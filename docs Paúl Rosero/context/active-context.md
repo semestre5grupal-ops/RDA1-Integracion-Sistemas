@@ -1,28 +1,35 @@
 # Contexto Activo — Booking Prototipo (Integración de Sistemas)
 
-## Estado Actual del Proyecto
-Nos encontramos en el **Reto 1: Construcción base API-first sin integración**.
-El objetivo es tener la versión funcional del sistema (Monolito) con backend, frontend y base de datos operativa.
+## ✅ Estado Actual del Proyecto
+**Reto 1 (RDA1): COMPLETADO** — Construcción base API-first finalizada y subida al repositorio `RDA1-Integracion-Sistemas`.
+
+El stack completo está operativo en local:
+- **Docker:** PostgreSQL corriendo en `localhost:5432` (contenedor `booking_db_container`)
+- **Backend NestJS:** `http://localhost:3000/api/v1` | Swagger: `http://localhost:3000/api/docs`
+- **Frontend React:** `http://localhost:5173`
 
 ## Equipo "Booking Prototipo" (El Integrador)
 Somos un grupo de 3 estudiantes responsables de crear la plataforma central (Marketplace + Admin) que consumirá las APIs de nuestros compañeros.
-- **Tu Rol:** Integración vertical de la categoría **Atracciones**.
-- **Alejo:** Integración de Vuelos (asumido).
-- **Lizz:** Integración de Alojamientos (asumido).
+- **Tu Rol:** Integración vertical de la categoría **Atracciones** ✅ COMPLETO
+- **Alejo:** Integración de Vuelos (pendiente de su parte).
+- **Lizz:** Integración de Alojamientos (pendiente de su parte).
 
-## Arquitectura Actual (Reto 1)
-- **Repositorio:** `RDA1-Integracion-Sistemas` (Basado en `plantilla inicial`).
-- **Base de Datos (Docker):** PostgreSQL con **8 tablas core** (`usuarios`, `carritos`, `facturas`, etc.). **NO** existen tablas de productos (atracciones, vuelos) porque se consultan por HTTP.
-- **Backend:** NestJS. Actúa como API Gateway/Integrador. Tu módulo `AtraccionesModule` usará `@nestjs/axios` para hacer peticiones HTTP `GET` a la API de los compañeros.
-- **Frontend:** React (Plantilla clon de Booking.com).
+## Arquitectura Implementada (Reto 1)
+- **Repositorio:** `RDA1-Integracion-Sistemas`.
+- **Base de Datos (Docker):** PostgreSQL con **8 tablas core** auto-generadas por TypeORM (`usuarios`, `carritos`, `carrito_items`, `facturas`, `factura_items`, `api_request_logs`, `estado_servicios`, `configuraciones`).
+- **Backend:** NestJS con `AtraccionesModule` como BFF: usa `@nestjs/axios` para consumir la API externa. CORS habilitado para el frontend.
+- **Frontend:** React + Vite en `/frontend`. Diseño estilo Booking.com con Axios.
 
-## Qué estamos haciendo justo ahora
-- Preparando la construcción vertical del módulo de Atracciones.
-- Antes de programar, estamos documentando todo en la carpeta `docs Paúl Rosero` para asegurar trazabilidad técnica de cara al Ingeniero.
+## Tareas Completadas — RDA1
+1. ✅ `docker-compose.yml` con PostgreSQL operativo.
+2. ✅ 8 entidades TypeORM en `src/core/entities/`.
+3. ✅ `AtraccionesModule` con `@nestjs/axios` como integrador HTTP (BFF).
+4. ✅ Swagger activo en `http://localhost:3000/api/docs`.
+5. ✅ CORS habilitado en `main.ts` para `localhost:5173`.
+6. ✅ Frontend React con buscador, filtros, tarjetas paginadas y vista detalle.
+7. ✅ Todo subido a GitHub (`semestre5grupal-ops/RDA1-Integracion-Sistemas`).
 
-## Tareas Pendientes Inmediatas
-1. ~~Crear `docker-compose.yml` para levantar PostgreSQL.~~ (Completado - Fase 1)
-2. ~~Configurar TypeORM en NestJS para que genere las 8 tablas al conectar.~~ (Completado - Fase 1)
-3. ~~Crear el módulo integrador de Atracciones en el backend y configurar Swagger.~~ (Completado - Fase 2)
-4. ~~Crear frontend React estilo Booking.com con Axios conectado al backend.~~ (Completado - Fase 3)
-5. **Siguiente:** Habilitar CORS en NestJS y probar el flujo completo (Docker + Backend + Frontend corriendo juntos).
+## Próximos Pasos — RDA2
+- Esperar la URL de la API real de Atracciones del compañero responsable.
+- Actualizar `ATRACCIONES_API_URL` en `.env` apuntando a esa URL real.
+- Preparar el API Gateway para el Reto 2.
