@@ -3,9 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { CommonModule } from './common/common.module';
-import { AlojamientosModule } from './modules/alojamientos/alojamientos.module';
+import { CoreModule } from './core/core.module';
+// import { AlojamientosModule } from './modules/alojamientos/alojamientos.module';
 // import { AutosModule } from './modules/autos/autos.module';
-// import { AtraccionesModule } from './modules/atracciones/atracciones.module';
+import { AtraccionesModule } from './modules/atracciones/atracciones.module';
 // import { VuelosModule } from './modules/vuelos/vuelos.module';
 
 @Module({
@@ -32,12 +33,14 @@ import { AlojamientosModule } from './modules/alojamientos/alojamientos.module';
     CommonModule,
 
     // =========================================================================
-    // ATENCIÓN ALUMNO: Descomenta solo el módulo que corresponde a tu grupo
+    // Módulo Core del Integrador (Booking Prototipo)
     // =========================================================================
-    AlojamientosModule,
-    // AutosModule,
-    // AtraccionesModule,
-    // VuelosModule,
+    CoreModule,
+    
+    // =========================================================================
+    // Módulos de Integración (Tus endpoints BFF)
+    // =========================================================================
+    AtraccionesModule,
   ],
   controllers: [],
   providers: [],
