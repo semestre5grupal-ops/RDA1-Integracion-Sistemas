@@ -1,0 +1,628 @@
+openapi: 3.0.3
+info:
+  title: GDS Billing & Invoicing API
+  description: |
+    Microservicio de Facturación del Booking Prototipo.
+    Gestiona la emisión, consulta, descarga (PDF) y anulación de facturas
+    generadas a partir de carritos convertidos (vuelos, alojamientos, atracciones).
+
+    **Flujo típico:**
+    1. El cliente completa el pago en la Payment API (obtiene `referencia_pago`).
+    2. El frontend llama a `POST /facturas` enviando el `carrito_id` y la `referencia_pago`.
+    3. La API genera la factura con número correlativo único y retorna el detalle completo.
+    4. El cliente puede descargar el PDF en `GET /facturas/{facturaId}/pdf`.
+
+    Todos los errores siguen el estándar RFC 7807 (`application/problem+json`).
+    La identidad del usuario se extrae exclusivamente del JWT (sub claim).
+  version: 1.0.0
+  contact:
+    name: Alejandro Sebastián Flores Lugmaña
+    email: alejandro.floreslu@outlook.com
+
+servers:
+  - url: https://api.booking-hub.com/billing/v1
+    description: Producción
+  - url: https://sandbox.api.booking-hub.com/billing/v1
+    description: Sandbox
+
+security:
+  - OAuth2Security: []
+
+tags:
+  - name: Facturas
+    description: Emisión y consulta de facturas
+  - name: Administración
+    description: Operaciones de anulación (requiere scope billing:admin)
+
+paths:
+
+  # --- 1. EMITIR FACTURA ---
+  /facturas:
+    post:
+      tags:
+        - Facturas
+      summary: Emitir una nueva factura
+      description: |
+        Genera una factura a partir de un carrito en estado `convertido`.
+        El `usuario_id` se extrae del JWT; no se acepta como parámetro del cliente.
+        Requiere la `referencia_pago` emitida por la Payment API.
+        La operación es idempotente: si ya existe una factura para el mismo `carrito_id`,
+        retorna la existente con código `200`.
+      operationId: emitirFactura
+      security:
+        - OAuth2Security:
+            - billing:write
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: UUID v4 para garantizar idempotencia en caso de reintentos.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmitirFacturaRequest'
+      responses:
+        '201':
+          description: Factura emitida exitosamente.
+          headers:
+            Location:
+              description: URL del recurso de la factura creada.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '200':
+          description: La factura ya existía para ese carrito (idempotencia). Retorna la existente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: El carrito no está en estado `convertido` o ya fue procesado con error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          $ref: '#/components/responses/ProblemDetails422'
+
+    # --- 2. LISTAR FACTURAS ---
+    get:
+      tags:
+        - Facturas
+      summary: Listar facturas del usuario autenticado (paginado)
+      description: |
+        Retorna todas las facturas del usuario extraído del JWT.
+        Soporta filtro por estado y rango de fechas.
+      operationId: listarFacturas
+      security:
+        - OAuth2Security:
+            - billing:read
+      parameters:
+        - name: estado
+          in: query
+          description: Filtrar por estado de la factura.
+          schema:
+            type: string
+            enum: [emitida, anulada]
+        - name: desde
+          in: query
+          description: Fecha de inicio del rango (ISO 8601).
+          schema:
+            type: string
+            format: date
+        - name: hasta
+          in: query
+          description: Fecha de fin del rango (ISO 8601).
+          schema:
+            type: string
+            format: date
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: cursor
+          in: query
+          description: Token de paginación (cursor-based).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista paginada de facturas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # --- 3. DETALLE DE FACTURA ---
+  /facturas/{facturaId}:
+    get:
+      tags:
+        - Facturas
+      summary: Obtener detalle completo de una factura
+      description: Retorna la factura con todos sus items. Solo el propietario o un admin puede acceder.
+      operationId: obtenerFactura
+      security:
+        - OAuth2Security:
+            - billing:read
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detalle de la factura.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProblemDetails404'
+
+  # --- 4. DESCARGAR PDF ---
+  /facturas/{facturaId}/pdf:
+    get:
+      tags:
+        - Facturas
+      summary: Descargar la factura en formato PDF
+      description: Retorna el PDF de la factura como stream de bytes.
+      operationId: descargarFacturaPdf
+      security:
+        - OAuth2Security:
+            - billing:read
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: PDF de la factura.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: 'attachment; filename="factura-001.pdf"'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProblemDetails404'
+
+  # --- 5. ANULAR FACTURA ---
+  /facturas/{facturaId}/anular:
+    patch:
+      tags:
+        - Administración
+      summary: Anular una factura emitida
+      description: |
+        Cambia el estado de la factura a `anulada`.
+        Solo se puede anular una factura en estado `emitida`.
+        Requiere scope `billing:admin`.
+      operationId: anularFactura
+      security:
+        - OAuth2Security:
+            - billing:admin
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnularFacturaRequest'
+      responses:
+        '200':
+          description: Factura anulada exitosamente. Retorna la factura actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ProblemDetails404'
+        '409':
+          description: La factura ya está anulada o no puede anularse en su estado actual.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+components:
+  securitySchemes:
+    OAuth2Security:
+      type: oauth2
+      description: Flujo delegado al microservicio de Clientes/IdP.
+      flows:
+        password:
+          tokenUrl: https://api.booking-hub.com/customers/v1/auth/token
+          scopes:
+            billing:read: Leer y listar facturas propias
+            billing:write: Emitir nuevas facturas
+            billing:admin: Anular facturas (operación administrativa)
+
+  responses:
+    ProblemDetails400:
+      description: Error de validación (campo faltante o formato inválido).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ProblemDetails404:
+      description: Recurso no encontrado.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ProblemDetails422:
+      description: Datos semánticamente inválidos (ej. carrito vacío, referencia de pago inválida).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Unauthorized:
+      description: Token JWT inválido, expirado o ausente.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Forbidden:
+      description: El usuario autenticado no tiene permisos sobre este recurso.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+
+    # --- REQUEST: EMITIR FACTURA ---
+    EmitirFacturaRequest:
+      type: object
+      required:
+        - carrito_id
+        - billing_info
+        - metodo_pago
+        - referencia_pago
+      properties:
+        carrito_id:
+          type: string
+          format: uuid
+          description: ID del carrito en estado `convertido` que origina esta factura.
+        billing_info:
+          $ref: '#/components/schemas/BillingInfo'
+        metodo_pago:
+          type: string
+          enum: [tarjeta, transferencia, paypal, efectivo]
+          description: Método de pago usado para saldar el carrito.
+        referencia_pago:
+          type: string
+          description: |
+            Identificador del pago emitido por la Payment API.
+            Mismo campo que usa `vuelos-openapi` (PaymentReference.paymentReference)
+            y `alojamientos-openapi` (OrderCreateRequest.payment_reference).
+          example: 'pay_3NxQ1mJZqEvB'
+        notas:
+          type: string
+          description: Notas adicionales para incluir en la factura (opcional).
+          maxLength: 500
+
+    # --- REQUEST: ANULAR FACTURA ---
+    AnularFacturaRequest:
+      type: object
+      required:
+        - motivo
+      properties:
+        motivo:
+          type: string
+          description: Razón de la anulación para el registro de auditoría.
+          minLength: 10
+          maxLength: 500
+
+    # --- RESPONSE: FACTURA COMPLETA ---
+    FacturaResponse:
+      type: object
+      required:
+        - id
+        - numero_factura
+        - estado
+        - subtotal
+        - iva_porcentaje
+        - iva_valor
+        - total
+        - metodo_pago
+        - billing_info
+        - items
+        - emitida_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único de la factura (UUID).
+          readOnly: true
+        numero_factura:
+          type: string
+          description: Número de factura correlativo único (ej. FAC-2024-000001).
+          example: 'FAC-2024-000001'
+          readOnly: true
+        carrito_id:
+          type: string
+          format: uuid
+          description: ID del carrito de origen.
+        usuario_id:
+          type: string
+          format: uuid
+          description: ID del usuario propietario (del JWT).
+          readOnly: true
+        billing_info:
+          $ref: '#/components/schemas/BillingInfo'
+        subtotal:
+          type: number
+          format: double
+          description: Subtotal antes de IVA (suma de items).
+          example: 150.00
+        iva_porcentaje:
+          type: number
+          format: double
+          description: Porcentaje de IVA aplicado.
+          example: 15.00
+        iva_valor:
+          type: number
+          format: double
+          description: Valor monetario del IVA.
+          example: 22.50
+        total:
+          type: number
+          format: double
+          description: Total a pagar (subtotal + iva_valor).
+          example: 172.50
+        metodo_pago:
+          type: string
+          enum: [tarjeta, transferencia, paypal, efectivo]
+        referencia_pago:
+          type: string
+          description: Referencia del pago vinculado a esta factura.
+          nullable: true
+        estado:
+          type: string
+          enum: [emitida, anulada]
+          description: Estado actual de la factura.
+        notas:
+          type: string
+          nullable: true
+        items:
+          type: array
+          description: Líneas de detalle de la factura.
+          items:
+            $ref: '#/components/schemas/FacturaItemResponse'
+        emitida_at:
+          type: string
+          format: date-time
+          description: Timestamp de emisión de la factura.
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp de creación del registro.
+          readOnly: true
+
+    # --- SCHEMA: ITEM DE FACTURA ---
+    FacturaItemResponse:
+      type: object
+      required:
+        - id
+        - tipo_producto
+        - producto_id_externo
+        - nombre_producto
+        - cantidad
+        - precio_unitario
+        - subtotal
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        tipo_producto:
+          type: string
+          enum: [atraccion, vuelo, alojamiento, auto]
+          description: Dominio al que pertenece el producto reservado.
+        producto_id_externo:
+          type: string
+          format: uuid
+          description: |
+            ID del recurso en el microservicio origen.
+            - Para vuelos: `bookingId` de `vuelos-openapi`
+            - Para alojamientos: `order_id` de `alojamientos-openapi`
+            - Para atracciones: `reservation_id` de `atracciones-openapi`
+        nombre_producto:
+          type: string
+          description: Nombre descriptivo del producto para la factura.
+          example: 'Vuelo UIO-GYE - Clase Economy'
+        descripcion_producto:
+          type: string
+          nullable: true
+          description: Descripción adicional del producto.
+        cantidad:
+          type: integer
+          minimum: 1
+          description: Número de unidades.
+        precio_unitario:
+          type: number
+          format: double
+          description: Precio por unidad (sin IVA).
+        subtotal:
+          type: number
+          format: double
+          description: precio_unitario * cantidad.
+        fecha_inicio:
+          type: string
+          format: date
+          nullable: true
+          description: Fecha de inicio del servicio (check-in, vuelo, tour).
+        fecha_fin:
+          type: string
+          format: date
+          nullable: true
+          description: Fecha de fin del servicio (check-out, fecha de regreso).
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    # --- SCHEMA: LISTA PAGINADA ---
+    FacturaListResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacturaResumen'
+        meta:
+          type: object
+          properties:
+            total:
+              type: integer
+              description: Total de facturas del usuario.
+            limit:
+              type: integer
+            nextCursor:
+              type: string
+              nullable: true
+              description: Token para la siguiente página (null si es la última).
+
+    # --- SCHEMA: RESUMEN DE FACTURA (para listado) ---
+    FacturaResumen:
+      type: object
+      required:
+        - id
+        - numero_factura
+        - total
+        - estado
+        - emitida_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        numero_factura:
+          type: string
+          example: 'FAC-2024-000001'
+        total:
+          type: number
+          format: double
+        estado:
+          type: string
+          enum: [emitida, anulada]
+        metodo_pago:
+          type: string
+          enum: [tarjeta, transferencia, paypal, efectivo]
+        nombre_cliente:
+          type: string
+        emitida_at:
+          type: string
+          format: date-time
+
+    # --- SCHEMA: BILLING INFO (idéntico al de clientes-openapi) ---
+    BillingInfo:
+      type: object
+      description: |
+        Datos de facturación del cliente. Estructura idéntica a `BillingInfo`
+        en `clientes-openapi.yaml` para garantizar coherencia entre contratos.
+      required:
+        - taxIdType
+        - taxId
+        - legalName
+      properties:
+        taxIdType:
+          type: string
+          enum: [CEDULA, RUC, PASAPORTE]
+          description: Tipo de identificación tributaria.
+        taxId:
+          type: string
+          description: Número de cédula, RUC o pasaporte.
+          example: '1712345678'
+        legalName:
+          type: string
+          description: Nombre legal o razón social para la factura.
+          example: 'Juan Pérez'
+        address:
+          type: string
+          description: Dirección fiscal del cliente.
+          nullable: true
+
+    # --- SCHEMA: ERRORES RFC 7807 ---
+    ProblemDetails:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI que identifica el tipo de error.
+        title:
+          type: string
+          description: Descripción corta del error.
+        status:
+          type: integer
+          description: Código HTTP del error.
+        detail:
+          type: string
+          description: Explicación detallada del error específico.
+        instance:
+          type: string
+          format: uri
+          description: URI que identifica la ocurrencia específica del error.
+        invalidParams:
+          type: array
+          description: Lista de parámetros inválidos (para errores 400).
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              reason:
+                type: string

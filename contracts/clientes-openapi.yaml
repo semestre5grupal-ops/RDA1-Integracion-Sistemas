@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: GDS Customers & Identity API
+  description: |
+    Microservicio de Identidad (IdP) y perfiles de usuario.
+    Gestiona el registro, autenticación (emisión de JWT), y datos del cliente.
+  version: 1.1.0
+  contact:
+    name: Alejandro Sebastián Flores Lugmaña
+    email: alejandro.floreslu@outlook.com
+
+servers:
+  - url: https://api.booking-hub.com/customers/v1
+
+tags:
+  - name: Autenticación y Registro
+  - name: Perfil de Usuario
+
+paths:
+  # --- 1. REGISTRO ---
+  /register:
+    post:
+      tags:
+        - Autenticación y Registro
+      summary: Crear una nueva cuenta de cliente
+      description: |
+        Registra un nuevo usuario. El password viaja en plano pero debe ser hasheado por el backend (ej. bcrypt).
+        La fecha de nacimiento (birthDate) es opcional aquí para reducir fricción.
+      operationId: registerCustomer
+      security: [] # Endpoint público
+      parameters:
+        - name: X-Captcha-Token
+          in: header
+          required: true
+          description: Token de validación (ej. reCAPTCHA/Turnstile) para evitar registros masivos automatizados.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerRegistration'
+      responses:
+        '201':
+          description: Cuenta creada exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '409':
+          description: Conflicto. El email ya está registrado.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          $ref: '#/components/responses/ProblemDetails429'
+
+  # --- 2. LOGIN / EMISIÓN DE TOKEN ---
+  /auth/token:
+    post:
+      tags:
+        - Autenticación y Registro
+      summary: Iniciar sesión y obtener token (Login)
+      description: |
+        Valida credenciales y emite un JWT.
+        Regla de negocio: Si la cuenta está INACTIVE (eliminado lógico), un login exitoso la devuelve a estado ACTIVE automáticamente.
+      operationId: loginCustomer
+      security: []
+      parameters:
+        - name: X-Device-Fingerprint
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login exitoso. Retorna el JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '401':
+          description: Credenciales inválidas (Unauthorized).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '429':
+          $ref: '#/components/responses/ProblemDetails429'
+
+  # --- 3. PERFIL DE USUARIO ---
+  /me:
+    get:
+      tags:
+        - Perfil de Usuario
+      summary: Obtener perfil del cliente actual
+      description: El identificador se extrae del token JWT.
+      operationId: getCurrentCustomer
+      security:
+        - OAuth2Security:
+            - profile:read
+      responses:
+        '200':
+          description: Perfil del cliente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    patch:
+      tags:
+        - Perfil de Usuario
+      summary: Actualizar datos del perfil parcialmente
+      description: Permite actualizar campos y reactivar la cuenta manualmente cambiando el status a ACTIVE.
+      operationId: updateCurrentCustomer
+      security:
+        - OAuth2Security:
+            - profile:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerUpdate'
+      responses:
+        '200':
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerProfile'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    delete:
+      tags:
+        - Perfil de Usuario
+      summary: Desactivar cuenta (Eliminado lógico)
+      description: Cambia el estado del cliente a INACTIVE. Conserva el registro para auditoría de facturación y vuelos previos.
+      operationId: deactivateCurrentCustomer
+      security:
+        - OAuth2Security:
+            - profile:write
+      responses:
+        '204':
+          description: Cuenta desactivada (eliminado lógico exitoso).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    OAuth2Security:
+      type: oauth2
+      description: Flujo de autorización gestionado por el propio endpoint /auth/token.
+      flows:
+        password:
+          tokenUrl: https://api.booking-hub.com/customers/v1/auth/token
+          scopes:
+            profile:read: Leer datos del perfil
+            profile:write: Modificar perfil y estado
+
+  responses:
+    ProblemDetails400:
+      description: Error de validación (ej. formato de email inválido, password débil).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ProblemDetails429:
+      description: Límite de peticiones excedido (Protección anti-abuso).
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Unauthorized:
+      description: Token inválido, expirado o ausente.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+    # --- MODELOS DE AUTENTICACIÓN ---
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          description: JWT token.
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Segundos de validez del token.
+
+    # --- MODELOS DE CLIENTE ---
+    CustomerRegistration:
+      type: object
+      required: [email, password, fullName]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 64
+          pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\W]{8,}$'
+          description: Mínimo 8 caracteres, al menos una mayúscula, una minúscula y un número.
+        fullName:
+          type: string
+          minLength: 3
+          maxLength: 150
+        birthDate:
+          type: string
+          format: date
+          description: Opcional al registro. Se exigirá obligatoriamente al momento de comprar el vuelo.
+        phone:
+          type: string
+          pattern: '^\+?[1-9]\d{1,14}$'
+        defaultBillingInfo:
+          $ref: '#/components/schemas/BillingInfo'
+
+    CustomerProfile:
+      type: object
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        birthDate:
+          type: string
+          format: date
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, SUSPENDED]
+        defaultBillingInfo:
+          $ref: '#/components/schemas/BillingInfo'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CustomerUpdate:
+      type: object
+      properties:
+        fullName:
+          type: string
+          minLength: 3
+        phone:
+          type: string
+          pattern: '^\+?[1-9]\d{1,14}$'
+        birthDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [ACTIVE]
+          description: Permite enviar ACTIVE para reactivar la cuenta tras un eliminado lógico.
+        defaultBillingInfo:
+          $ref: '#/components/schemas/BillingInfo'
+
+    BillingInfo:
+      type: object
+      properties:
+        taxIdType:
+          type: string
+          enum: [CEDULA, RUC, PASAPORTE]
+        taxId:
+          type: string
+        legalName:
+          type: string
+        address:
+          type: string
+
+    # --- MANEJO DE ERRORES ---
+    ProblemDetails:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        invalidParams:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              reason:
+                type: string
