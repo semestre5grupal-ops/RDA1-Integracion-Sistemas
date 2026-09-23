@@ -1,5 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { SearchAtraccionesRequestDto } from './dto/search-atracciones.dto';
 import { CreateAtraccionDto } from './dto/create-atraccion.dto';
@@ -8,6 +10,8 @@ import { ReservationRequestDto, CancelReservationRequestDto, ReservationStatus }
 import { DetailsRequestDto } from './dto/details-request.dto';
 import { PagoService } from './pago.service';
 import { catchError, firstValueFrom } from 'rxjs';
+import { Atraccion } from './entities/atraccion.entity';
+import { ReservaAtraccion } from './entities/reserva.entity';
 
 @Injectable()
 export class AtraccionesService {
@@ -18,7 +22,11 @@ export class AtraccionesService {
 
   constructor(
     private readonly httpService: HttpService,
-    private readonly pagoService: PagoService
+    private readonly pagoService: PagoService,
+    @InjectRepository(Atraccion)
+    private readonly atraccionRepo: Repository<Atraccion>,
+    @InjectRepository(ReservaAtraccion)
+    private readonly reservaRepo: Repository<ReservaAtraccion>
   ) {}
 
   async search(dto: SearchAtraccionesRequestDto): Promise<any> {
@@ -72,23 +80,15 @@ export class AtraccionesService {
   }
 
   async findAll(query: PaginationQueryDto): Promise<any> {
-    this.logger.log(`Consultando API externa de Atracciones: ${this.EXTERNAL_API_URL}`);
+    this.logger.log(`Consultando API externa de Atracciones y base local`);
     
-    const { data } = await firstValueFrom(
-      this.httpService.get(this.EXTERNAL_API_URL, { params: { _limit: query.limit, _page: query.page } }).pipe(
-        catchError((error) => {
-          this.logger.error('Error al contactar la API de Atracciones', error);
-          throw new HttpException('El servicio de Atracciones no está disponible temporalmente.', HttpStatus.SERVICE_UNAVAILABLE);
-        }),
-      ),
-    );
-    
-    // ** PATRÓN WRAPPER **
-    // Aquí el BFF actúa como un Wrapper o Traductor.
-    // Transforma una respuesta externa (ej. Legacy XML, SOAP, o un JSON mal formateado)
-    // a un contrato REST/JSON unificado y limpio para el Frontend (Marketplace).
-    return {
-      data: data.map(item => ({
+    // 1. Catálogo Externo
+    let externalData = [];
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.get(this.EXTERNAL_API_URL, { params: { _limit: query.limit, _page: query.page } })
+      );
+      externalData = data.map(item => ({
         id: item.id.toString(),
         name: item.title,
         long_description: item.body,
@@ -111,9 +111,26 @@ export class AtraccionesService {
         free_cancellation: true,
         ratings: { number_of_reviews: 120, score: 4.8 },
         url: { web: `https://www.booking.com/attractions/ec/${item.id}`, app: `booking://attractions/product?slug=${item.id}` }
-      })),
+      }));
+    } catch(err) {
+      this.logger.warn('Error al contactar la API externa de Atracciones, mostrando solo locales', err.message);
+    }
+
+    // 2. Catálogo Local
+    const locales = await this.atraccionRepo.find({
+      take: query.limit || 10,
+      skip: ((query.page || 1) - 1) * (query.limit || 10)
+    });
+    
+    const localData = locales.map(l => ({
+      ...l,
+      url: { web: `/atracciones/${l.id}` }
+    }));
+
+    return {
+      data: [...localData, ...externalData],
       meta: {
-        total: 100, // Mock
+        total: localData.length + externalData.length,
         limit: query.limit || 10,
         page: query.page || 1
       }
@@ -121,21 +138,33 @@ export class AtraccionesService {
   }
 
   async create(dto: CreateAtraccionDto): Promise<any> {
-    this.logger.log('Creando atracción mock');
-    return { id: 'mock-uuid', ...dto };
+    this.logger.log('Creando atracción en base de datos local');
+    const newAtraccion = this.atraccionRepo.create(dto);
+    return this.atraccionRepo.save(newAtraccion);
   }
 
   async replace(id: string, dto: CreateAtraccionDto): Promise<void> {
-    this.logger.log(`Reemplazando atracción ${id}`);
+    this.logger.log(`Reemplazando atracción local ${id}`);
+    const atraccion = await this.atraccionRepo.findOneBy({ id });
+    if (!atraccion) throw new HttpException('Atracción no encontrada', HttpStatus.NOT_FOUND);
+    
+    await this.atraccionRepo.save({ ...atraccion, ...dto });
   }
 
   async update(id: string, dto: UpdateAtraccionDto): Promise<any> {
-    this.logger.log(`Actualizando atracción ${id}`);
-    return { id, ...dto };
+    this.logger.log(`Actualizando atracción local ${id}`);
+    const atraccion = await this.atraccionRepo.findOneBy({ id });
+    if (!atraccion) throw new HttpException('Atracción no encontrada', HttpStatus.NOT_FOUND);
+    
+    Object.assign(atraccion, dto);
+    return this.atraccionRepo.save(atraccion);
   }
 
   async delete(id: string): Promise<void> {
-    this.logger.log(`Eliminando atracción ${id}`);
+    this.logger.log(`Eliminando atracción local ${id}`);
+    const atraccion = await this.atraccionRepo.findOneBy({ id });
+    if (!atraccion) throw new HttpException('Atracción no encontrada', HttpStatus.NOT_FOUND);
+    await this.atraccionRepo.remove(atraccion);
   }
 
   async getAvailability(id: string, date: string): Promise<any> {
@@ -150,107 +179,128 @@ export class AtraccionesService {
   async findOne(id: string): Promise<any> {
     this.logger.log(`Consultando detalle de Atracción ID ${id}`);
     
-    const { data } = await firstValueFrom(
-      this.httpService.get(`${this.EXTERNAL_API_URL}/${id}`).pipe(
-        catchError((error) => {
-          this.logger.error(`Error al buscar la atracción ${id}`, error);
-          throw new HttpException('Atracción no encontrada o servicio caído.', HttpStatus.NOT_FOUND);
-        }),
-      ),
-    );
+    // Buscar primero en local
+    let isUuid = id.length === 36; // quick check
+    if (isUuid) {
+       const local = await this.atraccionRepo.findOneBy({ id });
+       if (local) {
+         return {
+            ...local,
+            url: { web: `/atracciones/${local.id}` }
+         };
+       }
+    }
 
-    // ** PATRÓN WRAPPER **
-    return {
-      id: data.id.toString(),
-      name: data.title,
-      long_description: data.body,
-      duration: 'PT4H',
-      price: { currency: 'USD', total: Math.floor(Math.random() * 50) + 10 },
-      operator: { id: 1, name: 'Quito Tour Bus' },
-      product_type: 'PACKAGE',
-      includes: ['Transporte', 'Guía Bilingüe', 'Almuerzo'],
-      categories: ['tour_guiado', 'cultural'],
-      badges: ['best_seller'],
-      locations: [{
-        address: 'Centro Histórico, Quito',
-        city: -924216,
-        country: 'EC',
-        coordinates: { latitude: -0.22985, longitude: -78.52495 },
-        type: 'STARTING_POINT'
-      }],
-      photos: [{ url: 'https://via.placeholder.com/600x400?text=Tour+Quito' }],
-      supported_languages: ['es', 'en'],
-      free_cancellation: true,
-      ratings: { number_of_reviews: 120, score: 4.8 },
-      url: { web: `https://www.booking.com/attractions/ec/${id}`, app: `booking://attractions/product?slug=${id}` }
-    };
+    // Buscar externo
+    try {
+      const { data } = await firstValueFrom(this.httpService.get(`${this.EXTERNAL_API_URL}/${id}`));
+      return {
+        id: data.id.toString(),
+        name: data.title,
+        long_description: data.body,
+        duration: 'PT4H',
+        price: { currency: 'USD', total: Math.floor(Math.random() * 50) + 10 },
+        operator: { id: 1, name: 'Quito Tour Bus' },
+        product_type: 'PACKAGE',
+        includes: ['Transporte', 'Guía Bilingüe', 'Almuerzo'],
+        categories: ['tour_guiado', 'cultural'],
+        badges: ['best_seller'],
+        locations: [{
+          address: 'Centro Histórico, Quito',
+          city: -924216,
+          country: 'EC',
+          coordinates: { latitude: -0.22985, longitude: -78.52495 },
+          type: 'STARTING_POINT'
+        }],
+        photos: [{ url: 'https://via.placeholder.com/600x400?text=Tour+Quito' }],
+        supported_languages: ['es', 'en'],
+        free_cancellation: true,
+        ratings: { number_of_reviews: 120, score: 4.8 },
+        url: { web: `https://www.booking.com/attractions/ec/${id}`, app: `booking://attractions/product?slug=${id}` }
+      };
+    } catch(err) {
+      throw new HttpException('Atracción no encontrada', HttpStatus.NOT_FOUND);
+    }
   }
 
   async reservar(id: string, dto: ReservationRequestDto, idempotencyKey: string): Promise<any> {
     this.logger.log(`Iniciando reserva síncrona para Atracción ${id} con idempotency key ${idempotencyKey}`);
     
-    // 1. Verificar si la atracción existe
+    // Verificación de Idempotencia
+    const existing = await this.reservaRepo.findOne({ where: { idempotencyKey } });
+    if (existing) {
+      if (existing.status === ReservationStatus.CONFIRMED) {
+         throw new HttpException('Conflicto de Idempotencia: Reserva ya procesada.', HttpStatus.CONFLICT);
+      }
+      return this.buildReservaResponse(existing);
+    }
+
     const atraccion = await this.findOne(id);
+    const totalPrice = atraccion.price?.total ? atraccion.price.total * dto.ticket_count : 50 * dto.ticket_count;
     
-    // 2. Transacción Síncrona: Llamar al PagoService (Pasarela) de forma bloqueante
-    // Adaptamos el mock para usar total_price
+    // Crear reserva como PENDING
+    let reserva = this.reservaRepo.create({
+      atraccionId: id,
+      idempotencyKey,
+      status: ReservationStatus.PENDING,
+      ticketCount: dto.ticket_count,
+      totalPrice: { currency: 'USD', total: totalPrice },
+      customerName: dto.customer_name,
+      customerEmail: dto.customer_email || 'no-email@example.com',
+      date: dto.date,
+      time: dto.time || '10:00'
+    });
+    reserva = await this.reservaRepo.save(reserva);
+
+    // Pago Síncrono
     const pagoResult = await this.pagoService.procesarPago({ cantidadTickets: dto.ticket_count, metodoPago: 'TARJETA' });
 
-    // 3. Generar Ticket de confirmación si el pago es exitoso
-    return {
-      reservation_id: `res-${pagoResult.transactionId}`,
-      status: ReservationStatus.CONFIRMED,
-      ticket_count: dto.ticket_count,
-      total_price: { currency: 'USD', total: atraccion.price.total * dto.ticket_count },
-      _links: {
-        self: { href: `/api/v1/atracciones/${id}/reservations`, type: 'POST' },
-        cancelar: { href: `/api/v1/atracciones/reservations/res-${pagoResult.transactionId}/cancel`, type: 'POST' },
-        atraccion: { href: `/api/v1/atracciones/${id}`, type: 'GET' }
-      }
-    };
+    // Confirmar
+    reserva.status = ReservationStatus.CONFIRMED;
+    await this.reservaRepo.save(reserva);
+
+    return this.buildReservaResponse(reserva);
   }
 
   async cancelarReserva(reservationId: string, dto: CancelReservationRequestDto, idempotencyKey: string): Promise<any> {
     this.logger.log(`Cancelando reserva ${reservationId} (razón: ${dto.reason}) con idempotency key ${idempotencyKey}`);
     
-    return {
-      reservation_id: reservationId,
-      status: ReservationStatus.CANCELLED,
-      ticket_count: 0, // mock
-      total_price: { currency: 'USD', total: 0 }
-    };
+    const reserva = await this.reservaRepo.findOneBy({ id: reservationId });
+    if (!reserva) throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
+    
+    if (reserva.status === ReservationStatus.CANCELLED) {
+      return this.buildReservaResponse(reserva); // idempotente
+    }
+
+    reserva.status = ReservationStatus.CANCELLED;
+    await this.reservaRepo.save(reserva);
+
+    return this.buildReservaResponse(reserva);
   }
 
   async getReservas(): Promise<any> {
-    this.logger.log('Consultando historial de reservas del usuario');
-    // Mock de historial de reservas
-    return [
-      {
-        reservation_id: 'res-123',
-        status: ReservationStatus.CONFIRMED,
-        ticket_count: 2,
-        total_price: { currency: 'USD', total: 45.0 }
-      },
-      {
-        reservation_id: 'res-456',
-        status: ReservationStatus.CANCELLED,
-        ticket_count: 1,
-        total_price: { currency: 'USD', total: 20.0 }
-      }
-    ];
+    this.logger.log('Consultando historial de reservas del usuario (local DB)');
+    const reservas = await this.reservaRepo.find();
+    return reservas.map(r => this.buildReservaResponse(r));
   }
 
   async getReservaById(reservationId: string): Promise<any> {
     this.logger.log(`Consultando detalle de reserva ${reservationId}`);
-    // Mock de detalle de reserva
+    const reserva = await this.reservaRepo.findOneBy({ id: reservationId });
+    if (!reserva) throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
+    return this.buildReservaResponse(reserva);
+  }
+
+  private buildReservaResponse(reserva: ReservaAtraccion) {
     return {
-      reservation_id: reservationId,
-      status: ReservationStatus.CONFIRMED,
-      ticket_count: 2,
-      total_price: { currency: 'USD', total: 45.0 },
+      reservation_id: reserva.id,
+      status: reserva.status,
+      ticket_count: reserva.ticketCount,
+      total_price: reserva.totalPrice,
       _links: {
-        self: { href: `/api/v1/atracciones/reservations/${reservationId}`, type: 'GET' },
-        cancelar: { href: `/api/v1/atracciones/reservations/${reservationId}/cancel`, type: 'POST' }
+        self: { href: `/api/v1/atracciones/reservations/${reserva.id}`, type: 'GET' },
+        cancelar: { href: `/api/v1/atracciones/reservations/${reserva.id}/cancel`, type: 'POST' },
+        atraccion: { href: `/api/v1/atracciones/${reserva.atraccionId}`, type: 'GET' }
       }
     };
   }
