@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-// URL de tu backend NestJS
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 const api = axios.create({
@@ -8,19 +7,35 @@ const api = axios.create({
   timeout: 8000,
 });
 
-/**
- * Obtiene el listado paginado de atracciones desde nuestro NestJS (BFF)
- * que a su vez consulta la API externa del compañero.
- */
 export async function getAtracciones({ page = 1, limit = 10 } = {}) {
   const { data } = await api.get('/atracciones', { params: { page, limit } });
   return data;
 }
 
-/**
- * Obtiene el detalle de una atracción por su ID
- */
 export async function getAtraccion(id) {
   const { data } = await api.get(`/atracciones/${id}`);
+  return data;
+}
+
+export async function reservarAtraccion(id, reservationData, idempotencyKey) {
+  const { data } = await api.post(`/atracciones/${id}/reservations`, reservationData, {
+    headers: {
+      'idempotency-key': idempotencyKey
+    }
+  });
+  return data;
+}
+
+export async function crearAtraccion(atraccionData) {
+  const { data } = await api.post('/atracciones', atraccionData);
+  return data;
+}
+
+export async function eliminarAtraccion(id) {
+  await api.delete(`/atracciones/${id}`);
+}
+
+export async function getReservas() {
+  const { data } = await api.get('/atracciones/reservations');
   return data;
 }

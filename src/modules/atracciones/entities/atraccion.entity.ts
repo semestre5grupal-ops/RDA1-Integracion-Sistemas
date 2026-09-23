@@ -7,40 +7,46 @@ export class Atraccion {
   id: string;
 
   @Column({ type: 'varchar', length: 255 })
-  nombre: string;
+  name: string;
 
   @Column({ type: 'text' })
-  descripcion: string;
+  long_description: string;
 
-  @Column({ type: 'varchar', length: 100 })
-  ciudad: string;
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  duration: string;
 
-  @Column('numeric', {
-    precision: 10,
-    scale: 6,
-    transformer: new ColumnNumericTransformer(),
-  })
-  latitud: number;
+  @Column('jsonb', { nullable: true })
+  price: { currency: string; total: number };
 
-  @Column('numeric', {
-    precision: 10,
-    scale: 6,
-    transformer: new ColumnNumericTransformer(),
-  })
-  longitud: number;
+  @Column('jsonb', { nullable: true })
+  categories: string[];
 
-  @Column('numeric', {
-    precision: 10,
-    scale: 2,
-    transformer: new ColumnNumericTransformer(),
-  })
-  precioTicket: number;
+  @Column('jsonb', { nullable: true })
+  badges: string[];
 
-  @Column({ type: 'int' })
-  duracionHoras: number;
+  @Column('jsonb', { nullable: true })
+  locations: any[];
 
-  @Column({ type: 'boolean', default: true })
-  estaActivo: boolean;
+  @Column('jsonb', { nullable: true })
+  photos: any[];
+
+  @Column('jsonb', { nullable: true })
+  operator: { id: number; name: string };
+
+  @Column({ type: 'varchar', length: 50, default: 'SINGLE_TICKET' })
+  product_type: string;
+
+  @Column('jsonb', { nullable: true })
+  includes: string[];
+
+  @Column('jsonb', { nullable: true })
+  supported_languages: string[];
+
+  @Column({ type: 'boolean', default: false })
+  free_cancellation: boolean;
+
+  @Column('jsonb', { nullable: true })
+  ratings: { number_of_reviews: number; score: number };
 
   @CreateDateColumn({ type: 'timestamp' })
   createdAt: Date;

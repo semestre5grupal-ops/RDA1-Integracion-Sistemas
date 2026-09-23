@@ -12,7 +12,6 @@ export function AtraccionesPage() {
   const [filtroActivo, setFiltroActivo] = useState('Todas');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(3);
-  const [detalle, setDetalle] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -36,43 +35,9 @@ export function AtraccionesPage() {
   }, [fetchData]);
 
   const atraccionesFiltradas = atracciones.filter((a) => {
-    const nombre = (a.nombre || a.title || '').toLowerCase();
+    const nombre = (a.nombre || a.name || a.title || '').toLowerCase();
     return nombre.includes(busqueda.toLowerCase());
   });
-
-  if (detalle) {
-    const precio = parseFloat(detalle.precio_unitario || detalle.precio || 0);
-    return (
-      <main className="main-content">
-        <button
-          onClick={() => setDetalle(null)}
-          style={{ background: 'none', border: 'none', color: 'var(--booking-blue)', cursor: 'pointer', fontWeight: 700, fontSize: '1rem', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 6 }}
-        >
-          ← Volver a Atracciones
-        </button>
-        <div style={{ background: '#fff', borderRadius: 12, padding: 32, boxShadow: 'var(--card-shadow)', maxWidth: 700 }}>
-          <div style={{ fontSize: '4rem', textAlign: 'center', marginBottom: 16 }}>🎡</div>
-          <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: 8 }}>
-            {detalle.nombre || detalle.title}
-          </h1>
-          <p style={{ color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.6 }}>
-            {detalle.descripcion || detalle.body}
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 20 }}>
-            <div>
-              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--booking-blue)' }}>
-                ${precio.toFixed(2)}
-              </div>
-              <div style={{ fontSize: '.85rem', color: 'var(--text-muted)' }}>por persona</div>
-            </div>
-            <button className="card-btn" style={{ padding: '12px 28px', fontSize: '1rem' }}>
-              🛒 Agregar al carrito
-            </button>
-          </div>
-        </div>
-      </main>
-    );
-  }
 
   return (
     <>
@@ -100,7 +65,7 @@ export function AtraccionesPage() {
       <main className="main-content">
         <h2 className="section-title">Atracciones disponibles</h2>
         <p className="section-subtitle">
-          Información obtenida en tiempo real desde el servicio de Atracciones
+          Información obtenida en tiempo real desde el servicio de Atracciones (Híbrido)
         </p>
 
         {/* FILTROS */}
@@ -121,7 +86,7 @@ export function AtraccionesPage() {
           <div className="state-container">
             <div className="spinner" />
             <p className="state-title">Cargando atracciones...</p>
-            <p className="state-subtitle">Conectando con el servicio externo</p>
+            <p className="state-subtitle">Conectando con el servicio externo y local</p>
           </div>
         )}
 
@@ -147,7 +112,7 @@ export function AtraccionesPage() {
             ) : (
               <div className="atracciones-grid">
                 {atraccionesFiltradas.map((a, i) => (
-                  <AtraccionCard key={a.id || i} atraccion={a} onVerDetalle={setDetalle} />
+                  <AtraccionCard key={a.id || i} atraccion={a} />
                 ))}
               </div>
             )}

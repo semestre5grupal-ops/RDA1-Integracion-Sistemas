@@ -1,4 +1,9 @@
+import { Link, useLocation } from 'react-router-dom';
+
 export function Navbar() {
+  const location = useLocation();
+  const isAutos = location.pathname.startsWith('/autos');
+
   return (
     <nav className="navbar">
       <div className="navbar-inner">
@@ -7,10 +12,10 @@ export function Navbar() {
           <span style={{ fontSize: '0.55rem', fontWeight: 400, opacity: .7, marginLeft: 6 }}>Prototipo</span>
         </div>
         <div className="navbar-links">
-          <a href="#">🏨 Alojamientos</a>
-          <a href="#" style={{ color: '#febb02', fontWeight: 700 }}>🎡 Atracciones</a>
-          <a href="#">✈️ Vuelos</a>
-          <a href="#">🚗 Autos</a>
+          <Link to="/">🏨 Alojamientos</Link>
+          <Link to="/" style={!isAutos ? { color: '#febb02', fontWeight: 700 } : {}}>🎡 Atracciones</Link>
+          <Link to="/">✈️ Vuelos</Link>
+          <Link to="/autos" style={isAutos ? { color: '#febb02', fontWeight: 700 } : {}}>🚗 Autos</Link>
         </div>
         <button className="navbar-btn">Registrarse</button>
       </div>
