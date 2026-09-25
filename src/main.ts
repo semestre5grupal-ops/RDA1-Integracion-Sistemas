@@ -3,6 +3,8 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+import { Rfc7807ExceptionFilter } from './core/filters/rfc7807-exception.filter';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -22,6 +24,10 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  // Registrar el filtro global de excepciones para cumplir con la RFC 7807
+  app.useGlobalFilters(new Rfc7807ExceptionFilter());
+
 
   const config = new DocumentBuilder()
     .setTitle('Booking Prototipo API')

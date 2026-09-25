@@ -1,34 +1,85 @@
-import { Controller, Get, Post, Body, Param, Query, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Headers, UseInterceptors, ParseUUIDPipe } from '@nestjs/common';
 import { AutosService } from './autos.service';
-import { CreateAutoDto } from './dto/create-auto.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { AutoResponseDto } from './dto/auto-response.dto';
+import { ApiTags, ApiOperation, ApiHeader, ApiParam } from '@nestjs/swagger';
+import { CacheInterceptor } from '@nestjs/cache-manager';
 
 @ApiTags('Autos')
 @Controller('autos')
 export class AutosController {
   constructor(private readonly autosService: AutosService) {}
 
+  @Post('search')
+  @ApiOperation({ summary: 'Búsqueda de renta de vehículos (Catálogo Híbrido)' })
+  search(@Body() dto: any) {
+    return this.autosService.search(dto);
+  }
+
+  @Post('depots')
+  @UseInterceptors(CacheInterceptor)
+  @ApiOperation({ summary: 'Consultar lista de agencias de renta' })
+  getDepots() {
+    return this.autosService.getDepots();
+  }
+
+  @Post('constants')
+  @UseInterceptors(CacheInterceptor)
+  @ApiOperation({ summary: 'Consultar constantes del sistema' })
+  getConstants() {
+    return this.autosService.getConstants();
+  }
+
+  @Post('suppliers')
+  @UseInterceptors(CacheInterceptor)
+  @ApiOperation({ summary: 'Listar proveedores de renta de autos' })
+  getSuppliers() {
+    return this.autosService.getSuppliers();
+  }
+
+  @Post('orders/create')
+  @ApiOperation({ summary: 'Crear orden/reserva de renta de vehículo' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  createOrder(
+    @Headers('Idempotency-Key') idempotencyKey: string,
+    @Body() orderData: any
+  ) {
+    return this.autosService.createOrder(orderData, idempotencyKey);
+  }
+
+  @Get('orders')
+  @ApiOperation({ summary: 'Obtener historial de órdenes (Admin)' })
+  getOrders() {
+    return this.autosService.getOrders();
+  }
+
+  @Get('orders/:orderId')
+  @ApiOperation({ summary: 'Obtener detalles de la orden' })
+  @ApiParam({ name: 'orderId', format: 'uuid' })
+  getOrderById(@Param('orderId', ParseUUIDPipe) orderId: string) {
+    return this.autosService.getOrderById(orderId);
+  }
+
+  @Post('orders/:orderId/cancel')
+  @ApiOperation({ summary: 'Cancelar una orden de renta' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  cancelOrder(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Headers('Idempotency-Key') idempotencyKey: string,
+    @Body() cancelData: any
+  ) {
+    return this.autosService.cancelOrder(orderId, cancelData, idempotencyKey);
+  }
+
+  // --- Endpoints Administrativos para CRUD de Autos Locales --- //
+  
   @Post()
-  @ApiOperation({ summary: 'Registrar un nuevo auto para renta' })
-  @ApiResponse({ status: 201, description: 'Auto creado exitosamente', type: AutoResponseDto })
-  create(@Body() createAutoDto: CreateAutoDto): AutoResponseDto {
-    return null;
+  @ApiOperation({ summary: 'Crear auto local (Admin)' })
+  createAutoLocal(@Body() autoData: any) {
+    return this.autosService.createAutoLocal(autoData);
   }
 
-  @Get()
-  @ApiOperation({ summary: 'Obtener todos los autos con paginación' })
-  @ApiResponse({ status: 200, description: 'Lista paginada de autos' })
-  findAll(@Query() paginationQuery: PaginationQueryDto) {
-    return null;
-  }
-
-  @Get(':id')
-  @ApiOperation({ summary: 'Obtener un auto por ID' })
-  @ApiParam({ name: 'id', description: 'UUID del auto' })
-  @ApiResponse({ status: 200, description: 'Auto encontrado', type: AutoResponseDto })
-  findOne(@Param('id', ParseUUIDPipe) id: string): AutoResponseDto {
-    return null;
+  @Post(':id/delete')
+  @ApiOperation({ summary: 'Eliminar auto local (Admin)' })
+  deleteAutoLocal(@Param('id', ParseUUIDPipe) id: string) {
+    return this.autosService.deleteAutoLocal(id);
   }
 }

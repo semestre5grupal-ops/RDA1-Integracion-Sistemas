@@ -674,6 +674,7 @@ components:
         - date
         - ticket_count
         - payment_reference
+        - customer_name
       properties:
         date:
           type: string
