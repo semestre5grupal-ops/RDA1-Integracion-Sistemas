@@ -1,13 +1,21 @@
 import { useCallback, useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom';
 
+// --- Modulo de Alojamientos ---
+import { AlojamientosPage } from './pages/AlojamientosPage';
+import { AlojamientoDetail } from './pages/AlojamientoDetail';
+
+// --- Modulo de Atracciones ---
 import { AtraccionesPage } from './pages/AtraccionesPage';
 import { AtraccionesSearchPage } from './pages/AtraccionesSearchPage';
 import { AtraccionDetail } from './pages/AtraccionDetail';
+
+// --- Modulo de Autos ---
 import { AutosPage } from './pages/AutosPage';
 import { AutoDetail } from './pages/AutoDetail';
 import { AdminDashboard } from './pages/AdminDashboard';
-// --- Modulo de Vuelos (Fase 4: busqueda implementada) ---
+
+// --- Modulo de Vuelos ---
 import { VuelosPage } from './pages/VuelosPage';
 import { MisReservasPage } from './pages/MisReservasPage';
 import { EstadoVueloPage } from './pages/EstadoVueloPage';
@@ -15,107 +23,100 @@ import { DetalleReservaPage } from './pages/DetalleReservaPage';
 import { FacturasPage } from './pages/FacturasPage';
 import { WebhooksPage } from './pages/WebhooksPage';
 
-// --- Autenticacion: destino del logout forzado por 401 ---
+// --- Autenticacion ---
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 
-// --- Componentes legales (seccion 5 del plan) ---
+// --- Componentes legales ---
 import { PrivacidadPage } from './pages/PrivacidadPage';
 import { TerminosPage } from './pages/TerminosPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
-// --- Banner global de consentimiento (Fase 2) ---
+// --- Banner global de consentimiento ---
 import { BannerCookies } from './components/BannerCookies';
 
 import { AuthProvider } from './hooks/useAuth';
-
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
+
 import './index.css';
 import './vuelos.css';
-import { useParams } from 'react-router-dom';
 
 /**
  * Puente entre la ruta y `DetalleReservaPage`.
- *
- * La pagina recibe `bookingId` como prop en lugar de llamar a `useParams` por
- * dentro. Es separacion de responsabilidades: asi la pagina es testeable sin
- * montar un Router, y este wrapper es el unico que conoce la ruta.
  */
 function DetalleReservaRoute() {
   const { bookingId } = useParams();
   return <DetalleReservaPage bookingId={bookingId} />;
 }
 
-/**
- * Raiz de la aplicacion.
- *
- * ## Banner de Cookies
- * Se monta UNA sola vez aqui, por encima de Navbar, Routes y Footer. Si se
- * montara dentro de una ruta, dejaria de existir al navegar y volveria a
- * aparecer en cada pantalla.
- *
- * ## Accesibilidad del salto de contenido
- * El enlace "Saltar al contenido" es el primer elemento enfocable de la pagina
- * y permite al usuario de teclado saltarse la navegacion. Solo se ve al
- * recibir el foco, para no cargar visualmente el diseno.
- */
 function App() {
-  // Controla la apertura del panel de preferencias desde el Footer.
+  // Controla la apertura del panel de preferencias desde el Footer
   const [preferenciasCookies, setPreferenciasCookies] = useState(false);
   const cerrarPreferencias = useCallback(() => setPreferenciasCookies(false), []);
 
   return (
     <AuthProvider>
-    <BrowserRouter>
-      <a className="skip-link" href="#contenido-principal">
-        Saltar al contenido
-      </a>
+      <BrowserRouter>
+        <a className="skip-link" href="#contenido-principal">
+          Saltar al contenido
+        </a>
 
-      <div className="app-wrapper">
-        <Navbar />
-        <Routes>
-          <Route path="/" element={<AtraccionesPage />} />
-          <Route path="/search" element={<AtraccionesSearchPage />} />
-          <Route path="/atracciones/:id" element={<AtraccionDetail />} />
-          <Route path="/autos" element={<AutosPage />} />
-          <Route path="/autos/:id" element={<AutoDetail />} />
-          <Route path="/admin" element={<AdminDashboard />} />
-          {/* Modulo de Vuelos */}
-          <Route path="/vuelos" element={<VuelosPage />} />
-          <Route path="/vuelos/busqueda" element={<VuelosPage />} />
-          <Route path="/vuelos/reserva" element={<VuelosPage />} />
-          <Route path="/vuelos/reservas" element={<MisReservasPage />} />
-          <Route path="/vuelos/reservas/:bookingId" element={<DetalleReservaRoute />} />
-          <Route path="/mis-reservas" element={<MisReservasPage />} />
+        <div className="app-wrapper">
+          <Navbar />
+          <Routes>
+            {/* Rutas de Alojamientos (Página principal por defecto) */}
+            <Route path="/" element={<AlojamientosPage />} />
+            <Route path="/alojamientos" element={<AlojamientosPage />} />
+            <Route path="/alojamientos/:id" element={<AlojamientoDetail />} />
 
-          {/* Otros endpoints de vuelos */}
-          <Route path="/estado-vuelos" element={<EstadoVueloPage />} />
-          <Route path="/vuelos/estado" element={<EstadoVueloPage />} />
-          <Route path="/webhooks" element={<WebhooksPage />} />
+            {/* Rutas de Atracciones */}
+            <Route path="/atracciones" element={<AtraccionesPage />} />
+            <Route path="/search" element={<AtraccionesSearchPage />} />
+            <Route path="/atracciones/:id" element={<AtraccionDetail />} />
 
-          {/* Autenticacion */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/facturas" element={<FacturasPage />} />
+            {/* Rutas de Autos */}
+            <Route path="/autos" element={<AutosPage />} />
+            <Route path="/autos/:id" element={<AutoDetail />} />
+            <Route path="/admin" element={<AdminDashboard />} />
 
-          {/* Paginas legales */}
-          <Route path="/privacidad" element={<PrivacidadPage />} />
-          <Route path="/terminos" element={<TerminosPage />} />
-          <Route path="/legal/privacidad" element={<PrivacidadPage />} />
-          <Route path="/legal/terminos" element={<TerminosPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+            {/* Modulo de Vuelos */}
+            <Route path="/vuelos" element={<VuelosPage />} />
+            <Route path="/vuelos/busqueda" element={<VuelosPage />} />
+            <Route path="/vuelos/reserva" element={<VuelosPage />} />
+            <Route path="/vuelos/reservas" element={<MisReservasPage />} />
+            <Route path="/vuelos/reservas/:bookingId" element={<DetalleReservaRoute />} />
+            <Route path="/mis-reservas" element={<MisReservasPage />} />
 
-        <Footer onAbrirPreferenciasCookies={() => setPreferenciasCookies(true)} />
-      </div>
+            {/* Estado de Vuelos y Webhooks */}
+            <Route path="/estado-vuelos" element={<EstadoVueloPage />} />
+            <Route path="/vuelos/estado" element={<EstadoVueloPage />} />
+            <Route path="/webhooks" element={<WebhooksPage />} />
 
-      {/* Global, fuera del router visual pero dentro de la app */}
-      <BannerCookies
-        abiertoExternamente={preferenciasCookies}
-        onCerrarExterno={cerrarPreferencias}
-      />
-    </BrowserRouter>
+            {/* Autenticacion y Facturas */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/facturas" element={<FacturasPage />} />
+
+            {/* Paginas legales */}
+            <Route path="/privacidad" element={<PrivacidadPage />} />
+            <Route path="/terminos" element={<TerminosPage />} />
+            <Route path="/legal/privacidad" element={<PrivacidadPage />} />
+            <Route path="/legal/terminos" element={<TerminosPage />} />
+
+            {/* 404 Not Found */}
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+
+          <Footer onAbrirPreferenciasCookies={() => setPreferenciasCookies(true)} />
+        </div>
+
+        {/* Global, fuera del router visual pero dentro de la app */}
+        <BannerCookies
+          abiertoExternamente={preferenciasCookies}
+          onCerrarExterno={cerrarPreferencias}
+        />
+      </BrowserRouter>
     </AuthProvider>
   );
 }

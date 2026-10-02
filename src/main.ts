@@ -105,7 +105,14 @@ async function bootstrap() {
       /^https:\/\/.*\.onrender\.com$/
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'idempotency-key'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'idempotency-key',
+      'Idempotency-Key',
+      'x-device-fingerprint',
+      'X-Device-Fingerprint',
+    ],
   });
 
   app.setGlobalPrefix('api/v1');
@@ -128,7 +135,6 @@ async function bootstrap() {
 
   // HATEOAS: inyectar enlaces en las respuestas (Richardson Nivel 3)
   app.useGlobalInterceptors(new HateoasInterceptor());
-
 
   const config = new DocumentBuilder()
     .setTitle('Booking Prototipo API')

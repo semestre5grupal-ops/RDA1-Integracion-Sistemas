@@ -5,7 +5,7 @@ import {
   CATEGORIAS_COOKIES,
   guardarConsentimiento,
   leerConsentimiento,
-} from '../services/cookieConsent';
+} from '../services/userPreferences';
 
 /**
  * Banner de Consentimiento de Cookies.
