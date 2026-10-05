@@ -422,15 +422,6 @@ const PROVEEDORES_INICIALES = [
 ];
 
 const TIPO_COLORES = {
-  Atracciones: { bg: '#e8f5e9', color: '#2e7d32' },
-  Vuelos: { bg: '#e3f2fd', color: '#1565c0' },
-  Alojamientos: { bg: '#f3e5f5', color: '#6a1b9a' },
-  Autos: { bg: '#fff3e0', color: '#e65100' },
-  Tours: { bg: '#e0f7fa', color: '#00695c' },
-  Otro: { bg: '#f5f5f5', color: '#333' },
-};
-
-const TIPO_COLORES = {
   Atracciones: { bg: C.green + '18', color: C.green },
   Vuelos: { bg: C.blue + '18', color: C.blue },
   Alojamientos: { bg: C.purple + '18', color: C.purple },
