@@ -5,6 +5,7 @@ import { AdminErrorsInterceptor } from './admin-errors.interceptor';
 import { AdminConfigService, PlatformConfig } from './admin-config.service';
 import { AdminFinanzasService } from './admin-finanzas.service';
 import { AdminAuditService, actorDesdeRequest } from './admin-audit.service';
+import { AdminProveedoresService } from './admin-proveedores.service';
 import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
 
 @ApiTags('Admin')
@@ -18,6 +19,7 @@ export class AdminController {
     private readonly configService: AdminConfigService,
     private readonly finanzasService: AdminFinanzasService,
     private readonly auditService: AdminAuditService,
+    private readonly proveedoresService: AdminProveedoresService,
   ) {}
 
   // ── Observabilidad ────────────────────────────────────────────────────────
@@ -129,6 +131,30 @@ export class AdminController {
   async registrarAuditoria(@Body() body: { accion: string; entidadTipo?: string; entidadId?: string; detalle?: any }, @Req() req: any) {
     await this.auditService.registrar(actorDesdeRequest(req), body?.accion || 'Acción', body?.entidadTipo || 'panel', body?.entidadId || null, body?.detalle);
     return { success: true };
+  }
+
+  // ── Solicitudes de proveedores ("Quiero ser proveedor") ─────────────────
+  @Get('proveedores/solicitudes')
+  @ApiOperation({ summary: 'Solicitudes de nuevos proveedores (pendientes primero)' })
+  @ApiQuery({ name: 'estado', required: false, enum: ['PENDIENTE', 'APROBADA', 'RECHAZADA'] })
+  async getSolicitudesProveedor(@Query('estado') estado?: string) {
+    return this.proveedoresService.listar(estado);
+  }
+
+  @Put('proveedores/solicitudes/:id')
+  @ApiOperation({ summary: 'Aprobar o rechazar una solicitud de proveedor (queda en auditoría)' })
+  @ApiBody({ schema: { example: { accion: 'rechazar', nota: 'El RUC no corresponde a la empresa.' } } })
+  async revisarSolicitudProveedor(@Param('id') id: string, @Body() body: { accion: string; nota?: string }, @Req() req: any) {
+    const actor = actorDesdeRequest(req);
+    const sol = await this.proveedoresService.revisar(id, body?.accion, actor.email, body?.nota);
+    await this.auditService.registrar(
+      actor,
+      sol.estado === 'APROBADA' ? 'Aprobó proveedor' : 'Rechazó proveedor',
+      'proveedor',
+      `${sol.codigo} · ${sol.empresa}`,
+      { tipo: sol.tipo, ruc: sol.ruc, email: sol.email, nota: sol.notaAdmin },
+    );
+    return sol;
   }
 
   // ── Ajustes globales ──────────────────────────────────────────────────────

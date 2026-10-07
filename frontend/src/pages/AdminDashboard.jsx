@@ -1662,6 +1662,150 @@ function FinanzasPanel({ refreshKey }) {
   );
 }
 
+// ── Moderación: solicitudes "Quiero ser proveedor" (datos reales de la BD) ──
+const TIPO_PROV = { hospedaje: '🏨 Hospedaje', vuelos: '✈️ Vuelos', autos: '🚗 Autos', atracciones: '🎡 Atracciones' };
+const ESTADO_SOL = {
+  PENDIENTE: { label: 'Pendiente', color: C.orange },
+  APROBADA: { label: 'Aprobada', color: C.green },
+  RECHAZADA: { label: 'Rechazada', color: C.red },
+};
+
+function SolicitudesProveedorPanel() {
+  const [data, setData] = useState({ items: [], resumen: {} });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [aviso, setAviso] = useState(null);
+  const [filtro, setFiltro] = useState('PENDIENTE');
+  const [abierta, setAbierta] = useState(null);
+  const [notas, setNotas] = useState({});
+  const [guardando, setGuardando] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await api.get('/admin/proveedores/solicitudes');
+      setData({ items: Array.isArray(data?.items) ? data.items : [], resumen: data?.resumen || {} });
+    } catch (err) {
+      setError(apiErrorMsg(err, 'No se pudieron cargar las solicitudes de proveedores'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const revisar = async (sol, accion) => {
+    const nota = (notas[sol.id] || '').trim();
+    if (accion === 'rechazar' && !nota) {
+      setAviso({ tipo: 'error', texto: `Escribe el motivo del rechazo de ${sol.empresa}.` });
+      setAbierta(sol.id);
+      return;
+    }
+    setGuardando(sol.id);
+    setAviso(null);
+    try {
+      const { data: act } = await api.put(`/admin/proveedores/solicitudes/${sol.id}`, { accion, nota: nota || undefined });
+      setData((d) => {
+        const items = d.items.map((i) => (i.id === sol.id ? act : i));
+        const r = { total: items.length, pendientes: 0, aprobadas: 0, rechazadas: 0 };
+        items.forEach((i) => { if (i.estado === 'PENDIENTE') r.pendientes++; else if (i.estado === 'APROBADA') r.aprobadas++; else r.rechazadas++; });
+        return { items, resumen: r };
+      });
+      setAviso({ tipo: 'success', texto: `${act.empresa} fue ${act.estado === 'APROBADA' ? 'aprobado como proveedor' : 'rechazado'}. Quedó registrado en Auditoría.` });
+      setAbierta(null);
+    } catch (err) {
+      setAviso({ tipo: 'error', texto: `No se pudo ${accion} la solicitud: ${apiErrorMsg(err)}` });
+    } finally {
+      setGuardando(null);
+    }
+  };
+
+  const r = data.resumen || {};
+  const visibles = data.items.filter((i) => filtro === 'TODAS' || i.estado === filtro);
+  const filtros = [['PENDIENTE', 'Pendientes', r.pendientes], ['APROBADA', 'Aprobadas', r.aprobadas], ['RECHAZADA', 'Rechazadas', r.rechazadas], ['TODAS', 'Todas', r.total]];
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <style>{SPIN_CSS}</style>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+        <SectionTitle badge={r.pendientes ? `${r.pendientes} pendiente${r.pendientes === 1 ? '' : 's'}` : null}>🛂 Moderación — Solicitudes de nuevos proveedores</SectionTitle>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {filtros.map(([id, label, n]) => (
+            <button key={id} type="button" onClick={() => setFiltro(id)} style={{ background: filtro === id ? C.blue : C.white, color: filtro === id ? 'white' : C.text, border: `1px solid ${filtro === id ? C.blue : C.border}`, borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+              {label} {n ? `(${n})` : ''}
+            </button>
+          ))}
+          <button type="button" onClick={cargar} title="Recargar" style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 20, padding: '4px 10px', cursor: 'pointer' }}>↻</button>
+        </div>
+      </div>
+      <div style={{ fontSize: '0.8rem', color: C.gray, marginBottom: 12 }}>
+        Llegan desde el formulario público <a href="/proveedores/registro" target="_blank" rel="noreferrer" style={{ color: C.blue }}>/proveedores/registro</a> (botón “Quiero ser proveedor”).
+      </div>
+
+      {error && <Alerta tipo="error" onClose={() => setError(null)}>{error} <button type="button" onClick={cargar} style={{ marginLeft: 8, background: 'transparent', border: `1px solid ${C.red}`, color: C.red, borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>Reintentar</button></Alerta>}
+      {aviso && <Alerta tipo={aviso.tipo} onClose={() => setAviso(null)}>{aviso.texto}</Alerta>}
+
+      {loading ? (
+        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, textAlign: 'center', color: C.gray }}><Spinner color={C.blue} /> Cargando solicitudes…</div>
+      ) : visibles.length === 0 ? (
+        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, textAlign: 'center', color: C.gray }}>
+          {filtro === 'PENDIENTE' ? 'No hay solicitudes pendientes. ✅' : 'No hay solicitudes en este estado.'}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+          {visibles.map((s) => {
+            const est = ESTADO_SOL[s.estado] || { label: s.estado, color: C.gray };
+            const abierto = abierta === s.id;
+            return (
+              <div key={s.id} style={{ background: C.white, border: `1px solid ${C.border}`, borderTop: `4px solid ${est.color}`, borderRadius: 8, padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: C.text, wordBreak: 'break-word' }}>{s.empresa}</div>
+                    <div style={{ fontSize: '0.75rem', color: C.gray }}>{s.codigo} · {fmtDate(s.creadaEn)}</div>
+                  </div>
+                  <span style={{ background: est.color + '22', color: est.color, padding: '2px 8px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{est.label}</span>
+                </div>
+                <div style={{ fontSize: '0.82rem', color: C.text, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 10px' }}>
+                  <span style={{ color: C.gray }}>Servicio</span><span>{TIPO_PROV[s.tipo] || s.tipo}</span>
+                  <span style={{ color: C.gray }}>RUC</span><span style={{ fontFamily: 'monospace' }}>{s.ruc}</span>
+                  <span style={{ color: C.gray }}>Contacto</span><span>{s.contactoNombre}</span>
+                  <span style={{ color: C.gray }}>Correo</span><a href={`mailto:${s.email}`} style={{ color: C.blue, wordBreak: 'break-all' }}>{s.email}</a>
+                  <span style={{ color: C.gray }}>Teléfono</span><span>{s.telefono}</span>
+                  {s.ciudad && <><span style={{ color: C.gray }}>Ciudad</span><span>{s.ciudad}</span></>}
+                  {s.sitioWeb && <><span style={{ color: C.gray }}>Web</span><a href={s.sitioWeb} target="_blank" rel="noreferrer" style={{ color: C.blue, wordBreak: 'break-all' }}>{s.sitioWeb}</a></>}
+                </div>
+                {s.descripcion && <div style={{ fontSize: '0.82rem', color: C.gray, background: C.bg, borderRadius: 6, padding: '8px 10px', lineHeight: 1.4 }}>{s.descripcion}</div>}
+
+                {s.estado === 'PENDIENTE' ? (
+                  <>
+                    {abierto && (
+                      <textarea aria-label={`Nota para ${s.empresa}`} rows={2} placeholder="Nota o motivo (obligatorio para rechazar)" value={notas[s.id] || ''} onChange={(e) => setNotas((n) => ({ ...n, [s.id]: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', border: `1px solid ${C.border}`, borderRadius: 6, padding: 8, fontSize: '0.82rem', fontFamily: 'inherit', resize: 'vertical' }} />
+                    )}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
+                      <button type="button" disabled={!!guardando} onClick={() => revisar(s, 'aprobar')} style={{ flex: 1, background: C.green, color: 'white', border: 'none', borderRadius: 4, padding: '7px', cursor: guardando ? 'wait' : 'pointer', fontWeight: 600, display: 'inline-flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+                        {guardando === s.id && <Spinner size={12} />} Aprobar
+                      </button>
+                      <button type="button" disabled={!!guardando} onClick={() => (abierto ? revisar(s, 'rechazar') : setAbierta(s.id))} style={{ flex: 1, background: C.red, color: 'white', border: 'none', borderRadius: 4, padding: '7px', cursor: guardando ? 'wait' : 'pointer', fontWeight: 600 }}>
+                        {abierto ? 'Confirmar rechazo' : 'Rechazar'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: '0.75rem', color: C.gray, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                    {s.estado === 'APROBADA' ? 'Aprobada' : 'Rechazada'} por {s.revisadoPor || 'admin'} · {fmtDate(s.revisadoEn)}
+                    {s.notaAdmin && <div style={{ marginTop: 4, color: C.text }}>“{s.notaAdmin}”</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SoporteTab() {
   const [tickets, setTickets] = useState([]);
   const [loadingTickets, setLoadingTickets] = useState(true);
@@ -1715,20 +1859,7 @@ function SoporteTab() {
         </span>
       </div>
 
-      {/* <SectionTitle>🛂 Moderación (Quality Control) - Pendientes de Aprobación</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-            <span style={{ fontWeight: 700 }}>Hostal La Costa 🏖️</span>
-            <Badge status="PENDING" />
-          </div>
-          <div style={{ fontSize: '0.85rem', color: C.gray, marginBottom: 14 }}>Esperando revisión de fotos y validación de RUC.</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={{ flex: 1, background: C.green, color: 'white', border: 'none', borderRadius: 4, padding: '6px', cursor: 'pointer', fontWeight: 600 }}>Aprobar</button>
-            <button style={{ flex: 1, background: C.red, color: 'white', border: 'none', borderRadius: 4, padding: '6px', cursor: 'pointer', fontWeight: 600 }}>Rechazar</button>
-          </div>
-        </div>
-      </div> */}
+      <SolicitudesProveedorPanel />
 
       <SectionTitle>🎫 Tickets de Soporte (Helpdesk)</SectionTitle>
 
@@ -1841,7 +1972,7 @@ function SoporteTab() {
 }
 
 // ── Auditoría (datos reales: admin_audit_logs + eventos del sistema) ─────────
-const AUD_CATEGORIAS = { usuario: '👤 Usuarios', sesion: '🔐 Sesiones', reserva: '🎫 Reservas', soporte: '🎧 Soporte', liquidacion: '🏦 Payouts', config: '⚙️ Ajustes' };
+const AUD_CATEGORIAS = { usuario: '👤 Usuarios', sesion: '🔐 Sesiones', reserva: '🎫 Reservas', soporte: '🎧 Soporte', liquidacion: '🏦 Payouts', config: '⚙️ Ajustes', proveedor: '🤝 Proveedores' };
 const AUD_POR_PAGINA = 25;
 
 function catLabel(c) {

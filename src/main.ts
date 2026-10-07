@@ -179,12 +179,24 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Booking Prototipo API')
-    .setDescription('API base para los dominios de Alojamientos, Autos, Atracciones y Vuelos.')
+    .setDescription(
+      'API del Booking: Vuelos, Autos, Atracciones, Alojamientos, Facturas, Chatbot, Telemetría, ' +
+      'Panel de Administración (usuarios, finanzas, payouts, auditoría, ajustes) y Configuración pública.',
+    )
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  // Swagger UI (interactivo) + JSON del contrato OpenAPI
+  SwaggerModule.setup('api/docs', app, document, { jsonDocumentUrl: 'api/docs-json' });
+  // ReDoc (documentación de lectura) usando el mismo contrato OpenAPI
+  app.getHttpAdapter().get('/api/redoc', (_req: any, res: any) => {
+    res.type('html').send(`<!DOCTYPE html><html><head><title>Booking Prototipo API - ReDoc</title>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body><redoc spec-url="/api/docs-json"></redoc>
+<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script></body></html>`);
+  });
 
   await app.listen(process.env.PORT || 3000);
 }

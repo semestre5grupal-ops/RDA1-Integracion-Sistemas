@@ -97,7 +97,7 @@ export class AdminAuditService {
     const lim = Math.min(Math.max(Number(limit) || 300, 1), 1000);
     await this.configService.asegurarEsquema().catch(() => undefined);
 
-    const [admin, usuarios, vuelos, autos, atracciones, hospedaje, tickets] = await Promise.all([
+    const [admin, usuarios, vuelos, autos, atracciones, hospedaje, tickets, proveedores] = await Promise.all([
       this.q(`SELECT id, created_at, actor_email, accion, entidad_tipo, entidad_id, detalle, ip
               FROM panel_audit_logs ORDER BY created_at DESC LIMIT $1`, [lim]),
       this.q(`SELECT id, email, created_at, last_sign_in_at FROM auth.users
@@ -111,6 +111,7 @@ export class AdminAuditService {
       this.q(`SELECT id, codigo_reserva AS codigo, estado, total, cliente_email AS email, cliente_nombre AS nombre, creado_en AS fecha
               FROM reservas_alojamiento ORDER BY creado_en DESC LIMIT $1`, [lim]),
       this.q(`SELECT * FROM support_tickets ORDER BY created_at DESC LIMIT $1`, [lim]),
+      this.q(`SELECT id, created_at, empresa, tipo, email, ip FROM panel_solicitudes_proveedor ORDER BY created_at DESC LIMIT $1`, [lim]),
     ]);
 
     const items: AuditEntry[] = [];
@@ -173,6 +174,14 @@ export class AdminAuditService {
         detalle: `estado: ${h.estado} · total: $${Number(h.total || 0).toFixed(2)}`, ip: null,
       });
     }
+    for (const p of proveedores) {
+      items.push({
+        id: `prv-${p.id}`, fecha: new Date(p.created_at).toISOString(), origen: 'SISTEMA', categoria: 'proveedor',
+        actor: p.email, accion: 'Solicitud de proveedor recibida',
+        entidad: `proveedor · PRV-${String(p.id).padStart(5, '0')} · ${p.empresa}`, detalle: `tipo: ${p.tipo}`, ip: p.ip || null,
+      });
+    }
+
     for (const t of tickets) {
       if (t.created_at) {
         items.push({
