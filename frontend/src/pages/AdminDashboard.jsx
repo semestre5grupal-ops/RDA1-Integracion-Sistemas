@@ -1022,6 +1022,45 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
     }
   };
 
+  // ── Modal: Agregar nuevo usuario ──────────────────────────────────────────
+  const [newUserModal, setNewUserModal] = useState(false);
+  const [nuEmail, setNuEmail] = useState('');
+  const [nuPwd, setNuPwd] = useState('');
+  const [nuRol, setNuRol] = useState('cliente');
+  const [nuError, setNuError] = useState('');
+  const [nuGuardando, setNuGuardando] = useState(false);
+
+  /** Sanitiza el email: solo letras, números y caracteres válidos en un email */
+  const sanitizeEmail = (v) => v.replace(/[^a-zA-Z0-9._%+\-@]/g, '').slice(0, 30);
+
+  /** Sanitiza la contraseña: excluye espacios y caracteres de control */
+  const sanitizePwd = (v) => v.replace(/[\s\x00-\x1F\x7F]/g, '').slice(0, 16);
+
+  const abrirNuevoUsuario = () => {
+    setNuEmail(''); setNuPwd(''); setNuRol('cliente'); setNuError(''); setNuGuardando(false);
+    setNewUserModal(true);
+  };
+
+  const crearUsuario = async (e) => {
+    e.preventDefault();
+    setNuError('');
+    if (!nuEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nuEmail))
+      return setNuError('Ingresa un correo electrónico válido.');
+    if (nuPwd.length < 6)
+      return setNuError('La contraseña debe tener al menos 6 caracteres.');
+    setNuGuardando(true);
+    try {
+      await api.post('/admin/users', { email: nuEmail.trim(), password: nuPwd, rol: nuRol });
+      setNewUserModal(false);
+      alert(`Usuario ${nuEmail} creado correctamente.`);
+      onRefresh();
+    } catch (err) {
+      setNuError(apiErrorMsg(err, 'No se pudo crear el usuario. Verifica que el correo no esté registrado.'));
+    } finally {
+      setNuGuardando(false);
+    }
+  };
+
   const handleReservaAction = async (tipo, id, action) => {
     // Hospedaje guardado solo en este navegador (no está en la BD)
     if (tipo === 'hospedaje' && (reservas.hospedaje || []).find(r => r.id === id)?.local) {
@@ -1137,15 +1176,24 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
               </Alerta>
             </div>
           )}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,padding:16,background:C.bg,borderBottom:`1px solid ${C.border}`}}>
-            <div style={{background:C.white,padding:12,borderRadius:8,border:`1px solid ${C.border}`}}>
-              <div style={{fontSize:'0.8rem',color:C.gray}}>Total Usuarios Registrados</div>
-              <div style={{fontSize:'1.4rem',fontWeight:700,color:C.darkBlue}}>{users.length}</div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 16px 12px',flexWrap:'wrap',gap:8}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,flex:1}}>
+              <div style={{background:C.white,padding:12,borderRadius:8,border:`1px solid ${C.border}`}}>
+                <div style={{fontSize:'0.8rem',color:C.gray}}>Total Usuarios Registrados</div>
+                <div style={{fontSize:'1.4rem',fontWeight:700,color:C.darkBlue}}>{users.length}</div>
+              </div>
+              <div style={{background:C.white,padding:12,borderRadius:8,border:`1px solid ${C.border}`}}>
+                <div style={{fontSize:'0.8rem',color:C.gray}}>Administradores</div>
+                <div style={{fontSize:'1.4rem',fontWeight:700,color:C.orange}}>{admins}</div>
+              </div>
             </div>
-            <div style={{background:C.white,padding:12,borderRadius:8,border:`1px solid ${C.border}`}}>
-              <div style={{fontSize:'0.8rem',color:C.gray}}>Administradores</div>
-              <div style={{fontSize:'1.4rem',fontWeight:700,color:C.orange}}>{admins}</div>
-            </div>
+            <button
+              type="button"
+              onClick={abrirNuevoUsuario}
+              style={{background:C.blue,color:'#fff',border:'none',borderRadius:8,padding:'10px 18px',fontWeight:700,fontSize:'0.9rem',cursor:'pointer',display:'flex',alignItems:'center',gap:6,whiteSpace:'nowrap',flexShrink:0}}
+            >
+              ➕ Agregar Usuario
+            </button>
           </div>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.85rem'}}>
             <thead><tr style={{background:C.lightBlue}}>
@@ -1310,6 +1358,103 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
               <button type="button" onClick={()=>setConfirmModal(null)} style={{padding:'10px 20px',border:`1px solid ${C.border}`,background:C.white,color:C.text,borderRadius:8,cursor:'pointer',fontWeight:600,flex:1}}>Cancelar</button>
               <button type="button" onClick={executeConfirm} style={{padding:'10px 20px',border:'none',background:confirmModal.color,color:'white',borderRadius:8,cursor:'pointer',fontWeight:600,flex:1}}>Sí, Proceder</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Agregar nuevo usuario ── */}
+      {newUserModal && (
+        <div
+          role="dialog" aria-modal="true" aria-labelledby="nu-modal-titulo"
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1100,padding:16}}
+          onClick={(e)=>{ if(e.target===e.currentTarget && !nuGuardando) setNewUserModal(false); }}
+        >
+          <div style={{background:'#fff',borderRadius:12,padding:'28px 24px',width:'100%',maxWidth:420,boxShadow:'0 20px 50px rgba(0,0,0,0.25)'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+              <h2 id="nu-modal-titulo" style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:C.darkBlue}}>➕ Agregar nuevo usuario</h2>
+              <button type="button" onClick={()=>setNewUserModal(false)} disabled={nuGuardando} style={{background:'none',border:'none',fontSize:'1.3rem',cursor:'pointer',color:C.gray,lineHeight:1}}>✕</button>
+            </div>
+
+            <form onSubmit={crearUsuario} noValidate>
+              {/* Campo: Email / Usuario */}
+              <div style={{marginBottom:16}}>
+                <label htmlFor="nu-email" style={{display:'block',fontWeight:600,fontSize:'0.85rem',marginBottom:4,color:C.text}}>
+                  Correo electrónico (usuario) <span style={{color:C.red}}>*</span>
+                </label>
+                <input
+                  id="nu-email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="off"
+                  placeholder="usuario@ejemplo.com"
+                  maxLength={30}
+                  value={nuEmail}
+                  onChange={(e) => setNuEmail(sanitizeEmail(e.target.value))}
+                  onPaste={(e) => { e.preventDefault(); const txt = e.clipboardData.getData('text'); setNuEmail(sanitizeEmail(txt)); }}
+                  style={{width:'100%',padding:'9px 12px',border:`1px solid ${nuError&&!nuEmail?C.red:C.border}`,borderRadius:6,fontSize:'0.9rem',boxSizing:'border-box',outline:'none'}}
+                  disabled={nuGuardando}
+                  required
+                />
+                <div style={{fontSize:'0.72rem',color:C.gray,marginTop:3,textAlign:'right'}}>{nuEmail.length}/30 caracteres</div>
+              </div>
+
+              {/* Campo: Contraseña */}
+              <div style={{marginBottom:16}}>
+                <label htmlFor="nu-pwd" style={{display:'block',fontWeight:600,fontSize:'0.85rem',marginBottom:4,color:C.text}}>
+                  Contraseña <span style={{color:C.red}}>*</span>
+                </label>
+                <input
+                  id="nu-pwd"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="Mínimo 6 caracteres"
+                  maxLength={16}
+                  value={nuPwd}
+                  onChange={(e) => setNuPwd(sanitizePwd(e.target.value))}
+                  onPaste={(e) => { e.preventDefault(); const txt = e.clipboardData.getData('text'); setNuPwd(sanitizePwd(txt)); }}
+                  onKeyDown={(e) => { if(e.key === ' ') e.preventDefault(); }}
+                  style={{width:'100%',padding:'9px 12px',border:`1px solid ${nuError&&nuPwd.length<6?C.red:C.border}`,borderRadius:6,fontSize:'0.9rem',boxSizing:'border-box',outline:'none'}}
+                  disabled={nuGuardando}
+                  required
+                />
+                <div style={{display:'flex',justifyContent:'space-between',marginTop:3}}>
+                  <span style={{fontSize:'0.72rem',color:nuPwd.length>0&&nuPwd.length<6?C.red:C.gray}}>Mín. 6 · Máx. 16 caracteres (sin espacios)</span>
+                  <span style={{fontSize:'0.72rem',color:C.gray}}>{nuPwd.length}/16</span>
+                </div>
+              </div>
+
+              {/* Campo: Rol */}
+              <div style={{marginBottom:20}}>
+                <label style={{display:'block',fontWeight:600,fontSize:'0.85rem',marginBottom:8,color:C.text}}>
+                  Rol <span style={{color:C.red}}>*</span>
+                </label>
+                <div style={{display:'flex',gap:12}}>
+                  {[{val:'cliente',label:'👤 Cliente'},{val:'admin',label:'👑 Administrador'}].map(({val,label})=>(
+                    <label key={val} style={{display:'flex',alignItems:'center',gap:8,padding:'10px 16px',border:`2px solid ${nuRol===val?C.blue:C.border}`,borderRadius:8,cursor:'pointer',flex:1,fontWeight:nuRol===val?700:400,color:nuRol===val?C.blue:C.text,transition:'all 0.15s',background:nuRol===val?'#eaf2ff':'#fff',fontSize:'0.85rem'}}>
+                      <input type="radio" name="nu-rol" value={val} checked={nuRol===val} onChange={()=>setNuRol(val)} style={{accentColor:C.blue}} disabled={nuGuardando} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Error */}
+              {nuError && (
+                <div style={{background:'#fff0f0',border:`1px solid ${C.red}`,color:C.red,borderRadius:6,padding:'8px 12px',fontSize:'0.85rem',marginBottom:16,fontWeight:600}}>
+                  ⚠️ {nuError}
+                </div>
+              )}
+
+              {/* Acciones */}
+              <div style={{display:'flex',gap:12}}>
+                <button type="button" onClick={()=>setNewUserModal(false)} disabled={nuGuardando} style={{flex:1,padding:'10px',border:`1px solid ${C.border}`,background:C.white,color:C.text,borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:'0.9rem'}}>
+                  Cancelar
+                </button>
+                <button type="submit" disabled={nuGuardando} style={{flex:1,padding:'10px',border:'none',background:nuGuardando?C.gray:C.blue,color:'#fff',borderRadius:8,cursor:nuGuardando?'not-allowed':'pointer',fontWeight:700,fontSize:'0.9rem',transition:'background 0.2s'}}>
+                  {nuGuardando ? 'Creando...' : 'Crear usuario'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
