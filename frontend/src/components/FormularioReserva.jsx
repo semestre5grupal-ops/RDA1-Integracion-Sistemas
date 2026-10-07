@@ -393,6 +393,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const adultos = lista.filter((p) => p.passengerType === 'ADULT');
 
   return (
+    <>
     <div
       className="modal-overlay"
       onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}
@@ -829,7 +830,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 

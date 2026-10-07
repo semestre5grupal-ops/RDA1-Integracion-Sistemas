@@ -520,6 +520,7 @@ export function AtraccionDetail() {
                           Las cuentas de administrador no pueden realizar compras.
                         </div>
                       ) : (
+                        <>
                         <button className="search-btn" style={{width: '100%', padding: '12px', fontSize: '1rem', marginTop: 16}} onClick={handleBooking} disabled={isBooking}>
                           {isBooking ? 'Procesando Pago Seguro...' : 'Pagar y Confirmar'}
                         </button>
@@ -537,6 +538,7 @@ export function AtraccionDetail() {
                             }}
                           />
                         )}
+                        </>
                       )}
                     </div>
                   </>
