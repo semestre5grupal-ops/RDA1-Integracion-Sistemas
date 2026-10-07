@@ -435,23 +435,25 @@ export function AutoDetail() {
                   Los administradores no pueden pagar.
                 </div>
               ) : (
-                <button onClick={procesarPagoYReserva} disabled={loading} style={{ background: '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                  {loading ? 'Procesando...' : 'Pagar y Reservar'}
-                </button>
+                <>
+                  <button onClick={procesarPagoYReserva} disabled={loading} style={{ background: '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                    {loading ? 'Procesando...' : 'Pagar y Reservar'}
+                  </button>
 
-                {/* Modal offline: aparece cuando se pulsa el botón sin internet */}
-                {showOfflineModal && (
-                  <OfflineReservaModal
-                    onContinuar={() => {
-                      setShowOfflineModal(false);
-                      procesarPagoYReserva();
-                    }}
-                    onCancelar={() => {
-                      setShowOfflineModal(false);
-                      setPendingOfflinePay(false);
-                    }}
-                  />
-                )}
+                  {/* Modal offline: aparece cuando se pulsa el botón sin internet */}
+                  {showOfflineModal && (
+                    <OfflineReservaModal
+                      onContinuar={() => {
+                        setShowOfflineModal(false);
+                        procesarPagoYReserva();
+                      }}
+                      onCancelar={() => {
+                        setShowOfflineModal(false);
+                        setPendingOfflinePay(false);
+                      }}
+                    />
+                  )}
+                </>
               )}
             </div>
           </div>

@@ -1249,7 +1249,6 @@ export function AlojamientoCheckoutModal({
           </main>
         </div>
       )}
-    </div>
 
       {/* Modal offline: aparece cuando se pulsa Completar reserva sin internet */}
       {showOfflineModal && (
@@ -1267,3 +1266,4 @@ export function AlojamientoCheckoutModal({
     </div>
   );
 }
+

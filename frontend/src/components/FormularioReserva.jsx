@@ -811,14 +811,12 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             </div>
         </div>
       </form>
-    </div>
 
       {/* Modal offline: aparece en paso 3 cuando se pulsa Confirmar pago sin internet */}
       {showOfflineModal && (
         <OfflineReservaModal
           onContinuar={() => {
             setShowOfflineModal(false);
-            // Disparar el submit del form manualmente
             document.querySelector('.modal-form')?.dispatchEvent(
               new Event('submit', { bubbles: true, cancelable: true })
             );
