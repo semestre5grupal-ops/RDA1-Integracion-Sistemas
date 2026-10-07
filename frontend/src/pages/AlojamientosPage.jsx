@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAlojamientos, searchAlojamientos } from '../services/alojamientosApi';
 import { AlojamientoCard } from '../components/AlojamientoCard';
+import { DestinoAutocomplete } from '../components/DestinoAutocomplete';
+import { destinoExacto } from '../utils/destinos';
 import { useCurrency } from '../hooks/CurrencyContext';
 import {
   EcuadorFlagIcon,
@@ -297,6 +299,7 @@ export function AlojamientosPage() {
 
   // Estados del SearchBox
   const [destination, setDestination] = useState('');
+  const [destinationError, setDestinationError] = useState('');
   const [checkin, setCheckin] = useState('2026-10-09');
   const [checkout, setCheckout] = useState('2026-10-11');
   const [adults, setAdults] = useState(2);
@@ -346,8 +349,11 @@ export function AlojamientosPage() {
     }
   }, [destination]);
 
+  // Espera a que el usuario deje de escribir antes de consultar al servidor
+  // (antes se hacía una petición por cada tecla).
   useEffect(() => {
-    fetchData();
+    const timer = setTimeout(() => fetchData(), destination ? 400 : 0);
+    return () => clearTimeout(timer);
   }, [fetchData]);
 
   // Accesibilidad WCAG 2.1: Cerrar popovers con tecla Escape
@@ -364,7 +370,19 @@ export function AlojamientosPage() {
 
   const handleSearchSubmit = (e) => {
     if (e) e.preventDefault();
-    const dest = destination.trim() || 'Quito';
+    const typed = destination.trim();
+    if (!typed) {
+      setDestinationError('Introduce un destino para empezar a buscar.');
+      document.getElementById('bk-destination-input')?.focus();
+      return;
+    }
+    if (checkin && checkout && checkout <= checkin) {
+      setShowDatesPopover(true);
+      return;
+    }
+    // "quito" / "QUÍTO" se normaliza al nombre oficial del destino.
+    const dest = destinoExacto(typed)?.nombre || typed;
+    setDestinationError('');
     navigate(
       `/alojamientos/search?ss=${encodeURIComponent(dest)}&checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&group_children=${children}&no_rooms=${rooms}`
     );
@@ -429,20 +447,36 @@ export function AlojamientosPage() {
                 <label htmlFor="bk-destination-input" className="bk-field-label">
                   Indica el destino
                 </label>
-                <input
+                <DestinoAutocomplete
                   id="bk-destination-input"
-                  type="text"
                   className="bk-field-input"
-                  placeholder="¿A dónde vas?"
                   value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                  aria-label="Introduce un destino o nombre de alojamiento"
+                  onChange={(val) => {
+                    setDestination(val);
+                    if (val.trim()) setDestinationError('');
+                  }}
+                  onSelect={() => {
+                    setDestinationError('');
+                    setShowOccupancyPopover(false);
+                    setShowDatesPopover(true);
+                  }}
+                  onInvalidChars={() => setDestinationError('Solo se permiten letras, espacios y los signos , . - \' &')}
+                  invalid={Boolean(destinationError)}
+                  errorId="bk-destination-error"
                 />
               </div>
+              {destinationError && (
+                <div id="bk-destination-error" role="alert" className="dest-ac-error">
+                  {destinationError}
+                </div>
+              )}
               {destination && (
                 <button
                   type="button"
-                  onClick={() => setDestination('')}
+                  onClick={() => {
+                    setDestination('');
+                    document.getElementById('bk-destination-input')?.focus();
+                  }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 36, minHeight: 36 }}
                   aria-label="Borrar destino escrito"
                 >
@@ -530,10 +564,16 @@ export function AlojamientosPage() {
                           id="bk-checkout-date"
                           type="date"
                           value={checkout}
+                          min={checkin || undefined}
                           onChange={(e) => setCheckout(e.target.value)}
                           style={{ width: '100%', padding: '10px 12px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: '0.95rem' }}
                         />
                       </div>
+                      {checkin && checkout && checkout <= checkin && (
+                        <p role="alert" style={{ margin: 0, color: '#d4111e', fontSize: '0.85rem', fontWeight: 600 }}>
+                          La fecha de salida debe ser posterior a la de entrada.
+                        </p>
+                      )}
                     </div>
                     <button
                       type="button"

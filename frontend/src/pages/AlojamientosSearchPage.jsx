@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { getAlojamientos, searchAlojamientos } from '../services/alojamientosApi';
 import { useCurrency } from '../hooks/CurrencyContext';
+import { DestinoAutocomplete } from '../components/DestinoAutocomplete';
+import { destinoExacto } from '../utils/destinos';
 import {
   BedIcon,
   CalendarIcon,
@@ -40,6 +42,7 @@ export function AlojamientosSearchPage() {
 
   // Search Bar Form State
   const [destination, setDestination] = useState(initialDestination);
+  const [destinationError, setDestinationError] = useState('');
   const [checkin, setCheckin] = useState(initialCheckin);
   const [checkout, setCheckout] = useState(initialCheckout);
   const [adults, setAdults] = useState(initialAdults);
@@ -191,11 +194,26 @@ export function AlojamientosSearchPage() {
   // Handle Search Submission
   const handleSearchSubmit = (e) => {
     if (e) e.preventDefault();
+    const typed = destination.trim();
+    if (!typed) {
+      setDestinationError('Introduce un destino para empezar a buscar.');
+      document.getElementById('sr-destination-input')?.focus();
+      return;
+    }
+    if (checkin && checkout && checkout <= checkin) {
+      setShowOccupancyPopover(false);
+      setShowDatesPopover(true);
+      return;
+    }
+    setDestinationError('');
     setShowDatesPopover(false);
     setShowOccupancyPopover(false);
 
+    // "quito" / "QUÍTO" se normaliza al nombre oficial del destino.
+    const dest = destinoExacto(typed)?.nombre || typed;
+    setDestination(dest);
     setSearchParams({
-      ss: destination,
+      ss: dest,
       checkin,
       checkout,
       group_adults: adults,
@@ -323,20 +341,38 @@ export function AlojamientosSearchPage() {
                 <BedIcon size={20} color="#474747" />
               </span>
               <div className="sr-field-content">
-                <span className="sr-field-label">Indica el destino</span>
-                <input
-                  type="text"
+                <label htmlFor="sr-destination-input" className="sr-field-label">Indica el destino</label>
+                <DestinoAutocomplete
+                  id="sr-destination-input"
                   className="sr-field-input"
-                  placeholder="¿A dónde vas?"
                   value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
+                  onChange={(val) => {
+                    setDestination(val);
+                    if (val.trim()) setDestinationError('');
+                  }}
+                  onSelect={() => {
+                    setDestinationError('');
+                    setShowOccupancyPopover(false);
+                    setShowDatesPopover(true);
+                  }}
+                  onInvalidChars={() => setDestinationError('Solo se permiten letras, espacios y los signos , . - \' &')}
+                  invalid={Boolean(destinationError)}
+                  errorId="sr-destination-error"
                 />
               </div>
+              {destinationError && (
+                <div id="sr-destination-error" role="alert" className="dest-ac-error">
+                  {destinationError}
+                </div>
+              )}
               {destination && (
                 <button
                   type="button"
                   className="sr-clear-btn"
-                  onClick={() => setDestination('')}
+                  onClick={() => {
+                    setDestination('');
+                    document.getElementById('sr-destination-input')?.focus();
+                  }}
                   aria-label="Borrar destino"
                 >
                   <CloseIcon size={14} color="#595959" />
@@ -374,11 +410,17 @@ export function AlojamientosSearchPage() {
                       <input
                         type="date"
                         value={checkout}
+                        min={checkin || undefined}
                         onChange={(e) => setCheckout(e.target.value)}
                         style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #ccc' }}
                       />
                     </div>
                   </div>
+                  {checkin && checkout && checkout <= checkin && (
+                    <p role="alert" style={{ margin: '8px 0 0', color: '#d4111e', fontSize: '0.8rem', fontWeight: 600 }}>
+                      La fecha de salida debe ser posterior a la de entrada.
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="sr-smart-btn"
