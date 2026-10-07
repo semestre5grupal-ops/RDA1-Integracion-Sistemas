@@ -376,6 +376,13 @@ export function AlojamientosPage() {
     );
   };
 
+  const handlePropertyTypeClick = (typeName) => {
+    const dest = destination.trim() || 'Quito';
+    navigate(
+      `/alojamientos/search?ss=${encodeURIComponent(dest)}&type=${encodeURIComponent(typeName)}&checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&group_children=${children}&no_rooms=${rooms}`
+    );
+  };
+
   // Helper for formatting Booking date ranges (e.g. vie. 9 oct. — dom. 11 oct.)
   const formatBookingDateRange = (startStr, endStr) => {
     if (!startStr || !endStr) return 'Selecciona las fechas';
@@ -972,7 +979,7 @@ export function AlojamientosPage() {
               <div
                 key={idx}
                 className="bk-proptype-card"
-                onClick={() => handleDestinationClick('')}
+                onClick={() => handlePropertyTypeClick(pt.type || pt.name)}
               >
                 <div className="bk-proptype-img-box">
                   <img src={pt.img} alt={pt.name} loading="lazy" />

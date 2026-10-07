@@ -431,8 +431,13 @@ export class AlojamientosController {
   @ApiOperation({ summary: 'Consultar disponibilidad rápida de habitaciones por fecha (Frontend)' })
   @ApiParam({ name: 'id', description: 'ID del alojamiento' })
   @ApiResponse({ status: 200, description: 'Disponibilidad recuperada exitosamente.', type: AvailabilityResponseDto })
-  async getAvailability(@Param('id') id: string, @Query('date') date: string) {
-    return this.alojamientosService.getAvailability(id, date);
+  async getAvailability(
+    @Param('id') id: string,
+    @Query('date') date?: string,
+    @Query('checkin') checkin?: string,
+    @Query('checkout') checkout?: string,
+  ) {
+    return this.alojamientosService.getAvailability(id, checkin || date, checkout);
   }
 
   @Get(':id/resenas')

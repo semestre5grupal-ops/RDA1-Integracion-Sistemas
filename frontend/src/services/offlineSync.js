@@ -2,6 +2,7 @@ import { get, set, update } from 'idb-keyval';
 import { v4 as uuidv4 } from 'uuid';
 import { createOrderAuto } from './autosApi';
 import { reservarAtraccion } from './atraccionesApi';
+import { reservarAlojamiento } from './alojamientosApi';
 import { crearReserva as crearReservaVuelo } from './vuelosApi';
 import { enviarFacturaTrasCompra } from './envioFactura';
 

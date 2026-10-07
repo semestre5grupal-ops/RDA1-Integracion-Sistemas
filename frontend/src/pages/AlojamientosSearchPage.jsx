@@ -36,6 +36,7 @@ export function AlojamientosSearchPage() {
   const initialAdults = parseInt(searchParams.get('group_adults') || searchParams.get('adultos') || '2', 10);
   const initialChildren = parseInt(searchParams.get('group_children') || searchParams.get('ninos') || '0', 10);
   const initialRooms = parseInt(searchParams.get('no_rooms') || searchParams.get('habitaciones') || '1', 10);
+  const initialType = searchParams.get('type') || searchParams.get('tipo');
 
   // Search Bar Form State
   const [destination, setDestination] = useState(initialDestination);
@@ -77,7 +78,7 @@ export function AlojamientosSearchPage() {
 
   // Filter States
   const [maxBudget, setMaxBudget] = useState(250);
-  const [selectedTypes, setSelectedTypes] = useState([]);
+  const [selectedTypes, setSelectedTypes] = useState(initialType ? [initialType] : []);
   const [selectedPopular, setSelectedPopular] = useState([]);
   const [selectedFacilities, setSelectedFacilities] = useState([]);
   const [selectedStars, setSelectedStars] = useState([]);
@@ -121,17 +122,23 @@ export function AlojamientosSearchPage() {
   }, [checkin, checkout]);
 
   // Fetch properties from backend API
-  const fetchResults = async (targetDest) => {
+  const fetchResults = async (params) => {
     setLoading(true);
     setError(null);
     try {
-      const destQuery = targetDest || destination;
+      const destQuery = params?.destino || (typeof params === 'string' ? params : destination);
+      const cIn = params?.checkin || checkin;
+      const cOut = params?.checkout || checkout;
+      const ad = params?.adultos ?? adults;
+      const ch = params?.ninos ?? children;
+      const rm = params?.habitaciones ?? rooms;
+
       const res = await searchAlojamientos({
         destino: destQuery,
-        adultos: adults,
-        ninos: children,
-        habitaciones: rooms,
-        dates: { checkin, checkout },
+        adultos: ad,
+        ninos: ch,
+        habitaciones: rm,
+        dates: { checkin: cIn, checkout: cOut },
         rows: 25,
       });
 
@@ -140,7 +147,8 @@ export function AlojamientosSearchPage() {
     } catch (err) {
       // Fallback to general list
       try {
-        const fallback = await getAlojamientos({ limit: 25, destino: destination });
+        const destQuery = params?.destino || (typeof params === 'string' ? params : destination);
+        const fallback = await getAlojamientos({ limit: 25, destino: destQuery });
         const items = fallback.data || fallback;
         setProperties(Array.isArray(items) ? items : []);
       } catch (e) {
@@ -152,8 +160,33 @@ export function AlojamientosSearchPage() {
   };
 
   useEffect(() => {
-    fetchResults(initialDestination);
-  }, [initialDestination]);
+    const dest = searchParams.get('ss') || searchParams.get('destino') || 'Quito';
+    const cin = searchParams.get('checkin') || '2026-10-07';
+    const cout = searchParams.get('checkout') || '2026-11-01';
+    const ad = parseInt(searchParams.get('group_adults') || searchParams.get('adultos') || '2', 10);
+    const ch = parseInt(searchParams.get('group_children') || searchParams.get('ninos') || '0', 10);
+    const rm = parseInt(searchParams.get('no_rooms') || searchParams.get('habitaciones') || '1', 10);
+    const typeParam = searchParams.get('type') || searchParams.get('tipo');
+
+    setDestination(dest);
+    setCheckin(cin);
+    setCheckout(cout);
+    setAdults(ad);
+    setChildren(ch);
+    setRooms(rm);
+    if (typeParam) {
+      setSelectedTypes([typeParam]);
+    }
+
+    fetchResults({
+      destino: dest,
+      checkin: cin,
+      checkout: cout,
+      adultos: ad,
+      ninos: ch,
+      habitaciones: rm,
+    });
+  }, [searchParams]);
 
   // Handle Search Submission
   const handleSearchSubmit = (e) => {
@@ -169,8 +202,6 @@ export function AlojamientosSearchPage() {
       group_children: children,
       no_rooms: rooms,
     });
-
-    fetchResults(destination);
   };
 
   // Toggle wishlist heart
@@ -1008,11 +1039,13 @@ export function AlojamientosSearchPage() {
               const isSaved = wishlist.has(prop.id);
               const isAd = index === 1;
 
+              const detailQuery = `checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&group_children=${children}&no_rooms=${rooms}`;
+
               return (
                 <div key={prop.id} className="sr-property-card" data-testid="property-card">
                   {/* Left Column: Image with wishlist heart button */}
                   <div className="sr-card-image-wrapper">
-                    <Link to={`/alojamientos/${prop.id}`}>
+                    <Link to={`/alojamientos/${prop.id}?${detailQuery}`}>
                       <img src={photoUrl} alt={prop.nombre} className="sr-card-image" loading="lazy" />
                     </Link>
                     <button
@@ -1029,7 +1062,7 @@ export function AlojamientosSearchPage() {
                   <div className="sr-card-info">
                     <div>
                       <div className="sr-card-title-row">
-                        <Link to={`/alojamientos/${prop.id}`} className="sr-card-title">
+                        <Link to={`/alojamientos/${prop.id}?${detailQuery}`} className="sr-card-title">
                           {prop.nombre}
                         </Link>
                         <div className="sr-rating-squares" aria-label="Categoría de 4 estrellas">
@@ -1084,7 +1117,17 @@ export function AlojamientosSearchPage() {
                         </div>
 
                         <div className="sr-urgency-note">
-                          ¡Solo quedan {((index * 3) % 5) + 1} a este precio en nuestra web!
+                          {prop.habitacionesDisponibles !== undefined ? (
+                            prop.habitacionesDisponibles <= 0 ? (
+                              <span style={{ color: '#d9534f', fontWeight: 600 }}>¡Agotado para tus fechas!</span>
+                            ) : prop.habitacionesDisponibles <= 3 ? (
+                              <span style={{ color: '#d9534f', fontWeight: 600 }}>¡Solo quedan {prop.habitacionesDisponibles} habitaciones disponibles para tus fechas!</span>
+                            ) : (
+                              <span>{prop.habitacionesDisponibles} habitaciones disponibles</span>
+                            )
+                          ) : (
+                            <span>¡Solo quedan {((index * 3) % 5) + 1} a este precio en nuestra web!</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1119,7 +1162,7 @@ export function AlojamientosSearchPage() {
                         +{currency} {convertPrice(taxes)} de impuestos y cargos
                       </span>
 
-                      <Link to={`/alojamientos/${prop.id}`} className="sr-cta-btn">
+                      <Link to={`/alojamientos/${prop.id}?${detailQuery}`} className="sr-cta-btn">
                         <span>Ver disponibilidad</span>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                           <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z" />

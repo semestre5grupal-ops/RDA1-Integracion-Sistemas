@@ -178,11 +178,29 @@ export class AlojamientosService implements OnModuleInit {
   async search(dto: SearchAlojamientosRequestDto): Promise<any> {
     this.logger.log('Búsqueda de alojamientos con filtros', dto);
 
-    const where: any = {};
-    const destinoTerm = dto.destino || (typeof dto.city === 'string' ? dto.city : undefined);
+    const destinoRaw = dto.destino || (typeof dto.city === 'string' ? dto.city : undefined);
+    const destinoTerm = destinoRaw ? destinoRaw.trim() : '';
 
+    let where: any = undefined;
     if (destinoTerm) {
-      where.destino = ILike(`%${destinoTerm}%`);
+      // Normalizar términos para tolerar tildes (Cancun/Cancún, Galapagos/Galápagos, etc.)
+      const sinTildes = destinoTerm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const conVariante = sinTildes
+        .replace(/u/gi, 'ú')
+        .replace(/a/gi, 'á')
+        .replace(/e/gi, 'é')
+        .replace(/i/gi, 'í')
+        .replace(/o/gi, 'ó')
+        .replace(/n/gi, 'ñ');
+
+      where = [
+        { destino: ILike(`%${destinoTerm}%`) },
+        { destino: ILike(`%${sinTildes}%`) },
+        { destino: ILike(`%${conVariante}%`) },
+        { nombre: ILike(`%${destinoTerm}%`) },
+        { nombre: ILike(`%${sinTildes}%`) },
+        { descripcion: ILike(`%${destinoTerm}%`) },
+      ];
     } else if (dto.country) {
       const paisDestinoMap: Record<string, string> = {
         ec: 'Quito',
@@ -192,7 +210,7 @@ export class AlojamientosService implements OnModuleInit {
       };
       const destinoMapeado = paisDestinoMap[dto.country.toLowerCase()];
       if (destinoMapeado) {
-        where.destino = ILike(`%${destinoMapeado}%`);
+        where = { destino: ILike(`%${destinoMapeado}%`) };
       }
     }
 
@@ -207,7 +225,7 @@ export class AlojamientosService implements OnModuleInit {
       },
     });
 
-    const rowsCount = dto.rows || 10;
+    const rowsCount = dto.rows || 25;
     const [items, total] = await this.alojamientoRepo.findAndCount({
       where,
       take: rowsCount,
@@ -224,6 +242,23 @@ export class AlojamientosService implements OnModuleInit {
       filtered = filtered.filter((i) => Number(i.precioPorNoche) <= dto.filters!.precioMax!);
     }
 
+    const checkinDate = dto.checkin || dto.dates?.checkin;
+    const checkoutDate = dto.checkout || dto.dates?.checkout;
+    if (checkinDate) {
+      // Sincronizar disponibilidad en tiempo real con reservas existentes
+      filtered = await Promise.all(
+        filtered.map(async (aloj) => {
+          try {
+            const avail = await this.getAvailability(aloj.id, checkinDate, checkoutDate);
+            (aloj as any)._disponibilidad = avail;
+          } catch {
+            // Silencioso si ocurre error puntual de disponibilidad
+          }
+          return aloj;
+        }),
+      );
+    }
+
     if (filtered.length > 0) {
       const data = filtered.map((l) => this.transformAlojamiento(l));
 
@@ -235,6 +270,19 @@ export class AlojamientosService implements OnModuleInit {
           next_page: total > rowsCount ? Buffer.from(JSON.stringify({ page: 2 })).toString('base64') : null,
         },
         next_page: total > rowsCount ? Buffer.from(JSON.stringify({ page: 2 })).toString('base64') : null,
+      };
+    }
+
+    // Si el usuario buscó un destino específico y no hubo resultados, retornar lista vacía (no hoteles no relacionados)
+    if (destinoTerm || dto.country) {
+      return {
+        request_id: `req-${Date.now()}`,
+        data: [],
+        metadata: {
+          total_results: 0,
+          next_page: null,
+        },
+        next_page: null,
       };
     }
 
@@ -966,22 +1014,51 @@ export class AlojamientosService implements OnModuleInit {
     throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
   }
 
-  async getAvailability(id: string, date: string): Promise<any> {
-    this.logger.log(`Consultando disponibilidad para alojamiento ${id} en ${date}`);
+  async getAvailability(id: string, date?: string, checkoutDate?: string): Promise<any> {
+    this.logger.log(`Consultando disponibilidad para alojamiento ${id} en ${date} - ${checkoutDate}`);
     const local = await this.alojamientoRepo.findOne({ where: { id } });
-    const precio = local ? Number(local.precioPorNoche) : 150.0;
+    if (!local) {
+      throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
+    }
+    const precio = Number(local.precioPorNoche) || 150.0;
+    const totalRooms = local.habitaciones || 5;
+
+    const startDate = date || new Date().toISOString().split('T')[0];
+    const endDate = checkoutDate || new Date(new Date(startDate).getTime() + 86400000).toISOString().split('T')[0];
+
+    // Contabilizar reservas confirmadas activas que se crucen con el rango [startDate, endDate)
+    const activeReservations = await this.reservaRepo.find({
+      where: {
+        alojamientoId: id,
+        status: ReservationStatus.CONFIRMED,
+      },
+    });
+
+    const overlapping = activeReservations.filter((r) => {
+      return r.checkin < endDate && r.checkout > startDate;
+    });
+
+    const reservedRooms = overlapping.reduce((sum, r) => sum + (r.habitacionesCount || 1), 0);
+    const availableRooms = Math.max(0, totalRooms - reservedRooms);
+
     return {
       alojamiento_id: id,
-      date: date || new Date().toISOString().split('T')[0],
-      available_rooms: local ? local.habitaciones : 5,
+      date: startDate,
+      checkin: startDate,
+      checkout: endDate,
+      total_rooms: totalRooms,
+      reserved_rooms: reservedRooms,
+      available_rooms: availableRooms,
       price_per_night: precio,
       checkin_times: ['14:00', '15:00', '16:00'],
+      is_available: availableRooms > 0,
     };
   }
 
   async reservar(id: string, dto: ReservationRequestDto, idempotencyKey: string): Promise<any> {
     this.logger.log(`Iniciando reserva para Alojamiento ${id} con idempotency key ${idempotencyKey}`);
 
+    // 1. Control de Idempotencia estricto
     const existing = await this.reservaRepo.findOne({ where: { idempotencyKey } });
     if (existing) {
       if (existing.status === ReservationStatus.CONFIRMED) {
@@ -992,8 +1069,42 @@ export class AlojamientosService implements OnModuleInit {
 
     const alojamiento = await this.findOne(id);
     const nights = Math.max(1, dto.nights || 1);
+    const targetCheckin = dto.checkin || new Date().toISOString().split('T')[0];
+    const targetCheckout = dto.checkout || new Date(Date.now() + 86400000 * nights).toISOString().split('T')[0];
+    const roomsCount = Math.max(1, dto.habitaciones_count || 1);
+
+    // 2. Prevención de reservas duplicadas para el mismo usuario y fechas superpuestas
+    const customerEmail = (dto.customer_email || '').trim().toLowerCase();
+    if (customerEmail) {
+      const duplicate = await this.reservaRepo.findOne({
+        where: {
+          alojamientoId: id,
+          customerEmail,
+          checkin: targetCheckin,
+          checkout: targetCheckout,
+          status: ReservationStatus.CONFIRMED,
+        },
+      });
+
+      if (duplicate) {
+        this.logger.warn(`Intento de duplicación de reserva por ${customerEmail} para alojamiento ${id}`);
+        throw conflicto(
+          CodigoProblema.BOOKING_NOT_CONFIRMED,
+          `Ya existe una reserva confirmada para este alojamiento en las fechas seleccionadas (Código: ${duplicate.codigoReserva}).`,
+        );
+      }
+    }
+
+    // 3. Verificación de disponibilidad de habitaciones sincronizada en tiempo real
+    const availability = await this.getAvailability(id, targetCheckin, targetCheckout);
+    if (availability.available_rooms < roomsCount) {
+      throw conflicto(
+        CodigoProblema.ROOM_NO_LONGER_AVAILABLE,
+        `No hay suficientes habitaciones disponibles para las fechas seleccionadas. Habitaciones disponibles: ${availability.available_rooms}, solicitadas: ${roomsCount}.`,
+      );
+    }
+
     const pricePerNight = Number(alojamiento.precioPorNoche) || 100.0;
-    const roomsCount = dto.habitaciones_count || 1;
     const total = pricePerNight * nights * roomsCount;
 
     const codigoReserva = `BKG-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1009,8 +1120,8 @@ export class AlojamientosService implements OnModuleInit {
       habitacionesCount: roomsCount,
       customerName: dto.customer_name,
       customerEmail: dto.customer_email || 'cliente@example.com',
-      checkin: dto.checkin || new Date().toISOString().split('T')[0],
-      checkout: dto.checkout || new Date(Date.now() + 86400000 * nights).toISOString().split('T')[0],
+      checkin: targetCheckin,
+      checkout: targetCheckout,
       huespedes: (dto.adultos || 1) + (dto.ninos || 0),
     });
 

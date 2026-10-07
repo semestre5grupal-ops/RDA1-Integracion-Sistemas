@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { getAlojamiento, reservarAlojamiento } from '../services/alojamientosApi';
+import { getAlojamiento, reservarAlojamiento, getDisponibilidadAlojamiento } from '../services/alojamientosApi';
 import { API_BASE } from '../services/api';
 import { getAtracciones } from '../services/atraccionesApi';
 import { useAuth } from '../hooks/useAuth';
@@ -172,6 +172,50 @@ export function AlojamientoDetail() {
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
+  // Disponibilidad de habitaciones en tiempo real
+  const [disponibilidad, setDisponibilidad] = useState(null);
+  const [loadingDisponibilidad, setLoadingDisponibilidad] = useState(false);
+
+  // Detectar si el usuario ya tiene una reserva confirmada para este alojamiento en estas fechas
+  const existingActiveBooking = useMemo(() => {
+    try {
+      const reservas = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
+      return reservas.find((r) =>
+        (r.alojamientoId === id || r.alojamiento_id === id) &&
+        !['CANCELLED', 'Cancelada', 'FALLIDA'].includes(r.status) &&
+        (r.checkin === checkin || (r.checkin < checkout && r.checkout > checkin))
+      );
+    } catch {
+      return null;
+    }
+  }, [id, checkin, checkout]);
+
+  // Sincronizar disponibilidad en tiempo real
+  useEffect(() => {
+    if (!id) return;
+    let isCancelled = false;
+    const fetchAvail = async () => {
+      setLoadingDisponibilidad(true);
+      try {
+        const data = await getDisponibilidadAlojamiento(id, { checkin, checkout });
+        if (!isCancelled) {
+          setDisponibilidad(data);
+          if (data && typeof data.available_rooms === 'number') {
+            if (data.available_rooms > 0 && rooms > data.available_rooms) {
+              setRooms(data.available_rooms);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error verificando disponibilidad de habitaciones:', err);
+      } finally {
+        if (!isCancelled) setLoadingDisponibilidad(false);
+      }
+    };
+    fetchAvail();
+    return () => { isCancelled = true; };
+  }, [id, checkin, checkout]);
+
   // References for Smooth Scrolling
   const overviewRef = useRef(null);
   const availabilityRef = useRef(null);
@@ -284,12 +328,20 @@ export function AlojamientoDetail() {
   // Reservation handler
   const handleBookingSubmit = async (e) => {
     if (e) e.preventDefault();
+    if (bookingLoading) return; // Prevenir doble clic
+
     if (!customerName.trim()) {
       setBookingError('Por favor ingresa tu nombre completo.');
       return;
     }
     if (!customerEmail.trim()) {
       setBookingError('Por favor ingresa tu correo electrónico.');
+      return;
+    }
+
+    // Validar disponibilidad de habitaciones
+    if (disponibilidad && typeof disponibilidad.available_rooms === 'number' && disponibilidad.available_rooms < parseInt(rooms, 10)) {
+      setBookingError(`Lo sentimos, solo quedan ${disponibilidad.available_rooms} habitaciones disponibles para estas fechas.`);
       return;
     }
 
@@ -318,6 +370,7 @@ export function AlojamientoDetail() {
           firstName: customerName || user?.user_metadata?.nombre || 'Huésped',
           lastName: user?.user_metadata?.apellido || '',
           documentNumber: user?.user_metadata?.cedula || '',
+          email: customerEmail || user?.email || '',
         },
       ],
     };
@@ -347,7 +400,16 @@ export function AlojamientoDetail() {
       };
 
       const existing = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
-      existing.unshift(localBooking);
+      const existingIdx = existing.findIndex((r) =>
+        (r.id && (r.id === localBooking.id || r.id === localBooking.reservationId || r.id === localBooking.codigoReserva)) ||
+        (r.reservationId && (r.reservationId === localBooking.reservationId || r.reservationId === localBooking.id)) ||
+        (r.alojamientoId === localBooking.alojamientoId && r.checkin === localBooking.checkin && r.checkout === localBooking.checkout)
+      );
+      if (existingIdx >= 0) {
+        existing[existingIdx] = localBooking;
+      } else {
+        existing.unshift(localBooking);
+      }
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
       setBookingSuccess({ ...localBooking, offline: true });
@@ -369,6 +431,7 @@ export function AlojamientoDetail() {
       const confirmedBooking = {
         id: res.reservation_id || res.id || reservationCode,
         reservationId: reservationCode,
+        codigoReserva: reservationCode,
         alojamientoId: id,
         titulo: `${alojamiento?.nombre} (${nightsCount} noches)`,
         checkin,
@@ -382,15 +445,27 @@ export function AlojamientoDetail() {
       };
 
       const existing = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
-      existing.unshift(confirmedBooking);
+      const existingIdx = existing.findIndex((r) =>
+        (r.id && (r.id === confirmedBooking.id || r.id === confirmedBooking.reservationId || r.id === confirmedBooking.codigoReserva)) ||
+        (r.reservationId && (r.reservationId === confirmedBooking.reservationId || r.reservationId === confirmedBooking.id)) ||
+        (r.codigoReserva && (r.codigoReserva === confirmedBooking.codigoReserva || r.codigoReserva === confirmedBooking.id)) ||
+        (r.alojamientoId === confirmedBooking.alojamientoId && r.checkin === confirmedBooking.checkin && r.checkout === confirmedBooking.checkout && r.status === confirmedBooking.status)
+      );
+      if (existingIdx >= 0) {
+        existing[existingIdx] = confirmedBooking;
+      } else {
+        existing.unshift(confirmedBooking);
+      }
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
       setBookingSuccess(confirmedBooking);
     } catch (err) {
       if (err.response?.status === 409) {
-        setBookingError('Conflicto de Idempotencia: Esta reserva ya fue registrada anteriormente.');
+        const errorDetail = err.response?.data?.detail || err.response?.data?.message;
+        setBookingError(errorDetail || 'Esta reserva ya fue registrada anteriormente.');
       } else {
-        setBookingError(err.response?.data?.message || 'Error al procesar la reserva. Intenta de nuevo.');
+        const errorDetail = err.response?.data?.detail || err.response?.data?.message;
+        setBookingError(errorDetail || 'Error al procesar la reserva. Intenta de nuevo.');
       }
     } finally {
       setBookingLoading(false);
@@ -507,6 +582,11 @@ export function AlojamientoDetail() {
 
   const score = Number(alojamiento.ratings?.score || 8.7).toFixed(1);
   const reviewsCount = alojamiento.ratings?.number_of_reviews || 24;
+
+  const availableRoomsCount = disponibilidad && typeof disponibilidad.available_rooms === 'number'
+    ? disponibilidad.available_rooms
+    : (alojamiento.habitaciones || 5);
+  const isSoldOut = availableRoomsCount <= 0;
 
   return (
     <div className="dt-page-wrapper">
@@ -1098,6 +1178,27 @@ export function AlojamientoDetail() {
             </button>
           </div>
 
+          {/* Banner de Reserva Existente */}
+          {existingActiveBooking && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', padding: '14px 18px', borderRadius: '8px', marginBottom: '20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+              <div>
+                <div style={{ color: '#92400e', fontWeight: 700, fontSize: '0.95rem', marginBottom: '2px' }}>
+                  Ya tienes una reserva confirmada en este alojamiento
+                </div>
+                <div style={{ color: '#b45309', fontSize: '0.85rem' }}>
+                  Estancia del {existingActiveBooking.checkin} al {existingActiveBooking.checkout} • Código PNR: <strong>{existingActiveBooking.codigoReserva || existingActiveBooking.reservationId || existingActiveBooking.id}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/mis-reservas')}
+                style={{ background: '#006ce4', color: '#fff', border: 'none', borderRadius: '4px', padding: '8px 16px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                Ver en Mis Reservas
+              </button>
+            </div>
+          )}
+
           {/* Room Type and Rates Table */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: '16px', alignItems: 'start' }}>
             <table className="dt-rooms-table" style={{ margin: 0 }}>
@@ -1150,14 +1251,25 @@ export function AlojamientoDetail() {
                     <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <CheckmarkIcon size={14} /> Cancelación gratis
                     </div>
-                    <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
-                      ¡Solo quedan 2 a este precio en nuestra web!
-                    </div>
+                    {isSoldOut ? (
+                      <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.8rem' }}>
+                        ¡Agotado para las fechas seleccionadas!
+                      </div>
+                    ) : availableRoomsCount <= 3 ? (
+                      <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
+                        ¡Solo quedan {availableRoomsCount} a este precio en nuestra web!
+                      </div>
+                    ) : (
+                      <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.75rem' }}>
+                        {availableRoomsCount} habitaciones disponibles
+                      </div>
+                    )}
                   </td>
                   <td style={{ verticalAlign: 'top', paddingTop: '16px' }}>
                     <select
                       value={rooms}
                       onChange={(e) => setRooms(Number(e.target.value))}
+                      disabled={isSoldOut}
                       style={{
                         padding: '8px 10px',
                         border: '1px solid #003580',
@@ -1165,15 +1277,19 @@ export function AlojamientoDetail() {
                         fontWeight: 700,
                         fontSize: '14px',
                         width: '100%',
-                        background: '#ffffff',
-                        cursor: 'pointer',
+                        background: isSoldOut ? '#f3f4f6' : '#ffffff',
+                        cursor: isSoldOut ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      {[1, 2, 3, 4, 5].map((num) => (
-                        <option key={num} value={num}>
-                          {num}
-                        </option>
-                      ))}
+                      {isSoldOut ? (
+                        <option value="0">0 (Agotado)</option>
+                      ) : (
+                        Array.from({ length: Math.min(availableRoomsCount, 10) }, (_, i) => i + 1).map((num) => (
+                          <option key={num} value={num}>
+                            {num}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </td>
                 </tr>
@@ -1206,6 +1322,7 @@ export function AlojamientoDetail() {
               <button
                 type="button"
                 className="dt-reserve-btn-primary"
+                disabled={isSoldOut}
                 onClick={() => setShowCheckoutModal(true)}
                 style={{
                   width: '100%',
@@ -1216,11 +1333,13 @@ export function AlojamientoDetail() {
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '2px',
+                  opacity: isSoldOut ? 0.6 : 1,
+                  cursor: isSoldOut ? 'not-allowed' : 'pointer',
                 }}
               >
-                <span>Reservaré</span>
+                <span>{isSoldOut ? 'Agotado' : 'Reservaré'}</span>
                 <span style={{ fontSize: '11px', fontWeight: 500, opacity: 0.9 }}>
-                  Confirmación inmediata
+                  {isSoldOut ? 'Sin disponibilidad' : 'Confirmación inmediata'}
                 </span>
               </button>
 
@@ -1319,12 +1438,20 @@ export function AlojamientoDetail() {
                 <div className="dt-res-grid">
                   <div className="dt-res-input-group">
                     <label>Habitaciones solicitadas</label>
-                    <select value={rooms} onChange={(e) => setRooms(Number(e.target.value))}>
-                      {[1, 2, 3, 4, 5].map((num) => (
-                        <option key={num} value={num}>
-                          {num} habitación ({currency} {convertPrice(Math.round(pricePerNight * nightsCount * num))})
-                        </option>
-                      ))}
+                    <select
+                      value={rooms}
+                      onChange={(e) => setRooms(Number(e.target.value))}
+                      disabled={isSoldOut}
+                    >
+                      {isSoldOut ? (
+                        <option value="0">0 (Agotado)</option>
+                      ) : (
+                        Array.from({ length: Math.min(availableRoomsCount, 10) }, (_, i) => i + 1).map((num) => (
+                          <option key={num} value={num}>
+                            {num} habitación ({currency} {convertPrice(Math.round(pricePerNight * nightsCount * num))})
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
                   <div className="dt-res-input-group">
@@ -1340,8 +1467,8 @@ export function AlojamientoDetail() {
                       {currency} {convertPrice(totalPrice)}
                     </strong>
                   </div>
-                  <button type="submit" className="dt-reserve-btn-primary" disabled={bookingLoading}>
-                    {bookingLoading ? 'Procesando reserva...' : 'Reservaré'}
+                  <button type="submit" className="dt-reserve-btn-primary" disabled={bookingLoading || isSoldOut}>
+                    {bookingLoading ? 'Procesando reserva...' : isSoldOut ? 'Agotado' : 'Reservaré'}
                   </button>
                 </div>
               </form>

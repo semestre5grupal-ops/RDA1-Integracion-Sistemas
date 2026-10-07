@@ -159,9 +159,25 @@ export function AlojamientoCheckoutModal({
     }
   };
 
+  // Detectar si el usuario ya tiene una reserva confirmada para este alojamiento en estas fechas
+  const existingActiveBooking = useMemo(() => {
+    try {
+      const reservas = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
+      return reservas.find((r) => 
+        (r.alojamientoId === alojamiento?.id || r.alojamiento_id === alojamiento?.id) &&
+        !['CANCELLED', 'Cancelada', 'FALLIDA'].includes(r.status) &&
+        (r.checkin === checkin || (r.checkin < checkout && r.checkout > checkin))
+      );
+    } catch {
+      return null;
+    }
+  }, [alojamiento?.id, checkin, checkout]);
+
   // Submission handler in Step 2
   const handleCompletarReserva = async (e) => {
     e.preventDefault();
+    if (loading) return; // Prevenir envíos concurrentes por doble clic
+
     if (!titularTarjeta.trim()) {
       setErrorMsg('Ingresa el nombre del titular de la tarjeta.');
       return;
@@ -201,7 +217,7 @@ export function AlojamientoCheckoutModal({
           firstName: nombre || 'Huésped',
           lastName: apellidos || '',
           documentNumber: user?.user_metadata?.cedula || '',
-          email: email.trim(),
+          email: email.trim() || user?.email || '',
         },
       ],
     };
@@ -238,7 +254,16 @@ export function AlojamientoCheckoutModal({
       };
 
       const existing = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
-      existing.unshift(localBooking);
+      const existingIdx = existing.findIndex((r) =>
+        (r.id && (r.id === localBooking.id || r.id === localBooking.reservationId || r.id === localBooking.codigoReserva)) ||
+        (r.reservationId && (r.reservationId === localBooking.reservationId || r.reservationId === localBooking.id)) ||
+        (r.alojamientoId === localBooking.alojamientoId && r.checkin === localBooking.checkin && r.checkout === localBooking.checkout)
+      );
+      if (existingIdx >= 0) {
+        existing[existingIdx] = localBooking;
+      } else {
+        existing.unshift(localBooking);
+      }
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
       setBookingConfirmed({ ...localBooking, offline: true });
@@ -283,7 +308,17 @@ export function AlojamientoCheckoutModal({
       };
 
       const existing = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
-      existing.unshift(confirmedBooking);
+      const existingIdx = existing.findIndex((r) =>
+        (r.id && (r.id === confirmedBooking.id || r.id === confirmedBooking.reservationId || r.id === confirmedBooking.codigoReserva)) ||
+        (r.reservationId && (r.reservationId === confirmedBooking.reservationId || r.reservationId === confirmedBooking.id)) ||
+        (r.codigoReserva && (r.codigoReserva === confirmedBooking.codigoReserva || r.codigoReserva === confirmedBooking.id)) ||
+        (r.alojamientoId === confirmedBooking.alojamientoId && r.checkin === confirmedBooking.checkin && r.checkout === confirmedBooking.checkout && r.status === confirmedBooking.status)
+      );
+      if (existingIdx >= 0) {
+        existing[existingIdx] = confirmedBooking;
+      } else {
+        existing.unshift(confirmedBooking);
+      }
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
       setBookingConfirmed(confirmedBooking);
@@ -291,7 +326,8 @@ export function AlojamientoCheckoutModal({
       if (onSuccess) onSuccess(confirmedBooking);
     } catch (err) {
       if (err.response?.status === 409) {
-        setErrorMsg('Esta reserva ya fue procesada anteriormente.');
+        const errorDetail = err.response?.data?.detail || err.response?.data?.message;
+        setErrorMsg(errorDetail || 'Esta reserva ya fue procesada anteriormente.');
       } else {
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;
         const invalidParams = err.response?.data?.invalidParams?.map(p => `${p.name}: ${p.reason}`).join(', ');
@@ -692,6 +728,21 @@ export function AlojamientoCheckoutModal({
             {errorMsg && (
               <div style={{ background: '#fef2f2', border: '1px solid #f87171', color: '#b91c1c', padding: '12px 16px', borderRadius: '6px', fontSize: '14px', fontWeight: 600 }}>
                 {errorMsg}
+              </div>
+            )}
+
+            {existingActiveBooking && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <div style={{ fontSize: '0.85rem', color: '#92400e', lineHeight: 1.4 }}>
+                  <strong>Aviso de reserva previa:</strong> Ya cuentas con una reserva confirmada para este alojamiento ({existingActiveBooking.checkin} al {existingActiveBooking.checkout}, Código: <strong>{existingActiveBooking.codigoReserva || existingActiveBooking.reservationId || existingActiveBooking.id}</strong>).
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/mis-reservas')}
+                  style={{ background: '#006ce4', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  Ver en Mis Reservas
+                </button>
               </div>
             )}
 

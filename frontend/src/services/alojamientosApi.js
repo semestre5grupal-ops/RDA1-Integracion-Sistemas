@@ -29,9 +29,15 @@ export async function getAlojamiento(id) {
   return data;
 }
 
-export async function getDisponibilidadAlojamiento(id, date) {
+export async function getDisponibilidadAlojamiento(id, params = {}) {
+  const checkinVal = typeof params === 'string' ? params : (params?.checkin || params?.date);
+  const checkoutVal = typeof params === 'object' ? params?.checkout : undefined;
   const { data } = await api.get(`/alojamientos/${id}/availability`, {
-    params: { date },
+    params: {
+      checkin: checkinVal,
+      checkout: checkoutVal,
+      date: checkinVal,
+    },
   });
   return data;
 }
