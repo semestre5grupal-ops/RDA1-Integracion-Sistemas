@@ -145,6 +145,28 @@ export const HERRAMIENTAS: readonly DefinicionHerramienta[] = [
   {
     type: 'function',
     function: {
+      name: 'consultar_alojamientos',
+      description:
+        'Hoteles, resorts y alojamientos disponibles por destino (Quito, Cancún, Cartagena, Medellín, etc.). ' +
+        'Devuelve opciones con precio por noche, puntuación, amenidades y si tiene piscina. ' +
+        'Úsala si el usuario busca dónde hospedarse o quedarse.',
+      parameters: {
+        type: 'object',
+        properties: {
+          destino: { type: 'string' },
+          checkin: { type: 'string' },
+          checkout: { type: 'string' },
+          adultos: { type: 'integer' },
+          tienePiscina: { type: 'boolean' },
+          precioMaximo: { type: 'number' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'estado_vuelo',
       description:
         'Estado operativo de un vuelo (programado, retrasado, cancelado, aterrizado) por su ' +

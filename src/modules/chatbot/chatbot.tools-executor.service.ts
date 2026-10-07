@@ -97,6 +97,7 @@ export class ChatbotToolsExecutorService {
       consultar_vuelos: (a) => this.consultarVuelos(a),
       consultar_autos: (a) => this.consultarAutos(a),
       consultar_atracciones: (a) => this.consultarAtracciones(a),
+      consultar_alojamientos: (a) => this.consultarAlojamientos(a),
       estado_vuelo: (a) => this.estadoVuelo(a),
     };
   }
@@ -815,6 +816,59 @@ export class ChatbotToolsExecutorService {
     const cortado = texto.slice(0, maximo);
     const ultimoEspacio = cortado.lastIndexOf(' ');
     return `${cortado.slice(0, ultimoEspacio > 0 ? ultimoEspacio : maximo)}…`;
+  }
+
+  /**
+   * `consultar_alojamientos`: `GET /alojamientos`.
+   * Consulta el catálogo de hoteles y hospedajes, filtrando en memoria por destino y comodidades.
+   */
+  private async consultarAlojamientos(args: any): Promise<ResultadoHerramienta> {
+    try {
+      const destinoTexto = args?.destino ? String(args.destino) : null;
+      const { data } = await this.http.get('/alojamientos', { params: { limit: 25 } });
+      const crudos = Array.isArray(data?.data) ? data.data : [];
+
+      let filtrados = crudos;
+      if (destinoTexto) {
+        const normalizado = this.normalizarTexto(destinoTexto);
+        filtrados = filtrados.filter((a: any) =>
+          this.normalizarTexto(a?.destino ?? '').includes(normalizado) ||
+          this.normalizarTexto(a?.nombre ?? '').includes(normalizado)
+        );
+      }
+
+      if (args?.tienePiscina) {
+        filtrados = filtrados.filter((a: any) => a?.tienePiscina === true);
+      }
+
+      if (args?.precioMaximo) {
+        filtrados = filtrados.filter((a: any) => Number(a?.precioPorNoche ?? 0) <= Number(args.precioMaximo));
+      }
+
+      const finales = filtrados.slice(0, 5).map((a: any) => ({
+        id: a?.id,
+        nombre: a?.nombre,
+        destino: a?.destino,
+        tipo_propiedad: a?.tipo_propiedad,
+        precio_por_noche: a?.precioPorNoche != null ? `${a.precioPorNoche} ${a.moneda || 'USD'}` : 'Consultar',
+        puntuacion: a?.ratings?.score ?? 9.0,
+        tiene_piscina: a?.tienePiscina ? 'Sí' : 'No',
+        amenidades: Array.isArray(a?.amenidades) ? a.amenidades.slice(0, 4) : [],
+      }));
+
+      return {
+        ok: true,
+        data: {
+          destino: destinoTexto,
+          total_encontrados: filtrados.length,
+          mostrados: finales.length,
+          alojamientos: finales,
+        },
+      };
+    } catch (e: any) {
+      this.logger.error(`Error al consultar alojamientos: ${e.message}`);
+      return { ok: false, data: { error: 'No se pudo consultar el catálogo de alojamientos en este momento.' } };
+    }
   }
 
   /**

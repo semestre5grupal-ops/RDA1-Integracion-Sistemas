@@ -8,6 +8,7 @@ import {
   ConflictException,
   UnprocessableEntityException,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -59,6 +60,14 @@ import {
   AccommodationWebhookSubscriptionDto,
 } from './dto/webhooks.dto';
 
+import { TelemetryService } from '../telemetry/telemetry.service';
+import {
+  CodigoProblema,
+  conflicto,
+  noProcesable,
+  ProblemaApi,
+} from '../../core/errors/codigo-error';
+
 interface OrderPreviewStoreItem {
   id: string;
   alojamientoId: string;
@@ -100,6 +109,8 @@ export class AlojamientosService implements OnModuleInit {
     private readonly reservaRepo: Repository<ReservaAlojamiento>,
     @InjectRepository(ResenaAlojamiento)
     private readonly resenaRepo: Repository<ResenaAlojamiento>,
+    @Optional()
+    private readonly telemetryService?: TelemetryService,
   ) {}
 
   async onModuleInit() {
@@ -184,6 +195,17 @@ export class AlojamientosService implements OnModuleInit {
         where.destino = ILike(`%${destinoMapeado}%`);
       }
     }
+
+    this.telemetryService?.trackEvent({
+      event_name: 'search_submitted',
+      vertical: 'alojamientos',
+      properties: {
+        destino: destinoTerm || dto.country || 'all',
+        checkin: dto.checkin,
+        checkout: dto.checkout,
+        adultos: dto.guests?.number_of_adults || dto.adultos,
+      },
+    });
 
     const rowsCount = dto.rows || 10;
     const [items, total] = await this.alojamientoRepo.findAndCount({
@@ -580,6 +602,18 @@ export class AlojamientosService implements OnModuleInit {
       createdAt: Date.now(),
     });
 
+    this.telemetryService?.trackEvent({
+      event_name: 'checkout_started',
+      vertical: 'alojamientos',
+      properties: {
+        alojamiento_id: local.id,
+        nights,
+        rooms,
+        total_price: totalPrice,
+        currency: local.moneda || 'USD',
+      },
+    });
+
     return {
       request_id: `req-prev-${Date.now()}`,
       data: {
@@ -606,9 +640,12 @@ export class AlojamientosService implements OnModuleInit {
       }
     }
 
-    // 2. Validación de referencia de pago
+    // 2. Validación de referencia de pago (RFC 7807: PAYMENT_REFERENCE_INVALID)
     if (!dto.payment_reference || dto.payment_reference.trim().length < 4) {
-      throw new UnprocessableEntityException('payment_reference inválido o ausente. Se requiere confirmación de pago.');
+      throw noProcesable(
+        CodigoProblema.PAYMENT_REFERENCE_INVALID,
+        'payment_reference inválido o ausente. Se requiere confirmación de pago de la Payment API.',
+      );
     }
 
     // 3. Resolución de datos del preview o fallback
@@ -634,7 +671,10 @@ export class AlojamientosService implements OnModuleInit {
     }
 
     if (!local) {
-      throw new NotFoundException('No se encontró el alojamiento para formalizar la orden.');
+      throw conflicto(
+        CodigoProblema.ROOM_NO_LONGER_AVAILABLE,
+        'El alojamiento seleccionado ya no tiene disponibilidad para formalizar la orden.',
+      );
     }
 
     const codigoReserva = `BKG-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -668,6 +708,20 @@ export class AlojamientosService implements OnModuleInit {
       total: reserva.total,
       customer_email: reserva.customerEmail,
       alojamiento_id: reserva.alojamientoId,
+    });
+
+    // Telemetría de reserva confirmada
+    this.telemetryService?.trackEvent({
+      event_name: 'booking_confirmed',
+      vertical: 'alojamientos',
+      properties: {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        alojamiento_id: reserva.alojamientoId,
+        total: reserva.total,
+        destination: local.destino,
+        payment_reference: dto.payment_reference,
+      },
     });
 
     return this.buildOrderDetailDto(reserva, local, dto.payment_reference);
@@ -733,6 +787,13 @@ export class AlojamientosService implements OnModuleInit {
     }
 
     if (reserva.status !== ReservationStatus.CANCELLED) {
+      if (reserva.checkout && new Date(reserva.checkout).getTime() < Date.now()) {
+        throw conflicto(
+          CodigoProblema.CANCELLATION_NOT_ALLOWED,
+          'No es posible cancelar una reserva cuya estancia ya ha finalizado.',
+        );
+      }
+
       reserva.status = ReservationStatus.CANCELLED;
       await this.reservaRepo.save(reserva);
 
@@ -740,6 +801,16 @@ export class AlojamientosService implements OnModuleInit {
         order_id: reserva.id,
         reason: reason || 'Cancelado a solicitud del cliente',
         status: 'CANCELLED',
+      });
+
+      this.telemetryService?.trackEvent({
+        event_name: 'booking_cancelled',
+        vertical: 'alojamientos',
+        properties: {
+          order_id: reserva.id,
+          codigo_reserva: reserva.codigoReserva,
+          reason: reason || 'Cancelado a solicitud del cliente',
+        },
       });
     }
 
@@ -829,6 +900,15 @@ export class AlojamientosService implements OnModuleInit {
         }).subscribe({
           error: (e) => this.logger.warn(`Error al entregar webhook a ${sub.url}: ${e.message}`),
         });
+
+        this.telemetryService?.trackApiCall({
+          provider: 'AlojamientosWebhookDispatcher',
+          vertical: 'alojamientos',
+          operation: eventType,
+          status_code: 200,
+          latency_ms: 15,
+          success: true,
+        });
       }
     }
   }
@@ -905,7 +985,7 @@ export class AlojamientosService implements OnModuleInit {
     const existing = await this.reservaRepo.findOne({ where: { idempotencyKey } });
     if (existing) {
       if (existing.status === ReservationStatus.CONFIRMED) {
-        throw new HttpException('Conflicto de Idempotencia: Reserva ya procesada.', HttpStatus.CONFLICT);
+        throw conflicto(CodigoProblema.BOOKING_NOT_CONFIRMED, 'Conflicto de Idempotencia: Reserva ya procesada con este Idempotency-Key.');
       }
       return this.buildReservaResponse(existing);
     }
@@ -935,6 +1015,19 @@ export class AlojamientosService implements OnModuleInit {
     });
 
     reserva = await this.reservaRepo.save(reserva);
+
+    this.telemetryService?.trackEvent({
+      event_name: 'booking_confirmed',
+      vertical: 'alojamientos',
+      properties: {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        alojamiento_id: reserva.alojamientoId,
+        total: reserva.total,
+        customer_email: reserva.customerEmail,
+      },
+    });
+
     return this.buildReservaResponse(reserva, alojamiento);
   }
 
@@ -948,8 +1041,25 @@ export class AlojamientosService implements OnModuleInit {
       return this.buildReservaResponse(reserva);
     }
 
+    if (reserva.checkout && new Date(reserva.checkout).getTime() < Date.now()) {
+      throw conflicto(
+        CodigoProblema.CANCELLATION_NOT_ALLOWED,
+        'No es posible cancelar una reserva cuya estancia ya ha finalizado.',
+      );
+    }
+
     reserva.status = ReservationStatus.CANCELLED;
     await this.reservaRepo.save(reserva);
+
+    this.telemetryService?.trackEvent({
+      event_name: 'booking_cancelled',
+      vertical: 'alojamientos',
+      properties: {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        reason: dto.reason,
+      },
+    });
 
     return this.buildReservaResponse(reserva);
   }

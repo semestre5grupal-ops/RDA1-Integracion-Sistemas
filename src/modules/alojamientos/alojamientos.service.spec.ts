@@ -8,6 +8,8 @@ import { Alojamiento } from './entities/alojamiento.entity';
 import { ReservaAlojamiento } from './entities/reserva.entity';
 import { ResenaAlojamiento } from './entities/resena.entity';
 import { ReservationStatus } from './dto/reservation.dto';
+import { TelemetryService } from '../telemetry/telemetry.service';
+import { CodigoProblema, ProblemaApi } from '../../core/errors/codigo-error';
 
 describe('AlojamientosService', () => {
   let service: AlojamientosService;
@@ -15,6 +17,7 @@ describe('AlojamientosService', () => {
   let reservaRepo: any;
   let resenaRepo: any;
   let httpService: any;
+  let telemetryService: any;
 
   const mockAlojamiento: Partial<Alojamiento> = {
     id: 'test-uuid-1',
@@ -82,6 +85,11 @@ describe('AlojamientosService', () => {
       post: jest.fn().mockReturnValue(of({ data: {} })),
     };
 
+    telemetryService = {
+      trackEvent: jest.fn().mockResolvedValue({ success: true }),
+      trackApiCall: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AlojamientosService,
@@ -92,6 +100,7 @@ describe('AlojamientosService', () => {
         { provide: getRepositoryToken(Alojamiento), useValue: alojamientoRepo },
         { provide: getRepositoryToken(ReservaAlojamiento), useValue: reservaRepo },
         { provide: getRepositoryToken(ResenaAlojamiento), useValue: resenaRepo },
+        { provide: TelemetryService, useValue: telemetryService },
       ],
     }).compile();
 
@@ -170,9 +179,13 @@ describe('AlojamientosService', () => {
       });
 
       const dto = { nights: 1, customer_name: 'Juan' };
-      await expect(service.reservar('test-uuid-1', dto as any, 'idemp-key-dup')).rejects.toThrow(
-        new HttpException('Conflicto de Idempotencia: Reserva ya procesada.', HttpStatus.CONFLICT),
-      );
+      try {
+        await service.reservar('test-uuid-1', dto as any, 'idemp-key-dup');
+        fail('Debería lanzar error');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ProblemaApi);
+        expect(err.codigo).toBe(CodigoProblema.BOOKING_NOT_CONFIRMED);
+      }
     });
   });
 
@@ -275,20 +288,24 @@ describe('AlojamientosService', () => {
       expect(res.data.nights).toBe(2);
     });
 
-    it('createOrder() debe fallar si falta payment_reference', async () => {
-      await expect(
-        service.createOrder(
+    it('createOrder() debe fallar si falta payment_reference con ProblemaApi (PAYMENT_REFERENCE_INVALID)', async () => {
+      try {
+        await service.createOrder(
           {
             order_preview_id: 'prev_123',
             payment_reference: '',
             customer_details: { first_name: 'Carlos', last_name: 'Mendoza', email: 'carlos@test.com' },
           },
           'idemp-order-1',
-        ),
-      ).rejects.toThrow(UnprocessableEntityException);
+        );
+        fail('Debería lanzar error');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ProblemaApi);
+        expect(err.codigo).toBe(CodigoProblema.PAYMENT_REFERENCE_INVALID);
+      }
     });
 
-    it('createOrder() debe crear orden formalizada con payment_reference válido', async () => {
+    it('createOrder() debe crear orden formalizada con payment_reference válido y emitir telemetría', async () => {
       const preview = await service.previewOrder({
         accommodation_id: 'test-uuid-1',
         checkin: '2026-10-15',
@@ -308,6 +325,9 @@ describe('AlojamientosService', () => {
       expect(order.status).toBe('CONFIRMED');
       expect(order.payment_reference).toBe('pay_ABC123456789');
       expect(order.accommodation_details.nombre).toBe('Villa Paraíso');
+      expect(telemetryService.trackEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ event_name: 'booking_confirmed', vertical: 'alojamientos' }),
+      );
     });
 
     it('getOrderById() debe retornar la orden solicitada', async () => {
@@ -342,15 +362,36 @@ describe('AlojamientosService', () => {
       expect(modified.total_price).toBe(800); // 200 * 4 noches
     });
 
-    it('cancelOrder() debe cambiar status a CANCELLED', async () => {
+    it('cancelOrder() debe rechazar cancelación con CANCELLATION_NOT_ALLOWED si la estancia ya finalizó', async () => {
       reservaRepo.findOne.mockResolvedValue({
         ...mockReserva,
         id: 'res-uuid-1',
+        checkout: '2020-01-01',
+        status: ReservationStatus.CONFIRMED,
+      });
+
+      try {
+        await service.cancelOrder('res-uuid-1', 'idemp-cancel-uuid', 'Imprevisto');
+        fail('Debería lanzar error');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ProblemaApi);
+        expect(err.codigo).toBe(CodigoProblema.CANCELLATION_NOT_ALLOWED);
+      }
+    });
+
+    it('cancelOrder() debe cambiar status a CANCELLED y emitir telemetría', async () => {
+      reservaRepo.findOne.mockResolvedValue({
+        ...mockReserva,
+        id: 'res-uuid-1',
+        checkout: '2030-10-13',
         status: ReservationStatus.CONFIRMED,
       });
 
       const cancelResult = await service.cancelOrder('res-uuid-1', 'idemp-cancel-uuid', 'Imprevisto');
       expect(cancelResult.status).toBe(ReservationStatus.CANCELLED);
+      expect(telemetryService.trackEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ event_name: 'booking_cancelled', vertical: 'alojamientos' }),
+      );
     });
   });
 

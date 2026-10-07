@@ -140,6 +140,8 @@ describe('ChatbotToolsExecutorService', () => {
       // El catálogo de ciudades se quitó del prompt para ahorrar tokens, así que el
       // modelo pasa "Quito" tal cual. Que esto funcione es lo que hace seguro
       // quitarlo: si fallara, el modelo recibiría un error en vez de datos.
+      jest.spyOn((executor as any).http, 'post').mockResolvedValueOnce({ data: { data: [] } });
+
       const resultado = await executor.ejecutar('consultar_vuelos', {
         origen: 'Quito',
         destino: 'Guayaquil',
@@ -149,6 +151,31 @@ describe('ChatbotToolsExecutorService', () => {
       // Con cities reconocidos no debe quejarse de la ciudad ni de la fecha.
       const seQuejo = resultado.ok === false;
       expect(seQuejo).toBe(false);
+    });
+
+    it('consulta alojamientos y formatea la respuesta', async () => {
+      jest.spyOn((executor as any).http, 'get').mockResolvedValueOnce({
+        data: {
+          data: [
+            {
+              id: 'hotel-1',
+              nombre: 'Hotel Quito Lujo',
+              destino: 'Quito',
+              tipo_propiedad: 'Hotel',
+              precioPorNoche: 120,
+              moneda: 'USD',
+              tienePiscina: true,
+              amenidades: ['WiFi', 'Piscina'],
+              ratings: { score: 9.5 },
+            },
+          ],
+        },
+      });
+
+      const res = await executor.ejecutar('consultar_alojamientos', { destino: 'Quito', tienePiscina: true });
+      expect(res.ok).toBe(true);
+      expect((res.data as any).alojamientos).toHaveLength(1);
+      expect((res.data as any).alojamientos[0].nombre).toBe('Hotel Quito Lujo');
     });
   });
 });

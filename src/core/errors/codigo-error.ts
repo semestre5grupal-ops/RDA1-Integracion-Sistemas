@@ -53,6 +53,9 @@ export enum CodigoProblema {
   BOARDING_PASS_NOT_AVAILABLE = 'BOARDING_PASS_NOT_AVAILABLE',
   SEAT_CABIN_MISMATCH = 'SEAT_CABIN_MISMATCH',
   FLIGHT_STATUS_NOT_AVAILABLE = 'FLIGHT_STATUS_NOT_AVAILABLE',
+  ROOM_NO_LONGER_AVAILABLE = 'ROOM_NO_LONGER_AVAILABLE',
+  PRICE_CHANGED = 'PRICE_CHANGED',
+  CANCELLATION_NOT_ALLOWED = 'CANCELLATION_NOT_ALLOWED',
 }
 
 /** Una fila de `codigo_error`: estado HTTP, `title` y `type` del contrato. */
@@ -189,6 +192,21 @@ export const CATALOGO_ERROR: Record<CodigoProblema, EntradaCatalogo> = {
     estado: 404,
     titulo: 'Flight Status Not Available',
     tipoUri: 'urn:gds:error:flight-status-not-available',
+  },
+  [CodigoProblema.ROOM_NO_LONGER_AVAILABLE]: {
+    estado: 409,
+    titulo: 'Room No Longer Available',
+    tipoUri: 'urn:gds:error:room-no-longer-available',
+  },
+  [CodigoProblema.PRICE_CHANGED]: {
+    estado: 409,
+    titulo: 'Price Changed',
+    tipoUri: 'urn:gds:error:price-changed',
+  },
+  [CodigoProblema.CANCELLATION_NOT_ALLOWED]: {
+    estado: 409,
+    titulo: 'Cancellation Not Allowed',
+    tipoUri: 'urn:gds:error:cancellation-not-allowed',
   },
 };
 
