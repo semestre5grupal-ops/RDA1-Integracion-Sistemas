@@ -13,11 +13,11 @@ The runtime is **Node.js (Backend)** y **Navegador Web (Frontend)**. The system 
 
 ```mermaid
 graph TD
-    UI[Frontend React] --> |REST API| Gateway[NestJS API Gateway]
-    Gateway --> |Read/Write| DB[(Supabase PostgreSQL)]
-    Gateway --> |HTTP GET/POST| ExtAPI1[API Atracciones]
-    Gateway --> |HTTP GET/POST| ExtAPI2[API Vuelos]
-    Gateway --> |HTTP GET/POST| ExtAPI3[API Alojamientos]
+    UI[Frontend React Vite] --> |REST JSON| API[NestJS Modular Monolith]
+    API --> |Read/Write| DB[(Supabase PostgreSQL)]
+    API --> |SOAP/XML Wrapper| ExtAPI1[API Atracciones Legado]
+    API --> |REST JSON| ExtAPI2[API Renta de Autos]
+    API --> |REST JSON| ExtAPI3[API Vuelos/Alojamientos]
 ```
 
 ### Layer Responsibilities
@@ -26,11 +26,13 @@ graph TD
 - UI Marketplace (Plantilla Booking.com).
 - Consumo exclusivo de los endpoints de nuestro NestJS (BFF - Backend For Frontend).
 
-**Backend (NestJS):**
-- Actúa como Integrador.
-- Expone endpoints unificados al Frontend.
-- Orquesta llamadas HTTP hacia las APIs de los compañeros (ej. `AtraccionesService` hace peticiones al exterior).
-- Gestiona la lógica transaccional de Carritos y Facturas.
+**Backend (NestJS Monolito Modular):**
+- Actúa como Integrador Principal nivel 3 de Richardson (HATEOAS).
+- Expone endpoints unificados al Frontend manejando errores estándar RFC7807.
+- Orquesta integraciones complejas: 
+  - **Atracciones:** Traduce al vuelo peticiones JSON a XML para un sistema SOAP de legado.
+  - **Autos:** Consume catálogo y disponibilidad vehicular vía REST nativo.
+- Gestiona la lógica transaccional de Carritos, Facturas y control de bloqueos de tarifas.
 
 **Base de Datos (Supabase PostgreSQL):**
 - Almacena únicamente las 8 tablas core de administración y ventas (`usuarios`, `carritos`, `facturas`, `logs`, etc.).
@@ -44,12 +46,16 @@ graph TD
 
 ```
 /
-├── frontend/                # Aplicación React
-├── backend/                 # Aplicación NestJS
+├── frontend/                # Aplicación React Vite (Clon Booking.com)
+├── api/                     # Aplicación NestJS (Modular Monolith)
 │   ├── src/
-│   │   ├── modulos_core/    # Usuarios, Carritos, Facturas
-│   │   ├── integraciones/   # Atracciones, Vuelos, Alojamientos
-│   │   └── config/          # Base de datos, HTTP
+│   │   ├── modules/
+│   │   │   ├── atracciones/ # Integración SOAP (Wrapper Service)
+│   │   │   ├── autos/       # Integración REST de Alquiler de Vehículos
+│   │   │   ├── vuelos/      # (Stub/Mocking fallback)
+│   │   │   └── alojamientos/# (Stub/Mocking fallback)
+│   │   ├── core/            # Interceptors (HATEOAS), Filters (RFC7807)
+│   │   └── common/          # Configuración y utilidades compartidas
 └── docs Paúl Rosero/        # Documentación de Arquitectura y Memoria AI
 ```
 

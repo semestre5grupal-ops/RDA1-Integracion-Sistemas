@@ -36,10 +36,12 @@ El **Booking Prototipo** es la plataforma central integradora del ecosistema dig
 
 ## Core Capabilities
 
-- **API Gateway:** Enrutamiento y consumo de APIs de compañeros.
-- **Identidad Centralizada:** Gestión de Usuarios y Roles (JWT).
-- **Checkout Unificado:** Emisión de facturas y control de transacciones distribuidas.
-- **Observabilidad:** Monitoreo del estado de las APIs externas (Up/Down).
+- **API Gateway:** Enrutamiento y consumo de APIs de compañeros (Arquitectura HATEOAS y RFC7807).
+- **Integración Atracciones (Legado SOAP):** Sistema wrapper (Traductor REST/JSON a SOAP/XML) para conectar con inventario heredado de atracciones.
+- **Integración Renta de Autos (REST):** Conexión síncrona con el sistema de alquiler de vehículos para cotizaciones y bloqueos de flota en tiempo real.
+- **Identidad Centralizada:** Gestión de Usuarios y Roles (JWT) con flujos de autenticación de Supabase.
+- **Checkout Unificado:** Emisión de facturas y control de transacciones con control de Idempotencia (`Idempotency-Key`).
+- **Observabilidad:** Monitoreo del estado de las APIs externas y logs transaccionales.
 
 ---
 
