@@ -61,14 +61,6 @@ export function VueloGroupCard({ ofertasGrupo, onSeleccionarTarifa }) {
         <div className="vuelo-route-row" style={{ marginBottom: 0, alignItems: 'center' }}>
           
           <div style={{ flex: 1, position: 'relative' }}>
-            {user && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowReportModal(true); }}
-                style={{ position: 'absolute', top: '-15px', left: 0, background: '#ffebee', color: '#d32f2f', border: '1px solid #ffcdd2', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.75rem', zIndex: 10 }}
-              >
-                ⚠️ Reportar aerolínea
-              </button>
-            )}
             <h3 className="vuelo-route-title" style={{ marginTop: user ? '20px' : '0' }}>
               {extraerHora(primerSegmento?.departure.at)} {primerSegmento?.departure.iataCode} 
             </h3>

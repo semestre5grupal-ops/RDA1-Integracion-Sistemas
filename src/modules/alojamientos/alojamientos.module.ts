@@ -7,6 +7,7 @@ import { AlojamientosController } from './alojamientos.controller';
 import { Alojamiento } from './entities/alojamiento.entity';
 import { ReservaAlojamiento } from './entities/reserva.entity';
 import { ResenaAlojamiento } from './entities/resena.entity';
+import { TelemetryModule } from '../telemetry/telemetry.module';
 
 @Module({
   imports: [
@@ -17,9 +18,11 @@ import { ResenaAlojamiento } from './entities/resena.entity';
       ReservaAlojamiento,
       ResenaAlojamiento,
     ]),
+    TelemetryModule,
   ],
   controllers: [AlojamientosController],
   providers: [AlojamientosService],
   exports: [AlojamientosService],
 })
 export class AlojamientosModule {}
+

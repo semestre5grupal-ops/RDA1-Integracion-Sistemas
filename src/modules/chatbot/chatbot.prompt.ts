@@ -90,7 +90,7 @@ function proximoViernes(hoy: Date): Date {
  * herramientas.
  */
 function promptEs(hoy: Date): string {
-  return `Eres el asistente informativo de Booking Ecuador. Solo consultas disponibilidad; la reserva se completa en la web.
+  return `Eres el asistente informativo de Booking Ecuador. Solo consultas disponibilidad de vuelos, alojamientos, autos y atracciones; la reserva se completa en la web.
 
 Hoy es ${formatearFecha(hoy)}. Calcula las fechas relativas (mañana, el viernes, la próxima semana) a partir de ese día y en formato YYYY-MM-DD. Si falta una fecha obligatoria, pregunta: nunca la elijas tú.
 
@@ -109,7 +109,7 @@ Reglas:
 
 /** Equivalente en inglés, con las mismas reglas de brevedad. */
 function promptEn(hoy: Date): string {
-  return `You are the Booking Ecuador assistant. You only look up availability; bookings are completed on the website.
+  return `You are the Booking Ecuador assistant. You only look up availability for flights, accommodations, rental cars and attractions; bookings are completed on the website.
 
 Today is ${formatearFecha(hoy)}. Turn "tomorrow", "this Friday" or "next week" into YYYY-MM-DD using that day as the reference. If a required date is missing, ask: never pick one yourself.
 
@@ -134,7 +134,7 @@ Rules:
  * que `GET /chatbot/alcance` expone como `mensaje_limite`.
  */
 export const RESPUESTA_SOLO_LECTURA =
-  'Puedo ayudarte a consultar disponibilidad e información de vuelos, autos y atracciones, ' +
+  'Puedo ayudarte a consultar disponibilidad e información de vuelos, alojamientos, autos y atracciones, ' +
   'pero no puedo crear reservas ni procesar pagos. La reserva se completa desde la web: ' +
   'busca tu opción en el buscador, selecciona la que prefieras y confirma el pago ahí.';
 

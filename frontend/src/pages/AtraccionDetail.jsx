@@ -193,11 +193,6 @@ export function AtraccionDetail() {
               <h1 className="detail-title">{atraccion.nombre || atraccion.name || 'Recorrido a pie de Quito Old Town con degustación de cacao en grupos pequeños'}</h1>
               <p className="detail-subtitle">Visita guiada de tres horas por el casco antiguo de Quito, destacando miles de años de historia, arquitectura, calles y costumbres.</p>
             </div>
-            {isLoggedIn && (
-              <button onClick={() => setShowReportModal(true)} style={{ background: '#ffebee', color: '#d32f2f', border: '1px solid #ffcdd2', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', flexShrink: 0, marginLeft: '16px', marginTop: '10px' }}>
-                ⚠️ Reportar un problema
-              </button>
-            )}
           </div>
 
           <div className="gallery-grid">

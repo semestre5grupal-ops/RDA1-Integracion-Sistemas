@@ -98,6 +98,22 @@ CREATE TABLE resenas_alojamiento (
 CREATE INDEX idx_resenas_alojamiento ON resenas_alojamiento(alojamiento_id);
 
 -- ============================================================================
+-- 4. TABLA: WEBHOOKS_ALOJAMIENTO
+-- Suscripciones y entrega de eventos para socios y propietarios
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS webhooks_alojamiento (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    propietario_id VARCHAR(100) NOT NULL,
+    url TEXT NOT NULL,
+    events JSONB NOT NULL DEFAULT '[]'::jsonb,
+    secret VARCHAR(255),
+    activo BOOLEAN DEFAULT true,
+    creado_en TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_alojamiento_propietario ON webhooks_alojamiento(propietario_id);
+
+-- ============================================================================
 -- POBLADO INICIAL DE ALOJAMIENTOS CON MULTIMEDIA Y METADATOS
 -- ============================================================================
 

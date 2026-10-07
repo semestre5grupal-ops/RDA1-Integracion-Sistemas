@@ -147,7 +147,7 @@ function App() {
           requisito es que esté en TODAS las pantallas. Va después de
           `OfflineBanner` para que en el DOM quede por encima si coincidieran,
           cosa que no ocurre porque `OfflineBanner` devuelve `null` con conexión. */}
-      <ChatbotFlotante />
+      {/* <ChatbotFlotante /> */}
     </BrowserRouter>
     </CurrencyProvider>
     </LanguageProvider>

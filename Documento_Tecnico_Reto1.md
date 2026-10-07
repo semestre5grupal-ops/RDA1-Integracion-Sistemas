@@ -1,6 +1,6 @@
 # Documento Técnico — Reto 1: Booking Prototipo (API-First)
 
-**Versión:** 1.0.0  
+**Versión:** 1.1.0  
 **Fecha:** 2026-10-07  
 **Asignatura:** Integración de Sistemas  
 **Equipo:** Semestre 5 Grupal  
@@ -12,9 +12,9 @@
 
 ## 1. Arquitectura del Sistema
 
-### 1.1 Visión General — Patrón Cliente-Servidor
+### 1.1 Visión General — Patrón Cliente-Servidor y BFF Integrador
 
-El sistema sigue una arquitectura **Cliente-Servidor estrictamente desacoplada**, donde el frontend y el backend son sistemas independientes que se comunican únicamente a través de la API REST documentada.
+El sistema sigue una arquitectura **Cliente-Servidor estrictamente desacoplada**, donde el frontend y el backend son sistemas independientes que se comunican únicamente a través de la API REST documentada. Adicionalmente, las verticales como **Alojamientos** implementan el patrón **BFF (Backend For Frontend) e Integrador de Catálogos**, exponiendo contratos homologados con estándares GDS Core para búsqueda, cotización dinámica, emisión idempotente de órdenes y despacho de eventos asíncronos.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -59,7 +59,8 @@ El sistema sigue una arquitectura **Cliente-Servidor estrictamente desacoplada**
 │  ┌──────────────────── Capa de Datos (ORM) ────────────────────────┐   │
 │  │  TypeORM  →  PostgreSQL (Supabase)                               │   │
 │  │  Entidades: Reserva, Vuelo, Segmento, Boleto, Pasajero, Auto,   │   │
-│  │             Atraccion, Alojamiento, Factura, SupportTicket, ...  │   │
+│  │             Atraccion, Alojamiento, ReservaAlojamiento,         │   │
+│  │             ResenaAlojamiento, WebhookAlojamiento, Factura...   │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -76,8 +77,8 @@ El sistema sigue una arquitectura **Cliente-Servidor estrictamente desacoplada**
 |---|---|
 | **Cliente-Servidor** | Separación total: frontend en Vercel (React), backend en Render (NestJS). Comunicación exclusiva por HTTP REST. |
 | **Stateless** | Autenticación mediante JWT de Supabase. El servidor no guarda estado de sesión. Cada request es auto-contenida. |
-| **Cacheable** | `CacheModule` + `CacheInterceptor` de `@nestjs/cache-manager` aplicado en módulos de Atracciones, Alojamientos, Autos y Chatbot con TTL de 60 segundos. |
-| **Interfaz Uniforme** | Uso correcto de verbos HTTP (GET, POST, PUT, PATCH, DELETE). URIs con sustantivos en plural. Prefijo global `/api/v1`. |
+| **Cacheable** | `CacheModule` + `CacheInterceptor` de `@nestjs/cache-manager` aplicado en módulos de Atracciones, Alojamientos, Autos y Chatbot con TTL configurable (5s a 60s). |
+| **Interfaz Uniforme** | Uso correcto de verbos HTTP (GET, POST, PUT, PATCH, DELETE). URIs con sustantivos en plural. Prefijo global `/api/v1`. Respuestas estandarizadas con hipermedios HATEOAS. |
 | **Sistema en Capas** | CORS configurado para proxies y gateways intermedios. Soporte de cabeceras `Authorization`, `Idempotency-Key`, `X-Device-Fingerprint`. |
 
 ### 1.3 Nivel 3 de Madurez Richardson (HATEOAS)
@@ -97,6 +98,8 @@ Implementado mediante el `HateoasInterceptor` global (`src/core/interceptors/hat
 }
 ```
 
+En el módulo de Alojamientos, las entidades devueltas en `GET /alojamientos/:id` incorporan hipervínculos hacia disponibilidad, reseñas, cotización de órdenes y cancelación de reservas.
+
 ### 1.4 Patrón Wrapper (REST ↔ SOAP)
 
 Implementado en `src/modules/atracciones/soap-wrapper.service.ts`. Cuando el módulo de Atracciones confirma una reserva, traduce el payload JSON a un Envelope SOAP y "envía" la petición a un sistema legado CML:
@@ -113,7 +116,7 @@ El `Rfc7807ExceptionFilter` intercepta todas las excepciones globalmente y devue
 ```json
 {
   "type": "urn:gds:error:validation-failed",
-  "title": "Error de Validación",
+  "title": "Validation Failed",
   "status": 400,
   "detail": "La petición no supera la validación del esquema.",
   "instance": "/api/v1/vuelos/bookings",
@@ -123,6 +126,23 @@ El `Rfc7807ExceptionFilter` intercepta todas las excepciones globalmente y devue
   ]
 }
 ```
+
+#### Catálogo Homologado de Códigos de Error RFC 7807
+
+La plataforma centraliza los códigos en `src/core/errors/codigo-error.ts`, soportando errores de vuelos y las extensiones para el dominio de **Alojamientos (Hospitality)**:
+
+| Código (`code`) | HTTP Status | URI (`type`) | Dominio / Descripción |
+|---|---|---|---|
+| `VALIDATION_FAILED` | 400 | `urn:gds:error:validation-failed` | Parámetros de petición inválidos o incompletos |
+| `SEAT_TAKEN` | 409 | `urn:gds:error:seat-taken` | Asiento previamente ocupado (Vuelos) |
+| `AMOUNT_MISMATCH` | 409 | `urn:gds:error:amount-mismatch` | Discrepancia en el monto o moneda enviada |
+| `BOOKING_NOT_CONFIRMED` | 409 | `urn:gds:error:booking-not-confirmed` | Conflicto con estado de reserva o colisión de Idempotency-Key |
+| `ROOM_NO_LONGER_AVAILABLE` | 409 | `urn:gds:error:room-no-longer-available` | **Alojamientos:** La habitación seleccionada ya no tiene disponibilidad |
+| `PRICE_CHANGED` | 409 | `urn:gds:error:price-changed` | **Alojamientos:** La tarifa ha cambiado entre la búsqueda y la orden |
+| `CANCELLATION_NOT_ALLOWED` | 409 | `urn:gds:error:cancellation-not-allowed` | **Alojamientos:** Estancia finalizada o fuera de política de cancelación |
+| `RATE_LIMIT_EXCEEDED` | 429 | `urn:gds:error:rate-limit-exceeded` | Límite de peticiones concurrentes superado |
+| `PAYMENT_REFERENCE_INVALID` | 422 | `urn:gds:error:payment-reference-invalid` | Referencia de pago nula o con longitud incorrecta |
+| `PAYMENT_NOT_AUTHORIZED` | 422 | `urn:gds:error:payment-not-authorized` | Fallo de pasarela o rechazo de pago |
 
 ---
 
@@ -175,67 +195,94 @@ El `Rfc7807ExceptionFilter` intercepta todas las excepciones globalmente y devue
 │ availableTickets │
 └──────────────────┘
 
+┌──────────────────────┐       ┌──────────────────────┐
+│     ALOJAMIENTO      │◀─────▶│ RESERVA_ALOJAMIENTO  │
+│ ──────────────────── │  1:N  │ ──────────────────── │
+│ id (VARCHAR 50)      │       │ id (UUID)            │
+│ nombre               │       │ codigo_reserva (UNQ) │
+│ descripcion          │       │ alojamiento_id (FK)  │
+│ tipo_propiedad       │       │ cliente_nombre       │
+│ destino              │       │ cliente_email        │
+│ precio_noche         │       │ fecha_inicio (DATE)  │
+│ tiene_piscina        │       │ fecha_fin (DATE)     │
+│ ratings (JSONB)      │       │ noches, huespedes    │
+│ amenidades (JSONB)   │       │ total (NUMERIC)      │
+│ photos (JSONB)       │       │ total_price (JSONB)  │
+│ host (JSONB)         │       │ estado               │
+│ ubicacion (JSONB)    │       │ idempotency_key(UNQ) │
+└──────────┬───────────┘       └──────────────────────┘
+           │ 1:N
+┌──────────▼───────────┐       ┌──────────────────────┐
+│  RESENAS_ALOJAMIENTO │       │ WEBHOOKS_ALOJAMIENTO │
+│ ──────────────────── │       │ ──────────────────── │
+│ id (UUID)            │       │ id (UUID)            │
+│ alojamiento_id (FK)  │       │ propietario_id       │
+│ usuario_nombre       │       │ url                  │
+│ comentario           │       │ events (JSONB)       │
+│ puntuacion           │       │ secret               │
+│ limpieza, servicio...│       │ activo (BOOLEAN)     │
+└──────────────────────┘       └──────────────────────┘
+
 ┌──────────────────┐       ┌──────────────────┐
-│  ALOJAMIENTO     │       │  ORDEN_AUTO      │
+│    ORDEN_AUTO    │       │  SUPPORT_TICKET  │
 │ ──────────────── │       │ ──────────────── │
 │ id (UUID)        │       │ id (UUID)        │
-│ nombre           │       │ vehicleId        │
-│ tipo             │       │ email            │
-│ ciudad           │       │ startDate        │
-│ precio_noche     │       │ endDate          │
-│ estrellas        │       │ status           │
-│ amenidades[]     │       │ totalPrice       │
+│ vehicleId        │       │ email            │
+│ email            │       │ subject          │
+│ startDate        │       │ priority         │
+│ endDate          │       │ status           │
+│ status           │       │ resolution       │
+│ totalPrice       │       │ created_at       │
 └──────────────────┘       └──────────────────┘
-
-┌──────────────────┐
-│ SUPPORT_TICKET   │
-│ ──────────────── │
-│ id (UUID)        │
-│ email            │
-│ client_name      │
-│ type             │
-│ entity_name      │
-│ pnr_or_id        │
-│ subject          │
-│ description      │
-│ priority         │
-│ status           │ ← PENDING | IN_REVIEW | RESOLVED | REJECTED
-│ resolution       │
-│ resolved_at      │
-│ resolved_by      │
-│ created_at       │
-└──────────────────┘
 ```
 
-### 2.2 Estados de Reserva de Vuelos
+### 2.2 Ciclos de Vida y Estados de Reserva
 
+#### 2.2.1 Reserva de Vuelos
 ```
 PENDING → PENDING_PAYMENT → TICKET_ISSUING → CONFIRMED
-                                                  ↓
-                           CHANGE_PENDING ←───────┤
-                                  ↓               │
-                               CONFIRMED ──────────┘
-                                                  ↓
-                          CANCELLATION_PENDING → CANCELLED
+                                                   ↓
+                            CHANGE_PENDING ←───────┤
+                                   ↓               │
+                                CONFIRMED ──────────┘
+                                                   ↓
+                           CANCELLATION_PENDING → CANCELLED
+```
+
+#### 2.2.2 Reserva de Alojamientos
+```
+POST /orders/create (con Idempotency-Key)
+                  │
+                  ▼
+              CONFIRMED
+              /       \
+             /         \
+ POST /orders/modify   POST /orders/cancel
+          │                     │
+          ▼                     ▼
+      CONFIRMED             CANCELLED
+ (fechas actualizadas) (valida checkout < now)
 ```
 
 ### 2.3 Tablas Principales en Supabase (PostgreSQL)
 
-| Tabla | Descripción | Columnas Clave |
-|---|---|---|
-| `reserva` | Reservas de vuelos | `reserva_id`, `pnr`, `status`, `propietarioId` |
-| `itinerario` | Tramos de un vuelo | `reserva_id`, `origen`, `destino`, `orden` |
-| `segmento` | Vuelo específico por tramo | `flightNumber`, `departureDate`, `origin`, `destination` |
-| `boleto` | Ticket emitido por pasajero | `ticketId`, `pasajeroId`, `segmentoId`, `status` |
-| `pasajero` | Pasajeros por reserva | `nombre`, `apellido`, `tipo_doc`, `tipo` (ADT/CHD/INF) |
-| `bloqueo_oferta` | Holds de 15-30 min | `holdId`, `offerId`, `propietarioId`, `expiresAt` |
-| `pase_abordar` | Boarding pass | `bookingId`, `asiento`, `puerta`, `checkedIn` |
-| `atraccion` | Catálogo de atracciones | `name`, `product_type`, `operator`, `price` |
-| `reserva_atraccion` | Reservas de atracciones | `reservationId`, `email`, `idempotencyKey` |
-| `alojamiento` | Propiedades hoteleras | `nombre`, `ciudad`, `precio_noche` |
-| `reserva_alojamiento` | Reservas de hoteles | `propertyId`, `checkIn`, `checkOut`, `email` |
-| `orden_auto` | Alquileres de vehículos | `vehicleId`, `email`, `startDate`, `endDate` |
-| `support_tickets` | Tickets de soporte | `email`, `subject`, `priority`, `status`, `resolution` |
+| Tabla | Vertical | Columnas Clave | Índices / Constricciones |
+|---|---|---|---|
+| `reserva` | Vuelos | `reserva_id`, `pnr`, `status`, `totalPrice`, `propietarioId` | PK `reserva_id`, UNIQUE `pnr` |
+| `itinerario` | Vuelos | `reserva_id`, `origen`, `destino`, `orden` | FK `reserva_id` |
+| `segmento` | Vuelos | `flightNumber`, `departureDate`, `origin`, `destination` | FK `itinerario_id` |
+| `boleto` | Vuelos | `ticketId`, `pasajeroId`, `segmentoId`, `status` | PK `id`, UNIQUE `ticketId` |
+| `pasajero` | Vuelos | `nombre`, `apellido`, `tipo_doc`, `numero_doc`, `tipo` | FK `reserva_id` |
+| `bloqueo_oferta` | Vuelos | `holdId`, `offerId`, `propietarioId`, `expiresAt` | UNIQUE `holdId`, TTL 15-30 min |
+| `atraccion` | Atracciones | `name`, `product_type`, `operator`, `price`, `availableTickets` | PK `id` |
+| `reserva_atraccion` | Atracciones | `reservationId`, `email`, `status`, `idempotencyKey` | UNIQUE `idempotencyKey` |
+| `alojamientos` | Alojamientos | `id`, `nombre`, `destino`, `tipo_propiedad`, `precio_noche`, `ratings`, `photos`, `amenidades` | PK `id`, IDX `destino`, IDX `precio_noche` |
+| `reservas_alojamiento` | Alojamientos | `id`, `codigo_reserva`, `alojamiento_id`, `fecha_inicio`, `fecha_fin`, `total`, `total_price`, `estado`, `idempotency_key` | PK `id`, UNIQUE `codigo_reserva`, UNIQUE `idempotency_key`, FK `alojamiento_id` |
+| `resenas_alojamiento` | Alojamientos | `id`, `alojamiento_id`, `usuario_nombre`, `comentario`, `puntuacion`, `limpieza`, `servicio`, `calidad` | PK `id`, IDX `alojamiento_id` |
+| `webhooks_alojamiento` | Alojamientos | `id`, `propietario_id`, `url`, `events`, `secret`, `activo` | PK `id`, IDX `propietario_id` |
+| `orden_auto` | Autos | `id`, `vehicleId`, `email`, `startDate`, `endDate`, `status`, `totalPrice` | PK `id` |
+| `support_tickets` | Soporte | `email`, `subject`, `priority`, `status`, `resolution`, `created_at` | PK `id` |
+| `telemetry_events` | Telemetría | `event_name`, `session_id`, `vertical`, `device`, `properties`, `created_at` | PK `id`, IDX `session_id` |
 
 ---
 
@@ -294,15 +341,66 @@ _*Usa `X-Device-Fingerprint` para identificar al propietario (UUID por sesión d
 | `GET` | `/reservations/:id` | Detalle de una reserva específica | **JWT** |
 | `POST` | `/reservations/:id/cancel` | Cancelar una reserva | **JWT** |
 
-### 3.3 Módulo Alojamientos — `/api/v1/alojamientos`
+### 3.3 Módulo Alojamientos — `/api/v1/alojamientos` (BFF Integrador GDS Core)
 
-| Método | Endpoint | Descripción | Auth |
+El módulo de Alojamientos implementa la especificación completa del integrador hotelero para consumo frontend y federación entre socios. Soporta búsquedas avanzadas, agregación de detalles en lote, cotizaciones previas, mutaciones idempotentes y subscripción a webhooks:
+
+#### 3.3.1 Búsqueda, Catálogo y Metadatos GDS Core
+
+| Método | Endpoint | Descripción | DTO Entrada / Parámetros | DTO Salida / Caché |
+|---|---|---|---|---|
+| `POST` | `/search` | Búsqueda avanzada de alojamientos con filtros de destino, fechas, huéspedes, tarifas y servicios | `SearchAlojamientosRequestDto` | `AlojamientoResponseDto[]` |
+| `POST` | `/details` | Consulta en bloque (batch) de detalles para múltiples propiedades | `DetailsRequestDto` (`ids: string[]`) | `AccommodationDetailsResponseDto[]` |
+| `POST` | `/details/changes` | Detección de cambios y actualizaciones de inventario desde una marca temporal (`since`) | `DetailsChangesRequestDto` | `DetailsChangesResponseDto` |
+| `POST` | `/chains` | Catálogo de cadenas hoteleras y operadores asociados | — | `ChainsResponseDto` |
+| `POST` | `/constants` | Constantes maestras del sistema (tipos de habitación, monedas, políticas de check-in) | `ConstantsRequestDto` | `ConstantsResponseDto` |
+| `POST` | `/reviews` | Consulta paginada del catálogo de opiniones de huéspedes | `ReviewsRequestDto` | `ReviewsResponseDto` |
+| `POST` | `/reviews/scores` | Resumen cuantitativo de puntuaciones de satisfacción (limpieza, servicio, relación calidad-precio) | `ReviewsScoresRequestDto` | `ReviewsScoresResponseDto` |
+
+#### 3.3.2 Disponibilidad y Precios Dinámicos
+
+| Método | Endpoint | Descripción | DTO Entrada / Parámetros | DTO Salida |
+|---|---|---|---|---|
+| `POST` | `/availability` | Consulta de disponibilidad y cotización dinámica por rango de fechas para un hotel | `AvailabilityRequestDto` | `ContractAvailabilityResponseDto` |
+| `POST` | `/bulk-availability` | Verificación masiva de disponibilidad para múltiples hoteles en paralelo | `BulkAvailabilityRequestDto` | `BulkAvailabilityResponseDto` |
+| `GET` | `/:id/availability` | Consulta directa de disponibilidad de la propiedad por ID | `checkin`, `checkout` (Query) | `AvailabilityResponseDto` |
+| `GET` | `/:id/resenas` | Listado de reseñas de huéspedes para la propiedad especificada | `id` (Param) | `ResenaAlojamiento[]` |
+
+#### 3.3.3 Órdenes y Gestión Transaccional (Idempotencia y Políticas)
+
+| Método | Endpoint | Descripción | Cabeceras Requeridas | DTO Entrada / Salida |
+|---|---|---|---|---|
+| `POST` | `/orders/preview` | Simulación y desglose previo de costos, impuestos y recargos antes de procesar el pago | — | In: `OrderPreviewRequestDto`<br>Out: `OrderPreviewResponseDto` |
+| `POST` | `/orders/create` | Creación y confirmación definitiva de la orden con soporte estricto de idempotencia | `Idempotency-Key: <UUID>` | In: `OrderCreateRequestDto`<br>Out: `OrderDetailDto` |
+| `GET` | `/orders/:orderId` | Consulta detallada del estado de una orden por ID o código de reserva | — | Out: `OrderDetailDto` |
+| `POST` | `/orders/:orderId/modify` | Modificación de fechas o número de ocupantes en una orden existente | `Idempotency-Key: <UUID>` | In: `OrderModifyRequestDto`<br>Out: `OrderDetailDto` |
+| `POST` | `/orders/:orderId/cancel` | Cancelación formal de la orden validando política de estancia (error 409 si ya finalizó) | `Idempotency-Key: <UUID>` | In: `CancelReservationRequestDto`<br>Out: `OrderDetailDto` |
+| `GET` | `/reservations` | Listado de reservas activas e históricas | — | Out: `ReservationResponseDto[]` |
+| `GET` | `/reservations/:reservationId` | Detalle específico de una reserva | — | Out: `ReservationResponseDto` |
+| `POST` | `/reservations/:reservationId/cancel` | Cancelación rápida de reserva | — | In: `CancelReservationRequestDto`<br>Out: `ReservationResponseDto` |
+| `POST` | `/:id/reservations` | Reserva directa sobre el recurso del alojamiento | `Idempotency-Key: <UUID>` (Opcional) | In: `ReservationRequestDto`<br>Out: `ReservationResponseDto` |
+
+#### 3.3.4 Webhooks de Notificación Asíncrona
+
+| Método | Endpoint | Descripción | DTO Entrada / Salida |
 |---|---|---|---|
-| `GET` | `/` | Listar alojamientos (caché, filtros opcionales) | No |
-| `GET` | `/:id` | Detalle de un alojamiento | No |
-| `POST` | `/reservations` | Crear reserva de alojamiento | **JWT** |
-| `GET` | `/reservations` | Listar reservas del usuario | **JWT** |
-| `DELETE` | `/reservations/:id` | Cancelar reserva de alojamiento | **JWT** |
+| `GET` | `/webhooks` | Listar suscripciones de webhooks activas para el propietario | Query: `propietarioId`<br>Out: `AccommodationWebhookSubscriptionDto[]` |
+| `POST` | `/webhooks` | Registrar una nueva URL de webhook para eventos (`booking_created`, `booking_cancelled`) | In: `CreateAccommodationWebhookDto`<br>Out: `AccommodationWebhookSubscriptionDto` |
+| `DELETE` | `/webhooks/:id` | Dar de baja una suscripción a webhook por su identificador UUID | Param: `id` (UUID)<br>Out: `204 No Content` |
+
+#### 3.3.5 Operaciones CRUD y Healthcheck
+
+| Método | Endpoint | Descripción | Caché / Observabilidad |
+|---|---|---|---|
+| `GET` | `/health` | Chequeo de estado y conectividad de la vertical | No Caché |
+| `GET` | `/` | Catálogo general de alojamientos con filtros (`destino`, `tipo`, `tienePiscina`, `precioMaximo`) | Caché HTTP 60s |
+| `POST` | `/` | Registro de una nueva propiedad hotelera | — |
+| `GET` | `/:id` | Detalle completo de un alojamiento específico con hipermedios HATEOAS | Caché HTTP 60s |
+| `PUT` | `/:id` | Actualización total de una propiedad | — |
+| `PATCH` | `/:id` | Actualización parcial de atributos | — |
+| `DELETE` | `/:id` | Eliminación lógica (soft-delete) de la propiedad | — |
+
+---
 
 ### 3.4 Módulo Autos — `/api/v1/autos`
 
@@ -317,26 +415,37 @@ _*Usa `X-Device-Fingerprint` para identificar al propietario (UUID por sesión d
 | `GET` | `/orders/:orderId` | Detalle de una orden (caché) | No |
 | `POST` | `/orders/:orderId/cancel` | Cancelar una orden | No |
 
-### 3.5 Módulo Chatbot — `/api/v1/chatbot`
+### 3.5 Módulo Chatbot — `/api/v1/chatbot` (Soporte Multi-Vertical con Groq/LLaMA)
 
 | Método | Endpoint | Descripción | Cache |
 |---|---|---|---|
-| `POST` | `/mensaje` | Enviar mensaje al chatbot (Groq/LLaMA) | No |
-| `POST` | `/nueva-conversacion` | Iniciar nueva conversación | No |
-| `GET` | `/estado` | Estado del servicio (caché 5s) | 5s |
-| `GET` | `/alcance` | Descripción del alcance del chatbot | No |
+| `POST` | `/mensaje` | Enviar mensaje al chatbot con ejecución de herramientas en tiempo real | No |
+| `POST` | `/nueva-conversacion` | Iniciar nueva conversación e inicializar memoria | No |
+| `GET` | `/estado` | Estado de disponibilidad del servicio Groq | 5s |
+| `GET` | `/alcance` | Descripción formal del alcance informativo y de solo lectura | No |
+
+#### Nueva Herramienta Integrada: `consultar_alojamientos`
+El chatbot incorpora en su motor de Function Calling la herramienta `consultar_alojamientos`, permitiendo a los clientes interactuar en lenguaje natural en español e inglés:
+- **Declaración:** En `src/modules/chatbot/chatbot.tools.ts`, configurada con esquema JSON Schema estricto.
+- **Parámetros:** `destino` (string), `checkin` (string YYYY-MM-DD), `checkout` (string YYYY-MM-DD), `adultos` (integer), `tienePiscina` (boolean), `precioMaximo` (number).
+- **Ejecución:** En `ChatbotToolsExecutorService`, consume `GET /api/v1/alojamientos` con normalización de caracteres, tildes y diacríticos, filtrando por destino, comodidades y presupuesto, retornando hasta 5 alternativas estructuradas con puntuación y precio por noche.
+- **Prompt:** Actualizado en `chatbot.prompt.ts` para instruir al modelo sobre la consulta de disponibilidad en las cuatro verticales (vuelos, alojamientos, autos y atracciones).
 
 ### 3.6 Módulo Facturas — `/api/v1/facturas`
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| `POST` | `/enviar` | Enviar factura PDF por correo (SMTP Gmail) |
+| `POST` | `/enviar` | Enviar factura PDF por correo (SMTP Gmail con Nodemailer) |
 
 ### 3.7 Módulo Telemetría — `/api/v1/telemetry`
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| `POST` | `/events` | Registrar evento de analítica (pageView, booking_confirmed, etc.) |
+| `POST` | `/events` | Registrar evento de analítica (search_submitted, checkout_started, booking_confirmed, etc.) |
+
+#### Eventos Emitidos por Alojamientos
+- `booking_confirmed`: Registrado al procesar con éxito `POST /alojamientos/orders/create` o `POST /alojamientos/:id/reservations`. Propiedades: `order_id`, `codigo_reserva`, `alojamiento_id`, `total`.
+- `booking_cancelled`: Registrado al procesar la cancelación de una orden en `POST /alojamientos/orders/:orderId/cancel`. Propiedades: `order_id`, `codigo_reserva`, `reason`.
 
 ---
 
@@ -372,11 +481,19 @@ if (Number(oferta.cambioTotalAPagar) > 0 && !dto.payment?.paymentReference) {
 
 ### 5.2 Idempotencia en Operaciones de Escritura
 
-Las operaciones que mueven dinero o inventario requieren la cabecera `Idempotency-Key` (formato UUID). Reenviar la misma clave devuelve la respuesta original sin re-ejecutar la operación.
+Las operaciones transaccionales críticas requieren la cabecera HTTP `Idempotency-Key` (formato UUID v4):
+- En **Vuelos:** En creación de holds, confirmación de bookings, cambios de fecha y cancelaciones.
+- En **Alojamientos:** En `POST /orders/create`, `POST /orders/:orderId/modify` y `POST /orders/:orderId/cancel`. El servicio verifica la clave en la tabla `reservas_alojamiento(idempotency_key)`. Si la orden ya se encuentra en estado `CONFIRMED`, se emite un error estructurado RFC 7807 `409 BOOKING_NOT_CONFIRMED` o se retorna el estado preexistente sin duplicar cobros ni registros.
 
 ### 5.3 Telemetría y Preparación para EDA
 
-El módulo `TelemetryModule` captura eventos clave (`payment_started`, `payment_succeeded`, `booking_confirmed`) que modelan el futuro bus de eventos para la arquitectura orientada a eventos (EDA/SOA) del Reto 2.
+El módulo `TelemetryModule` y los servicios de dominio capturan eventos clave (`search_submitted`, `checkout_started`, `booking_confirmed`, `booking_cancelled`). Los eventos se persisten directamente en PostgreSQL (`telemetry_events`), alimentando tanto el embudo en tiempo real del Panel de Administración como la preparación para el bus de eventos distribuido (EDA/SOA) del Reto 2.
+
+### 5.4 Persistencia y Despacho de Webhooks
+
+Tanto el módulo de Vuelos como el de **Alojamientos** implementan el patrón de notificación asíncrona mediante webhooks:
+- **Almacenamiento:** Las suscripciones se registran en `webhooks_alojamiento` vinculadas a un `propietario_id`, especificando URL destino, lista de eventos suscritos y secreto para firma.
+- **Despacho Resiliente:** Al confirmarse o cancelarse una orden, el servicio dispara solicitudes HTTP POST asíncronas con timeout estricto de 5 segundos hacia los endpoints de los socios, logueando el estado sin bloquear la respuesta al usuario final.
 
 ---
 
@@ -384,24 +501,27 @@ El módulo `TelemetryModule` captura eventos clave (`payment_started`, `payment_
 
 | Punto de Integración | Tipo | Descripción |
 |---|---|---|
-| `POST /api/v1/vuelos/webhooks` | Webhook Saliente | Notificación asíncrona de cambios de estado de reserva a sistemas externos |
+| `POST /api/v1/vuelos/webhooks` | Webhook Saliente | Notificación asíncrona de cambios de estado de reserva de vuelos a sistemas externos |
+| `POST /api/v1/alojamientos/webhooks` | Webhook Saliente | Notificación asíncrona de confirmación y cancelación de órdenes de hospedaje para socios |
+| `POST /api/v1/alojamientos/bulk-availability` | Endpoint Federado | Verificación de inventario masivo para metabuscadores y sistemas de distribución |
 | `GET /api/v1/atracciones` | Endpoint Público | Consumo por el sistema central Booking Prototipo para catálogo federado |
 | `SoapWrapperService` | Wrapper Interno | Preparado para conectarse a sistemas legados SOAP/XML sin modificar el contrato REST |
-| `TelemetryModule` | Event Source | Fuente de eventos para migración futura a Event Bus (RabbitMQ/Kafka) |
+| `TelemetryModule` | Event Source | Fuente de eventos unificada para migración futura a Event Bus (RabbitMQ/Kafka) |
 
 ---
 
 ## 7. Stack Tecnológico
 
-| Capa | Tecnología | Versión |
+| Capa | Tecnología | Versión / Detalle |
 |---|---|---|
 | Frontend | React (Vite) | 18.x |
 | Backend | NestJS | 10.x |
 | ORM | TypeORM | 0.3.x |
 | Base de Datos | PostgreSQL (Supabase) | 15.x |
-| Autenticación | Supabase Auth (JWT) | — |
+| Autenticación | Supabase Auth (JWT / RLS) | — |
+| IA & Chatbot | Groq SDK (LLaMA 3.3 70B Versatile) | Function Calling con herramientas REST |
 | Documentación API | Swagger / OpenAPI 3.0 | @nestjs/swagger |
-| Validación | class-validator + class-transformer | — |
-| Caché | @nestjs/cache-manager | — |
+| Validación | class-validator + class-transformer | Pipes globales con whitelist |
+| Caché | @nestjs/cache-manager | TTL dinámico por recurso |
 | Despliegue Frontend | Vercel | — |
 | Despliegue Backend | Render | — |

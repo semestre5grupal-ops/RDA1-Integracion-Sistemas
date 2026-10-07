@@ -190,11 +190,6 @@ export function AutoDetail() {
               <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#333', margin: '10px 0 5px 0' }}>Tu oferta</h1>
               <p style={{ color: '#666', fontSize: '0.9rem', margin: 0 }}>Siguiente: Añade los extras</p>
             </div>
-            {user && (
-              <button onClick={() => setShowReportModal(true)} style={{ background: '#ffebee', color: '#d32f2f', border: '1px solid #ffcdd2', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                ⚠️ Reportar un problema
-              </button>
-            )}
           </div>
           <div style={{ display: 'flex', gap: '5px', marginTop: '15px' }}>
             <div style={{ flex: 1, height: '4px', background: '#006ce4' }}></div>
