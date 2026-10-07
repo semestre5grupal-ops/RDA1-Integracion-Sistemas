@@ -1715,7 +1715,7 @@ function SoporteTab() {
         </span>
       </div>
 
-      <SectionTitle>🛂 Moderación (Quality Control) - Pendientes de Aprobación</SectionTitle>
+      {/* <SectionTitle>🛂 Moderación (Quality Control) - Pendientes de Aprobación</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -1728,7 +1728,7 @@ function SoporteTab() {
             <button style={{ flex: 1, background: C.red, color: 'white', border: 'none', borderRadius: 4, padding: '6px', cursor: 'pointer', fontWeight: 600 }}>Rechazar</button>
           </div>
         </div>
-      </div>
+      </div> */}
 
       <SectionTitle>🎫 Tickets de Soporte (Helpdesk)</SectionTitle>
 
