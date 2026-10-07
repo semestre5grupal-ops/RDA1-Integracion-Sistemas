@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, ValidateNested, IsArray, Matches } from 'class-validator';
+import { IsString, IsOptional, ValidateNested, IsArray, Matches, IsNotEmpty, ArrayNotEmpty, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BookerDto, AccommodationsGuestsDto } from './contract-common.dto';
 
@@ -25,6 +25,9 @@ export class AvailabilityProductDto {
 
 export class AvailabilityRequestDto {
   @ApiProperty({ description: 'ID del alojamiento a verificar', example: 'aloj-1' })
+  // Sin un decorador de class-validator, `forbidNonWhitelisted` trataba este campo
+  // OBLIGATORIO como desconocido y respondía 400 a toda petición válida.
+  @IsNotEmpty({ message: 'accommodation es obligatorio' })
   accommodation: string | number;
 
   @ApiProperty({ description: 'Información del comprador', type: BookerDto, required: false })
@@ -96,6 +99,8 @@ export class BulkAvailabilityFiltersDto {
 export class BulkAvailabilityRequestDto {
   @ApiProperty({ description: 'Lista de IDs de alojamientos', example: ['aloj-1', 'aloj-2'] })
   @IsArray()
+  @ArrayNotEmpty({ message: 'accommodations debe incluir al menos un ID' })
+  @ArrayMaxSize(100, { message: 'accommodations admite como máximo 100 IDs por petición' })
   accommodations: (string | number)[];
 
   @ApiProperty({ description: 'Información del comprador', type: BookerDto, required: false })

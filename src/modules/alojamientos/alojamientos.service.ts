@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 
 import { Alojamiento } from './entities/alojamiento.entity';
@@ -66,7 +66,22 @@ import {
   conflicto,
   noProcesable,
   ProblemaApi,
+  validacion,
 } from '../../core/errors/codigo-error';
+import { validarCapacidad, validarEstancia, calcularNoches } from './reglas-estancia';
+
+/** Una cotización (preview) caduca a los 30 minutos, como el carrito de Booking. */
+export const PREVIEW_TTL_MS = 30 * 60 * 1000;
+
+/** Minúsculas, sin tildes y con espacios colapsados: "  Cancún " -> "cancun". */
+function normalizarBusqueda(texto?: string | null): string {
+  return (texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 interface OrderPreviewStoreItem {
   id: string;
@@ -100,6 +115,24 @@ export class AlojamientosService implements OnModuleInit {
 
   // Almacén de suscripciones a webhooks
   private readonly webhooks = new Map<string, StoredWebhook>();
+
+  /**
+   * Cola de escrituras de reservas. Comprobar el cupo y guardar la reserva son
+   * dos pasos asíncronos: sin serializarlos, dos clientes que piden la ÚLTIMA
+   * habitación a la vez pasan ambos la comprobación y se produce overbooking
+   * (algo que Booking nunca permite). También evita que dos reintentos
+   * simultáneos con la misma Idempotency-Key creen dos reservas.
+   *
+   * Protege una instancia del servicio. Con varias instancias haría falta un
+   * bloqueo en base de datos (SELECT ... FOR UPDATE).
+   */
+  private colaReservas: Promise<unknown> = Promise.resolve();
+
+  private enSerie<T>(tarea: () => Promise<T>): Promise<T> {
+    const resultado = this.colaReservas.then(tarea, tarea);
+    this.colaReservas = resultado.catch(() => undefined);
+    return resultado;
+  }
 
   constructor(
     private readonly httpService: HttpService,
@@ -178,29 +211,31 @@ export class AlojamientosService implements OnModuleInit {
   async search(dto: SearchAlojamientosRequestDto): Promise<any> {
     this.logger.log('Búsqueda de alojamientos con filtros', dto);
 
+    // Fechas: solo se validan si el cliente las manda (se puede explorar sin fechas).
+    const fechaIn = dto.checkin ?? dto.dates?.checkin;
+    const fechaOut = dto.checkout ?? dto.dates?.checkout;
+    if (fechaIn !== undefined || fechaOut !== undefined) {
+      validarEstancia(fechaIn, fechaOut, { prefijo: dto.checkin === undefined && dto.dates ? 'dates' : undefined });
+    }
+    const { precioMin, precioMax } = dto.filters ?? {};
+    if (precioMin !== undefined && precioMax !== undefined && precioMin > precioMax) {
+      throw validacion('El precio mínimo no puede ser mayor que el máximo.', [
+        { name: 'filters.precioMin', reason: 'Debe ser menor o igual que filters.precioMax.' },
+      ]);
+    }
+
     const destinoRaw = dto.destino || (typeof dto.city === 'string' ? dto.city : undefined);
     const destinoTerm = destinoRaw ? destinoRaw.trim() : '';
 
-    let where: any = undefined;
+    // Filtro por destino/país. Se compara sobre texto NORMALIZADO (minúsculas y
+    // sin tildes) para que "cancun" encuentre "Cancún", igual que en Booking.
+    // `ILIKE` de Postgres ignora mayúsculas pero NO tildes, y además trata `%` y
+    // `_` como comodines: buscar "%" devolvía el catálogo entero.
+    let coincideDestino: ((a: Alojamiento) => boolean) | null = null;
     if (destinoTerm) {
-      // Normalizar términos para tolerar tildes (Cancun/Cancún, Galapagos/Galápagos, etc.)
-      const sinTildes = destinoTerm.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const conVariante = sinTildes
-        .replace(/u/gi, 'ú')
-        .replace(/a/gi, 'á')
-        .replace(/e/gi, 'é')
-        .replace(/i/gi, 'í')
-        .replace(/o/gi, 'ó')
-        .replace(/n/gi, 'ñ');
-
-      where = [
-        { destino: ILike(`%${destinoTerm}%`) },
-        { destino: ILike(`%${sinTildes}%`) },
-        { destino: ILike(`%${conVariante}%`) },
-        { nombre: ILike(`%${destinoTerm}%`) },
-        { nombre: ILike(`%${sinTildes}%`) },
-        { descripcion: ILike(`%${destinoTerm}%`) },
-      ];
+      const termino = normalizarBusqueda(destinoTerm);
+      coincideDestino = (a) =>
+        [a.destino, a.nombre, a.descripcion].some((campo) => normalizarBusqueda(campo).includes(termino));
     } else if (dto.country) {
       const paisDestinoMap: Record<string, string> = {
         ec: 'Quito',
@@ -209,9 +244,10 @@ export class AlojamientosService implements OnModuleInit {
         pe: 'Cusco',
       };
       const destinoMapeado = paisDestinoMap[dto.country.toLowerCase()];
-      if (destinoMapeado) {
-        where = { destino: ILike(`%${destinoMapeado}%`) };
-      }
+      // Un país sin oferta da 0 resultados, no el catálogo completo.
+      coincideDestino = destinoMapeado
+        ? (a) => normalizarBusqueda(a.destino) === normalizarBusqueda(destinoMapeado)
+        : () => false;
     }
 
     this.telemetryService?.trackEvent({
@@ -226,67 +262,62 @@ export class AlojamientosService implements OnModuleInit {
     });
 
     const rowsCount = dto.rows || 25;
-    const [items, total] = await this.alojamientoRepo.findAndCount({
-      where,
-      take: rowsCount,
-    });
-
-    let filtered = items;
+    const catalogo = await this.alojamientoRepo.find({ order: { createdAt: 'ASC' } });
+    // Los filtros se aplican ANTES de paginar: si no, una página podía quedar
+    // corta (o vacía) aunque existieran más resultados que cumplían el filtro.
+    let coincidentes = coincideDestino ? catalogo.filter(coincideDestino) : catalogo;
     if (dto.filters?.tienePiscina) {
-      filtered = filtered.filter((i) => i.tienePiscina);
+      coincidentes = coincidentes.filter((i) => i.tienePiscina);
     }
     if (dto.filters?.precioMin !== undefined) {
-      filtered = filtered.filter((i) => Number(i.precioPorNoche) >= dto.filters!.precioMin!);
+      coincidentes = coincidentes.filter((i) => Number(i.precioPorNoche) >= dto.filters!.precioMin!);
     }
     if (dto.filters?.precioMax !== undefined) {
-      filtered = filtered.filter((i) => Number(i.precioPorNoche) <= dto.filters!.precioMax!);
+      coincidentes = coincidentes.filter((i) => Number(i.precioPorNoche) <= dto.filters!.precioMax!);
     }
-
+    // Con fechas, como en Booking: solo se muestran alojamientos con cupo para
+    // las habitaciones pedidas, y cada resultado lleva su disponibilidad.
     const checkinDate = dto.checkin || dto.dates?.checkin;
     const checkoutDate = dto.checkout || dto.dates?.checkout;
-    if (checkinDate) {
-      // Sincronizar disponibilidad en tiempo real con reservas existentes
-      filtered = await Promise.all(
-        filtered.map(async (aloj) => {
-          try {
-            const avail = await this.getAvailability(aloj.id, checkinDate, checkoutDate);
-            (aloj as any)._disponibilidad = avail;
-          } catch {
-            // Silencioso si ocurre error puntual de disponibilidad
-          }
-          return aloj;
-        }),
-      );
+    const disponibilidad = new Map<string, any>();
+    if (checkinDate && checkoutDate) {
+      const habitacionesPedidas = dto.guests?.number_of_rooms || dto.habitaciones || 1;
+      const conCupo: Alojamiento[] = [];
+      for (const aloj of coincidentes) {
+        const avail = await this.getAvailability(aloj.id, checkinDate, checkoutDate);
+        if (avail.available_rooms >= habitacionesPedidas) {
+          disponibilidad.set(aloj.id, avail);
+          conCupo.push(aloj);
+        }
+      }
+      coincidentes = conCupo;
     }
 
-    if (filtered.length > 0) {
-      const data = filtered.map((l) => this.transformAlojamiento(l));
+    const total = coincidentes.length;
+    const pagina = coincidentes.slice(0, rowsCount);
+    const nextPage = total > rowsCount ? Buffer.from(JSON.stringify({ page: 2 })).toString('base64') : null;
 
-      return {
-        request_id: `req-${Date.now()}`,
-        data,
-        metadata: {
-          total_results: total,
-          next_page: total > rowsCount ? Buffer.from(JSON.stringify({ page: 2 })).toString('base64') : null,
-        },
-        next_page: total > rowsCount ? Buffer.from(JSON.stringify({ page: 2 })).toString('base64') : null,
-      };
-    }
-
-    // Si el usuario buscó un destino específico y no hubo resultados, retornar lista vacía (no hoteles no relacionados)
-    if (destinoTerm || dto.country) {
-      return {
-        request_id: `req-${Date.now()}`,
-        data: [],
-        metadata: {
-          total_results: 0,
-          next_page: null,
-        },
-        next_page: null,
-      };
-    }
-
-    return this.findAll({ limit: rowsCount, page: 1 });
+    return {
+      request_id: `req-${Date.now()}`,
+      data: pagina.map((l) => {
+        const avail = disponibilidad.get(l.id);
+        const item: any = this.transformAlojamiento(l);
+        if (avail) {
+          item.disponibilidad = {
+            available_rooms: avail.available_rooms,
+            nights: calcularNoches(checkinDate!, checkoutDate!),
+            total_price: Number((Number(l.precioPorNoche) * calcularNoches(checkinDate!, checkoutDate!)).toFixed(2)),
+            currency: l.moneda || 'USD',
+          };
+        }
+        return item;
+      }),
+      metadata: {
+        total_results: total,
+        next_page: nextPage,
+      },
+      next_page: nextPage,
+    };
   }
 
   async getDetailsBatch(dto: DetailsRequestDto): Promise<any> {
@@ -296,7 +327,8 @@ export class AlojamientosService implements OnModuleInit {
         try {
           return await this.findOne(String(id));
         } catch {
-          return { id, nombre: `Alojamiento ${id}`, disponible: false };
+          // No se inventa un nombre: el ID se marca como no encontrado.
+          return { id, disponible: false, error: 'Alojamiento no encontrado' };
         }
       }),
     );
@@ -494,6 +526,12 @@ export class AlojamientosService implements OnModuleInit {
     this.logger.log(`Consultando puntuaciones de reseñas para ${dto.accommodations.length} alojamientos`);
     const results: any[] = [];
     for (const accId of dto.accommodations) {
+      // En una consulta por lotes, un ID inexistente no tumba la respuesta entera.
+      const existe = await this.alojamientoRepo.findOneBy({ id: String(accId) });
+      if (!existe) {
+        results.push({ accommodation_id: accId, error: 'Alojamiento no encontrado' });
+        continue;
+      }
       const data = await this.getResenas(String(accId));
       results.push({
         accommodation_id: accId,
@@ -521,23 +559,15 @@ export class AlojamientosService implements OnModuleInit {
   async getAvailabilityContract(dto: AvailabilityRequestDto): Promise<AvailabilityResponseDto> {
     this.logger.log(`Consultando disponibilidad de contrato para ${dto.accommodation}`);
     const accId = String(dto.accommodation);
-    let local = await this.alojamientoRepo.findOne({ where: { id: accId } });
+    const nights = validarEstancia(dto.checkin, dto.checkout);
+    // Nunca se cotiza otro hotel en lugar del pedido: un ID inexistente es un 404.
+    const local = await this.alojamientoRepo.findOne({ where: { id: accId } });
     if (!local) {
-      local = await this.alojamientoRepo.findOne({ order: { createdAt: 'ASC' } });
+      throw new NotFoundException(`El alojamiento '${accId}' no existe.`);
     }
 
-    const basePrice = local ? Number(local.precioPorNoche) : 120.0;
-    const currency = dto.currency || local?.moneda || 'USD';
-
-    // Cálculo de noches
-    let nights = 1;
-    if (dto.checkin && dto.checkout) {
-      const dIn = new Date(dto.checkin).getTime();
-      const dOut = new Date(dto.checkout).getTime();
-      if (dOut > dIn) {
-        nights = Math.max(1, Math.round((dOut - dIn) / (1000 * 60 * 60 * 24)));
-      }
-    }
+    const basePrice = Number(local.precioPorNoche);
+    const currency = dto.currency || local.moneda || 'USD';
 
     const products = [
       {
@@ -566,19 +596,25 @@ export class AlojamientosService implements OnModuleInit {
       },
     ];
 
+    // Sin habitaciones libres para esas fechas no se ofrece ningún producto.
+    const ocupacion = await this.getAvailability(local.id, dto.checkin, dto.checkout);
+    const habitacionesPedidas = dto.guests?.number_of_rooms || 1;
+    const hayCupo = ocupacion.available_rooms >= habitacionesPedidas;
+
     return {
       request_id: `req-avail-${Date.now()}`,
       data: {
-        id: local ? local.id : accId,
+        id: local.id,
         currency,
-        products,
-        url: `/api/v1/alojamientos/${local ? local.id : accId}`,
+        products: hayCupo ? products : [],
+        url: `/api/v1/alojamientos/${local.id}`,
       },
     };
   }
 
   async getBulkAvailability(dto: BulkAvailabilityRequestDto): Promise<BulkAvailabilityResponseDto> {
     this.logger.log(`Consultando bulk availability para ${dto.accommodations.length} propiedades`);
+    validarEstancia(dto.checkin, dto.checkout);
     const results = await Promise.all(
       dto.accommodations.map(async (accId) => {
         try {
@@ -610,24 +646,25 @@ export class AlojamientosService implements OnModuleInit {
   async previewOrder(dto: OrderPreviewRequestDto): Promise<OrderPreviewResponseDto> {
     this.logger.log('Previsualizando orden de alojamiento', dto);
     const accId = String(dto.accommodation_id);
-    let local = await this.alojamientoRepo.findOne({ where: { id: accId } });
-    if (!local) {
-      local = await this.alojamientoRepo.findOne({ order: { createdAt: 'ASC' } });
-    }
+    const nights = validarEstancia(dto.checkin, dto.checkout);
+    const local = await this.alojamientoRepo.findOne({ where: { id: accId } });
     if (!local) {
       throw new NotFoundException(`El alojamiento '${dto.accommodation_id}' no existe.`);
     }
 
-    let nights = 1;
-    if (dto.checkin && dto.checkout) {
-      const dIn = new Date(dto.checkin).getTime();
-      const dOut = new Date(dto.checkout).getTime();
-      if (dOut > dIn) {
-        nights = Math.max(1, Math.round((dOut - dIn) / (1000 * 60 * 60 * 24)));
-      }
+    const rooms = dto.guests?.number_of_rooms || 1;
+    const adults = dto.guests?.number_of_adults || 1;
+    const children = dto.guests?.children?.length || 0;
+    validarCapacidad(local, adults, children, rooms);
+
+    const ocupacion = await this.getAvailability(local.id, dto.checkin, dto.checkout);
+    if (ocupacion.available_rooms < rooms) {
+      throw conflicto(
+        CodigoProblema.ROOM_NO_LONGER_AVAILABLE,
+        `No hay suficientes habitaciones para esas fechas. Disponibles: ${ocupacion.available_rooms}, solicitadas: ${rooms}.`,
+      );
     }
 
-    const rooms = dto.guests?.number_of_rooms || 1;
     let multiplier = 1.0;
     if (dto.product_id?.includes('deluxe')) multiplier = 1.25;
     if (dto.product_id?.includes('suite')) multiplier = 1.6;
@@ -640,8 +677,8 @@ export class AlojamientosService implements OnModuleInit {
     this.orderPreviews.set(previewId, {
       id: previewId,
       alojamientoId: local.id,
-      checkin: dto.checkin || new Date().toISOString().split('T')[0],
-      checkout: dto.checkout || new Date(Date.now() + 86400000 * nights).toISOString().split('T')[0],
+      checkin: dto.checkin!,
+      checkout: dto.checkout!,
       nights,
       rooms,
       guests: dto.guests,
@@ -671,21 +708,25 @@ export class AlojamientosService implements OnModuleInit {
         currency: local.moneda || 'USD',
         nights,
         rooms,
+        expires_at: new Date(Date.now() + PREVIEW_TTL_MS).toISOString(),
       },
     };
   }
 
   async createOrder(dto: OrderCreateRequestDto, idempotencyKey: string): Promise<OrderDetailDto> {
+    return this.enSerie(() => this.createOrderEnSerie(dto, idempotencyKey));
+  }
+
+  private async createOrderEnSerie(dto: OrderCreateRequestDto, idempotencyKey: string): Promise<OrderDetailDto> {
     this.logger.log(`Creando orden de alojamiento a partir de preview ${dto.order_preview_id} con idempotency key ${idempotencyKey}`);
 
     // 1. Verificación de Idempotencia estricta
+    // Reintento con la misma clave: se devuelve la orden original (sin cobrar dos veces).
     const existing = await this.reservaRepo.findOne({ where: { idempotencyKey } });
     if (existing) {
-      if (existing.status === ReservationStatus.CONFIRMED) {
-        this.logger.warn(`Idempotencia detectada: retornando reserva confirmada previa ${existing.id}`);
-        const local = await this.alojamientoRepo.findOne({ where: { id: existing.alojamientoId } });
-        return this.buildOrderDetailDto(existing, local, dto.payment_reference);
-      }
+      this.logger.warn(`Idempotencia detectada: retornando orden previa ${existing.id}`);
+      const local = await this.alojamientoRepo.findOne({ where: { id: existing.alojamientoId } });
+      return this.buildOrderDetailDto(existing, local, dto.payment_reference);
     }
 
     // 2. Validación de referencia de pago (RFC 7807: PAYMENT_REFERENCE_INVALID)
@@ -697,31 +738,32 @@ export class AlojamientosService implements OnModuleInit {
     }
 
     // 3. Resolución de datos del preview o fallback
-    let preview = this.orderPreviews.get(dto.order_preview_id);
-    let local: Alojamiento | null = null;
-
-    if (preview) {
-      local = await this.alojamientoRepo.findOne({ where: { id: preview.alojamientoId } });
-    } else {
-      local = await this.alojamientoRepo.findOne({ order: { createdAt: 'ASC' } });
-      preview = {
-        id: dto.order_preview_id,
-        alojamientoId: local ? local.id : 'aloj-1',
-        checkin: new Date().toISOString().split('T')[0],
-        checkout: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-        nights: 2,
-        rooms: 1,
-        guests: { number_of_adults: 2, number_of_rooms: 1 },
-        totalPrice: local ? Number(local.precioPorNoche) * 2 : 240.0,
-        currency: local?.moneda || 'USD',
-        createdAt: Date.now(),
-      };
+    // 3. La orden SOLO se crea desde una cotización vigente. Nunca se inventa una
+    //    reserva sobre otro hotel ni con otras fechas: si el preview no existe o
+    //    caducó, el cliente debe volver a cotizar (410 Gone).
+    const preview = this.orderPreviews.get(dto.order_preview_id);
+    if (!preview || Date.now() - preview.createdAt > PREVIEW_TTL_MS) {
+      if (preview) this.orderPreviews.delete(dto.order_preview_id);
+      throw conflicto(
+        CodigoProblema.OFFER_NO_LONGER_AVAILABLE,
+        'La cotización no existe o ha caducado. Vuelve a consultar el precio antes de reservar.',
+      );
     }
 
+    const local = await this.alojamientoRepo.findOne({ where: { id: preview.alojamientoId } });
     if (!local) {
       throw conflicto(
         CodigoProblema.ROOM_NO_LONGER_AVAILABLE,
         'El alojamiento seleccionado ya no tiene disponibilidad para formalizar la orden.',
+      );
+    }
+
+    // 4. Se revalida el cupo: otra persona pudo reservar entre el preview y el pago.
+    const ocupacion = await this.getAvailability(local.id, preview.checkin, preview.checkout);
+    if (ocupacion.available_rooms < preview.rooms) {
+      throw conflicto(
+        CodigoProblema.ROOM_NO_LONGER_AVAILABLE,
+        'Las habitaciones cotizadas ya no están disponibles para esas fechas.',
       );
     }
 
@@ -787,6 +829,10 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async modifyOrder(orderId: string, dto: OrderModifyRequestDto, idempotencyKey: string): Promise<OrderDetailDto> {
+    return this.enSerie(() => this.modifyOrderEnSerie(orderId, dto, idempotencyKey));
+  }
+
+  private async modifyOrderEnSerie(orderId: string, dto: OrderModifyRequestDto, idempotencyKey: string): Promise<OrderDetailDto> {
     this.logger.log(`Modificando orden ${orderId} con idempotency key ${idempotencyKey}`);
     const reserva = await this.reservaRepo.findOne({ where: { id: orderId } });
     if (!reserva) {
@@ -797,25 +843,38 @@ export class AlojamientosService implements OnModuleInit {
       throw new ConflictException(`No se puede modificar una orden en estado CANCELLED.`);
     }
 
-    if (dto.checkin) reserva.checkin = dto.checkin;
-    if (dto.checkout) reserva.checkout = dto.checkout;
-    if (dto.guests?.number_of_adults) reserva.huespedes = dto.guests.number_of_adults;
-    if (dto.guests?.number_of_rooms) reserva.habitacionesCount = dto.guests.number_of_rooms;
+    // Las fechas nuevas se combinan con las actuales (se puede cambiar solo una).
+    const nuevoCheckin = dto.checkin ?? reserva.checkin;
+    const nuevoCheckout = dto.checkout ?? reserva.checkout;
+    const nuevasHabitaciones = dto.guests?.number_of_rooms ?? reserva.habitacionesCount ?? 1;
+    const nuevosAdultos = dto.guests?.number_of_adults ?? reserva.huespedes ?? 1;
+    const noches = validarEstancia(nuevoCheckin, nuevoCheckout);
 
-    if (dto.checkin && dto.checkout) {
-      const dIn = new Date(dto.checkin).getTime();
-      const dOut = new Date(dto.checkout).getTime();
-      if (dOut > dIn) {
-        reserva.noches = Math.max(1, Math.round((dOut - dIn) / (1000 * 60 * 60 * 24)));
-        const local = await this.alojamientoRepo.findOne({ where: { id: reserva.alojamientoId } });
-        const basePrice = local ? Number(local.precioPorNoche) : 120.0;
-        reserva.total = Number((basePrice * reserva.noches * reserva.habitacionesCount).toFixed(2));
-        reserva.totalPrice = { currency: 'USD', total: reserva.total };
+    const local = await this.alojamientoRepo.findOne({ where: { id: reserva.alojamientoId } });
+    if (local) {
+      validarCapacidad(local, nuevosAdultos, dto.guests?.children?.length || 0, nuevasHabitaciones);
+      const ocupacion = await this.getAvailability(local.id, nuevoCheckin, nuevoCheckout, reserva.id);
+      if (ocupacion.available_rooms < nuevasHabitaciones) {
+        throw conflicto(
+          CodigoProblema.ROOM_NO_LONGER_AVAILABLE,
+          'No hay disponibilidad para las nuevas fechas u ocupación solicitadas.',
+        );
       }
     }
 
+    reserva.checkin = nuevoCheckin;
+    reserva.checkout = nuevoCheckout;
+    reserva.noches = noches;
+    reserva.huespedes = nuevosAdultos;
+    reserva.habitacionesCount = nuevasHabitaciones;
+
+    // El precio por noche se mantiene (tarifa contratada); cambia por noches/habitaciones.
+    const moneda = reserva.totalPrice?.currency || local?.moneda || 'USD';
+    const precioNoche = local ? Number(local.precioPorNoche) : Number(reserva.total) / Math.max(1, calcularNoches(reserva.checkin, reserva.checkout));
+    reserva.total = Number((precioNoche * noches * nuevasHabitaciones).toFixed(2));
+    reserva.totalPrice = { currency: moneda, total: reserva.total };
+
     await this.reservaRepo.save(reserva);
-    const local = await this.alojamientoRepo.findOne({ where: { id: reserva.alojamientoId } });
 
     this.triggerWebhookNotification('ORDER_MODIFIED', reserva.id, {
       order_id: reserva.id,
@@ -828,6 +887,10 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async cancelOrder(orderId: string, idempotencyKey: string, reason?: string): Promise<any> {
+    return this.enSerie(() => this.cancelOrderEnSerie(orderId, idempotencyKey, reason));
+  }
+
+  private async cancelOrderEnSerie(orderId: string, idempotencyKey: string, reason?: string): Promise<any> {
     this.logger.log(`Cancelando orden ${orderId} (motivo: ${reason}) con idempotency key ${idempotencyKey}`);
     const reserva = await this.reservaRepo.findOne({ where: { id: orderId } });
     if (!reserva) {
@@ -1014,7 +1077,7 @@ export class AlojamientosService implements OnModuleInit {
     throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
   }
 
-  async getAvailability(id: string, date?: string, checkoutDate?: string): Promise<any> {
+  async getAvailability(id: string, date?: string, checkoutDate?: string, excluirReservaId?: string): Promise<any> {
     this.logger.log(`Consultando disponibilidad para alojamiento ${id} en ${date} - ${checkoutDate}`);
     const local = await this.alojamientoRepo.findOne({ where: { id } });
     if (!local) {
@@ -1035,7 +1098,7 @@ export class AlojamientosService implements OnModuleInit {
     });
 
     const overlapping = activeReservations.filter((r) => {
-      return r.checkin < endDate && r.checkout > startDate;
+      return r.id !== excluirReservaId && r.checkin < endDate && r.checkout > startDate;
     });
 
     const reservedRooms = overlapping.reduce((sum, r) => sum + (r.habitacionesCount || 1), 0);
@@ -1056,6 +1119,10 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async reservar(id: string, dto: ReservationRequestDto, idempotencyKey: string): Promise<any> {
+    return this.enSerie(() => this.reservarEnSerie(id, dto, idempotencyKey));
+  }
+
+  private async reservarEnSerie(id: string, dto: ReservationRequestDto, idempotencyKey: string): Promise<any> {
     this.logger.log(`Iniciando reserva para Alojamiento ${id} con idempotency key ${idempotencyKey}`);
 
     // 1. Control de Idempotencia estricto
@@ -1068,10 +1135,13 @@ export class AlojamientosService implements OnModuleInit {
     }
 
     const alojamiento = await this.findOne(id);
-    const nights = Math.max(1, dto.nights || 1);
-    const targetCheckin = dto.checkin || new Date().toISOString().split('T')[0];
-    const targetCheckout = dto.checkout || new Date(Date.now() + 86400000 * nights).toISOString().split('T')[0];
+    // Las noches salen SIEMPRE de las fechas (fuente de verdad), no de `dto.nights`:
+    // así el total cobrado coincide con la estancia real.
+    const nights = validarEstancia(dto.checkin, dto.checkout);
+    const targetCheckin = dto.checkin;
+    const targetCheckout = dto.checkout;
     const roomsCount = Math.max(1, dto.habitaciones_count || 1);
+    validarCapacidad(alojamiento, dto.adultos || 1, dto.ninos || 0, roomsCount);
 
     // 2. Prevención de reservas duplicadas para el mismo usuario y fechas superpuestas
     const customerEmail = (dto.customer_email || '').trim().toLowerCase();
@@ -1105,7 +1175,8 @@ export class AlojamientosService implements OnModuleInit {
     }
 
     const pricePerNight = Number(alojamiento.precioPorNoche) || 100.0;
-    const total = pricePerNight * nights * roomsCount;
+    const total = Number((pricePerNight * nights * roomsCount).toFixed(2));
+    const currency = alojamiento.moneda || 'USD';
 
     const codigoReserva = `BKG-${Math.floor(100000 + Math.random() * 900000)}`;
 
@@ -1115,11 +1186,11 @@ export class AlojamientosService implements OnModuleInit {
       idempotencyKey,
       status: ReservationStatus.CONFIRMED,
       total,
-      totalPrice: { currency: 'USD', total },
+      totalPrice: { currency, total },
       noches: nights,
       habitacionesCount: roomsCount,
       customerName: dto.customer_name,
-      customerEmail: dto.customer_email || 'cliente@example.com',
+      customerEmail: customerEmail || 'cliente@example.com',
       checkin: targetCheckin,
       checkout: targetCheckout,
       huespedes: (dto.adultos || 1) + (dto.ninos || 0),
@@ -1143,6 +1214,10 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async cancelarReserva(reservationId: string, dto: CancelReservationRequestDto, idempotencyKey: string): Promise<any> {
+    return this.enSerie(() => this.cancelarReservaEnSerie(reservationId, dto, idempotencyKey));
+  }
+
+  private async cancelarReservaEnSerie(reservationId: string, dto: CancelReservationRequestDto, idempotencyKey: string): Promise<any> {
     this.logger.log(`Cancelando reserva ${reservationId} (razón: ${dto.reason}) con idempotency key ${idempotencyKey}`);
 
     const reserva = await this.reservaRepo.findOneBy({ id: reservationId });

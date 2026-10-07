@@ -20,6 +20,7 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
+    "test:alojamientos": "jest src/modules/alojamientos",
     "prueba:datos": "npm run build && node dist/modules/vuelos/pruebas/prueba-datos.js",
     "prueba:datos:purga": "npm run build && node dist/modules/vuelos/pruebas/prueba-datos.js --purge",
     "prueba:gestion": "npm run build && node dist/modules/vuelos/pruebas/prueba-gestion.js",

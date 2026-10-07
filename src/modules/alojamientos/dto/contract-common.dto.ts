@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsEnum, IsOptional, Matches, IsArray, IsInt, Min } from 'class-validator';
+import { IsString, IsEnum, IsOptional, Matches, IsArray, IsInt, Min, Max } from 'class-validator';
 
 export enum PlatformEnum {
   ANDROID = 'android',
@@ -60,16 +60,20 @@ export class AccommodationsGuestsDto {
   @ApiProperty({ description: 'Número de adultos (mínimo 1)', example: 2 })
   @IsInt()
   @Min(1)
+  @Max(30)
   number_of_adults: number;
 
   @ApiProperty({ description: 'Número de habitaciones (mínimo 1)', example: 1 })
   @IsInt()
   @Min(1)
+  @Max(30)
   number_of_rooms: number;
 
   @ApiProperty({ description: 'Edades de los niños que viajan', example: [4, 7], required: false })
   @IsArray()
   @IsInt({ each: true })
+  @Min(0, { each: true, message: 'La edad de cada niño debe estar entre 0 y 17 años' })
+  @Max(17, { each: true, message: 'La edad de cada niño debe estar entre 0 y 17 años' })
   @IsOptional()
   children?: number[];
 

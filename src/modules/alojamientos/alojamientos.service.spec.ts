@@ -10,6 +10,10 @@ import { ResenaAlojamiento } from './entities/resena.entity';
 import { ReservationStatus } from './dto/reservation.dto';
 import { TelemetryService } from '../telemetry/telemetry.service';
 import { CodigoProblema, ProblemaApi } from '../../core/errors/codigo-error';
+import { fechaRelativa } from './reglas-estancia';
+
+// Fechas relativas a hoy: con fechas fijas los tests caducaban al pasar el día.
+const D = (dias: number) => fechaRelativa(dias);
 
 describe('AlojamientosService', () => {
   let service: AlojamientosService;
@@ -43,8 +47,8 @@ describe('AlojamientosService', () => {
     alojamientoId: 'test-uuid-1',
     customerName: 'Juan Pérez',
     customerEmail: 'juan@test.com',
-    checkin: '2026-10-10',
-    checkout: '2026-10-13',
+    checkin: D(10),
+    checkout: D(13),
     noches: 3,
     huespedes: 2,
     habitacionesCount: 1,
@@ -158,8 +162,8 @@ describe('AlojamientosService', () => {
         habitaciones_count: 2,
         customer_name: 'Juan Pérez',
         customer_email: 'juan@test.com',
-        checkin: '2026-10-10',
-        checkout: '2026-10-13',
+        checkin: D(10),
+        checkout: D(13),
         adultos: 2,
       };
 
@@ -211,8 +215,8 @@ describe('AlojamientosService', () => {
     it('getAvailabilityContract() debe desglosar tarifas y productos por noche', async () => {
       const res = await service.getAvailabilityContract({
         accommodation: 'test-uuid-1',
-        checkin: '2026-10-10',
-        checkout: '2026-10-12',
+        checkin: D(10),
+        checkout: D(12),
       });
 
       expect(res.request_id).toBeDefined();
@@ -224,8 +228,8 @@ describe('AlojamientosService', () => {
     it('getBulkAvailability() debe retornar disponibilidad múltiple', async () => {
       const res = await service.getBulkAvailability({
         accommodations: ['test-uuid-1', 'test-uuid-2'],
-        checkin: '2026-10-10',
-        checkout: '2026-10-11',
+        checkin: D(10),
+        checkout: D(11),
       });
 
       expect(res.request_id).toBeDefined();
@@ -278,8 +282,8 @@ describe('AlojamientosService', () => {
     it('previewOrder() debe generar preview con precio calculado', async () => {
       const res = await service.previewOrder({
         accommodation_id: 'test-uuid-1',
-        checkin: '2026-10-15',
-        checkout: '2026-10-17',
+        checkin: D(15),
+        checkout: D(17),
         guests: { number_of_adults: 2, number_of_rooms: 1 },
       });
 
@@ -308,8 +312,8 @@ describe('AlojamientosService', () => {
     it('createOrder() debe crear orden formalizada con payment_reference válido y emitir telemetría', async () => {
       const preview = await service.previewOrder({
         accommodation_id: 'test-uuid-1',
-        checkin: '2026-10-15',
-        checkout: '2026-10-17',
+        checkin: D(15),
+        checkout: D(17),
       });
 
       const order = await service.createOrder(
@@ -345,8 +349,8 @@ describe('AlojamientosService', () => {
       reservaRepo.findOne.mockResolvedValue({
         ...mockReserva,
         id: 'res-uuid-1',
-        checkin: '2026-10-10',
-        checkout: '2026-10-13',
+        checkin: D(10),
+        checkout: D(13),
         noches: 3,
         habitacionesCount: 1,
         total: 600,
@@ -354,7 +358,7 @@ describe('AlojamientosService', () => {
 
       const modified = await service.modifyOrder(
         'res-uuid-1',
-        { checkin: '2026-10-10', checkout: '2026-10-14' }, // 4 noches
+        { checkin: D(10), checkout: D(14) }, // 4 noches
         'idemp-modify-uuid',
       );
 

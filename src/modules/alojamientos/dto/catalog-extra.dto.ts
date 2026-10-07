@@ -1,10 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, IsOptional, IsInt, Min } from 'class-validator';
+import { IsArray, IsString, IsOptional, IsInt, Min, Max, ArrayNotEmpty, ArrayMaxSize, IsISO8601 } from 'class-validator';
 
 // --- Details & Changes ---
 export class AccommodationDetailsRequestDto {
   @ApiProperty({ description: 'Arreglo de IDs de alojamientos', example: ['aloj-1', 'aloj-2'] })
   @IsArray()
+  @ArrayNotEmpty({ message: 'accommodations debe incluir al menos un ID' })
+  @ArrayMaxSize(100, { message: 'accommodations admite como máximo 100 IDs por petición' })
   accommodations: (string | number)[];
 
   @ApiProperty({ description: 'ID de ciudad', example: 1234, required: false })
@@ -59,7 +61,7 @@ export class DetailsChangesFiltersDto {
 
 export class DetailsChangesRequestDto {
   @ApiProperty({ description: 'Fecha y hora desde la cual consultar cambios (ISO 8601)', example: '2026-09-01T00:00:00Z' })
-  @IsString()
+  @IsISO8601({}, { message: 'last_change debe ser una fecha ISO 8601 (ej. 2026-09-01T00:00:00Z)' })
   last_change: string;
 
   @ApiProperty({ description: 'Filtros opcionales de países o ciudades', type: DetailsChangesFiltersDto, required: false })
@@ -137,6 +139,8 @@ export class ConstantsResponseDto {
 export class ReviewsRequestDto {
   @ApiProperty({ description: 'Lista de IDs de alojamientos', example: ['aloj-1'] })
   @IsArray()
+  @ArrayNotEmpty({ message: 'accommodations debe incluir al menos un ID' })
+  @ArrayMaxSize(100, { message: 'accommodations admite como máximo 100 IDs por petición' })
   accommodations: (string | number)[];
 
   @ApiProperty({ description: 'Idiomas', example: ['es'], required: false })
@@ -153,6 +157,7 @@ export class ReviewsRequestDto {
   @ApiProperty({ description: 'Cantidad de filas', example: 10, required: false })
   @IsInt()
   @Min(1)
+  @Max(100)
   @IsOptional()
   rows?: number;
 }
@@ -171,6 +176,8 @@ export class ReviewsResponseDto {
 export class ReviewsScoresRequestDto {
   @ApiProperty({ description: 'Lista de IDs de alojamientos', example: ['aloj-1'] })
   @IsArray()
+  @ArrayNotEmpty({ message: 'accommodations debe incluir al menos un ID' })
+  @ArrayMaxSize(100, { message: 'accommodations admite como máximo 100 IDs por petición' })
   accommodations: (string | number)[];
 
   @ApiProperty({ description: 'Idiomas', example: ['es'], required: false })

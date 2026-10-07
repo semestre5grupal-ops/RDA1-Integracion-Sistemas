@@ -23,6 +23,7 @@ import {
   ChevronDownIcon,
 } from '../components/BookingIcons';
 import './AlojamientosPage.css';
+import { fechaLocal } from '../utils/fechas';
 
 // 1. Destinos de playa (Looking for a beach trip?)
 const BEACH_TRIPS = [
@@ -300,8 +301,8 @@ export function AlojamientosPage() {
   // Estados del SearchBox
   const [destination, setDestination] = useState('');
   const [destinationError, setDestinationError] = useState('');
-  const [checkin, setCheckin] = useState('2026-10-09');
-  const [checkout, setCheckout] = useState('2026-10-11');
+  const [checkin, setCheckin] = useState(() => fechaLocal(2));
+  const [checkout, setCheckout] = useState(() => fechaLocal(4));
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
   const [rooms, setRooms] = useState(1);
