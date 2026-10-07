@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { getAlojamiento, reservarAlojamiento, getDisponibilidadAlojamiento } from '../services/alojamientosApi';
+import { getAlojamiento, reservarAlojamiento, getDisponibilidadAlojamiento, consultarDisponibilidad } from '../services/alojamientosApi';
+import { BarraDisponibilidad, resumenOcupacion } from '../components/BarraDisponibilidad';
 import { API_BASE } from '../services/api';
 import { getAtracciones } from '../services/atraccionesApi';
 import { useAuth } from '../hooks/useAuth';
@@ -115,7 +116,7 @@ const DEFAULT_ATTRACTIONS = [
 
 export function AlojamientoDetail() {
   const { id } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currency, convertPrice } = useCurrency();
@@ -125,6 +126,12 @@ export function AlojamientoDetail() {
   const queryCheckout = searchParams.get('checkout') || fechaLocal(4);
   const queryAdults = parseInt(searchParams.get('group_adults') || '2', 10);
   const queryRooms = parseInt(searchParams.get('no_rooms') || '1', 10);
+  // Edades de los niños como en la URL de Booking (`group_children=2&age=4&age=9`).
+  const queryEdades = (() => {
+    const n = Math.max(0, Math.min(10, parseInt(searchParams.get('group_children') || '0', 10) || 0));
+    const edades = searchParams.getAll('age').map(Number).filter((e) => Number.isInteger(e) && e >= 0 && e <= 17);
+    return Array.from({ length: n }, (_, i) => (edades[i] ?? 8));
+  })();
 
   // Core Data
   const [alojamiento, setAlojamiento] = useState(null);
@@ -138,6 +145,7 @@ export function AlojamientoDetail() {
   const [checkout, setCheckout] = useState(queryCheckout);
   const [adults, setAdults] = useState(queryAdults);
   const [rooms, setRooms] = useState(queryRooms);
+  const [edadesNinos, setEdadesNinos] = useState(queryEdades);
   const [showDatesPopover, setShowDatesPopover] = useState(false);
   const [showOccupancyPopover, setShowOccupancyPopover] = useState(false);
 
@@ -179,6 +187,62 @@ export function AlojamientoDetail() {
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
+  // Cotización REAL del backend para las fechas y ocupación elegidas
+  // (POST /alojamientos/availability): precio, noches y habitaciones libres.
+  const [cotizacion, setCotizacion] = useState(null);
+  const [consultando, setConsultando] = useState(false);
+  const [errorCotizacion, setErrorCotizacion] = useState('');
+
+  const consultar = async (valores) => {
+    setConsultando(true);
+    try {
+      const data = await consultarDisponibilidad({ id, ...valores });
+      const producto = data.products?.[0] || null;
+      setCotizacion({
+        precio: producto ? Number(producto.price) : null, // estancia completa, 1 habitación
+        moneda: data.currency,
+        noches: data.nights,
+        libres: data.available_rooms,
+        producto,
+      });
+      setErrorCotizacion('');
+      setCheckin(valores.checkin);
+      setCheckout(valores.checkout);
+      setAdults(valores.adultos);
+      setRooms(valores.habitaciones);
+      setEdadesNinos(valores.edadesNinos);
+      // La URL refleja la búsqueda (se puede compartir o recargar), como en Booking.
+      const params = new URLSearchParams(searchParams);
+      params.set('checkin', valores.checkin);
+      params.set('checkout', valores.checkout);
+      params.set('group_adults', String(valores.adultos));
+      params.set('no_rooms', String(valores.habitaciones));
+      params.set('group_children', String(valores.edadesNinos.length));
+      params.delete('age');
+      valores.edadesNinos.forEach((e) => params.append('age', String(e)));
+      setSearchParams(params, { replace: true });
+      if (!producto) {
+        return { ok: false, mensaje: data.available_rooms > 0
+          ? `Solo quedan ${data.available_rooms} habitación(es) libres para esas fechas. Reduce el número de habitaciones o cambia las fechas.`
+          : 'No hay disponibilidad para esas fechas. Prueba con otras fechas.' };
+      }
+      return { ok: true };
+    } catch (err) {
+      const datos = err.response?.data;
+      const errores = (datos?.invalidParams || []).map((p) => ({
+        campo: /checkin|checkout|dates/.test(p.name) ? 'fechas' : 'ocupacion',
+        mensaje: datos.detail && !/esquema/.test(datos.detail) ? `${datos.detail} ${p.reason}` : p.reason,
+      }));
+      const mensaje = err.response
+        ? (errores.length ? '' : (datos?.detail || 'No se pudo consultar la disponibilidad.'))
+        : 'No se pudo conectar con el servidor para consultar la disponibilidad.';
+      if (!errores.length) setErrorCotizacion(mensaje);
+      return { ok: false, errores, mensaje };
+    } finally {
+      setConsultando(false);
+    }
+  };
+
   // Disponibilidad de habitaciones en tiempo real
   const [disponibilidad, setDisponibilidad] = useState(null);
   const [loadingDisponibilidad, setLoadingDisponibilidad] = useState(false);
@@ -196,6 +260,18 @@ export function AlojamientoDetail() {
       return null;
     }
   }, [id, checkin, checkout]);
+
+  // Al abrir la página se cotiza con las fechas y ocupación de la URL.
+  useEffect(() => {
+    if (!id) return;
+    consultar({ checkin, checkout, adultos: adults, edadesNinos, habitaciones: rooms }).then((r) => {
+      if (r && !r.ok) {
+        const primero = r.errores?.[0]?.mensaje || r.mensaje;
+        if (primero) setErrorCotizacion(primero);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   // Sincronizar disponibilidad en tiempo real
   useEffect(() => {
@@ -307,7 +383,7 @@ export function AlojamientoDetail() {
   }, [alojamiento]);
 
   // Nights calculation
-  const nightsCount = useMemo(() => {
+  const nochesCalculadas = useMemo(() => {
     try {
       const d1 = new Date(checkin);
       const d2 = new Date(checkout);
@@ -319,9 +395,13 @@ export function AlojamientoDetail() {
     }
   }, [checkin, checkout]);
 
-  // Price calculations
+  const nightsCount = cotizacion?.noches || nochesCalculadas;
+
+  // Precio: el del backend para estas fechas (por habitación) × habitaciones.
   const pricePerNight = Number(alojamiento?.precioPorNoche || alojamiento?.precio_noche || 91);
-  const totalPrice = Math.round(pricePerNight * nightsCount * rooms);
+  const totalPrice = cotizacion?.precio != null
+    ? Math.round(cotizacion.precio * rooms * 100) / 100
+    : Math.round(pricePerNight * nightsCount * rooms);
   const originalPrice = Math.round(totalPrice * 1.14);
   const taxes = Math.round(totalPrice * 0.15);
 
@@ -375,6 +455,8 @@ export function AlojamientoDetail() {
       nights: nightsCount,
       customer_name: customerName,
       customer_email: customerEmail,
+      adultos: adults,
+      ninos: edadesNinos.length,
       ...(confirmadoDuplicadoRef.current ? { confirmar_duplicado: true } : {}),
     };
 
@@ -608,9 +690,13 @@ export function AlojamientoDetail() {
   const score = Number(alojamiento.ratings?.score || 8.7).toFixed(1);
   const reviewsCount = alojamiento.ratings?.number_of_reviews || 24;
 
-  const availableRoomsCount = disponibilidad && typeof disponibilidad.available_rooms === 'number'
-    ? disponibilidad.available_rooms
-    : (alojamiento.habitaciones || 5);
+  const availableRoomsCount = typeof cotizacion?.libres === 'number'
+    ? cotizacion.libres
+    : disponibilidad && typeof disponibilidad.available_rooms === 'number'
+      ? disponibilidad.available_rooms
+      : (alojamiento.habitaciones || 5);
+  const valoresBusqueda = { checkin, checkout, adultos: adults, edadesNinos, habitaciones: rooms };
+  const textoOcupacion = resumenOcupacion(valoresBusqueda);
   const isSoldOut = availableRoomsCount <= 0;
 
   return (
@@ -732,7 +818,7 @@ export function AlojamientoDetail() {
               <div className="dt-field-content">
                 <span className="dt-field-label">Personas y habitaciones</span>
                 <span className="dt-field-value">
-                  {adults} adultos · 0 niños · {rooms} hab.
+                  {textoOcupacion}
                 </span>
               </div>
               <span className="dt-field-chevron">
@@ -1180,28 +1266,13 @@ export function AlojamientoDetail() {
             </span>
           </div>
 
-          {/* Change search sub-bar */}
-          <div className="dt-change-search-bar">
-            <div className="dt-change-cell">
-              <CalendarIcon size={16} color="#003580" />
-              <span>
-                {checkin} — {checkout} ({nightsCount} noches)
-              </span>
-            </div>
-            <div className="dt-change-cell">
-              <UserIcon size={16} color="#003580" />
-              <span>
-                {adults} adultos · 0 niños · {rooms} hab.
-              </span>
-            </div>
-            <button
-              type="button"
-              className="dt-change-btn"
-              onClick={() => navigate(`/alojamientos/search?ss=${encodeURIComponent(alojamiento.destino || 'Quito')}`)}
-            >
-              Modificar búsqueda
-            </button>
-          </div>
+          {/* Barra editable (fechas + ocupación), validada contra el backend */}
+          <BarraDisponibilidad
+            valores={valoresBusqueda}
+            consultando={consultando}
+            errorExterno={errorCotizacion}
+            onAplicar={consultar}
+          />
 
           {/* Banner de Reserva Existente */}
           {existingActiveBooking && (
@@ -1256,7 +1327,12 @@ export function AlojamientoDetail() {
                       <UserIcon size={18} color="#1a1a1a" />
                       <UserIcon size={18} color="#1a1a1a" />
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#595959' }}>Para {adults} adultos</div>
+                    <div style={{ fontSize: '0.8rem', color: '#595959' }}>
+                      Para {adults} {adults === 1 ? 'adulto' : 'adultos'}{edadesNinos.length > 0 ? ` y ${edadesNinos.length} ${edadesNinos.length === 1 ? 'niño' : 'niños'}` : ''}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#595959', marginTop: 2 }}>
+                      Máx. {(alojamiento.capacidadAdultos || 2)} adultos por habitación
+                    </div>
                   </td>
                   <td>
                     <div style={{ fontSize: '0.85rem', color: '#d4111e', textDecoration: 'line-through' }}>
@@ -1271,10 +1347,10 @@ export function AlojamientoDetail() {
                   </td>
                   <td>
                     <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <CheckmarkIcon size={14} /> Desayuno incluido
+                      <CheckmarkIcon size={14} /> {cotizacion?.producto?.meal_plan || 'Desayuno incluido'}
                     </div>
                     <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <CheckmarkIcon size={14} /> Cancelación gratis
+                      <CheckmarkIcon size={14} /> {cotizacion?.producto?.cancellation_type || 'Cancelación gratis'}
                     </div>
                     {isSoldOut ? (
                       <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.8rem' }}>
@@ -1293,8 +1369,9 @@ export function AlojamientoDetail() {
                   <td style={{ verticalAlign: 'top', paddingTop: '16px' }}>
                     <select
                       value={rooms}
-                      onChange={(e) => setRooms(Number(e.target.value))}
-                      disabled={isSoldOut}
+                      onChange={(e) => consultar({ ...valoresBusqueda, habitaciones: Number(e.target.value) })}
+                      disabled={isSoldOut || consultando}
+                      aria-label="Habitaciones a reservar"
                       style={{
                         padding: '8px 10px',
                         border: '1px solid #003580',
@@ -1335,7 +1412,7 @@ export function AlojamientoDetail() {
               }}
             >
               <div style={{ fontSize: '13px', fontWeight: 700, color: '#003580' }}>
-                {rooms} {rooms === 1 ? 'apartamento' : 'apartamentos'} para {adults} adultos
+                {rooms} {rooms === 1 ? 'apartamento' : 'apartamentos'} para {adults} {adults === 1 ? 'adulto' : 'adultos'}{edadesNinos.length > 0 ? ` y ${edadesNinos.length} ${edadesNinos.length === 1 ? 'niño' : 'niños'}` : ''} · {nightsCount} {nightsCount === 1 ? 'noche' : 'noches'}
               </div>
               <div style={{ fontSize: '22px', fontWeight: 800, color: '#1a1a1a', lineHeight: 1.1 }}>
                 {currency} {convertPrice(totalPrice)}
@@ -2055,6 +2132,7 @@ export function AlojamientoDetail() {
           checkin={checkin}
           checkout={checkout}
           adults={adults}
+          children={edadesNinos.length}
           rooms={rooms}
           nightsCount={nightsCount}
           originalPrice={originalPrice}

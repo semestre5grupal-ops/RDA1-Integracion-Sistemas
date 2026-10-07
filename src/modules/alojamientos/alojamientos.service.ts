@@ -566,6 +566,17 @@ export class AlojamientosService implements OnModuleInit {
       throw new NotFoundException(`El alojamiento '${accId}' no existe.`);
     }
 
+    // Si el cliente indica la ocupación, se valida contra la capacidad real (400
+    // con el campo exacto), como hace Booking al cambiar adultos/niños/habitaciones.
+    if (dto.guests) {
+      validarCapacidad(
+        local,
+        dto.guests.number_of_adults,
+        dto.guests.children?.length || 0,
+        dto.guests.number_of_rooms,
+      );
+    }
+
     const basePrice = Number(local.precioPorNoche);
     const currency = dto.currency || local.moneda || 'USD';
 
@@ -606,6 +617,8 @@ export class AlojamientosService implements OnModuleInit {
       data: {
         id: local.id,
         currency,
+        nights,
+        available_rooms: ocupacion.available_rooms,
         products: hayCupo ? products : [],
         url: `/api/v1/alojamientos/${local.id}`,
       },

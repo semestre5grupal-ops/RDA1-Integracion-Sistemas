@@ -43,6 +43,7 @@ export function AlojamientoCheckoutModal({
   checkin,
   checkout,
   adults = 2,
+  children = 0,
   rooms = 1,
   nightsCount = 6,
   originalPrice = 257.40,
@@ -234,7 +235,7 @@ export function AlojamientoCheckoutModal({
       customer_name: `${nombre} ${apellidos}`.trim() || 'Huésped',
       customer_email: email.trim() || 'cliente@example.com',
       adultos: Math.max(1, parseInt(adults, 10) || 2),
-      ninos: 0,
+      ninos: Math.max(0, parseInt(children, 10) || 0),
       ...(confirmadoDuplicadoRef.current ? { confirmar_duplicado: true } : {}),
     };
 

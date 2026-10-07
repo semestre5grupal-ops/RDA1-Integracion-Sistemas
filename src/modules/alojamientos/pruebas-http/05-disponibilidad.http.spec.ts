@@ -94,6 +94,29 @@ describe('05 · Disponibilidad y tarifas', () => {
       expect(res.body.data.id).toBe('42');
     });
 
+    it('informa noches y habitaciones libres para pintar la página del hotel', async () => {
+      ocupar(t, 'quito-gangotena', 10, 12, 1);
+      const res = await disponibilidad({ accommodation: 'quito-gangotena', checkin: dia(10), checkout: dia(13) });
+      expect(res.body.data.nights).toBe(3);
+      expect(res.body.data.available_rooms).toBe(2);
+    });
+
+    it.each([
+      ['2 adultos en 1 habitación (cap. 4)', 'quito-epiq', { number_of_adults: 2, number_of_rooms: 1 }, 200],
+      ['4 adultos + 2 niños en 1 habitación', 'quito-epiq', { number_of_adults: 4, number_of_rooms: 1, children: [4, 9] }, 200],
+      ['5 adultos en 1 habitación', 'quito-epiq', { number_of_adults: 5, number_of_rooms: 1 }, 400],
+      ['5 adultos en 2 habitaciones', 'quito-epiq', { number_of_adults: 5, number_of_rooms: 2 }, 200],
+      ['2 adultos + 2 niños en Gangotena (cap. 2+1)', 'quito-gangotena', { number_of_adults: 2, number_of_rooms: 1, children: [3, 7] }, 400],
+    ])('ocupación: %s → %i', async (_caso, id, guests, esperado) => {
+      const res = await disponibilidad({ accommodation: id, checkin: dia(10), checkout: dia(12), guests });
+      expect(res.status).toBe(esperado);
+      if (esperado === 400) {
+        esperarProblema(res, 400, 'VALIDATION_FAILED');
+        expect(res.body.detail).toContain('capacidad');
+        expect(camposInvalidos(res).some((c) => ['adultos', 'ninos'].includes(c))).toBe(true);
+      }
+    });
+
     it('ID inexistente → 404 (no se cotiza otro hotel en su lugar)', async () => {
       const res = await disponibilidad({ accommodation: 'fantasma', checkin: dia(10), checkout: dia(11) });
       esperarProblema(res, 404);
