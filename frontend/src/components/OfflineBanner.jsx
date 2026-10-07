@@ -24,8 +24,8 @@ export function OfflineBanner() {
       {isOffline && (
         <div style={{
           position: 'fixed',
-          bottom: '20px',
-          right: '20px',
+          top: '20px',
+          left: '20px',
           background: '#333',
           color: '#fff',
           padding: '12px 20px',
@@ -53,8 +53,8 @@ export function OfflineBanner() {
           aria-live="polite"
           style={{
             position: 'fixed',
-            bottom: isOffline ? '90px' : '20px',
-            right: '20px',
+            top: isOffline ? '90px' : '20px',
+            left: '20px',
             background: '#059669',
             color: '#fff',
             padding: '14px 20px',

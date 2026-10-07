@@ -446,7 +446,6 @@ export function AlojamientoCheckoutModal({
   };
 
   return (
-    <>
     <div className="bkg-checkout-overlay" role="dialog" aria-modal="true" aria-label="Proceso de reserva">
       {/* 1. TOP NAVBAR */}
       <header className="bkg-checkout-nav">
@@ -1276,7 +1275,6 @@ export function AlojamientoCheckoutModal({
           </main>
         </div>
       )}
-    </div>
 
       <ModalReservaExistente
         abierto={showModalExistente}
@@ -1311,6 +1309,7 @@ export function AlojamientoCheckoutModal({
           }}
         />
       )}
-    </>
+    </div>
   );
 }
+

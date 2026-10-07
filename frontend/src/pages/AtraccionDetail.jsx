@@ -521,23 +521,23 @@ export function AtraccionDetail() {
                         </div>
                       ) : (
                         <>
-                        <button className="search-btn" style={{width: '100%', padding: '12px', fontSize: '1rem', marginTop: 16}} onClick={handleBooking} disabled={isBooking}>
-                          {isBooking ? 'Procesando Pago Seguro...' : 'Pagar y Confirmar'}
-                        </button>
+                          <button className="search-btn" style={{width: '100%', padding: '12px', fontSize: '1rem', marginTop: 16}} onClick={handleBooking} disabled={isBooking}>
+                            {isBooking ? 'Procesando Pago Seguro...' : 'Pagar y Confirmar'}
+                          </button>
 
-                        {/* Modal offline: aparece cuando se pulsa el botón sin internet */}
-                        {showOfflineModal && (
-                          <OfflineReservaModal
-                            onContinuar={() => {
-                              setShowOfflineModal(false);
-                              handleBooking({ preventDefault: () => {} });
-                            }}
-                            onCancelar={() => {
-                              setShowOfflineModal(false);
-                              setPendingOfflinePay(false);
-                            }}
-                          />
-                        )}
+                          {/* Modal offline: aparece cuando se pulsa el botón sin internet */}
+                          {showOfflineModal && (
+                            <OfflineReservaModal
+                              onContinuar={() => {
+                                setShowOfflineModal(false);
+                                handleBooking({ preventDefault: () => {} });
+                              }}
+                              onCancelar={() => {
+                                setShowOfflineModal(false);
+                                setPendingOfflinePay(false);
+                              }}
+                            />
+                          )}
                         </>
                       )}
                     </div>
