@@ -8,6 +8,7 @@ import { obtenerHuellaDispositivo, formatearMoneda } from '../services/formato';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { useTelemetry } from '../hooks/useTelemetry';
+import { OfflineReservaModal } from './OfflineReservaModal';
 
 const COUNTRIES = [
   { code: 'ECU', name: 'Ecuador' },
@@ -192,6 +193,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   }, [abierto, hold?.expiresAt, onCerrar]);
 
   const [pasoActual, setPasoActual] = useState(1); // 1: Pasajeros, 2: Extras, 3: Pago
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
+  const [pendingOfflinePay, setPendingOfflinePay] = useState(false);
 
   // Al abrir: un formulario por pasajero, con una clave de idempotencia nueva
   // para esta intencion de negocio.
@@ -298,6 +301,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         trackEvent('form_step_completed', 'vuelos', { step: 2 });
         return;
       }
+
+      // En el paso 3 (pago), si no hay red, mostrar modal ANTES de guardar
+      if (pasoActual === 3 && !navigator.onLine && !pendingOfflinePay) {
+        setPendingOfflinePay(true);
+        setShowOfflineModal(true);
+        return;
+      }
+      setPendingOfflinePay(false);
 
       setEnviando(true);
       setErrorGeneral(null);
@@ -800,6 +811,24 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             </div>
         </div>
       </form>
+    </div>
+
+      {/* Modal offline: aparece en paso 3 cuando se pulsa Confirmar pago sin internet */}
+      {showOfflineModal && (
+        <OfflineReservaModal
+          onContinuar={() => {
+            setShowOfflineModal(false);
+            // Disparar el submit del form manualmente
+            document.querySelector('.modal-form')?.dispatchEvent(
+              new Event('submit', { bubbles: true, cancelable: true })
+            );
+          }}
+          onCancelar={() => {
+            setShowOfflineModal(false);
+            setPendingOfflinePay(false);
+          }}
+        />
+      )}
     </div>
   );
 }

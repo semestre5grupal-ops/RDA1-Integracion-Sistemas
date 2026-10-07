@@ -6,6 +6,7 @@ import { reservarAlojamiento } from '../services/alojamientosApi';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { formatearFecha } from '../services/formato';
+import { OfflineReservaModal } from './OfflineReservaModal';
 import {
   CheckmarkIcon,
   CloseIcon,
@@ -93,6 +94,8 @@ export function AlojamientoCheckoutModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [bookingConfirmed, setBookingConfirmed] = useState(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
+  const [pendingOfflinePay, setPendingOfflinePay] = useState(false);
 
   // Discount calculation
   const discountAmount = Math.max(0, originalPrice - totalPrice);
@@ -193,6 +196,15 @@ export function AlojamientoCheckoutModal({
 
     setLoading(true);
     setErrorMsg('');
+
+    // Interceptar antes de proceder si no hay conexión
+    if (!navigator.onLine && !pendingOfflinePay) {
+      setLoading(false);
+      setPendingOfflinePay(true);
+      setShowOfflineModal(true);
+      return;
+    }
+    setPendingOfflinePay(false);
 
     const idempotencyKey = uuidv4();
     const payload = {
@@ -1236,6 +1248,21 @@ export function AlojamientoCheckoutModal({
             )}
           </main>
         </div>
+      )}
+    </div>
+
+      {/* Modal offline: aparece cuando se pulsa Completar reserva sin internet */}
+      {showOfflineModal && (
+        <OfflineReservaModal
+          onContinuar={() => {
+            setShowOfflineModal(false);
+            handleCompletarReserva({ preventDefault: () => {} });
+          }}
+          onCancelar={() => {
+            setShowOfflineModal(false);
+            setPendingOfflinePay(false);
+          }}
+        />
       )}
     </div>
   );

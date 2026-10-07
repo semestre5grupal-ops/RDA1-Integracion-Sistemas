@@ -83,6 +83,12 @@ export async function syncPendingReservations() {
   // Guardar en IDB solo las que fallaron (para reintentar después)
   await set(PENDING_RESERVATIONS_KEY, pending);
   
+  const syncedCount = queue.length - pending.length;
+  if (syncedCount > 0) {
+    console.log(`[Offline Sync] ${syncedCount} reserva(s) sincronizadas exitosamente.`);
+    // Notifica a la UI para que muestre el toast de éxito
+    window.dispatchEvent(new CustomEvent('offline-sync-complete', { detail: { count: syncedCount } }));
+  }
   if (pending.length === 0) {
     console.log('[Offline Sync] Todas las reservas pendientes fueron sincronizadas exitosamente.');
   }

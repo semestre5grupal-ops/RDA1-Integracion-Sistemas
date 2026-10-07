@@ -7,6 +7,7 @@ import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { ReportModal } from '../components/ReportModal';
+import { OfflineReservaModal } from '../components/OfflineReservaModal';
 
 export function AtraccionDetail() {
   const { id } = useParams();
@@ -26,6 +27,8 @@ export function AtraccionDetail() {
   // Auth & UI States
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('visa');
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
+  const [pendingOfflinePay, setPendingOfflinePay] = useState(false);
   
   const [form, setForm] = useState({
     date: '2026-09-28',
@@ -72,6 +75,14 @@ export function AtraccionDetail() {
       navigate('/login');
       return;
     }
+
+    // Si no hay conexión mostrar modal de aviso ANTES de guardar
+    if (!navigator.onLine && !pendingOfflinePay) {
+      setPendingOfflinePay(true);
+      setShowOfflineModal(true);
+      return;
+    }
+    setPendingOfflinePay(false);
 
     setIsBooking(true);
     setBookingResult(null);
@@ -512,6 +523,20 @@ export function AtraccionDetail() {
                         <button className="search-btn" style={{width: '100%', padding: '12px', fontSize: '1rem', marginTop: 16}} onClick={handleBooking} disabled={isBooking}>
                           {isBooking ? 'Procesando Pago Seguro...' : 'Pagar y Confirmar'}
                         </button>
+
+                        {/* Modal offline: aparece cuando se pulsa el botón sin internet */}
+                        {showOfflineModal && (
+                          <OfflineReservaModal
+                            onContinuar={() => {
+                              setShowOfflineModal(false);
+                              handleBooking({ preventDefault: () => {} });
+                            }}
+                            onCancelar={() => {
+                              setShowOfflineModal(false);
+                              setPendingOfflinePay(false);
+                            }}
+                          />
+                        )}
                       )}
                     </div>
                   </>

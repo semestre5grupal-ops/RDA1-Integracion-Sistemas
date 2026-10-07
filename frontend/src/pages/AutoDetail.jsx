@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ReportModal } from '../components/ReportModal';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
+import { OfflineReservaModal } from '../components/OfflineReservaModal';
 import { useCurrency } from '../hooks/CurrencyContext';
 
 export function AutoDetail() {
@@ -47,6 +48,8 @@ export function AutoDetail() {
   const [showSimilarModal, setShowSimilarModal] = useState(false);
   const [showImportantInfoModal, setShowImportantInfoModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
+  const [pendingOfflinePay, setPendingOfflinePay] = useState(false);
 
   // Sanitizar entradas para permitir solo números
   const handleNumberKeyDown = (e) => {
@@ -93,6 +96,13 @@ export function AutoDetail() {
   };
 
   const procesarPagoYReserva = async () => {
+    // Si no hay conexión, mostrar modal de aviso ANTES de guardar
+    if (!navigator.onLine && !pendingOfflinePay) {
+      setPendingOfflinePay(true);
+      setShowOfflineModal(true);
+      return;
+    }
+    setPendingOfflinePay(false);
     setLoading(true);
     setError(null);
     setSuccess(null);
@@ -428,6 +438,20 @@ export function AutoDetail() {
                 <button onClick={procesarPagoYReserva} disabled={loading} style={{ background: '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
                   {loading ? 'Procesando...' : 'Pagar y Reservar'}
                 </button>
+
+                {/* Modal offline: aparece cuando se pulsa el botón sin internet */}
+                {showOfflineModal && (
+                  <OfflineReservaModal
+                    onContinuar={() => {
+                      setShowOfflineModal(false);
+                      procesarPagoYReserva();
+                    }}
+                    onCancelar={() => {
+                      setShowOfflineModal(false);
+                      setPendingOfflinePay(false);
+                    }}
+                  />
+                )}
               )}
             </div>
           </div>
