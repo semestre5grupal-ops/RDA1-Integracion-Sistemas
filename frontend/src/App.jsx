@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom';
 
 // --- Modulo de Alojamientos ---
 import { AlojamientosPage } from './pages/AlojamientosPage';
+import { QuieroSerProveedorPage } from './pages/QuieroSerProveedorPage';
 import { AlojamientosSearchPage } from './pages/AlojamientosSearchPage';
 import { AlojamientoDetail } from './pages/AlojamientoDetail';
 import { AlojamientoCheckoutPage } from './pages/AlojamientoCheckoutPage';
@@ -123,6 +124,7 @@ function App() {
           <Route path="/facturas" element={<FacturasPage />} />
 
           {/* Paginas legales */}
+          <Route path="/proveedores/registro" element={<QuieroSerProveedorPage />} />
           <Route path="/privacidad" element={<PrivacidadPage />} />
           <Route path="/terminos" element={<TerminosPage />} />
           <Route path="/legal/privacidad" element={<PrivacidadPage />} />

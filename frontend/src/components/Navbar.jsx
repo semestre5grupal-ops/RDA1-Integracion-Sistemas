@@ -160,17 +160,18 @@ export function Navbar() {
           <span className="nav-flag"... />
           <span className="nav-help"... />
           */}
-          <span
+          {!isAdmin && <Link
+            to="/proveedores/registro"
             style={{
               color: '#ffffff',
               fontSize: '0.9rem',
               fontWeight: 500,
-              cursor: 'pointer',
               margin: '0 4px',
+              textDecoration: 'none',
             }}
           >
-            Publica tu propiedad
-          </span>
+            Quiero ser proveedor
+          </Link>}
           {user ? (
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }} ref={dropdownRef}>
               {!isAdmin && (

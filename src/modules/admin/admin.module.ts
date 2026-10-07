@@ -6,6 +6,8 @@ import { AdminConfigService } from './admin-config.service';
 import { AdminFinanzasService } from './admin-finanzas.service';
 import { AdminAuditService } from './admin-audit.service';
 import { PublicConfigController } from './public-config.controller';
+import { AdminProveedoresService } from './admin-proveedores.service';
+import { ProveedoresPublicController } from './proveedores-public.controller';
 import { Reserva } from '../vuelos/entities/reserva.entity';
 import { OrderAuto } from '../autos/entities/order-auto.entity';
 import { ReservaAtraccion } from '../atracciones/entities/reserva.entity';
@@ -23,8 +25,8 @@ import { CoreModule } from '../../core/core.module';
     TypeOrmModule.forFeature([Reserva, OrderAuto, ReservaAtraccion, ReservaAlojamiento, Alojamiento]),
     CoreModule,
   ],
-  controllers: [AdminController, PublicConfigController],
-  providers: [AdminService, AdminConfigService, AdminFinanzasService, AdminAuditService],
+  controllers: [AdminController, PublicConfigController, ProveedoresPublicController],
+  providers: [AdminService, AdminConfigService, AdminFinanzasService, AdminAuditService, AdminProveedoresService],
   exports: [AdminConfigService, AdminAuditService],
 })
 export class AdminModule { }

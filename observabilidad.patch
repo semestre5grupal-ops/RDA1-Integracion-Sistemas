@@ -1,0 +1,630 @@
+From e71739bf2c5b445986b80fc33cc5c1e093a3f870 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 7 Oct 2026 07:35:47 -0500
+Subject: [PATCH] fix(admin): Observabilidad 100% con datos de la base de datos
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Se elimina el embudo inventado (multiplicaba reservas por factores fijos);
+  ahora sale de telemetry_events y, si no hay eventos, se muestra vacío.
+- La telemetría se guarda y se lee por Postgres (antes dependía de la clave
+  secreta de Supabase, inválida en Render, y no se registraba nada).
+- Ingresos cuentan solo reservas cobradas (antes sumaba también canceladas).
+- Ya no se suman reservas del localStorage del navegador a los KPIs.
+- Tráfico de hospedaje usa sesiones reales; estados de reserva para las 4
+  verticales; últimas reservas ordenadas por fecha; ping a Hospedaje.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015pXFeN2fW2hnHeJCQsSfZ1
+---
+ frontend/src/pages/AdminDashboard.jsx       | 164 ++++++------------
+ src/modules/admin/admin-finanzas.service.ts |   2 +-
+ src/modules/admin/admin.service.ts          | 182 ++++++++++----------
+ src/modules/telemetry/telemetry.service.ts  | 125 +++++++++++---
+ 4 files changed, 239 insertions(+), 234 deletions(-)
+
+diff --git a/frontend/src/pages/AdminDashboard.jsx b/frontend/src/pages/AdminDashboard.jsx
+index 5a75f2f..3b28a63 100644
+--- a/frontend/src/pages/AdminDashboard.jsx
++++ b/frontend/src/pages/AdminDashboard.jsx
+@@ -78,31 +78,15 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
+   );
+   const k = stats?.kpis||{};
+ 
+-  const res = k.totalReservas || 0;
+-  
+-  // Usamos el funnel real del backend si viene, si no, fallback al simulado
+-  let funnel = stats?.realFunnel;
+-  
+-  if (!funnel) {
+-    funnel = res > 0 ? [
+-      {label:'Búsquedas Globales (Vuelos, Autos, Atracciones)',count:res * 14, pct: 100},
+-      {label:'Selección de producto / Ver detalles',count:Math.round(res * 11.06), pct: 79},
+-      {label:'Inicio de Checkout',count:Math.round(res * 4.76), pct: 34},
+-      {label:'Ingreso de datos del cliente',count:Math.round(res * 2.1), pct: 15},
+-      {label:'Confirmación de Pago',count:Math.round(res * 1.07), pct: 7.7},
+-      {label:'✅ Reserva Exitosa (Global - Real)',count:res, pct: 7.1},
+-    ] : [
+-      {label:'Búsquedas Globales (Vuelos, Autos, Atracciones)',count:0, pct: 0},
+-      {label:'Selección de producto / Ver detalles',count:0, pct: 0},
+-      {label:'Inicio de Checkout',count:0, pct: 0},
+-      {label:'Ingreso de datos del cliente',count:0, pct: 0},
+-      {label:'Confirmación de Pago',count:0, pct: 0},
+-      {label:'✅ Reserva Exitosa (Global - Real)',count:0, pct: 0},
+-    ];
+-  }
++  // Embudo real (telemetría guardada en la BD). Si no hay eventos, se muestra vacío: nunca se inventan cifras.
++  const funnel = Array.isArray(stats?.realFunnel) ? stats.realFunnel : null;
++  const tel = stats?.telemetria || {};
++  const trafico = stats?.trafficByVertical || {};
++  const estadosPorVertical = stats?.estadosPorVertical || (stats?.estadosVuelos ? { vuelos: stats.estadosVuelos } : {});
+ 
+   return (
+     <div>
++      {stats?.error && <Alerta tipo="error">{stats.error}</Alerta>}
+       <SectionTitle>📈 KPIs de Negocio (Tiempo Real)</SectionTitle>
+       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:12}}>
+         <KpiCard icon="🎫" label="Total Reservas" value={k.totalReservas??0} color={C.blue}/>
+@@ -110,7 +94,7 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
+         <KpiCard icon="🚗" label="Autos" value={k.reservasAutos??0} sub="reservas" color={C.cyan}/>
+         <KpiCard icon="🎡" label="Atracciones" value={k.reservasAtracciones??0} sub="reservas" color={C.green}/>
+         <KpiCard icon="🏨" label="Hospedajes" value={k.reservasHospedaje??0} sub="reservas" color={'#8e44ad'}/>
+-        <KpiCard icon="💵" label="Ingresos Totales" value={`$${fmt(k.ingresosTotal)}`} sub="USD" color={C.green}/>
++        <KpiCard icon="💵" label="Ingresos cobrados" value={`$${fmt(k.ingresosTotal)}`} sub={`USD · ${k.reservasCobradas??0} reservas pagadas`} color={C.green}/>
+       </div>
+       <SectionTitle badge="Real">💰 Finanzas del Booking</SectionTitle>
+       <FinanzasPanel refreshKey={refreshKey}/>
+@@ -121,49 +105,60 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
+         {serviceHealth.length===0 && <div style={{color:C.gray,fontSize:'0.85rem',padding:'10px 0'}}>Comprobando servicios...</div>}
+       </div>
+ 
+-      <SectionTitle>📊 Tráfico por Vertical (Nuevas Sesiones)</SectionTitle>
+-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:12,marginBottom:20}}>
+-        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
+-          <div style={{fontSize:'0.85rem',color:C.text}}>✈️ Vuelos</div>
+-          <div style={{fontSize:'1.6rem',fontWeight:700,color:C.darkBlue}}>{stats?.trafficByVertical?.vuelos || 0}</div>
+-        </div>
+-        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
+-          <div style={{fontSize:'0.85rem',color:C.text}}>🚗 Autos</div>
+-          <div style={{fontSize:'1.6rem',fontWeight:700,color:C.orange}}>{stats?.trafficByVertical?.autos || 0}</div>
+-        </div>
+-        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
+-          <div style={{fontSize:'0.85rem',color:C.text}}>🎡 Atracciones</div>
+-          <div style={{fontSize:'1.6rem',fontWeight:700,color:C.green}}>{stats?.trafficByVertical?.atracciones || 0}</div>
+-        </div>
+-        <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
+-          <div style={{fontSize:'0.85rem',color:C.text}}>🏨 Hospedaje</div>
+-          <div style={{fontSize:'1.6rem',fontWeight:700,color:'#8e44ad'}}>{stats?.kpis?.reservasHospedaje || 0}</div>
+-        </div>
++      <SectionTitle>📊 Tráfico por Vertical (sesiones únicas)</SectionTitle>
++      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:12,marginBottom:8}}>
++        {[['✈️ Vuelos','vuelos',C.darkBlue],['🚗 Autos','autos',C.orange],['🎡 Atracciones','atracciones',C.green],['🏨 Hospedaje','hospedaje','#8e44ad']].map(([label,key,color])=>(
++          <div key={key} style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
++            <div style={{fontSize:'0.85rem',color:C.text}}>{label}</div>
++            <div style={{fontSize:'1.6rem',fontWeight:700,color}}>{toNum(trafico[key])}</div>
++          </div>
++        ))}
++      </div>
++      <div style={{fontSize:'0.75rem',color:C.gray,marginBottom:20}}>
++        {tel.eventos
++          ? `${toNum(tel.eventos).toLocaleString('es-EC')} eventos de ${toNum(tel.sesiones).toLocaleString('es-EC')} sesiones registrados${tel.ultimoEvento ? ` · último: ${fmtDate(tel.ultimoEvento)}` : ''}.`
++          : 'Aún no hay eventos de telemetría guardados en la base de datos.'}
+       </div>
+-      {stats?.estadosVuelos && Object.keys(stats.estadosVuelos).length>0 && (
++
++      {Object.values(estadosPorVertical).some(e => Object.keys(e||{}).length>0) && (
+         <>
+-          <SectionTitle>📋 Distribución de Estados (Vuelos)</SectionTitle>
+-          <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+-            {Object.entries(stats.estadosVuelos).map(([estado,count])=>(
+-              <div key={estado} style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px',textAlign:'center',minWidth:100}}>
+-                <div style={{fontSize:'1.4rem',fontWeight:700,color:estadoColor(estado)}}>{count}</div>
+-                <Badge status={estado}/>
+-              </div>
+-            ))}
++          <SectionTitle>📋 Reservas por estado</SectionTitle>
++          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))',gap:12}}>
++            {[['vuelos','✈️ Vuelos'],['autos','🚗 Autos'],['atracciones','🎡 Atracciones'],['hospedaje','🏨 Hospedaje']].filter(([v])=>estadosPorVertical[v]).map(([v,label])=>{
++              const entradas=Object.entries(estadosPorVertical[v]||{}).sort((a,b)=>b[1]-a[1]);
++              return (
++                <div key={v} style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 16px'}}>
++                  <div style={{fontWeight:700,fontSize:'0.85rem',marginBottom:8,color:C.text}}>{label}</div>
++                  {entradas.length===0 && <div style={{fontSize:'0.8rem',color:C.gray}}>Sin reservas</div>}
++                  {entradas.map(([estado,count])=>(
++                    <div key={estado} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0'}}>
++                      <Badge status={estado}/>
++                      <span style={{fontWeight:700,color:estadoColor(estado)}}>{count}</span>
++                    </div>
++                  ))}
++                </div>
++              );
++            })}
+           </div>
+         </>
+       )}
+ 
+-      <SectionTitle>🎯 Embudo de Conversión (Extrapolado desde reservas reales)</SectionTitle>
++      <SectionTitle>🎯 Embudo de Conversión (telemetría real)</SectionTitle>
+       <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'16px 20px'}}>
+-        {funnel.map((f,i)=>(
++        {!funnel && (
++          <div style={{textAlign:'center',color:C.gray,fontSize:'0.88rem',padding:'12px 0'}}>
++            Sin datos de telemetría todavía. El embudo se llenará cuando los usuarios busquen y reserven en el sitio.
++            {tel.error && <div style={{fontSize:'0.75rem',marginTop:6,color:C.orange}}>Detalle: {tel.error}</div>}
++          </div>
++        )}
++        {funnel && funnel.map((f,i)=>(
+           <div key={f.label} style={{marginBottom:14}}>
+             <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.85rem',marginBottom:4}}>
+               <span style={{color:C.text}}>{f.label}</span>
+-              <span style={{fontWeight:700,color:f.pct<20 && f.count > 0 ? C.orange : C.text}}>{f.count.toLocaleString()} ({f.pct}%)</span>
++              <span style={{fontWeight:700,color:f.pct<20 && f.count > 0 ? C.orange : C.text}}>{toNum(f.count).toLocaleString('es-EC')} sesiones ({f.pct}%)</span>
+             </div>
+             <div style={{background:C.border,borderRadius:4,height:12,overflow:'hidden'}}>
+-              <div style={{width:`${f.pct}%`,height:'100%',borderRadius:4,background:`linear-gradient(90deg, ${C.blue}, ${C.darkBlue})`,opacity:0.5+(i*0.08)}}/>
++              <div style={{width:`${Math.min(100, toNum(f.pct))}%`,height:'100%',borderRadius:4,background:`linear-gradient(90deg, ${C.blue}, ${C.darkBlue})`,opacity:0.5+(i*0.08)}}/>
+             </div>
+           </div>
+         ))}
+@@ -2201,6 +2196,7 @@ export function AdminDashboard() {
+       {label:'Módulo Vuelos',url:'/vuelos/bookings?limit=1'},
+       {label:'Módulo Autos',url:'/autos/orders'},
+       {label:'Módulo Atracciones',url:'/atracciones?page=1&limit=1'},
++      {label:'Módulo Hospedaje',url:'/alojamientos?page=1&limit=1'},
+       {label:'Módulo Chatbot',url:'/chatbot/estado'},
+       {label:'Módulo Admin (Stats)',url:'/admin/stats'},
+     ];
+@@ -2216,64 +2212,10 @@ export function AdminDashboard() {
+     if(!silent) setLoadingStats(true);
+     try{
+       const{data}=await api.get('/admin/stats');
+-
+-      // Hospedaje ya viene de la BD; solo se suman las reservas que existan únicamente en este navegador
+-      const localesAloj = hospedajeSoloLocal((data.ultimasReservas || []).filter(r => r.tipo === 'hospedaje'));
+-      const hospedajeList = localesAloj;
+-
+-      const localesAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
+-      const autosList = localesAutos.map(au => ({
+-        id: au.id || au.orderId,
+-        tipo: 'auto',
+-        pnr: (au.id || au.orderId || 'AUTO').substring(0, 6).toUpperCase(),
+-        estado: au.status || 'CONFIRMED',
+-        total: au.totalPrice?.total || au.total || 0,
+-        moneda: 'USD',
+-        createdAt: au.createdAt || au.date || new Date().toISOString().split('T')[0],
+-      }));
+-
+-      const localesAtracciones = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
+-      const atraccionesList = localesAtracciones.map(at => ({
+-        id: at.id || at.reservation_id,
+-        tipo: 'atraccion',
+-        pnr: (at.id || at.reservation_id || 'ATRAC').substring(0, 6).toUpperCase(),
+-        estado: at.status || 'CONFIRMED',
+-        total: at.totalPrice?.total || at.total || 0,
+-        moneda: 'USD',
+-        createdAt: at.createdAt || at.date || new Date().toISOString().split('T')[0],
+-      }));
+-      
+-      const kpis = data.kpis || {};
+-      const statsHospedaje = (kpis.reservasHospedaje || 0) + localesAloj.length;
+-      const ingresosHospedaje = (kpis.ingresosHospedaje || 0) + localesAloj.reduce((acc, curr) => acc + Number(curr.total || 0), 0);
+-      
+-      const statsAutosLocales = localesAutos.length;
+-      const ingresosAutosLocales = localesAutos.reduce((acc, curr) => acc + Number(curr.totalPrice?.total || curr.total || 0), 0);
+-
+-      const statsAtraccionesLocales = localesAtracciones.length;
+-      const ingresosAtraccionesLocales = localesAtracciones.reduce((acc, curr) => acc + Number(curr.totalPrice?.total || curr.total || 0), 0);
+-      
+-      let ultimasReservas = [...(data.ultimasReservas || []), ...hospedajeList, ...autosList, ...atraccionesList]
+-        .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+-        .slice(0,10);
+-        
+-      setStats({
+-        ...data,
+-        kpis: {
+-          ...kpis,
+-          reservasHospedaje: statsHospedaje,
+-          ingresosHospedaje: ingresosHospedaje,
+-          reservasAutos: (kpis.reservasAutos || 0) + statsAutosLocales,
+-          ingresosAutos: (kpis.ingresosAutos || 0) + ingresosAutosLocales,
+-          reservasAtracciones: (kpis.reservasAtracciones || 0) + statsAtraccionesLocales,
+-          ingresosAtracciones: (kpis.ingresosAtracciones || 0) + ingresosAtraccionesLocales,
+-          totalReservas: (kpis.totalReservas || 0) + localesAloj.length + statsAutosLocales + statsAtraccionesLocales,
+-          ingresosTotal: (kpis.ingresosTotal || 0) + (ingresosHospedaje - (kpis.ingresosHospedaje || 0)) + ingresosAutosLocales + ingresosAtraccionesLocales
+-        },
+-        ultimasReservas
+-      });
++      // Todo sale de la base de datos (el backend ya incluye las 4 verticales).
++      setStats(data);
+     }
+-    catch{setStats({kpis:{},ultimasReservas:[],estadosVuelos:{}});}
++    catch(err){setStats({kpis:{},ultimasReservas:[],estadosPorVertical:{},error:apiErrorMsg(err,'No se pudieron cargar las estadísticas')});}
+     finally{if(!silent) setLoadingStats(false);setLastRefresh(new Date());}
+   },[]);
+ 
+diff --git a/src/modules/admin/admin-finanzas.service.ts b/src/modules/admin/admin-finanzas.service.ts
+index 748df7c..061a719 100644
+--- a/src/modules/admin/admin-finanzas.service.ts
++++ b/src/modules/admin/admin-finanzas.service.ts
+@@ -8,7 +8,7 @@ import { ReservaAlojamiento } from '../alojamientos/entities/reserva.entity';
+ import { AdminConfigService } from './admin-config.service';
+ 
+ /** Estados que significan "el cliente ya pagó". */
+-const PAGADAS = new Set(['CONFIRMED', 'CONFIRMADA', 'PAGADA', 'PAID', 'TICKET_ISSUING', 'TICKETED', 'ISSUED', 'COMPLETED']);
++export const PAGADAS = new Set(['CONFIRMED', 'CONFIRMADA', 'PAGADA', 'PAID', 'TICKET_ISSUING', 'TICKETED', 'ISSUED', 'COMPLETED']);
+ /** Estados de reserva viva pendiente de cobro. */
+ const PENDIENTES = new Set(['PENDING', 'PENDIENTE', 'PENDING_PAYMENT', 'RESERVED', 'HELD', 'CHANGE_PENDING']);
+ /** Estados anulados / reembolsados. */
+diff --git a/src/modules/admin/admin.service.ts b/src/modules/admin/admin.service.ts
+index 460864a..27f423c 100644
+--- a/src/modules/admin/admin.service.ts
++++ b/src/modules/admin/admin.service.ts
+@@ -7,6 +7,7 @@ import { OrderAuto } from '../autos/entities/order-auto.entity';
+ import { ReservaAtraccion } from '../atracciones/entities/reserva.entity';
+ import { ReservaAlojamiento } from '../alojamientos/entities/reserva.entity';
+ import { Alojamiento } from '../alojamientos/entities/alojamiento.entity';
++import { PAGADAS as ESTADOS_COBRADOS } from './admin-finanzas.service';
+ 
+ const ES_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ 
+@@ -66,119 +67,110 @@ export class AdminService {
+     };
+   }
+ 
++  /**
++   * Telemetría real (tabla telemetry_events) leída por Postgres: sesiones únicas
++   * por paso del embudo y por vertical. Si la tabla no existe o está vacía
++   * se devuelve null (el panel muestra "sin datos", nunca números inventados).
++   */
++  private async telemetria() {
++    try {
++      const [porEvento, porVertical, total] = await Promise.all([
++        this.dataSource.query(`SELECT event_name, COUNT(DISTINCT session_id)::int AS n FROM telemetry_events GROUP BY event_name`),
++        this.dataSource.query(`SELECT LOWER(COALESCE(vertical, 'global')) AS vertical, COUNT(DISTINCT session_id)::int AS n FROM telemetry_events GROUP BY 1`),
++        this.dataSource.query(`SELECT COUNT(*)::int AS eventos, COUNT(DISTINCT session_id)::int AS sesiones, MAX(created_at) AS ultimo FROM telemetry_events`)
++          .catch(() => this.dataSource.query(`SELECT COUNT(*)::int AS eventos, COUNT(DISTINCT session_id)::int AS sesiones, NULL AS ultimo FROM telemetry_events`)),
++      ]);
++      const ev = (nombres: string[]) => Math.max(0, ...porEvento.filter((r: any) => nombres.includes(r.event_name)).map((r: any) => Number(r.n)));
++      const resumen = total?.[0] || {};
++      if (!Number(resumen.eventos)) return { funnel: null, trafico: { vuelos: 0, autos: 0, atracciones: 0, hospedaje: 0 }, eventos: 0, sesiones: 0, ultimoEvento: null };
++
++      const pasos = [
++        { label: 'Búsquedas', count: ev(['search_submitted']) },
++        { label: 'Inicio de checkout', count: ev(['checkout_started']) },
++        { label: 'Ingreso de datos del cliente', count: ev(['form_step_completed']) },
++        { label: 'Intento de pago', count: ev(['payment_started']) },
++        { label: '✅ Reserva exitosa', count: ev(['payment_succeeded', 'booking_confirmed']) },
++      ];
++      const base = Math.max(pasos[0].count, 1);
++      const vert = (nombres: string[]) => porVertical.filter((r: any) => nombres.includes(r.vertical)).reduce((s: number, r: any) => s + Number(r.n), 0);
++      return {
++        funnel: pasos.map((p) => ({ ...p, pct: Math.round((p.count / base) * 1000) / 10 })),
++        trafico: {
++          vuelos: vert(['vuelos', 'vuelo']),
++          autos: vert(['autos', 'auto']),
++          atracciones: vert(['atracciones', 'atraccion']),
++          hospedaje: vert(['hospedaje', 'alojamientos', 'alojamiento']),
++        },
++        eventos: Number(resumen.eventos) || 0,
++        sesiones: Number(resumen.sesiones) || 0,
++        ultimoEvento: resumen.ultimo || null,
++      };
++    } catch (e) {
++      this.logger.warn(`Telemetría no disponible: ${e.message}`);
++      return { funnel: null, trafico: { vuelos: 0, autos: 0, atracciones: 0, hospedaje: 0 }, eventos: 0, sesiones: 0, ultimoEvento: null, error: e.message };
++    }
++  }
++
+   async getStats() {
+     this.logger.log('Admin: consultando estadísticas globales...');
+ 
+-    const [vuelos, autos, atracciones, hospedaje] = await Promise.all([
++    const [vuelos, autos, atracciones, hospedaje, tel] = await Promise.all([
+       this.reservaRepo.find().catch((e) => { this.logger.error('Error vuelos:', e); return [] as Reserva[]; }),
+       this.orderAutoRepo.find().catch((e) => { this.logger.error('Error autos:', e); return [] as OrderAuto[]; }),
+       this.reservaAtraccionRepo.find().catch((e) => { this.logger.error('Error atracciones:', e); return [] as ReservaAtraccion[]; }),
+       this.reservasHospedaje(),
++      this.telemetria(),
+     ]);
+ 
+-    const { data: telemetry } = await this.supabase.from('telemetry_events').select('event_name, session_id, vertical');
+-
+-    // Ingresos calculados
+-    const ingresosVuelos = vuelos.reduce((sum: number, r: any) => sum + Number(r.total || 0), 0);
+-    const ingresosAutos = autos.reduce((sum: number, o: any) => sum + Number(o.totalPrice?.total || 0), 0);
+-    const ingresosAtracciones = atracciones.reduce((sum: number, a: any) => sum + Number(a.totalPrice?.total || 0), 0);
+-    const ingresosHospedaje = hospedaje.reduce((sum: number, h: any) => sum + Number(h.totalPrice?.total ?? h.total ?? 0), 0);
+-    const ingresosTotal = ingresosVuelos + ingresosAutos + ingresosAtracciones + ingresosHospedaje;
+-
+-    // Reservas por estado (vuelos)
+-    const estadosVuelos = vuelos.reduce((acc: Record<string, number>, r: any) => {
+-      acc[r.estado] = (acc[r.estado] || 0) + 1;
+-      return acc;
+-    }, {});
+-
+-    // Últimas 5 reservas de cada tipo combinadas
+-    const ultimasVuelos = vuelos.slice(-5).map(r => ({
+-      tipo: 'vuelo',
+-      id: r.idReserva,
+-      pnr: r.pnr,
+-      estado: r.estado,
+-      total: Number(r.total || 0),
+-      moneda: r.moneda || 'USD',
+-      createdAt: r.fechaCreacion,
+-    }));
+-
+-    const ultimasAutos = autos.slice(-5).map(o => ({
+-      tipo: 'auto',
+-      id: o.id,
+-      pnr: o.id.substring(0, 6).toUpperCase(),
+-      estado: o.status,
+-      total: Number(o.totalPrice?.total || 0),
+-      moneda: o.totalPrice?.currency || 'USD',
+-      createdAt: o.createdAt,
+-    }));
+-    const ultimasAtracciones = atracciones.slice(-5).map(a => ({
+-      tipo: 'atraccion',
+-      id: a.id,
+-      pnr: a.id.substring(0, 6).toUpperCase(),
+-      estado: a.status,
+-      total: Number(a.totalPrice?.total || 0),
+-      moneda: a.totalPrice?.currency || 'USD',
+-      createdAt: a.createdAt,
+-    }));
+-
+-    const ultimasHospedaje = hospedaje.slice(0, 5).map((h) => this.mapHospedaje(h));
+-
+-    const ultimasReservas = [...ultimasVuelos, ...ultimasAutos, ...ultimasAtracciones, ...ultimasHospedaje]
+-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+-      .slice(0, 10);
+-
+-    // Cálculos para el embudo real si hay eventos
+-    let realFunnel = null;
+-    let trafficByVertical = { vuelos: 0, autos: 0, atracciones: 0 };
+-    
+-    if (telemetry && telemetry.length > 0) {
+-      const counts = { busquedas: new Set(), detalles: new Set(), datos_cliente: new Set(), intento_pago: new Set(), exito: new Set() };
+-      const verticalSessions = { vuelos: new Set(), autos: new Set(), atracciones: new Set() };
+-
+-      telemetry.forEach(t => {
+-        if (t.event_name === 'search_submitted') counts.busquedas.add(t.session_id);
+-        if (t.event_name === 'checkout_started') counts.detalles.add(t.session_id);
+-        if (t.event_name === 'form_step_completed') counts.datos_cliente.add(t.session_id);
+-        if (t.event_name === 'payment_started') counts.intento_pago.add(t.session_id);
+-        if (t.event_name === 'payment_succeeded' || t.event_name === 'booking_confirmed') counts.exito.add(t.session_id);
+-
+-        if (t.vertical === 'vuelos') verticalSessions.vuelos.add(t.session_id);
+-        if (t.vertical === 'autos') verticalSessions.autos.add(t.session_id);
+-        if (t.vertical === 'atracciones') verticalSessions.atracciones.add(t.session_id);
+-      });
+-      const b = Math.max(counts.busquedas.size, 1);
+-      realFunnel = [
+-        { label: 'Búsquedas (Global)', count: counts.busquedas.size, pct: 100 },
+-        { label: 'Seleccionar / Iniciar Checkout', count: counts.detalles.size, pct: Math.round((counts.detalles.size / b) * 100) },
+-        { label: 'Ingreso de datos', count: counts.datos_cliente.size, pct: Math.round((counts.datos_cliente.size / b) * 100) },
+-        { label: 'Intento de Pago', count: counts.intento_pago.size, pct: Math.round((counts.intento_pago.size / b) * 100) },
+-        { label: '✅ Reserva Exitosa', count: counts.exito.size, pct: Math.round((counts.exito.size / b) * 100) },
+-      ];
+-
+-      trafficByVertical = {
+-        vuelos: verticalSessions.vuelos.size,
+-        autos: verticalSessions.autos.size,
+-        atracciones: verticalSessions.atracciones.size,
+-      };
++    // Todas las reservas normalizadas (misma forma para las 4 verticales)
++    const todas = [
++      ...vuelos.map((r) => ({ tipo: 'vuelo', vertical: 'vuelos', id: r.idReserva, pnr: r.pnr, estado: r.estado, total: Number(r.total || 0), moneda: r.moneda || 'USD', createdAt: r.fechaCreacion })),
++      ...autos.map((o) => ({ tipo: 'auto', vertical: 'autos', id: o.id, pnr: o.id.substring(0, 6).toUpperCase(), estado: o.status, total: Number(o.totalPrice?.total || 0), moneda: o.totalPrice?.currency || 'USD', createdAt: o.createdAt })),
++      ...atracciones.map((a) => ({ tipo: 'atraccion', vertical: 'atracciones', id: a.id, pnr: a.id.substring(0, 6).toUpperCase(), estado: a.status, total: Number(a.totalPrice?.total || 0), moneda: a.totalPrice?.currency || 'USD', createdAt: a.createdAt })),
++      ...hospedaje.map((h) => ({ ...this.mapHospedaje(h), vertical: 'hospedaje' })),
++    ];
++
++    // Ingresos = solo reservas cobradas (mismas reglas que Finanzas)
++    const cobrada = (e: any) => ESTADOS_COBRADOS.has(String(e || '').toUpperCase());
++    const ingresos = (v: string) => Math.round(todas.filter((r) => r.vertical === v && cobrada(r.estado)).reduce((s, r) => s + r.total, 0) * 100) / 100;
++    const ingresosVuelos = ingresos('vuelos');
++    const ingresosAutos = ingresos('autos');
++    const ingresosAtracciones = ingresos('atracciones');
++    const ingresosHospedaje = ingresos('hospedaje');
++
++    // Reservas por estado, por vertical
++    const estadosPorVertical: Record<string, Record<string, number>> = { vuelos: {}, autos: {}, atracciones: {}, hospedaje: {} };
++    for (const r of todas) {
++      const e = String(r.estado || 'SIN_ESTADO').toUpperCase();
++      estadosPorVertical[r.vertical][e] = (estadosPorVertical[r.vertical][e] || 0) + 1;
+     }
+ 
++    const ultimasReservas = [...todas]
++      .sort((a, b) => new Date(b.createdAt as any).getTime() - new Date(a.createdAt as any).getTime())
++      .slice(0, 10)
++      .map(({ vertical, ...r }) => r);
++
+     return {
++      generadoEn: new Date().toISOString(),
+       kpis: {
+-        totalReservas: vuelos.length + autos.length + atracciones.length + hospedaje.length,
+-        reservasHospedaje: hospedaje.length,
+-        ingresosHospedaje: parseFloat(ingresosHospedaje.toFixed(2)),
++        totalReservas: todas.length,
+         reservasVuelos: vuelos.length,
+         reservasAutos: autos.length,
+         reservasAtracciones: atracciones.length,
+-        ingresosTotal: parseFloat(ingresosTotal.toFixed(2)),
+-        ingresosVuelos: parseFloat(ingresosVuelos.toFixed(2)),
+-        ingresosAutos: parseFloat(ingresosAutos.toFixed(2)),
+-        ingresosAtracciones: parseFloat(ingresosAtracciones.toFixed(2)),
++        reservasHospedaje: hospedaje.length,
++        reservasCobradas: todas.filter((r) => cobrada(r.estado)).length,
++        ingresosTotal: Math.round((ingresosVuelos + ingresosAutos + ingresosAtracciones + ingresosHospedaje) * 100) / 100,
++        ingresosVuelos,
++        ingresosAutos,
++        ingresosAtracciones,
++        ingresosHospedaje,
+       },
+-      estadosVuelos,
++      estadosVuelos: estadosPorVertical.vuelos,
++      estadosPorVertical,
+       ultimasReservas,
+-      realFunnel,
+-      trafficByVertical,
++      realFunnel: tel.funnel,
++      trafficByVertical: tel.trafico,
++      telemetria: { eventos: tel.eventos, sesiones: tel.sesiones, ultimoEvento: tel.ultimoEvento, error: (tel as any).error || null },
+     };
+   }
+ 
+diff --git a/src/modules/telemetry/telemetry.service.ts b/src/modules/telemetry/telemetry.service.ts
+index 30936d5..8a39d13 100644
+--- a/src/modules/telemetry/telemetry.service.ts
++++ b/src/modules/telemetry/telemetry.service.ts
+@@ -1,48 +1,119 @@
+-﻿import { Injectable, Logger } from '@nestjs/common';
++import { Injectable, Logger } from '@nestjs/common';
++import { DataSource } from 'typeorm';
+ import { createClient } from '@supabase/supabase-js';
+ 
++const ES_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const corto = (v: any, max: number) => (v === undefined || v === null ? null : String(v).slice(0, max));
++
++/**
++ * Guarda la telemetría del frontend (embudo de conversión, tráfico por vertical).
++ *
++ * Se escribe directo en Postgres (misma conexión que el resto del backend), así
++ * no depende de SUPABASE_SECRET_KEY. Si la escritura SQL falla se intenta con
++ * el cliente de Supabase como respaldo.
++ */
+ @Injectable()
+ export class TelemetryService {
+   private readonly logger = new Logger(TelemetryService.name);
+   private readonly supabase;
++  private esquemaListo: Promise<void> | null = null;
+ 
+-  constructor() {
++  constructor(private readonly dataSource: DataSource) {
+     const url = process.env.SUPABASE_URL;
+     const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+     this.supabase = createClient(url || 'https://placeholder.supabase.co', key || 'placeholder');
+   }
+ 
++  /** Crea las tablas si aún no existen (no toca tablas ya creadas). */
++  private asegurarEsquema() {
++    if (!this.esquemaListo) {
++      const sentencias = [
++        `CREATE TABLE IF NOT EXISTS telemetry_events (
++           id BIGSERIAL PRIMARY KEY,
++           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
++           event_name VARCHAR(80) NOT NULL,
++           session_id VARCHAR(80),
++           user_id VARCHAR(80),
++           vertical VARCHAR(40),
++           device VARCHAR(20),
++           properties JSONB DEFAULT '{}'::jsonb
++         )`,
++        `CREATE TABLE IF NOT EXISTS provider_api_calls (
++           id BIGSERIAL PRIMARY KEY,
++           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
++           provider VARCHAR(80),
++           vertical VARCHAR(40),
++           operation VARCHAR(80),
++           status_code INT,
++           latency_ms INT,
++           success BOOLEAN,
++           error_type VARCHAR(80),
++           error_message TEXT,
++           session_id VARCHAR(80)
++         )`,
++      ];
++      // Supabase en modo pooler no acepta varias sentencias en una sola consulta
++      this.esquemaListo = (async () => {
++        for (const sql of sentencias) {
++          await this.dataSource.query(sql).catch((e) => this.logger.warn(`Telemetría: no se pudo preparar tabla (${e.message})`));
++        }
++      })();
++    }
++    return this.esquemaListo;
++  }
++
+   async trackEvent(data: any) {
+-    const { error } = await this.supabase
+-      .from('telemetry_events')
+-      .insert({
+-        event_name: data.event_name,
+-        session_id: data.session_id || 'anonymous',
+-        user_id: data.user_id,
+-        vertical: data.vertical,
+-        device: data.device,
+-        properties: data.properties || {},
+-      });
+-      
++    const fila = {
++      event_name: corto(data?.event_name, 80),
++      session_id: corto(data?.session_id || 'anonymous', 80),
++      user_id: data?.user_id && ES_UUID.test(String(data.user_id)) ? String(data.user_id) : null,
++      vertical: corto(data?.vertical, 40),
++      device: corto(data?.device, 20),
++      properties: data?.properties && typeof data.properties === 'object' ? data.properties : {},
++    };
++    if (!fila.event_name) return { success: false, error: 'event_name es obligatorio' };
++
++    try {
++      await this.asegurarEsquema();
++      await this.dataSource.query(
++        `INSERT INTO telemetry_events (event_name, session_id, user_id, vertical, device, properties)
++         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
++        [fila.event_name, fila.session_id, fila.user_id, fila.vertical, fila.device, JSON.stringify(fila.properties)],
++      );
++      return { success: true };
++    } catch (e) {
++      this.logger.warn(`Telemetría por SQL falló (${e.message}); probando Supabase...`);
++    }
++
++    const { error } = await this.supabase.from('telemetry_events').insert(fila);
+     if (error) this.logger.error('Error guardando evento de telemetría: ' + error.message);
+     return { success: !error };
+   }
+ 
+   async trackApiCall(data: any) {
+-    const { error } = await this.supabase
+-      .from('provider_api_calls')
+-      .insert({
+-        provider: data.provider,
+-        vertical: data.vertical,
+-        operation: data.operation,
+-        status_code: data.status_code,
+-        latency_ms: data.latency_ms,
+-        success: data.success,
+-        error_type: data.error_type,
+-        error_message: data.error_message,
+-        session_id: data.session_id,
+-      });
+-
++    const valores = [
++      corto(data?.provider, 80), corto(data?.vertical, 40), corto(data?.operation, 80),
++      Number.isFinite(Number(data?.status_code)) ? Number(data.status_code) : null,
++      Number.isFinite(Number(data?.latency_ms)) ? Math.round(Number(data.latency_ms)) : null,
++      typeof data?.success === 'boolean' ? data.success : null,
++      corto(data?.error_type, 80), data?.error_message ? String(data.error_message) : null, corto(data?.session_id, 80),
++    ];
++    try {
++      await this.asegurarEsquema();
++      await this.dataSource.query(
++        `INSERT INTO provider_api_calls (provider, vertical, operation, status_code, latency_ms, success, error_type, error_message, session_id)
++         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
++        valores,
++      );
++      return;
++    } catch (e) {
++      this.logger.warn(`Telemetría de API por SQL falló (${e.message}); probando Supabase...`);
++    }
++    const { error } = await this.supabase.from('provider_api_calls').insert({
++      provider: data.provider, vertical: data.vertical, operation: data.operation, status_code: data.status_code,
++      latency_ms: data.latency_ms, success: data.success, error_type: data.error_type, error_message: data.error_message,
++      session_id: data.session_id,
++    });
+     if (error) this.logger.error('Error guardando telemetría de API: ' + error.message);
+   }
+ }
+-- 
+2.43.0
+
