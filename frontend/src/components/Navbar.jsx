@@ -160,17 +160,7 @@ export function Navbar() {
           <span className="nav-flag"... />
           <span className="nav-help"... />
           */}
-          <span
-            style={{
-              color: '#ffffff',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              margin: '0 4px',
-            }}
-          >
-            Publica tu propiedad
-          </span>
+
           {user ? (
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }} ref={dropdownRef}>
               {!isAdmin && (

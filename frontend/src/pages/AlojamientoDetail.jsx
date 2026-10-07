@@ -847,15 +847,6 @@ export function AlojamientoDetail() {
             >
               Reservar tu estancia
             </button>
-            {user && (
-              <button
-                type="button"
-                onClick={() => setShowReportModal(true)}
-                style={{ background: '#ffebee', color: '#d32f2f', border: '1px solid #ffcdd2', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.9rem', width: '100%', marginTop: '8px' }}
-              >
-                ⚠️ Reportar un problema
-              </button>
-            )}
           </div>
         </div>
 
