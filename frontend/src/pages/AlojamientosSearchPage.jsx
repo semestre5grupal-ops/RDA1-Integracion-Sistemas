@@ -18,6 +18,7 @@ import {
   NoResultsIllustration,
 } from '../components/BookingIcons';
 import './AlojamientosSearchPage.css';
+import { fechaLocal } from '../utils/fechas';
 
 // Histogram bar heights to replicate Booking.com desktop distribution curve
 const HISTOGRAM_BARS = [
@@ -33,8 +34,8 @@ export function AlojamientosSearchPage() {
 
   // Search parameters from URL or defaults
   const initialDestination = searchParams.get('ss') || searchParams.get('destino') || 'Quito';
-  const initialCheckin = searchParams.get('checkin') || '2026-10-07';
-  const initialCheckout = searchParams.get('checkout') || '2026-11-01';
+  const initialCheckin = searchParams.get('checkin') || fechaLocal(2);
+  const initialCheckout = searchParams.get('checkout') || fechaLocal(4);
   const initialAdults = parseInt(searchParams.get('group_adults') || searchParams.get('adultos') || '2', 10);
   const initialChildren = parseInt(searchParams.get('group_children') || searchParams.get('ninos') || '0', 10);
   const initialRooms = parseInt(searchParams.get('no_rooms') || searchParams.get('habitaciones') || '1', 10);
@@ -164,8 +165,8 @@ export function AlojamientosSearchPage() {
 
   useEffect(() => {
     const dest = searchParams.get('ss') || searchParams.get('destino') || 'Quito';
-    const cin = searchParams.get('checkin') || '2026-10-07';
-    const cout = searchParams.get('checkout') || '2026-11-01';
+    const cin = searchParams.get('checkin') || fechaLocal(2);
+    const cout = searchParams.get('checkout') || fechaLocal(4);
     const ad = parseInt(searchParams.get('group_adults') || searchParams.get('adultos') || '2', 10);
     const ch = parseInt(searchParams.get('group_children') || searchParams.get('ninos') || '0', 10);
     const rm = parseInt(searchParams.get('no_rooms') || searchParams.get('habitaciones') || '1', 10);

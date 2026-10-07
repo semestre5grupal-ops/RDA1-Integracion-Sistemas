@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsInt, IsOptional, ValidateNested, IsNumber, IsArray, Matches, Min, Max } from 'class-validator';
+import { IsString, IsInt, IsOptional, ValidateNested, IsNumber, IsArray, Matches, Min, Max, IsBoolean, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BookerDto, AccommodationsGuestsDto } from './contract-common.dto';
 
@@ -33,16 +33,19 @@ export class FiltersDto {
   rating?: RatingFilterDto;
 
   @ApiProperty({ example: true, required: false })
+  @IsBoolean()
   @IsOptional()
   tienePiscina?: boolean;
 
   @ApiProperty({ example: 50, required: false })
   @IsNumber()
+  @Min(0)
   @IsOptional()
   precioMin?: number;
 
   @ApiProperty({ example: 300, required: false })
   @IsNumber()
+  @Min(0)
   @IsOptional()
   precioMax?: number;
 }
@@ -107,6 +110,7 @@ export class SearchAlojamientosRequestDto {
   // --- Campos de compatibilidad con Frontend de la aplicación ---
   @ApiProperty({ description: 'Destino o ciudad de búsqueda (texto libre)', example: 'Cancún', required: false })
   @IsString()
+  @MaxLength(100)
   @IsOptional()
   destino?: string;
 
@@ -118,16 +122,22 @@ export class SearchAlojamientosRequestDto {
 
   @ApiProperty({ description: 'Cantidad de adultos', example: 2, required: false })
   @IsInt()
+  @Min(1)
+  @Max(30)
   @IsOptional()
   adultos?: number;
 
   @ApiProperty({ description: 'Cantidad de niños', example: 0, required: false })
   @IsInt()
+  @Min(0)
+  @Max(10)
   @IsOptional()
   ninos?: number;
 
   @ApiProperty({ description: 'Cantidad de habitaciones', example: 1, required: false })
   @IsInt()
+  @Min(1)
+  @Max(30)
   @IsOptional()
   habitaciones?: number;
 

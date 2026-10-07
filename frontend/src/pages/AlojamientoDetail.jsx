@@ -62,6 +62,7 @@ import {
   ChevronDownIcon,
 } from '../components/BookingIcons';
 import './AlojamientoDetail.css';
+import { fechaLocal } from '../utils/fechas';
 
 // High-res gallery photos matching Booking.com desktop layout
 const GALLERY_DEFAULT_PHOTOS = [
@@ -119,8 +120,8 @@ export function AlojamientoDetail() {
   const { currency, convertPrice } = useCurrency();
 
   // URL parameters
-  const queryCheckin = searchParams.get('checkin') || '2026-10-07';
-  const queryCheckout = searchParams.get('checkout') || '2026-11-01';
+  const queryCheckin = searchParams.get('checkin') || fechaLocal(2);
+  const queryCheckout = searchParams.get('checkout') || fechaLocal(4);
   const queryAdults = parseInt(searchParams.get('group_adults') || '2', 10);
   const queryRooms = parseInt(searchParams.get('no_rooms') || '1', 10);
 

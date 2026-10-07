@@ -4,6 +4,7 @@ import { getAlojamiento } from '../services/alojamientosApi';
 import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
+import { fechaLocal } from '../utils/fechas';
 
 export function AlojamientoCheckoutPage() {
   const [searchParams] = useSearchParams();
@@ -12,8 +13,8 @@ export function AlojamientoCheckoutPage() {
   const { currency, convertPrice } = useCurrency();
 
   const hotelId = searchParams.get('hotel_id') || searchParams.get('id') || '11771815';
-  const checkin = searchParams.get('checkin') || '2026-10-04';
-  const checkout = searchParams.get('checkout') || '2026-10-10';
+  const checkin = searchParams.get('checkin') || fechaLocal(2);
+  const checkout = searchParams.get('checkout') || fechaLocal(4);
   const rooms = parseInt(searchParams.get('rooms') || '1', 10);
   const adults = parseInt(searchParams.get('adults') || '2', 10);
 

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, ValidateNested, IsOptional, IsEmail, MinLength, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, ValidateNested, IsOptional, IsEmail, MinLength, MaxLength, IsDefined, IsObject } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AccommodationsGuestsDto } from './contract-common.dto';
 
@@ -53,6 +53,8 @@ export class OrderPreviewResponseDto {
     currency: string;
     nights?: number;
     rooms?: number;
+    /** Momento en que caduca la cotización (ISO 8601). */
+    expires_at?: string;
   };
 }
 
@@ -97,6 +99,10 @@ export class OrderCreateRequestDto {
   payment_reference: string;
 
   @ApiProperty({ description: 'Datos del cliente que realiza la reserva', type: CustomerDetailsDto })
+  // `@ValidateNested` NO hace obligatorio el campo: sin `@IsDefined`, una orden
+  // sin datos del cliente pasaba la validación y reventaba con un 500.
+  @IsDefined({ message: 'customer_details es obligatorio' })
+  @IsObject()
   @ValidateNested()
   @Type(() => CustomerDetailsDto)
   customer_details: CustomerDetailsDto;

@@ -15,8 +15,10 @@ import {
   HttpStatus,
   BadRequestException,
   ParseUUIDPipe,
+  Inject,
 } from '@nestjs/common';
-import { CacheInterceptor } from '@nestjs/cache-manager';
+import { CacheInterceptor, CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { AlojamientosService } from './alojamientos.service';
 import {
   ApiTags,
@@ -89,7 +91,19 @@ function exigirIdempotencyKey(valor: string | undefined): string {
 @ApiTags('Alojamientos (BFF Integrador)')
 @Controller('alojamientos')
 export class AlojamientosController {
-  constructor(private readonly alojamientosService: AlojamientosService) {}
+  constructor(
+    private readonly alojamientosService: AlojamientosService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
+
+  /**
+   * El catálogo (`GET /alojamientos` y `GET /alojamientos/:id`) se cachea 60 s.
+   * Tras cualquier cambio de administración se vacía la caché: si no, el precio
+   * o un alojamiento eliminado seguirían mostrándose hasta que caducara.
+   */
+  private async invalidarCatalogo(): Promise<void> {
+    await this.cache.reset();
+  }
 
   // =========================================================================
   // BÚSQUEDA Y CATÁLOGO (OpenAPI GDS Core)
@@ -342,7 +356,8 @@ export class AlojamientosController {
   @ApiParam({ name: 'reservationId', description: 'ID de la reserva', type: 'string' })
   @ApiResponse({ status: 200, description: 'Detalle de la reserva.', type: ReservationResponseDto })
   @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
-  async getReservaById(@Param('reservationId') reservationId: string) {
+  @ApiResponse({ status: 400, description: 'El ID no es un UUID válido.' })
+  async getReservaById(@Param('reservationId', ParseUUIDPipe) reservationId: string) {
     return this.alojamientosService.getReservaById(reservationId);
   }
 
@@ -357,7 +372,7 @@ export class AlojamientosController {
   })
   @ApiResponse({ status: 200, description: 'Reserva cancelada exitosamente.', type: ReservationResponseDto })
   async cancelarReserva(
-    @Param('reservationId') reservationId: string,
+    @Param('reservationId', ParseUUIDPipe) reservationId: string,
     @Headers('idempotency-key') idempotencyKey: string,
     @Body() dto: CancelReservationRequestDto,
   ) {
@@ -373,9 +388,14 @@ export class AlojamientosController {
   @ApiResponse({ status: 503, description: 'Servicio de Alojamientos Externo no disponible.' })
   async findAll(@Query() query: PaginationQueryDto) {
     const result = await this.alojamientosService.findAll(query);
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+    const hayMas = page * limit < (result.meta?.total ?? 0);
     result._links = {
-      self: { href: `/api/v1/alojamientos?page=${query.page || 1}&limit=${query.limit || 10}`, type: 'GET' },
-      next: { href: `/api/v1/alojamientos?page=${(query.page || 1) + 1}&limit=${query.limit || 10}`, type: 'GET' },
+      self: { href: `/api/v1/alojamientos?page=${page}&limit=${limit}`, type: 'GET' },
+      // En la última página no hay `next`, y en la primera no hay `prev`.
+      next: hayMas ? { href: `/api/v1/alojamientos?page=${page + 1}&limit=${limit}`, type: 'GET' } : null,
+      prev: page > 1 ? { href: `/api/v1/alojamientos?page=${page - 1}&limit=${limit}`, type: 'GET' } : null,
     };
     return result;
   }
@@ -384,7 +404,9 @@ export class AlojamientosController {
   @ApiOperation({ summary: 'Registrar un nuevo alojamiento (Admin)' })
   @ApiResponse({ status: 201, description: 'El alojamiento ha sido creado exitosamente.', type: AlojamientoResponseDto })
   async create(@Body() dto: CreateAlojamientoDto) {
-    return this.alojamientosService.create(dto);
+    const creado = await this.alojamientosService.create(dto);
+    await this.invalidarCatalogo();
+    return creado;
   }
 
   @Get(':id')
@@ -411,20 +433,24 @@ export class AlojamientosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Reemplazar datos de un alojamiento (Admin)' })
   async replace(@Param('id') id: string, @Body() dto: CreateAlojamientoDto) {
-    return this.alojamientosService.replace(id, dto);
+    await this.alojamientosService.replace(id, dto);
+    await this.invalidarCatalogo();
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Actualizar parcialmente un alojamiento (Admin)' })
   async update(@Param('id') id: string, @Body() dto: UpdateAlojamientoDto) {
-    return this.alojamientosService.update(id, dto);
+    const actualizado = await this.alojamientosService.update(id, dto);
+    await this.invalidarCatalogo();
+    return actualizado;
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Eliminar un alojamiento (Admin)' })
   async delete(@Param('id') id: string) {
-    return this.alojamientosService.delete(id);
+    await this.alojamientosService.delete(id);
+    await this.invalidarCatalogo();
   }
 
   @Get(':id/availability')

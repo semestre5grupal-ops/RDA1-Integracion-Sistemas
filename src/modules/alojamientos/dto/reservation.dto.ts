@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsInt, Min, IsEmail, IsOptional } from 'class-validator';
+import { IsString, IsInt, Min, Max, IsEmail, IsOptional, IsNotEmpty, MaxLength } from 'class-validator';
 import { PriceDto } from './nested-types.dto';
 
 export class ReservationRequestDto {
@@ -14,6 +14,7 @@ export class ReservationRequestDto {
   @ApiProperty({ description: 'Cantidad de habitaciones', example: 1 })
   @IsInt()
   @Min(1)
+  @Max(30)
   habitaciones_count: number;
 
   @ApiProperty({ description: 'Cantidad de noches', example: 5, required: false })
@@ -24,17 +25,21 @@ export class ReservationRequestDto {
 
   @ApiProperty({ description: 'Nombre completo del cliente', example: 'Juan Perez' })
   @IsString()
+  @IsNotEmpty({ message: 'customer_name es obligatorio' })
+  @MaxLength(150)
   customer_name: string;
 
   @ApiProperty({ description: 'Cantidad de adultos', example: 2, required: false })
   @IsInt()
   @Min(1)
+  @Max(30)
   @IsOptional()
   adultos?: number;
 
   @ApiProperty({ description: 'Cantidad de niños', example: 0, required: false })
   @IsInt()
   @Min(0)
+  @Max(10)
   @IsOptional()
   ninos?: number;
 
@@ -55,6 +60,7 @@ export class ReservationRequestDto {
 
   @ApiProperty({ description: 'Peticiones especiales', example: 'Cama extra si es posible', required: false })
   @IsString()
+  @MaxLength(1000)
   @IsOptional()
   special_requests?: string;
 
@@ -106,7 +112,10 @@ export class ReservationResponseDto {
 }
 
 export class CancelReservationRequestDto {
-  @ApiProperty({ description: 'Razón de la cancelación', example: 'Cambio de planes de viaje' })
+  // Opcional, como en Booking: el motivo se pide pero no bloquea la cancelación.
+  @ApiProperty({ description: 'Razón de la cancelación', example: 'Cambio de planes de viaje', required: false })
   @IsString()
-  reason: string;
+  @MaxLength(500)
+  @IsOptional()
+  reason?: string;
 }
