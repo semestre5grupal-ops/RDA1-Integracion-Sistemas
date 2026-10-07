@@ -167,6 +167,9 @@ describe('AlojamientosService', () => {
         adultos: 2,
       };
 
+      // El mock de `find` ignora el `where`: la primera llamada es la búsqueda de
+      // una reserva previa del mismo cliente, que aquí no existe.
+      reservaRepo.find.mockResolvedValueOnce([]);
       const result = await service.reservar('test-uuid-1', dto as any, 'idemp-key-123');
 
       expect(result.status).toBe(ReservationStatus.CONFIRMED);

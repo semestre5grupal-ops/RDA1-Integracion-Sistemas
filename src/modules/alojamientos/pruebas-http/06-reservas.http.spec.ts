@@ -227,12 +227,68 @@ describe('06 · Reservas directas', () => {
       expect((await reservar('quito-ejido', reservaValida({ adultos: 1 }))).status).toBe(201);
     });
 
-    it('el mismo cliente no puede duplicar la misma reserva (mismas fechas y alojamiento)', async () => {
+  });
+
+  describe('Posible reserva duplicada: se pide confirmación, no se bloquea (como Booking)', () => {
+    it('mismo cliente, mismo alojamiento y mismas fechas → 409 que pide confirmar_duplicado', async () => {
       const body = reservaValida({ customer_email: 'repetida@example.com' });
       const primera = await reservar('cancun-coral', body);
       const res = await reservar('cancun-coral', { ...body, customer_email: 'REPETIDA@example.com' });
       esperarProblema(res, 409, 'BOOKING_NOT_CONFIRMED');
       expect(res.body.detail).toContain(primera.body.codigo_reserva);
+      expect(res.body.detail).toContain(`del ${body.checkin} al ${body.checkout}`);
+      expect(camposInvalidos(res)).toEqual(['confirmar_duplicado']);
+    });
+
+    it('también avisa si las fechas se SOLAPAN aunque no sean idénticas', async () => {
+      await reservar('cancun-coral', reservaValida({ customer_email: 'a@example.com', checkin: dia(10), checkout: dia(14) }));
+      const res = await reservar('cancun-coral', reservaValida({ customer_email: 'a@example.com', checkin: dia(12), checkout: dia(16) }));
+      esperarProblema(res, 409, 'BOOKING_NOT_CONFIRMED');
+      expect(camposInvalidos(res)).toEqual(['confirmar_duplicado']);
+    });
+
+    it('con confirmar_duplicado: true se crea la segunda reserva (otra habitación)', async () => {
+      const body = reservaValida({ customer_email: 'familia@example.com' });
+      const primera = await reservar('cancun-coral', body);
+      const segunda = await reservar('cancun-coral', { ...body, confirmar_duplicado: true });
+      expect(segunda.status).toBe(201);
+      expect(segunda.body.codigo_reserva).not.toBe(primera.body.codigo_reserva);
+      expect(t.repos.reservas.todas().filter((r) => r.status === 'CONFIRMED')).toHaveLength(2);
+    });
+
+    it('confirmar no salta el inventario: si no quedan habitaciones → 409 ROOM_NO_LONGER_AVAILABLE', async () => {
+      const body = reservaValida({ customer_email: 'solo@example.com', adultos: 1 });
+      await reservar('quito-ejido', body);
+      esperarProblema(await reservar('quito-ejido', { ...body, confirmar_duplicado: true }), 409, 'ROOM_NO_LONGER_AVAILABLE');
+    });
+
+    it('reserva en OTRO alojamiento para las mismas fechas → 201 sin avisos', async () => {
+      const body = reservaValida({ customer_email: 'viajero@example.com' });
+      expect((await reservar('quito-epiq', body)).status).toBe(201);
+      expect((await reservar('cusco-inka', body)).status).toBe(201);
+    });
+
+    it('mismo alojamiento en fechas que NO se solapan → 201 sin avisos', async () => {
+      await reservar('cancun-coral', reservaValida({ customer_email: 'b@example.com', checkin: dia(10), checkout: dia(12) }));
+      expect((await reservar('cancun-coral', reservaValida({ customer_email: 'b@example.com', checkin: dia(12), checkout: dia(14) }))).status).toBe(201);
+    });
+
+    it('una reserva previa CANCELADA no cuenta como duplicada', async () => {
+      const body = reservaValida({ customer_email: 'c@example.com' });
+      const primera = await reservar('cancun-coral', body);
+      await t.pedir('POST', `/alojamientos/reservations/${primera.body.reservation_id}/cancel`, { idem: true, body: {} });
+      expect((await reservar('cancun-coral', body)).status).toBe(201);
+    });
+
+    it('otro cliente en el mismo alojamiento y fechas → 201 sin avisos', async () => {
+      await reservar('cancun-coral', reservaValida({ customer_email: 'uno@example.com' }));
+      expect((await reservar('cancun-coral', reservaValida({ customer_email: 'dos@example.com' }))).status).toBe(201);
+    });
+
+    it('confirmar_duplicado no booleano → 400', async () => {
+      const res = await reservar('cancun-coral', reservaValida({ confirmar_duplicado: 'si' }));
+      esperarProblema(res, 400, 'VALIDATION_FAILED');
+      expect(camposInvalidos(res)).toEqual(['confirmar_duplicado']);
     });
   });
 

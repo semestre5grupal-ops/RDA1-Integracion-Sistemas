@@ -566,6 +566,17 @@ export class AlojamientosService implements OnModuleInit {
       throw new NotFoundException(`El alojamiento '${accId}' no existe.`);
     }
 
+    // Si el cliente indica la ocupación, se valida contra la capacidad real (400
+    // con el campo exacto), como hace Booking al cambiar adultos/niños/habitaciones.
+    if (dto.guests) {
+      validarCapacidad(
+        local,
+        dto.guests.number_of_adults,
+        dto.guests.children?.length || 0,
+        dto.guests.number_of_rooms,
+      );
+    }
+
     const basePrice = Number(local.precioPorNoche);
     const currency = dto.currency || local.moneda || 'USD';
 
@@ -606,6 +617,8 @@ export class AlojamientosService implements OnModuleInit {
       data: {
         id: local.id,
         currency,
+        nights,
+        available_rooms: ocupacion.available_rooms,
         products: hayCupo ? products : [],
         url: `/api/v1/alojamientos/${local.id}`,
       },
@@ -1143,24 +1156,28 @@ export class AlojamientosService implements OnModuleInit {
     const roomsCount = Math.max(1, dto.habitaciones_count || 1);
     validarCapacidad(alojamiento, dto.adultos || 1, dto.ninos || 0, roomsCount);
 
-    // 2. Prevención de reservas duplicadas para el mismo usuario y fechas superpuestas
+    // 2. Posible reserva duplicada (mismo cliente, mismo alojamiento, fechas que
+    //    se solapan). Como en Booking, NO se bloquea: puede querer otra habitación.
+    //    Se devuelve 409 para que el cliente CONFIRME, y basta con reenviar la
+    //    petición con `confirmar_duplicado: true` (lo indica `invalidParams`).
     const customerEmail = (dto.customer_email || '').trim().toLowerCase();
-    if (customerEmail) {
-      const duplicate = await this.reservaRepo.findOne({
-        where: {
-          alojamientoId: id,
-          customerEmail,
-          checkin: targetCheckin,
-          checkout: targetCheckout,
-          status: ReservationStatus.CONFIRMED,
-        },
+    if (customerEmail && !dto.confirmar_duplicado) {
+      const delCliente = await this.reservaRepo.find({
+        where: { alojamientoId: id, customerEmail, status: ReservationStatus.CONFIRMED },
       });
+      const duplicate = delCliente.find((r) => r.checkin < targetCheckout && r.checkout > targetCheckin);
 
       if (duplicate) {
-        this.logger.warn(`Intento de duplicación de reserva por ${customerEmail} para alojamiento ${id}`);
+        this.logger.warn(`Posible reserva duplicada de ${customerEmail} en alojamiento ${id}`);
         throw conflicto(
           CodigoProblema.BOOKING_NOT_CONFIRMED,
-          `Ya existe una reserva confirmada para este alojamiento en las fechas seleccionadas (Código: ${duplicate.codigoReserva}).`,
+          `Ya tienes una reserva confirmada en este alojamiento del ${duplicate.checkin} al ${duplicate.checkout} (Código: ${duplicate.codigoReserva}).`,
+          [
+            {
+              name: 'confirmar_duplicado',
+              reason: 'Reenvía la petición con confirmar_duplicado: true para hacer otra reserva igualmente.',
+            },
+          ],
         );
       }
     }

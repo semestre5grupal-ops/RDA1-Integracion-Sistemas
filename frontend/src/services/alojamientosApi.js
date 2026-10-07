@@ -24,6 +24,25 @@ export async function searchAlojamientos(searchPayload) {
   return data;
 }
 
+/**
+ * Disponibilidad y precio REAL de un alojamiento para unas fechas y ocupación
+ * (POST /alojamientos/availability). El backend valida fechas y capacidad:
+ * responde 400 con `invalidParams` si algo no cuadra.
+ */
+export async function consultarDisponibilidad({ id, checkin, checkout, adultos, edadesNinos = [], habitaciones }) {
+  const { data } = await api.post('/alojamientos/availability', {
+    accommodation: id,
+    checkin,
+    checkout,
+    guests: {
+      number_of_adults: adultos,
+      number_of_rooms: habitaciones,
+      ...(edadesNinos.length > 0 ? { children: edadesNinos } : {}),
+    },
+  });
+  return data.data;
+}
+
 export async function getAlojamiento(id) {
   const { data } = await api.get(`/alojamientos/${id}`);
   return data;

@@ -79,6 +79,10 @@ export class AvailabilityResponseDto {
   data: {
     id: string | number;
     currency: string;
+    /** Noches de la estancia consultada. */
+    nights?: number;
+    /** Habitaciones libres para esas fechas. */
+    available_rooms?: number;
     products: AvailabilityProductDto[];
     url?: string;
   };

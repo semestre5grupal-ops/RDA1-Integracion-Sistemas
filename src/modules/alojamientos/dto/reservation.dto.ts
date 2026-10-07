@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsInt, Min, Max, IsEmail, IsOptional, IsNotEmpty, MaxLength } from 'class-validator';
+import { IsString, IsInt, Min, Max, IsEmail, IsOptional, IsNotEmpty, MaxLength, IsBoolean } from 'class-validator';
 import { PriceDto } from './nested-types.dto';
 
 export class ReservationRequestDto {
@@ -83,6 +83,16 @@ export class ReservationRequestDto {
   @IsString()
   @IsOptional()
   payment_method?: string;
+
+  @ApiProperty({
+    description:
+      'El cliente confirma que quiere reservar aunque ya tenga una reserva en este alojamiento para fechas que se solapan.',
+    example: false,
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  confirmar_duplicado?: boolean;
 }
 
 export enum ReservationStatus {

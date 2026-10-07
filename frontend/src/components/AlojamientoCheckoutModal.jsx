@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { jsPDF } from 'jspdf';
@@ -7,6 +7,7 @@ import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { formatearFecha } from '../services/formato';
 import { OfflineReservaModal } from './OfflineReservaModal';
+import { ModalReservaExistente, reservasQueSeSolapan, esAvisoDuplicado } from './ModalReservaExistente';
 import {
   CheckmarkIcon,
   CloseIcon,
@@ -42,6 +43,7 @@ export function AlojamientoCheckoutModal({
   checkin,
   checkout,
   adults = 2,
+  children = 0,
   rooms = 1,
   nightsCount = 6,
   originalPrice = 257.40,
@@ -96,6 +98,13 @@ export function AlojamientoCheckoutModal({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [showOfflineModal, setShowOfflineModal] = useState(false);
   const [pendingOfflinePay, setPendingOfflinePay] = useState(false);
+
+  // Aviso de reserva existente (como Booking): no bloquea, pide confirmación.
+  const [showModalExistente, setShowModalExistente] = useState(false);
+  const [reservasSolapadas, setReservasSolapadas] = useState([]);
+  const [mensajeDuplicado, setMensajeDuplicado] = useState('');
+  // Ref y no estado: el reintento tras confirmar se lanza en el mismo ciclo.
+  const confirmadoDuplicadoRef = useRef(false);
 
   // Discount calculation
   const discountAmount = Math.max(0, originalPrice - totalPrice);
@@ -194,6 +203,17 @@ export function AlojamientoCheckoutModal({
       return;
     }
 
+    // ¿Ya tiene una reserva que coincide con estas fechas (en cualquier alojamiento)?
+    if (!confirmadoDuplicadoRef.current) {
+      const solapadas = reservasQueSeSolapan(checkin, checkout);
+      if (solapadas.length > 0) {
+        setReservasSolapadas(solapadas);
+        setMensajeDuplicado('');
+        setShowModalExistente(true);
+        return;
+      }
+    }
+
     setLoading(true);
     setErrorMsg('');
 
@@ -215,7 +235,8 @@ export function AlojamientoCheckoutModal({
       customer_name: `${nombre} ${apellidos}`.trim() || 'Huésped',
       customer_email: email.trim() || 'cliente@example.com',
       adultos: Math.max(1, parseInt(adults, 10) || 2),
-      ninos: 0,
+      ninos: Math.max(0, parseInt(children, 10) || 0),
+      ...(confirmadoDuplicadoRef.current ? { confirmar_duplicado: true } : {}),
     };
 
     const codigoReservaPnr = `BKG-${uuidv4().substring(0, 6).toUpperCase()}`;
@@ -333,11 +354,17 @@ export function AlojamientoCheckoutModal({
       }
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
+      confirmadoDuplicadoRef.current = false;
       setBookingConfirmed(confirmedBooking);
       setStep(3);
       if (onSuccess) onSuccess(confirmedBooking);
     } catch (err) {
-      if (err.response?.status === 409) {
+      if (esAvisoDuplicado(err) && !confirmadoDuplicadoRef.current) {
+        // La reserva previa existe en el servidor (p. ej. hecha desde otro dispositivo).
+        setReservasSolapadas([]);
+        setMensajeDuplicado(err.response.data.detail);
+        setShowModalExistente(true);
+      } else if (err.response?.status === 409) {
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;
         setErrorMsg(errorDetail || 'Esta reserva ya fue procesada anteriormente.');
       } else {
@@ -1249,6 +1276,26 @@ export function AlojamientoCheckoutModal({
           </main>
         </div>
       )}
+
+      <ModalReservaExistente
+        abierto={showModalExistente}
+        reservas={reservasSolapadas}
+        alojamientoActualId={alojamiento?.id}
+        nombreAlojamientoActual={alojamiento?.nombre}
+        checkin={checkin}
+        checkout={checkout}
+        mensajeServidor={mensajeDuplicado}
+        onContinuar={() => {
+          confirmadoDuplicadoRef.current = true;
+          setShowModalExistente(false);
+          handleCompletarReserva({ preventDefault: () => {} });
+        }}
+        onCancelar={() => {
+          confirmadoDuplicadoRef.current = false;
+          setShowModalExistente(false);
+        }}
+        onVerReservas={() => navigate('/mis-reservas')}
+      />
 
       {/* Modal offline: aparece cuando se pulsa Completar reserva sin internet */}
       {showOfflineModal && (
