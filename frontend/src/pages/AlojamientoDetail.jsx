@@ -12,6 +12,7 @@ import { jsPDF } from 'jspdf';
 import { v4 as uuidv4 } from 'uuid';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
 import { ReportModal } from '../components/ReportModal';
+import { ModalReservaExistente, reservasQueSeSolapan, esAvisoDuplicado } from '../components/ModalReservaExistente';
 
 const ESTADOS_ES = {
   PENDING: 'Pendiente',
@@ -168,6 +169,11 @@ export function AlojamientoDetail() {
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [bookingLoading, setBookingLoading] = useState(false);
+  // Aviso de reserva existente (como Booking): no bloquea, pide confirmación.
+  const [showModalExistente, setShowModalExistente] = useState(false);
+  const [reservasSolapadas, setReservasSolapadas] = useState([]);
+  const [mensajeDuplicado, setMensajeDuplicado] = useState('');
+  const confirmadoDuplicadoRef = useRef(false);
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [bookingError, setBookingError] = useState(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -346,6 +352,17 @@ export function AlojamientoDetail() {
       return;
     }
 
+    // ¿Ya tiene una reserva que coincide con estas fechas (en cualquier alojamiento)?
+    if (!confirmadoDuplicadoRef.current) {
+      const solapadas = reservasQueSeSolapan(checkin, checkout);
+      if (solapadas.length > 0) {
+        setReservasSolapadas(solapadas);
+        setMensajeDuplicado('');
+        setShowModalExistente(true);
+        return;
+      }
+    }
+
     setBookingLoading(true);
     setBookingError(null);
     setBookingSuccess(null);
@@ -358,6 +375,7 @@ export function AlojamientoDetail() {
       nights: nightsCount,
       customer_name: customerName,
       customer_email: customerEmail,
+      ...(confirmadoDuplicadoRef.current ? { confirmar_duplicado: true } : {}),
     };
 
     const codigoReservaPnr = `BKG-${uuidv4().substring(0, 6).toUpperCase()}`;
@@ -459,9 +477,15 @@ export function AlojamientoDetail() {
       }
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
+      confirmadoDuplicadoRef.current = false;
       setBookingSuccess(confirmedBooking);
     } catch (err) {
-      if (err.response?.status === 409) {
+      if (esAvisoDuplicado(err) && !confirmadoDuplicadoRef.current) {
+        // La reserva previa existe en el servidor (p. ej. hecha desde otro dispositivo).
+        setReservasSolapadas([]);
+        setMensajeDuplicado(err.response.data.detail);
+        setShowModalExistente(true);
+      } else if (err.response?.status === 409) {
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;
         setBookingError(errorDetail || 'Esta reserva ya fue registrada anteriormente.');
       } else {
@@ -2046,6 +2070,26 @@ export function AlojamientoDetail() {
           }}
         />
       )}
+
+      <ModalReservaExistente
+        abierto={showModalExistente}
+        reservas={reservasSolapadas}
+        alojamientoActualId={id}
+        nombreAlojamientoActual={alojamiento?.nombre}
+        checkin={checkin}
+        checkout={checkout}
+        mensajeServidor={mensajeDuplicado}
+        onContinuar={() => {
+          confirmadoDuplicadoRef.current = true;
+          setShowModalExistente(false);
+          handleBookingSubmit();
+        }}
+        onCancelar={() => {
+          confirmadoDuplicadoRef.current = false;
+          setShowModalExistente(false);
+        }}
+        onVerReservas={() => navigate('/mis-reservas')}
+      />
 
       <ReportModal 
         isOpen={showReportModal} 
