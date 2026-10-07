@@ -1,0 +1,110 @@
+.dest-ac {
+  width: 100%;
+}
+
+/* El campo contenedor ya marca el foco con :focus-within; evitamos un doble borde. */
+.dest-ac input:focus-visible {
+  outline: none;
+}
+
+/* Se posiciona respecto al campo de búsqueda contenedor (position: relative). */
+.dest-ac-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  min-width: 300px;
+  max-width: calc(100vw - 32px);
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 16px rgba(26, 26, 26, 0.24);
+  z-index: 1100;
+  padding: 8px 0;
+  cursor: default;
+  text-align: left;
+}
+
+.dest-ac-title {
+  padding: 4px 16px 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.dest-ac-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.dest-ac-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.dest-ac-option.is-active,
+.dest-ac-option:hover {
+  background: #f2f2f2;
+}
+
+.dest-ac-icon {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.dest-ac-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dest-ac-name {
+  font-size: 0.95rem;
+  color: #1a1a1a;
+  font-weight: 400;
+}
+
+.dest-ac-name strong {
+  font-weight: 700;
+}
+
+.dest-ac-sub {
+  font-size: 0.8rem;
+  color: #595959;
+}
+
+.dest-ac-empty {
+  padding: 10px 16px;
+  font-size: 0.9rem;
+  color: #595959;
+}
+
+@media (max-width: 600px) {
+  .dest-ac-panel {
+    min-width: 0;
+  }
+}
+
+/* Mensaje de validación del campo de destino (tooltip rojo, como en Booking). */
+.dest-ac-error {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  background: #d4111e;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 4px;
+  z-index: 1101;
+  white-space: nowrap;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
