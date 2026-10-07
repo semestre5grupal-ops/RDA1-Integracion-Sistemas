@@ -456,14 +456,41 @@ export function AlojamientoCheckoutModal({
       {/* 3. STEP 3: CONFIRMED VIEW */}
       {step === 3 && bookingConfirmed ? (
         <main className="bkg-confirmed-container">
+          {/* Banner offline: visible solo cuando la reserva fue guardada localmente */}
+          {bookingConfirmed.offline && (
+            <div style={{
+              background: '#fff3cd',
+              border: '1px solid #ffc107',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+            }}>
+              <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>📡</span>
+              <div>
+                <p style={{ margin: 0, fontWeight: 700, fontSize: '14px', color: '#856404' }}>
+                  Reserva guardada sin conexión
+                </p>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#856404' }}>
+                  Tu reserva se sincronizará automáticamente cuando recuperes la conexión a internet. Guarda tu código de referencia.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="bkg-confirmed-header">
             <div className="bkg-confirmed-check-icon">
-              <CheckmarkIcon size={32} color="#059669" />
+              <CheckmarkIcon size={32} color={bookingConfirmed.offline ? '#f59e0b' : '#059669'} />
             </div>
             <div>
-              <h2>¡Tu reserva está confirmada!</h2>
+              <h2>{bookingConfirmed.offline ? 'Guardado sin conexión' : '¡Tu reserva está confirmada!'}</h2>
               <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>
-                Hemos enviado la confirmación y los detalles de tu factura a <strong>{email}</strong>.
+                {bookingConfirmed.offline
+                  ? 'La confirmación se enviará a tu correo cuando se restaure la conexión.'
+                  : <>Hemos enviado la confirmación y los detalles de tu factura a <strong>{email}</strong>.</>
+                }
               </p>
             </div>
           </div>

@@ -47,15 +47,44 @@ export function PantallaReservaConfirmada({ reserva, onVolver }) {
   return (
     <main className="main-content main-content-vuelos">
       <div className="confirmacion">
+
+        {/* Banner offline: visible solo cuando la reserva fue guardada localmente */}
+        {reserva.offline && (
+          <div style={{
+            background: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+          }}>
+            <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>📡</span>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: '14px', color: '#856404' }}>
+                Reserva guardada sin conexión
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#856404' }}>
+                Tu reserva se sincronizará automáticamente cuando recuperes la conexión a internet. Guarda tu código de referencia.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="confirmacion-cabecera">
           <span className="confirmacion-icono" aria-hidden="true">
-            ✓
+            {reserva.offline ? '📡' : '✓'}
           </span>
           <div>
-            <h1 className="section-title">Reserva confirmada</h1>
+            <h1 className="section-title">
+              {reserva.offline ? 'Guardado sin conexión' : 'Reserva confirmada'}
+            </h1>
             <p className="section-subtitle">
-              Guarda tu código PNR: es lo que necesitas para presentarte en el
-              aeropuerto.
+              {reserva.offline
+                ? 'La confirmación se enviará a tu correo cuando se restaure la conexión. Guarda tu código PNR.'
+                : 'Guarda tu código PNR: es lo que necesitas para presentarte en el aeropuerto.'
+              }
             </p>
           </div>
         </div>
@@ -67,14 +96,17 @@ export function PantallaReservaConfirmada({ reserva, onVolver }) {
           <p className="pnr-valor" aria-labelledby="pnr-etiqueta">
             {reserva.pnr}
           </p>
-          <p className="pnr-estado">
-            Estado: <strong>{reserva.status}</strong> ·{' '}
-            {formatearMoneda(reserva.grandTotal?.total, reserva.grandTotal?.currency)}{' '}
-            {reserva.grandTotal?.currency}
-          </p>
-          <p className="pnr-fecha">
-            Reservado el {formatearFecha(reserva.createdAt?.slice(0, 10))}
-          </p>
+          {!reserva.offline && (
+            <p className="pnr-estado">
+              Estado: <strong>{reserva.status}</strong> ·{' '}
+              {formatearMoneda(reserva.grandTotal?.total, reserva.grandTotal?.currency)}{' '}
+              {reserva.grandTotal?.currency}
+            </p>
+          )}
+          {reserva.offline
+            ? <p className="pnr-estado" style={{ color: '#f59e0b', fontWeight: 600 }}>Estado: PENDIENTE DE SINCRONIZACIÓN</p>
+            : <p className="pnr-fecha">Reservado el {formatearFecha(reserva.createdAt?.slice(0, 10))}</p>
+          }
         </div>
 
         {iterarios.length > 0 && (
