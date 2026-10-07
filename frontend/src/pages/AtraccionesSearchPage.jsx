@@ -91,6 +91,7 @@ export function AtraccionesSearchPage() {
                 placeholderText="Fechas"
                 dateFormat="dd/MM/yyyy"
                 className="custom-date-picker-input"
+                minDate={new Date()}
               />
             </div>
           </div>
