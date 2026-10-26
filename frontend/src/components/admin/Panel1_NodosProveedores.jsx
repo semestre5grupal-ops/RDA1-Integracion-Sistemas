@@ -1,5 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../services/api';
+import { mensajeError, ErrorBox, aLista } from './panelUtils';
+
+/**
+ * Estado visual a partir del semáforo que calcula NodesService
+ * (`semaforo_led.estado`: HEALTHY | DEGRADED | DOWN | KILL_SWITCH_ACTIVE),
+ * para que el panel y el backend usen las mismas reglas.
+ */
+function estadoNodo(n) {
+  const sem = n.semaforo_led?.estado;
+  if (sem === 'KILL_SWITCH_ACTIVE' || n.killSwitchActivo || n.estado === 'APAGADO') return { txt: 'DESCONECTADO', led: '#ef4444', bg: '#fee2e2', fg: '#991b1b', off: true };
+  if (sem === 'DOWN' || n.estado === 'DOWN') return { txt: 'CAÍDO', led: '#ef4444', bg: '#fee2e2', fg: '#991b1b', off: false };
+  if (sem === 'DEGRADED' || n.estado === 'DEGRADED') return { txt: 'DEGRADADO', led: '#f59e0b', bg: '#fef3c7', fg: '#92400e', off: false };
+  if (!n.ultimo_ping_at) return { txt: 'SIN SONDEO', led: '#94a3b8', bg: '#f1f5f9', fg: '#475569', off: false };
+  return { txt: 'OPERATIVO', led: '#10b981', bg: '#dcfce7', fg: '#166534', off: false };
+}
 
 export function Panel1_NodosProveedores() {
   const [nodos, setNodos] = useState([]);
@@ -7,31 +22,26 @@ export function Panel1_NodosProveedores() {
   const [togglingId, setTogglingId] = useState(null);
   const [toggleError, setToggleError] = useState('');
 
-  const fetchNodos = async () => {
+  const [error, setError] = useState(null);
+
+  const fetchNodos = useCallback(async () => {
     try {
       setLoading(true);
       const res = await api.get('/nodes');
-      setNodos(Array.isArray(res) ? res : res.data || []);
+      setNodos(aLista(res));
+      setError(null);
     } catch (err) {
-      // Mock fallback con nodos estándar si backend está offline
-      setNodos([
-        { id: 'nodo-atracciones-1', codigo: 'MS_ATR', nombre: 'Microservicio Atracciones (REST OpenAPI v2)', url: 'http://localhost:3000/api/v2/atracciones', latenciaMs: 42, estado: 'OPERATIVO', killSwitchActivo: false, failCount: 0 },
-        { id: 'nodo-autos-2', codigo: 'MS_AUT', nombre: 'Microservicio Autos (Flota & Cooldown 2h)', url: 'http://localhost:3000/api/v2/autos', latenciaMs: 65, estado: 'OPERATIVO', killSwitchActivo: false, failCount: 0 },
-        { id: 'nodo-alojamientos-3', codigo: 'MS_ALO', nombre: 'Microservicio Alojamientos (Check-in 14:00)', url: 'http://localhost:3000/api/v2/alojamientos', latenciaMs: 88, estado: 'OPERATIVO', killSwitchActivo: false, failCount: 0 },
-        { id: 'nodo-vuelos-4', codigo: 'MS_VUE', nombre: 'Microservicio Vuelos (Boarding Pass)', url: 'http://localhost:3000/api/v2/vuelos', latenciaMs: 110, estado: 'OPERATIVO', killSwitchActivo: false, failCount: 0 },
-        { id: 'nodo-pagos-5', codigo: 'MS_PAG', nombre: 'Pasarela Pagos SOA (Idempotency-Key)', url: 'http://localhost:3000/api/v1/pagos', latenciaMs: 35, estado: 'OPERATIVO', killSwitchActivo: false, failCount: 0 },
-        { id: 'nodo-stock-6', codigo: 'MS_STK', nombre: 'Inventario gRPC Stream (TCP 50051)', url: 'grpc://localhost:50051', latenciaMs: 12, estado: 'OPERATIVO', killSwitchActivo: false, failCount: 0 },
-      ]);
+      setError(mensajeError(err, 'No se pudo leer la lista de nodos.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchNodos();
     const interval = setInterval(fetchNodos, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchNodos]);
 
   const handleToggle = async (nodoId) => {
     const nodo = nodos.find((item) => item.id === nodoId);
@@ -47,20 +57,10 @@ export function Panel1_NodosProveedores() {
       await api.post(`/admin/nodes/${codigoNodo}/toggle-killswitch`);
       await fetchNodos();
     } catch (error) {
-      setToggleError(
-        error.response?.data?.detail ||
-        error.response?.data?.message ||
-        'No se pudo cambiar el Kill-Switch. Verifica tu sesión y permisos.',
-      );
+      setToggleError(mensajeError(error, 'No se pudo cambiar el Kill-Switch.'));
     } finally {
       setTogglingId(null);
     }
-  };
-
-  const getLedColor = (nodo) => {
-    if (nodo.killSwitchActivo || nodo.estado === 'APAGADO') return '#ef4444'; // Rojo
-    if (nodo.latenciaMs > 300 || nodo.estado === 'DEGRADADO') return '#f59e0b'; // Amarillo
-    return '#10b981'; // Verde
   };
 
   return (
@@ -82,6 +82,10 @@ export function Panel1_NodosProveedores() {
         </button>
       </div>
 
+      <ErrorBox error={error} onRetry={fetchNodos} />
+      {!loading && !error && nodos.length === 0 && (
+        <p style={{ color: '#64748b' }}>No hay nodos registrados. Agrégalos en la pestaña «Servicios & Prov.».</p>
+      )}
       {loading && nodos.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>Sondeando topología de nodos...</div>
       ) : (
@@ -92,8 +96,9 @@ export function Panel1_NodosProveedores() {
             </div>
           )}
           {nodos.map((nodo) => {
-            const led = getLedColor(nodo);
-            const isOff = nodo.killSwitchActivo || nodo.estado === 'APAGADO';
+            const st = estadoNodo(nodo);
+            const led = st.led;
+            const isOff = st.off;
 
             return (
               <div 
@@ -122,7 +127,7 @@ export function Panel1_NodosProveedores() {
                           display: 'inline-block'
                         }}
                       />
-                      <strong style={{ fontSize: '0.95rem', color: '#1e293b' }}>{nodo.codigo}</strong>
+                      <strong style={{ fontSize: '0.95rem', color: '#1e293b' }}>{nodo.codigo_nodo || nodo.codigo}</strong>
                     </div>
                     <span 
                       style={{ 
@@ -130,11 +135,11 @@ export function Panel1_NodosProveedores() {
                         fontWeight: 700, 
                         padding: '2px 8px', 
                         borderRadius: '12px',
-                        background: isOff ? '#fee2e2' : '#dcfce7',
-                        color: isOff ? '#991b1b' : '#166534',
+                        background: st.bg,
+                        color: st.fg,
                       }}
                     >
-                      {isOff ? 'DESCONECTADO' : 'OPERATIVO'}
+                      {st.txt}
                     </span>
                   </div>
 
@@ -147,8 +152,12 @@ export function Panel1_NodosProveedores() {
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#64748b', marginBottom: '14px' }}>
-                    <span>Latencia: <strong style={{ color: led }}>{nodo.latenciaMs ?? 25} ms</strong></span>
-                    <span>Fallos seguidos: <strong>{nodo.failCount ?? 0}</strong></span>
+                    <span>Latencia: <strong style={{ color: led }}>{nodo.latenciaMs != null ? `${nodo.latenciaMs} ms` : '—'}</strong></span>
+                    <span>Fallos: <strong>{nodo.tasa_fallos_pct != null ? `${nodo.tasa_fallos_pct}%` : (nodo.failCount ?? 0)}</strong></span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94a3b8', marginTop: '-8px', marginBottom: '14px' }}>
+                    <span>Circuit breaker: <strong>{nodo.circuit_breaker_estado || '—'}</strong></span>
+                    <span>Último ping: {nodo.ultimo_ping_at ? new Date(nodo.ultimo_ping_at).toLocaleTimeString('es-EC') : 'nunca'}</span>
                   </div>
                 </div>
 

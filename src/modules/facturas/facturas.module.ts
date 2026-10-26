@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { FacturasController } from './facturas.controller';
 import { FacturasService } from './facturas.service';
+import { FacturasAdminService } from './facturas-admin.service';
+import { SecurityModule } from '../../core/security/security.module';
+import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
+import { RolesGuard } from '../../core/guards/roles.guard';
 
 /**
  * Facturacion: envio de la factura en PDF por correo.
@@ -17,8 +21,8 @@ import { FacturasService } from './facturas.service';
  * explicito de donde vienen las credenciales.
  */
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, SecurityModule],
   controllers: [FacturasController],
-  providers: [FacturasService],
+  providers: [FacturasService, FacturasAdminService, SupabaseAuthGuard, RolesGuard],
 })
 export class FacturasModule {}

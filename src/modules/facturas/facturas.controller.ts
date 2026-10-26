@@ -1,23 +1,46 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpException,
   HttpStatus,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { FacturasService } from './facturas.service';
 import { EnviarFacturaDto } from './dto/enviar-factura.dto';
 import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
+import { RolesGuard } from '../../core/guards/roles.guard';
+import { Roles } from '../../core/decorators/roles.decorator';
+import { Rol } from '../../core/auth/roles.enum';
+import { FacturasAdminService } from './facturas-admin.service';
 
 @ApiTags('Facturas')
 @ApiBearerAuth()
 @Controller('facturas')
 export class FacturasController {
-  constructor(private readonly facturasService: FacturasService) {}
+  constructor(
+    private readonly facturasService: FacturasService,
+    private readonly facturasAdmin: FacturasAdminService,
+  ) {}
+
+  @Get()
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiOperation({ summary: 'Listar facturas emitidas (Panel 5 · Consola Fiscal del administrador)' })
+  @ApiQuery({ name: 'limit', required: false, example: 100 })
+  @ApiQuery({ name: 'estado', required: false, enum: ['EMITIDA', 'PAGADA', 'ANULADA_POR_COMPENSACION'] })
+  @ApiQuery({ name: 'q', required: false, description: 'Busca por número, cliente, cédula/RUC o email' })
+  @ApiResponse({ status: 200, description: '{ items, total, totales }' })
+  @ApiResponse({ status: 403, description: 'Requiere rol ADMIN' })
+  @ApiResponse({ status: 503, description: 'Base de datos de facturación no disponible' })
+  listar(@Query('limit') limit?: string, @Query('estado') estado?: string, @Query('q') q?: string) {
+    return this.facturasAdmin.listar({ limit: Number(limit), estado, q });
+  }
 
   @Post('enviar')
   @UseGuards(SupabaseAuthGuard)

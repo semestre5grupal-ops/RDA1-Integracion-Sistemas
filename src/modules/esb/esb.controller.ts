@@ -1,5 +1,9 @@
-import { Controller, Post, Get, Param, Body, Headers, HttpCode, HttpStatus, Query, Res } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiHeader } from '@nestjs/swagger';
+import { Controller, Post, Get, Param, Body, Headers, HttpCode, HttpStatus, Query, Res, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiHeader, ApiBearerAuth } from '@nestjs/swagger';
+import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
+import { RolesGuard } from '../../core/guards/roles.guard';
+import { Roles } from '../../core/decorators/roles.decorator';
+import { Rol } from '../../core/auth/roles.enum';
 import { SagaOrchestratorService, CheckoutSagaInput } from './interna/saga-orchestrator.service';
 import { EsbInternalRouterService } from './interna/esb-internal-router.service';
 
@@ -42,6 +46,10 @@ export class EsbController {
   }
 
   @Get('sagas/:correlationId')
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN, Rol.MANTENIMIENTO)
+  @ApiBearerAuth()
+  @ApiResponse({ status: 403, description: 'Requiere rol ADMIN o MANTENIMIENTO (contiene datos de compras)' })
   @ApiOperation({ summary: 'Consultar bitácora y pasos ejecutados de una transacción Saga por Correlation-ID' })
   @ApiParam({ name: 'correlationId', description: 'Correlation-ID de la Saga (ej. SAGA-A1B2C3D4)' })
   async getSaga(@Param('correlationId') correlationId: string) {
@@ -49,9 +57,13 @@ export class EsbController {
   }
 
   @Get('sagas')
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN, Rol.MANTENIMIENTO)
+  @ApiBearerAuth()
+  @ApiResponse({ status: 403, description: 'Requiere rol ADMIN o MANTENIMIENTO (contiene datos de compras)' })
   @ApiOperation({ summary: 'Listar transacciones Saga recientes para el Panel 8 de Auditoría y Sagas' })
   async listarSagas(@Query('limit') limit: number) {
-    return this.sagaOrchestrator.listarSagasRecientes(Number(limit) || 20);
+    return this.sagaOrchestrator.listarSagasRecientes(Math.min(Math.max(Number(limit) || 20, 1), 200));
   }
 
   @Get('aggregate/mis-reservas/:cliente')
