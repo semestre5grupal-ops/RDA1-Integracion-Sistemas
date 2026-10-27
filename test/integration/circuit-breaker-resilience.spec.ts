@@ -87,14 +87,14 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
   describe('1. Parametrización en Vivo de URLs Oficiales (NodesService & Controller)', () => {
     it('debe sembrar nodos por defecto con variables .env si la tabla está vacía y calcular semáforos LED para Panel 1', async () => {
       const nodos = await nodesService.listarNodos();
-      expect(nodos.length).toBe(4);
+      expect(nodos.length).toBe(20);
 
       const dilanNode = nodos.find((n) => n.codigo_nodo === 'NODE_ATR_DILAN');
       expect(dilanNode).toBeDefined();
       expect(dilanNode.vertical).toBe('ATRACCIONES');
       expect(dilanNode.semaforo_led.icono).toBe('🟢');
       expect(dilanNode.semaforo_led.estado).toBe('HEALTHY');
-      expect(dilanNode.url).toBe(process.env.TIENDA_ATRACCIONES_URL || 'https://descubreec.com/api/v2');
+      expect(dilanNode.url).toBe(process.env.TIENDA_ATRACCIONES_URL || 'http://100.80.229.90:8080/api/v3');
 
       // Compatibilidad con campos de Panel 1
       expect(dilanNode.codigo).toBe('NODE_ATR_DILAN');

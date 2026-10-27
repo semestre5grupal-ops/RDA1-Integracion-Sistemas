@@ -39,6 +39,7 @@ import { TraceContextService } from '../../../core/tracing/trace-context.service
 export class DilanAtraccionesAdapter {
   private readonly logger = new Logger(DilanAtraccionesAdapter.name);
   private BASE_URL = process.env.TIENDA_ATRACCIONES_URL || process.env.ATRACCIONES_API_URL || 'https://descubreec.com/api/v2';
+  private API_KEY = process.env.TIENDA_ATRACCIONES_API_KEY || '';
 
   // Circuit Breaker State
   private circuitState: CircuitState = CircuitState.CLOSED;
@@ -65,6 +66,14 @@ export class DilanAtraccionesAdapter {
   }
 
   /**
+   * Actualiza en vivo la API Key oficial de la tienda de Dilan.
+   */
+  setApiKey(key: string) {
+    this.API_KEY = key;
+    this.logger.log(`[DilanAtraccionesAdapter] API Key de socio actualizada en vivo.`);
+  }
+
+  /**
    * Obtiene la disponibilidad de turnos y cupos consultando la API externa con Circuit Breaker.
    */
   async getDisponibilidad(atraccionId: string, fecha: string): Promise<any[]> {
@@ -76,9 +85,14 @@ export class DilanAtraccionesAdapter {
     }
 
     try {
+      const apiKey = this.API_KEY || process.env.TIENDA_ATRACCIONES_API_KEY;
       const response = await firstValueFrom(
         this.httpService.get(`${this.BASE_URL}/atracciones/${atraccionId}/disponibilidad`, {
           params: { fecha },
+          headers: {
+            'X-Correlation-Id': 'corr-disp-' + Date.now(),
+            ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+          },
           timeout: this.TIMEOUT_MS,
         }).pipe(
           timeout(this.TIMEOUT_MS),
@@ -143,12 +157,14 @@ export class DilanAtraccionesAdapter {
     try {
       this.logger.log(`ACL: Enviando reserva a Dilan (${this.BASE_URL}/reservas) con Idempotency-Key ${idempotencyKey}`);
       
+      const apiKey = this.API_KEY || process.env.TIENDA_ATRACCIONES_API_KEY;
       const response = await firstValueFrom(
         this.httpService.post(`${this.BASE_URL}/reservas`, dilanPayload, {
           headers: {
             'Idempotency-Key': idempotencyKey,
             'X-Correlation-Id': correlationId || 'corr-' + Date.now(),
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(apiKey ? { 'X-API-Key': apiKey } : {}),
           },
           timeout: this.TIMEOUT_MS,
         }).pipe(
@@ -194,6 +210,7 @@ export class DilanAtraccionesAdapter {
 
     try {
       this.logger.log(`ACL: Notificando cancelación a tienda externa de Dilan (${this.BASE_URL}/reservas/${reservaId}/cancel)`);
+      const apiKey = this.API_KEY || process.env.TIENDA_ATRACCIONES_API_KEY;
       const response = await firstValueFrom(
         this.httpService.post(`${this.BASE_URL}/reservas/${reservaId}/cancel`, {
           reason: razon,
@@ -202,7 +219,8 @@ export class DilanAtraccionesAdapter {
           headers: {
             'Idempotency-Key': idempotencyKey,
             'X-Correlation-Id': correlationId || 'corr-cancel-' + Date.now(),
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(apiKey ? { 'X-API-Key': apiKey } : {}),
           },
           timeout: this.TIMEOUT_MS,
         }).pipe(
@@ -270,7 +288,7 @@ export class DilanAtraccionesAdapter {
         time: item.hora_inicio || item.turno || item.time || item.hora || '10:00 a.m.',
         hora: item.hora_inicio || item.turno || item.time || item.hora || '10:00 a.m.',
         cupos: item.cupos_disponibles ?? item.cupos_libres ?? item.cupos ?? 10,
-        estado: (item.cupos_disponibles === 0 || item.cupos_libres === 0) ? 'AGOTADO' : ((item.cupos_disponibles <= 3 || item.cupos_libres <= 3) ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
+        estado: (item.cupos_disponibles === 0 || item.cupos_libres === 0) ? 'AGOTADO' : ((item.cupos_disponibles <= 5 || item.cupos_libres <= 5) ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
         origen: 'TIENDA_EXTERNA'
       }));
     }

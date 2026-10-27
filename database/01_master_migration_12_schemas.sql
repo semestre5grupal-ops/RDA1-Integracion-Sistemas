@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS schema_proveedores.config_proveedor (
     vertical VARCHAR(30) NOT NULL,
     base_url_rest TEXT NOT NULL,
     endpoint_grpc VARCHAR(100),
+    api_key VARCHAR(255),
     health_status VARCHAR(20) NOT NULL DEFAULT 'HEALTHY' CHECK (health_status IN ('HEALTHY', 'DEGRADED', 'DOWN')),
     latencia_ms INT NOT NULL DEFAULT 0,
     ultimo_ping_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

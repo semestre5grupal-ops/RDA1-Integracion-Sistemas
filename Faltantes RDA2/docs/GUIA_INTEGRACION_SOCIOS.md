@@ -78,8 +78,11 @@ Adjuntos en el repositorio del proyecto central, cada socio dispone de los sigui
 
 ## 4. Especificación gRPC Inbound (Envío de Stock hacia Booking)
 
-* **Servicio Protobuf:** `inventory.InventoryStockService`
-* **Definición:** [`src/proto/inventory.proto`](file:///c:/Users/ASUS/Documents/6to%20Semestre/Integración%20Sistemas/proyecto/plantilla%20inicial/src/proto/inventory.proto)
+* **Servicio Protobuf Oficial:** `inventory.InventoryStockService` (Package: `inventory`)
+* **Método Unario Canónico:** `PushStockUpdate` (Firma gRPC completa: `/inventory.InventoryStockService/PushStockUpdate`)
+* **Puerto y Cifrado:** Puerto `50051`, **sin TLS** (comunicación h2c en claro sobre TCP para Docker, LAN o Tailscale).
+* **Definición Protobuf:** [`src/proto/inventory.proto`](file:///c:/Users/ASUS/Documents/6to%20Semestre/Integración%20Sistemas/proyecto/plantilla%20inicial/src/proto/inventory.proto)
+* **Identificador de Nodo (`service_id`):** Cada tienda socia tiene su código único asignado en el Gateway de Booking. Para la tienda de Dilan (Descubre EC) el código oficial registrado es **`NODE_ATR_DILAN`**.
 
 ### 4.1. RPC 1: `PushStockUpdate` (Obligatorio)
 Debe invocarse ante cada evento de venta local, cancelación o recarga de aforo en la tienda socia:
@@ -90,11 +93,16 @@ message StockUpdateMessage {
   string item_id = 2;         // ID o slug de la atracción (ej. "PRhu4UBTWPBC")
   string date = 3;            // Fecha del turno (formato ISO YYYY-MM-DD, ej. "2026-10-25")
   string time_slot = 4;       // Franja horaria (ej. "10:30 a.m." o "10:30:00")
-  int32 available_units = 5;  // Cupos vigentes netos disponibles (0 si está agotado)
+  int32 available_units = 5;  // Cupos vigentes netos disponibles (0 si está agotado; <= 5 activa ULTIMOS_CUPOS)
   int64 timestamp = 6;        // Unix Epoch timestamp en milisegundos (Date.now())
   string slot_id = 7;         // Identificador canónico del turno (ej. "slot-20261025-1030")
 }
 ```
+
+#### Regla Canónica de Umbrales de Aforo en Booking:
+* **`AGOTADO`:** `available_units <= 0` (0 cupos disponibles, bloqueo preventivo de reservas).
+* **`ULTIMOS_CUPOS`:** `available_units <= 5` (de 1 a 5 cupos remanentes, activa badge de escasez en marketplace).
+* **`DISPONIBLE`:** `available_units > 5` (aforo regular suficiente).
 
 **Respuesta Retornada por Booking:**
 ```protobuf
@@ -124,10 +132,24 @@ Cuando un turista reserva y paga un paquete en Booking, nuestro agregador despac
 
 * **Método HTTP:** `POST`
 * **Ruta en la Tienda del Socio:** `${baseUrlRest}/reservas`
-* **Cabeceras Obligatorias:**
+* **Cabeceras Enviadas por Booking:**
   * `Content-Type: application/json`
   * `Idempotency-Key: <UUID único de la orden>`
   * `X-Correlation-Id: <UUID de trazabilidad distribuida>`
+  * `X-API-Key: <API Key precompartida>` *(Opcional / Configurable)*: Si la tienda socia protege sus rutas `/reservas`, `/cancel` y `/checkin` con autenticación por clave de API, Booking transmitirá automáticamente esta cabecera con el valor acordado en el `.env` de Booking (`TIENDA_ATRACCIONES_API_KEY`). Si la tienda no requiere API key en entorno demo/local, simplemente ignora o permite la petición.
+
+---
+
+## 5.1. Endpoints de Diagnóstico y Telemetría Consumidos por el Panel de Booking
+
+El panel administrativo de Booking Prototipo (`/admin`) dispone de dos botones de acción rápida para interactuar con cada socio:
+
+1. **Botón 🔄 (Diagnóstico / Ping en Vivo):**
+   * **Ruta Invocada:** `GET ${baseUrlRest}/health`
+   * **Propósito:** Mide la latencia en milisegundos y actualiza el semáforo LED visual (🟢 Verde < 800ms / 🟡 Amarillo / 🔴 Rojo). Si responde HTTP < 500 (ej. 200 OK), el nodo se marca como `HEALTHY`.
+2. **Botón 📥 (Sincronización de Catálogo):**
+   * **Ruta Invocada:** `GET ${baseUrlRest}/atracciones`
+   * **Propósito:** Importa el catálogo de tours y atracciones hacia Booking. Espera recibir un JSON con formato de arreglo `[...]`, o bien `{ items: [...] }` / `{ data: [...] }`.
 
 ### 5.1. Payload Canónico Enviado por Booking
 
@@ -146,7 +168,7 @@ Cuando un turista reserva y paga un paquete en Booking, nuestro agregador despac
     "name": "María José Flores",
     "email": "turista@epn.edu.ec",
     "phone": "+593991234567",
-    "document_id": "1724589632"
+    "document_id": "1724589633"
   },
   "special_requirements": "Requiere audio-guía en inglés",
   "booking_reservation_id": "RES-ATR-A1B2C3"
@@ -159,11 +181,14 @@ Cuando un turista reserva y paga un paquete en Booking, nuestro agregador despac
 ```json
 {
   "success": true,
-  "reservation_id": "SOCIO-CONF-9921",
+  "reservation_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "reservation_code": "DEC-7F3K9Q",
   "status": "CONFIRMED",
   "message": "Reserva confirmada exitosamente en la tienda individual."
 }
 ```
+> [!NOTE]
+> **Formato de Identificadores:** `reservation_id` debe ser un UUID v4 canónico (coincidiendo con `res_uuid` de su tabla `reserva`). Si desean enviar un localizador corto para el cliente, pueden incluir `reservation_code` (ej. `"DEC-7F3K9Q"`).
 
 #### B. Sin Cupos Disponibles (`409 Conflict`):
 Si en el milisegundo anterior la tienda socia agotó sus cupos locales, debe responder **estrictamente con `409 Conflict` y `code: "OUT_OF_STOCK"`** (formato Problem Details RFC 7807):
@@ -207,7 +232,7 @@ Toda atracción turística debe soportar la validación física del turista ante
 * **Payload:**
   ```json
   {
-    "documento_identidad": "1724589632",
+    "documento_identidad": "1724589633",
     "guia_asignado": "Carlos Villacís (Licencia MINTUR-441)"
   }
   ```

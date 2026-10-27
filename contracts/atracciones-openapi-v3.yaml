@@ -429,7 +429,7 @@ paths:
         
         Estados de Aforo Operativo:
         * `DISPONIBLE`: Turno con aforo suficiente para reserva.
-        * `ULTIMOS_CUPOS`: Quedan 3 o menos cupos (activa alerta visual de escasez en el marketplace).
+        * `ULTIMOS_CUPOS`: Quedan 5 o menos cupos (activa alerta visual de escasez en el marketplace).
         * `AGOTADO`: Aforo completo (0 cupos disponibles, bloqueo preventivo de reserva).
 
         > **Consistencia en Tiempo Real:** Los cupos son consultados directamente desde la tabla PostgreSQL `schema_atracciones.turnos_aforo`, la cual se mantiene sincronizada con la ingesta gRPC (puerto 50051) y los bloqueos transaccionales de reservas activas.
@@ -1685,22 +1685,10 @@ components:
           type: number
           description: Unit ticket price for child (50% off) in USD.
           example: 15.00
-        slot_id:
-          type: string
-          description: Identificador unívoco del turno horario para bloqueo atómico.
-          example: "slot-20261025-1030"
-        time:
-          type: string
-          description: Hora del turno en formato legible (12h o 24h).
-          example: "10:30 a.m."
         hora:
           type: string
           description: Alias canónico en español para hora del turno.
           example: "10:30 a.m."
-        time_24h:
-          type: string
-          description: Hora del turno en formato 24 horas normalizado (HH:mm:ss).
-          example: "10:30:00"
         hora_24h:
           type: string
           description: Alias canónico en español para hora 24h.
@@ -1987,11 +1975,11 @@ components:
         document_id:
           type: string
           description: Número de documento de identidad (cédula de 10 dígitos validada por módulo 10 o pasaporte de 6 a 9 caracteres).
-          example: "1723456789"
+          example: "1710034065"
         numero_documento:
           type: string
           description: Alias canónico en español para número de documento de identidad.
-          example: "1723456789"
+          example: "1710034065"
 
     PassengerItem:
       type: object
@@ -2182,7 +2170,7 @@ components:
         documento_identidad:
           type: string
           description: Documento de identidad físico presentado por el titular en el punto de encuentro.
-          example: "1723456789"
+          example: "1710034065"
         codigo_voucher_qr:
           type: string
           description: Payload o texto decodificado del código QR presentado por el cliente.
@@ -2222,7 +2210,7 @@ components:
           example: "Paúl Rosero"
         titular_documento:
           type: string
-          example: "1723456789"
+          example: "1710034065"
         guia_asignado:
           type: string
           example: "Lic. Carlos Morales"
