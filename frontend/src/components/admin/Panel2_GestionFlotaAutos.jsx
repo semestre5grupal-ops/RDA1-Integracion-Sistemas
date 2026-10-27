@@ -137,7 +137,7 @@ export function Panel2_GestionFlotaAutos() {
       </div>
 
       {/* ALERTAS ACTIVAS POR KILOMETRAJE */}
-      {flota.some((c) => c.mantenimiento_requerido) && (
+      {flota.some((c) => (c.alerta_mantenimiento ?? c.mantenimiento_requerido)) && (
         <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: '14px 18px', borderRadius: '8px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={{ fontSize: '1.5rem' }}>🚨</span>
           <div>
@@ -159,7 +159,7 @@ export function Panel2_GestionFlotaAutos() {
             <div 
               key={auto.id}
               style={{
-                border: auto.mantenimiento_requerido ? '2px solid #ef4444' : '1px solid #e2e8f0',
+                border: (auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) ? '2px solid #ef4444' : '1px solid #e2e8f0',
                 borderRadius: '10px',
                 padding: '16px',
                 background: auto.estado_operativo === 'EN_LIMPIEZA' ? '#fffbeb' : '#ffffff',
@@ -194,7 +194,7 @@ export function Panel2_GestionFlotaAutos() {
               <div style={{ marginBottom: '14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
                   <span style={{ color: '#64748b' }}>Odómetro: <strong>{auto.kilometraje_actual} km</strong></span>
-                  <span style={{ color: auto.mantenimiento_requerido ? '#dc2626' : '#64748b' }}>
+                  <span style={{ color: (auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) ? '#dc2626' : '#64748b' }}>
                     Umbral: {auto.umbral_mantenimiento_km} km
                   </span>
                 </div>
@@ -203,14 +203,14 @@ export function Panel2_GestionFlotaAutos() {
                     style={{ 
                       width: `${kmRatio}%`, 
                       height: '100%', 
-                      background: auto.mantenimiento_requerido ? '#ef4444' : kmRatio > 80 ? '#f59e0b' : '#3b82f6',
+                      background: (auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) ? '#ef4444' : kmRatio > 80 ? '#f59e0b' : '#3b82f6',
                       transition: 'width 0.3s'
                     }} 
                   />
                 </div>
               </div>
 
-              {auto.mantenimiento_requerido && (
+              {(auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) && (
                 <div style={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 600, background: '#fee2e2', padding: '6px', borderRadius: '4px', textAlign: 'center' }}>
                   ⚠️ Requiere cambio de aceite y filtros
                 </div>

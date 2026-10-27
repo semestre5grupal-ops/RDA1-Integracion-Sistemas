@@ -1,0 +1,37 @@
+# Producción en la VM e2-micro de Google Cloud.
+# Caddy obtiene certificados HTTPS gratis (Let's Encrypt) y publica:
+#   https://$API_DOMAIN          -> REST  (app:3000)
+#   $GRPC_DOMAIN:50051 (TLS)     -> gRPC  (app:50051, HTTP/2 sin cifrar dentro de la VM)
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/semestre5grupal-ops/rda1-integracion-sistemas:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "3000"
+      GRPC_PORT: "50051"
+    volumes:
+      - ./logs:/app/logs
+    mem_limit: 700m
+    expose:
+      - "3000"
+      - "50051"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "50051:50051"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

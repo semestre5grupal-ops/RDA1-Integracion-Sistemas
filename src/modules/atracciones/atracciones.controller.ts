@@ -12,6 +12,9 @@ import { CreateAtraccionDto } from './dto/create-atraccion.dto';
 import { UpdateAtraccionDto } from './dto/update-atraccion.dto';
 import { ReservationRequestDto, CancelReservationRequestDto, ReservationResponseDto, CheckinAtraccionDto } from './dto/reservation.dto';
 import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
+import { RolesGuard } from '../../core/guards/roles.guard';
+import { Roles } from '../../core/decorators/roles.decorator';
+import { Rol } from '../../core/auth/roles.enum';
 
 @ApiTags('Atracciones (BFF Integrador)')
 @Controller('atracciones')
@@ -50,7 +53,10 @@ export class AtraccionesController {
 
   @Post('categorias')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Crear una categoría en el árbol jerárquico (RDA2)' })
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiOperation({ summary: 'Crear una categoría en el árbol jerárquico (RDA2) — solo ADMIN (Panel 3)' })
+  @ApiResponse({ status: 403, description: 'Requiere rol ADMIN' })
   async crearCategoria(@Body() dto: any) {
     return this.atraccionesService.crearCategoria(dto);
   }
