@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepara una VM Debian/Ubuntu nueva (e2-micro) para el backend de Booking.
+# Prepara una VM Debian/Ubuntu nueva (cualquier nube: Azure, Google, etc.) para el backend de Booking.
 # Uso, dentro de la VM:  bash setup-vm.sh
 set -euo pipefail
 
@@ -9,7 +9,7 @@ if ! command -v docker >/dev/null; then
 fi
 sudo usermod -aG docker "$USER"
 
-echo "==> Creando 2 GB de swap (la e2-micro solo tiene 1 GB de RAM)"
+echo "==> Creando 2 GB de swap (las VM gratis/pequeñas tienen ~1 GB de RAM)"
 if ! sudo swapon --show | grep -q /swapfile; then
   sudo fallocate -l 2G /swapfile
   sudo chmod 600 /swapfile
@@ -27,7 +27,8 @@ for f in docker-compose.yml Caddyfile; do
   fi
 done
 if [ ! -f .env ]; then
-  IP=$(curl -fsSL -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || echo "0.0.0.0")
+  # IP pública de la VM (funciona en cualquier nube)
+  IP=$(curl -fsS4 https://api.ipify.org || curl -fsS4 https://ifconfig.me || echo "0.0.0.0")
   DASH=${IP//./-}
   cat > .env <<EOF
 # Dominios (sslip.io resuelve a la IP de la VM, sin comprar dominio)

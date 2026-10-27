@@ -1,4 +1,4 @@
-# Producción en la VM e2-micro de Google Cloud.
+# Producción en una VM pequeña (Azure, Google, etc.).
 # Caddy obtiene certificados HTTPS gratis (Let's Encrypt) y publica:
 #   https://$API_DOMAIN          -> REST  (app:3000)
 #   $GRPC_DOMAIN:50051 (TLS)     -> gRPC  (app:50051, HTTP/2 sin cifrar dentro de la VM)

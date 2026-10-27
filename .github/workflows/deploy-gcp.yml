@@ -1,4 +1,4 @@
-name: Deploy backend a Google Cloud (VM e2-micro)
+name: Deploy backend a la VM (SSH)
 
 # Cada push a main: compila la imagen en GitHub (la VM no tiene RAM para compilar),
 # la publica en GitHub Container Registry y la VM la descarga y reinicia.
