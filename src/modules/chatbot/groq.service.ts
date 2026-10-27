@@ -1,6 +1,7 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 import { MODELO_POR_DEFECTO, LIMITES } from './chatbot.constants';
 import { DefinicionHerramienta } from './chatbot.tools';
@@ -62,7 +63,11 @@ export class GroqService {
   private readonly razonamiento: string;
   private readonly http = axios.create({ baseURL: BASE_URL_GROQ });
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() traceContext?: TraceContextService,
+  ) {
+    traceContext?.instrumentAxios(this.http);
     this.apiKey = this.config.get<string>('GROQ_API_KEY') ?? '';
     this.modelo = this.config.get<string>('GROQ_MODEL') || MODELO_POR_DEFECTO;
 

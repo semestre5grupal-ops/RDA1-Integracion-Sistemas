@@ -1,0 +1,864 @@
+asyncapi: '3.0.0'
+defaultContentType: application/json
+info:
+  title: Bus de Eventos Asíncronos Dual (RabbitMQ + Apache Kafka) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    Contrato AsyncAPI 3.0 formal que especifica la arquitectura de mensajería orientada
+    a eventos (EDA) del agregador central Booking Prototipo (RDA2).
+
+    ## 1. Propósito y Arquitectura Híbrida de Eventos (Cátedra Semana 8)
+
+    El sistema implementa una arquitectura de mensajería híbrida combinando **RabbitMQ**
+    y **Apache Kafka**, asignando a cada tecnología el rol para el cual fue diseñada:
+
+    > **"RabbitMQ para lo que el negocio no puede fallar (Sagas, compras, pagos, compensaciones).
+    > Apache Kafka para lo que el negocio necesita escalar (telemetría, analítica, auditoría forense y replay)."**
+
+    ```
+    ┌─────────────────────────────────────────────────────────────────────────────┐
+    │                         BOOKING GATEWAY AGGREGATOR                          │
+    │                                                                             │
+    │  [Sagas / ESB]         [MS_PAG / Checkout]      [MS_STK / Ingesta gRPC]     │
+    └───────┬─────────────────────────┬──────────────────────────┬────────────────┘
+            │                         │                          │
+            ▼                         ▼                          ▼
+    ┌─────────────────────────────────────────────────────────────────────────────┐
+    │          PUENTE DUAL DE EVENTOS (KafkaRabbitBridgeService)                  │
+    └───────────────────────┬─────────────────────────────┬───────────────────────┘
+                            │                             │
+       Canal Transaccional  │                             │  Canal de Réplica B2B
+       y Autoritativo       ▼                             ▼  y Streaming Analítico
+    ┌─────────────────────────────────┐         ┌─────────────────────────────────┐
+    │       RABBITMQ BROKER           │         │       APACHE KAFKA              │
+    │       (AMQP 0-9-1)              │         │       (Commit Log)              │
+    │                                 │         │                                 │
+    │  Topic Exchange: booking.events │         │  • topic-catalogo-sync          │
+    │  • search.query                 │         │  • topic-ordenes-b2b            │
+    │  • order.confirmed              │         │  • topic-auditoria-sagas        │
+    │  • stock.updated                │         │  • booking.telemetry.events     │
+    │  • saga.compensate              │         │                                 │
+    │  • q.dead_letter (DLQ)          │         │  Particionado por key hash      │
+    │  ACK estricto + TTL + Reintentos│         │  Retención 7 días / Replay      │
+    └─────────────────────────────────┘         └─────────────────────────────────┘
+    ```
+
+    ---
+
+    ## 2. Preservación Invariable de Contexto en el Puente Dual (`KafkaRabbitBridgeService`)
+
+    El servicio de enlace `src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts`
+    orquesta el bus asíncrono respetando la especialización de brokers (Semana 8 / I04):
+    1. **Publicación Transaccional Autoritativa (RabbitMQ):** Envía eventos de órdenes, reservas,
+       pagos, stock y compensaciones al Topic Exchange `booking.events` de RabbitMQ con persistencia
+       (`delivery_mode: 2`), enrutamiento semántico y garantías de reintentos + DLQ (`q.dead_letter`).
+    2. **Streaming Analítico Masivo (Apache Kafka):** Los eventos de telemetría de navegación del frontend
+       (`POST /telemetry/events`) y sincronización de catálogo se emiten hacia tópicos de Kafka
+       (`booking.telemetry.events` y `topic-catalogo-sync`) sin bloquear el flujo transaccional.
+    3. **Trazabilidad Ininterrumpida:** Propaga de forma idéntica e invariable el `correlation_id`,
+       `trace_id` (W3C `traceparent`) y `node_id` a través de cabeceras AMQP y Kafka RecordHeaders.
+    4. **Modo Resiliente / Desarrollo Sin Brokers:** Mediante `EVENT_BUS_MODE=memory|rabbitmq` y
+       `TELEMETRY_SINK=kafka|file|none` (por defecto `memory` y `none`), el sistema opera
+       completamente en memoria para pruebas y desarrollo local.
+
+    ---
+
+    ## 3. Matriz Comparativa: Vista Hoy (Código Real) vs Vista Objetivo (Blueprint §7)
+
+    | Característica / Dominio | Vista Hoy en Código (`src/modules/event-bus/`) | Vista Objetivo (`ARQUITECTURA_RDA2_MICROSERVICIOS_PRODUCCION.md` §7) | Acción Requerida para Convergencia |
+    |---|---|---|---|
+    | **Exchange RabbitMQ** | `booking.events` (Topic) | `booking.events.topic` (Topic) | Homologar nombre mediante alias en topología AMQP |
+    | **Cola Búsquedas** | `q.busquedas.masivas` (`search.*`) | `eventos.busquedas` (`busqueda.catalogo.*`, TTL 10s) | Configurar TTL de 10s en binding de RabbitMQ |
+    | **Cola Órdenes** | `q.ordenes.confirmadas` (`order.confirmed`) | `ordenes.confirmadas` (`orden.factura.confirmada`) | Unificar routing key canónica con prefijo de dominio |
+    | **Cola Sagas Compensación**| `q.sagas.compensacion` (`saga.compensate`) | `sagas.compensacion` (`saga.compensacion.trigger`) | Vincular listener automático de reversión en ESB |
+    | **Cola Stock Inbound** | `q.stock.actualizado` (`stock.updated`) | `stock.actualizado` (`stock.delta.notificacion`) | Conectar emisor gRPC `applyStockDelta` |
+    | **Cola Mensajes Muertos** | `q.dead_letter` | `booking.dlx` / `q.dead_letter` | Implementado en código y consistente con el blueprint |
+    | **Tópico Kafka Catálogo** | `topic-catalogo-sync` | `booking.catalogo.stream` (4 particiones por vertical) | Particionar por `vertical` (`vuelos`, `autos`, etc.) |
+    | **Tópico Kafka Órdenes** | `topic-ordenes-b2b` | `booking.compras.audit` (6 particiones por `cliente_id`) | Estandarizar retención de 7 días con compactación |
+    | **Tópico Kafka Auditoría** | `topic-auditoria-sagas` | `booking.compras.audit` / `schema_auditoria` | Integrar journal de pasos de `SagaOrchestratorService` |
+    | **Telemetría Frontend** | Tópico Kafka `booking.telemetry.events` | Tópico Kafka `booking.telemetria.nodes` | Implementado en `TelemetryService` con emisión a Kafka (H-P08-03 / I04) |
+
+    ---
+
+    ## 4. Catálogo de Eventos del Ciclo de Vida de Sagas (Saga Pattern)
+
+    La coordinación de compras compuestas multivertical (Vuelos + Autos + Tours + Hoteles)
+    emplea los siguientes eventos estandarizados:
+
+    | Nombre Semántico del Evento | Canal RabbitMQ | Tópico Kafka | Emisor | Estado en Código | Significado Transaccional |
+    |---|---|---|---|:---:|---|
+    | `saga.started` | `general.event` | `topic-auditoria-sagas` | `MS_ESB` | `planned` | Inicio de checkout multidominio con desglose de ítems |
+    | `saga.step.completed` | `general.event` | `topic-auditoria-sagas` | `MS_ESB` | `planned` | Reserva exitosa de un ítem individual en tienda socia |
+    | `saga.step.failed` | `saga.compensate` | `topic-auditoria-sagas` | `MS_ESB` | `planned` | Falla o agotamiento de cupo en un paso intermedio |
+    | `saga.compensating` | `saga.compensate` | `topic-auditoria-sagas` | `MS_ESB` | `implemented` | Disparo de compensaciones en orden inverso (LIFO) |
+    | `saga.compensated` | `saga.compensate` | `topic-auditoria-sagas` | `MS_ESB` | `implemented` | Reintegro exitoso de cupos y reembolso completado |
+    | `saga.completed` | `order.confirmed` | `topic-ordenes-b2b` | `MS_ESB` | `implemented` | Compra finalizada exitosamente y factura emitida |
+
+    ---
+
+    ## 5. Eventos Entrantes de las Tiendas (Webhooks) y Re-publicación
+
+    Los eventos de dominio empujados por los microservicios socios vía HTTP Webhooks
+    (formalizados en `webhooks-inbound-openapi-v2.yaml`) son validados criptográficamente
+    con HMAC-SHA256 en el receptor y se re-inyectan inmediatamente en el bus de eventos:
+    - **`booking.ticket_issued` / `*.order.confirmed`:** Se publica en RabbitMQ `order.confirmed`
+      y en Kafka `topic-ordenes-b2b` para liquidación de comisiones en `MS_FIN`.
+    - **`booking.cancelled` / `*.order.cancelled`:** Se publica en RabbitMQ `saga.compensate`
+      para coordinar cancelaciones en cascada y liberación de inventario.
+    - **`auto.cleaning.cooldown.started`:** Se publica en RabbitMQ `stock.updated` y en Kafka
+      `topic-catalogo-sync` para actualizar la disponibilidad en memoria y ocultar el vehículo.
+
+    ---
+
+    ## 6. Políticas de Idempotencia y Resiliencia en Consumidores
+
+    - **Garantías de Entrega:**
+      - RabbitMQ: `delivery_mode: 2` (mensajes persistidos en disco), acuse de recibo manual (`basicAck`/`basicNack`)
+        con límite de 3 reintentos antes de enrutar a `q.dead_letter`.
+      - Kafka: Semántica **At-Least-Once** (`enable.auto.commit = false`), commit síncrono manual de offsets
+        (`commitSync()`) tras persistir la traza en base de datos o almacenamiento forense.
+    - **Deduplicación Estricta:** Todo consumidor verifica el atributo `id` del CloudEvent o el `event_id`
+      contra la caché de idempotencia antes de procesar la lógica de negocio, descartando duplicados sin error.
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  rabbitmq:
+    host: '{rabbitmqHost}:{rabbitmqPort}'
+    protocol: amqp
+    description: Broker de mensajería transaccional AMQP 0-9-1 para coordinación de Sagas y checkout.
+    variables:
+      rabbitmqHost:
+        default: 'localhost'
+        description: Hostname o IP del servidor RabbitMQ.
+      rabbitmqPort:
+        default: '5672'
+        description: Puerto estándar de comunicación AMQP.
+  kafka:
+    host: '{kafkaBrokers}'
+    protocol: kafka
+    description: Cluster de streaming distribuido Apache Kafka para réplica B2B, analítica y auditoría.
+    variables:
+      kafkaBrokers:
+        default: 'localhost:9092'
+        description: Lista separada por comas de brokers de Apache Kafka (bootstrap servers).
+
+channels:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # CANALES RABBITMQ (AMQP 0-9-1 - Topic Exchange: booking.events)
+  # ─────────────────────────────────────────────────────────────────────────────
+  searchQuery:
+    address: 'search.query'
+    title: Cola de Búsquedas Masivas de Catálogo
+    summary: Amortiguamiento de peticiones masivas de búsqueda para protección de cachés locales
+    messages:
+      SearchQueryMessage:
+        $ref: '#/components/messages/SearchQueryMessage'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: booking.events
+          type: topic
+          durable: true
+    x-source: 'src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts#bridgeEvent'
+    x-status: implemented
+    x-microservice: MS_ESB
+
+  stockUpdated:
+    address: 'stock.updated'
+    title: Cola de Actualizaciones de Stock en Tiempo Real
+    summary: Propagación interna de variaciones de cupos y disponibilidad recibidas vía gRPC 50051
+    messages:
+      StockUpdatedMessage:
+        $ref: '#/components/messages/StockUpdatedMessage'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: booking.events
+          type: topic
+          durable: true
+    x-source: 'src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts#bridgeEvent'
+    x-status: implemented
+    x-microservice: MS_STK
+
+  orderConfirmed:
+    address: 'order.confirmed'
+    title: Cola de Órdenes y Reservas Confirmadas
+    summary: Notificaciones autoritativas de checkout formalizado, pago aprobado y facturación
+    messages:
+      OrderConfirmedMessage:
+        $ref: '#/components/messages/OrderConfirmedMessage'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: booking.events
+          type: topic
+          durable: true
+    x-source: 'src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts#bridgeEvent'
+    x-status: implemented
+    x-microservice: MS_PAG
+
+  sagaCompensate:
+    address: 'saga.compensate'
+    title: Cola de Compensación y Rollback de Sagas
+    summary: Despacho de instrucciones compensatorias en orden inverso (LIFO) ante fallos en la compra
+    messages:
+      SagaCompensateMessage:
+        $ref: '#/components/messages/SagaCompensateMessage'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: booking.events
+          type: topic
+          durable: true
+    x-source: 'src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts#bridgeEvent'
+    x-status: implemented
+    x-microservice: MS_ESB
+
+  generalEvent:
+    address: 'general.event'
+    title: Cola de Eventos Generales del Gateway
+    summary: Canal de amortiguamiento para eventos de dominio misceláneos de la plataforma
+    messages:
+      GeneralEventMessage:
+        $ref: '#/components/messages/GeneralEventMessage'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: booking.events
+          type: topic
+          durable: true
+    x-source: 'src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts#bridgeEvent'
+    x-status: implemented
+    x-microservice: MS_ESB
+
+  deadLetterQueue:
+    address: 'q.dead_letter'
+    title: Cola de Mensajes Muertos (DLQ)
+    summary: Almacén de aislamiento para mensajes con errores de procesamiento o reintentos agotados
+    messages:
+      DeadLetterMessage:
+        $ref: '#/components/messages/DeadLetterMessage'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: q.dead_letter
+          durable: true
+    x-source: 'src/modules/event-bus/rabbitmq/rabbitmq-event-bus.service.ts#conectarRabbitMQ'
+    x-status: implemented
+    x-microservice: MS_AUD
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # CANALES APACHE KAFKA (Event Streaming B2B y Analítica)
+  # ─────────────────────────────────────────────────────────────────────────────
+  kafkaCatalogoSync:
+    address: 'topic-catalogo-sync'
+    title: Tópico Kafka de Sincronización de Catálogo e Inventario
+    summary: Réplica masiva B2B de deltas de stock y disponibilidad de tiendas externas
+    messages:
+      CatalogoSyncRecord:
+        $ref: '#/components/messages/CatalogoSyncRecord'
+    bindings:
+      kafka:
+        topic: topic-catalogo-sync
+        partitions: 4
+    x-source: 'src/modules/event-bus/kafka/kafka-event-bus.service.ts#TOPICS'
+    x-status: implemented
+    x-microservice: MS_STK
+
+  kafkaOrdenesB2b:
+    address: 'topic-ordenes-b2b'
+    title: Tópico Kafka de Órdenes B2B y Liquidaciones
+    summary: Streaming inmutable de compras consolidadas para conciliación, facturación y finanzas
+    messages:
+      OrdenesB2bRecord:
+        $ref: '#/components/messages/OrdenesB2bRecord'
+    bindings:
+      kafka:
+        topic: topic-ordenes-b2b
+        partitions: 6
+    x-source: 'src/modules/event-bus/kafka/kafka-event-bus.service.ts#TOPICS'
+    x-status: implemented
+    x-microservice: MS_FIN
+
+  kafkaAuditoriaSagas:
+    address: 'topic-auditoria-sagas'
+    title: Tópico Kafka de Auditoría Forense de Sagas
+    summary: Commit log distribuido de transacciones compuestas, pasos intermedios y reversos
+    messages:
+      AuditoriaSagasRecord:
+        $ref: '#/components/messages/AuditoriaSagasRecord'
+    bindings:
+      kafka:
+        topic: topic-auditoria-sagas
+        partitions: 4
+    x-source: 'src/modules/event-bus/kafka/kafka-event-bus.service.ts#TOPICS'
+    x-status: implemented
+    x-microservice: MS_AUD
+
+  kafkaTelemetryEvents:
+    address: 'booking.telemetry.events'
+    title: Tópico Kafka de Telemetría Masiva de Navegación (Objetivo)
+    summary: Ingesta en streaming de eventos del embudo de conversión y comportamiento de usuario
+    messages:
+      TelemetryStreamRecord:
+        $ref: '#/components/messages/TelemetryStreamRecord'
+    bindings:
+      kafka:
+        topic: booking.telemetry.events
+        partitions: 6
+    x-source: 'src/modules/telemetry/telemetry.service.ts#trackEvent'
+    x-status: implemented
+    x-microservice: MS_AUD
+
+operations:
+
+  # Operaciones de Publicación y Consumo en RabbitMQ
+  publishSearchQuery:
+    action: send
+    channel:
+      $ref: '#/channels/searchQuery'
+    summary: Publicar consulta de búsqueda masiva hacia la cola de RabbitMQ
+    messages:
+      - $ref: '#/channels/searchQuery/messages/SearchQueryMessage'
+
+  publishStockUpdated:
+    action: send
+    channel:
+      $ref: '#/channels/stockUpdated'
+    summary: Publicar notificación de cambio de stock a RabbitMQ
+    messages:
+      - $ref: '#/channels/stockUpdated/messages/StockUpdatedMessage'
+
+  publishOrderConfirmed:
+    action: send
+    channel:
+      $ref: '#/channels/orderConfirmed'
+    summary: Publicar orden confirmada al Topic Exchange de RabbitMQ
+    messages:
+      - $ref: '#/channels/orderConfirmed/messages/OrderConfirmedMessage'
+
+  publishSagaCompensate:
+    action: send
+    channel:
+      $ref: '#/channels/sagaCompensate'
+    summary: Publicar instrucción de compensación LIFO a RabbitMQ
+    messages:
+      - $ref: '#/channels/sagaCompensate/messages/SagaCompensateMessage'
+
+  publishGeneralEvent:
+    action: send
+    channel:
+      $ref: '#/channels/generalEvent'
+    summary: Publicar evento genérico al Topic Exchange de RabbitMQ
+    messages:
+      - $ref: '#/channels/generalEvent/messages/GeneralEventMessage'
+
+  consumeDeadLetter:
+    action: receive
+    channel:
+      $ref: '#/channels/deadLetterQueue'
+    summary: Consumir mensajes no entregables desde la Dead Letter Queue
+    messages:
+      - $ref: '#/channels/deadLetterQueue/messages/DeadLetterMessage'
+
+  # Operaciones de Publicación en Apache Kafka
+  publishKafkaCatalogoSync:
+    action: send
+    channel:
+      $ref: '#/channels/kafkaCatalogoSync'
+    summary: Replicar evento de inventario en streaming hacia Apache Kafka
+    messages:
+      - $ref: '#/channels/kafkaCatalogoSync/messages/CatalogoSyncRecord'
+
+  publishKafkaOrdenesB2b:
+    action: send
+    channel:
+      $ref: '#/channels/kafkaOrdenesB2b'
+    summary: Replicar orden B2B consolidada hacia Apache Kafka
+    messages:
+      - $ref: '#/channels/kafkaOrdenesB2b/messages/OrdenesB2bRecord'
+
+  publishKafkaAuditoriaSagas:
+    action: send
+    channel:
+      $ref: '#/channels/kafkaAuditoriaSagas'
+    summary: Replicar traza forense de Saga hacia Apache Kafka
+    messages:
+      - $ref: '#/channels/kafkaAuditoriaSagas/messages/AuditoriaSagasRecord'
+
+  publishKafkaTelemetryEvents:
+    action: send
+    channel:
+      $ref: '#/channels/kafkaTelemetryEvents'
+    summary: Publicar evento de navegación y embudo hacia Apache Kafka
+    messages:
+      - $ref: '#/channels/kafkaTelemetryEvents/messages/TelemetryStreamRecord'
+
+components:
+
+  messages:
+
+    SearchQueryMessage:
+      name: SearchQueryMessage
+      title: Mensaje de Consulta de Búsqueda
+      contentType: application/json
+      summary: Payload con filtros de búsqueda y contexto de trazabilidad
+      payload:
+        $ref: '#/components/schemas/SearchQueryPayload'
+
+    StockUpdatedMessage:
+      name: StockUpdatedMessage
+      title: Mensaje de Variación de Stock
+      contentType: application/json
+      summary: Notificación de cupos actualizados originada en el socket gRPC
+      payload:
+        $ref: '#/components/schemas/StockUpdatedPayload'
+
+    OrderConfirmedMessage:
+      name: OrderConfirmedMessage
+      title: Mensaje de Orden Confirmada
+      contentType: application/json
+      summary: Evento canónico de compra consolidada con desglose fiscal
+      payload:
+        $ref: '#/components/schemas/OrderConfirmedPayload'
+
+    SagaCompensateMessage:
+      name: SagaCompensateMessage
+      title: Mensaje de Compensación Saga
+      contentType: application/json
+      summary: Carga útil con la lista de acciones compensatorias LIFO a ejecutar
+      payload:
+        $ref: '#/components/schemas/SagaCompensatePayload'
+
+    GeneralEventMessage:
+      name: GeneralEventMessage
+      title: Mensaje de Evento Genérico
+      contentType: application/json
+      summary: Envoltorio para eventos de dominio misceláneos
+      payload:
+        $ref: '#/components/schemas/GeneralEventPayload'
+
+    DeadLetterMessage:
+      name: DeadLetterMessage
+      title: Mensaje Rechazado en DLQ
+      contentType: application/json
+      summary: Registro de mensaje descartado con metadatos de error
+      payload:
+        $ref: '#/components/schemas/DeadLetterPayload'
+
+    CatalogoSyncRecord:
+      name: CatalogoSyncRecord
+      title: Registro Kafka de Catálogo
+      contentType: application/json
+      summary: Registro distribuido con clave de partición por vertical
+      payload:
+        $ref: '#/components/schemas/KafkaRecordEnvelope'
+
+    OrdenesB2bRecord:
+      name: OrdenesB2bRecord
+      title: Registro Kafka de Órdenes B2B
+      contentType: application/json
+      summary: Registro de compra inmutable particionado por cliente_id
+      payload:
+        $ref: '#/components/schemas/KafkaRecordEnvelope'
+
+    AuditoriaSagasRecord:
+      name: AuditoriaSagasRecord
+      title: Registro Kafka de Auditoría Forense
+      contentType: application/json
+      summary: Traza de ejecución de Sagas para reconstrucción de grafos
+      payload:
+        $ref: '#/components/schemas/KafkaRecordEnvelope'
+
+    TelemetryStreamRecord:
+      name: TelemetryStreamRecord
+      title: Registro Kafka de Telemetría Masiva
+      contentType: application/json
+      summary: Evento de navegación del embudo de conversión serializado para streaming
+      payload:
+        $ref: '#/components/schemas/TelemetryStreamPayload'
+
+  schemas:
+
+    CloudEventAttributes:
+      type: object
+      description: |
+        Atributos CloudEvents v1.0 y extensiones de trazabilidad añadidos al
+        envelope existente. `payload` se conserva como alias compatible para
+        consumidores previos; `data` es el dato canónico del CloudEvent.
+      required:
+        - specversion
+        - id
+        - source
+        - type
+        - time
+        - datacontenttype
+        - correlationid
+        - traceparent
+        - node_id
+        - data
+      properties:
+        specversion:
+          type: string
+          enum: ['1.0']
+        id:
+          type: string
+          format: uuid
+        source:
+          type: string
+        type:
+          type: string
+        time:
+          type: string
+          format: date-time
+        datacontenttype:
+          type: string
+          enum: [application/json]
+        correlationid:
+          type: string
+        traceparent:
+          type: string
+          pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+        tracestate:
+          type: string
+        node_id:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+
+    SearchQueryPayload:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CloudEventAttributes'
+      required:
+        - payload
+        - timestamp
+        - routing_key
+      properties:
+        payload:
+          type: object
+          properties:
+            trace_id:
+              type: string
+              example: 'TRC-8912-4412-ABC'
+            vertical:
+              type: string
+              enum: [VUELOS, AUTOS, ATRACCIONES, ALOJAMIENTOS]
+              example: 'ATRACCIONES'
+            filtros:
+              type: object
+              additionalProperties: true
+              example:
+                ciudad: 'Quito'
+                fecha: '2026-10-25'
+                personas: 2
+            correlation_id:
+              type: string
+              example: 'corr-1729810400000-a3f7b2c'
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+        routing_key:
+          type: string
+          example: 'search.query'
+
+    StockUpdatedPayload:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CloudEventAttributes'
+      required:
+        - payload
+        - timestamp
+        - routing_key
+      properties:
+        payload:
+          type: object
+          required:
+            - service_id
+            - item_id
+            - new_units
+          properties:
+            service_id:
+              type: string
+              example: 'atracciones-dilan'
+            item_id:
+              type: string
+              example: 'PRhu4UBTWPBC'
+            date:
+              type: string
+              format: date
+              example: '2026-10-25'
+            time_slot:
+              type: string
+              example: '10:00'
+            new_units:
+              type: integer
+              example: 10
+            delta:
+              type: integer
+              example: -2
+            sync_hash:
+              type: string
+              example: 'hash-sync-1792015000'
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+        routing_key:
+          type: string
+          example: 'stock.updated'
+
+    OrderConfirmedPayload:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CloudEventAttributes'
+      required:
+        - payload
+        - timestamp
+        - routing_key
+      properties:
+        payload:
+          type: object
+          required:
+            - event_id
+            - saga_id
+            - factura_id
+            - cliente
+            - items
+          properties:
+            event_id:
+              type: string
+              format: uuid
+              example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+            saga_id:
+              type: string
+              example: 'SAGA-7K2X9M'
+            factura_id:
+              type: string
+              format: uuid
+              example: 'b1a1c2d3-e4f5-6789-0123-456789abcdef'
+            numero_factura:
+              type: string
+              example: 'FAC-2026-00001'
+            cliente:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                nombre_completo:
+                  type: string
+                  example: 'Paúl Rosero'
+                email:
+                  type: string
+                  format: email
+                  example: 'paul.rosero@epn.edu.ec'
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  tipo_servicio:
+                    type: string
+                    example: 'ATRACCION'
+                  external_item_id:
+                    type: string
+                    example: 'PRhu4UBTWPBC'
+                  cantidad:
+                    type: integer
+                    example: 2
+                  precio_unitario:
+                    type: number
+                    example: 80.00
+            correlation_id:
+              type: string
+              example: 'corr-1729810400000-a3f7b2c'
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+        routing_key:
+          type: string
+          example: 'order.confirmed'
+
+    SagaCompensatePayload:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CloudEventAttributes'
+      required:
+        - payload
+        - timestamp
+        - routing_key
+      properties:
+        payload:
+          type: object
+          required:
+            - saga_id
+            - motivo
+            - acciones_compensatorias
+          properties:
+            saga_id:
+              type: string
+              example: 'SAGA-7K2X9M'
+            factura_id:
+              type: string
+              format: uuid
+              example: 'b1a1c2d3-e4f5-6789-0123-456789abcdef'
+            motivo:
+              type: string
+              example: 'OUT_OF_STOCK_PARTNER'
+            proveedor_fallido:
+              type: string
+              example: 'proveedor-hoteles-partner'
+            paso_fallido:
+              type: string
+              example: 'RESERVA_HOTEL'
+            acciones_compensatorias:
+              type: array
+              items:
+                type: object
+                properties:
+                  tipo:
+                    type: string
+                    enum: [CANCELAR_ORDEN_EXTERNA, REEMBOLSAR_PAGO_SOA, RESTAURAR_INVENTARIO]
+                    example: 'CANCELAR_ORDEN_EXTERNA'
+                  proveedor_id:
+                    type: string
+                    example: 'proveedor-atracciones-dilan'
+                  external_order_id:
+                    type: string
+                    example: 'ORD-DILAN-8721'
+                  monto:
+                    type: number
+                    example: 160.00
+            correlation_id:
+              type: string
+              example: 'corr-1729810400000-a3f7b2c'
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+        routing_key:
+          type: string
+          example: 'saga.compensate'
+
+    GeneralEventPayload:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CloudEventAttributes'
+      required:
+        - payload
+        - timestamp
+        - routing_key
+      properties:
+        payload:
+          type: object
+          additionalProperties: true
+          example:
+            event_type: 'USER_LOGIN'
+            user_id: 'd9b2d63d-a233-4123-8478-43f112bbad8e'
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+        routing_key:
+          type: string
+          example: 'general.event'
+
+    DeadLetterPayload:
+      type: object
+      required:
+        - original_payload
+        - reason
+        - death_count
+      properties:
+        original_payload:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+          example: 'rejected_unroutable'
+        death_count:
+          type: integer
+          example: 3
+        first_death_time:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+
+    KafkaRecordEnvelope:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CloudEventAttributes'
+      required:
+        - payload
+        - emitted_at
+        - source
+      properties:
+        payload:
+          type: object
+          additionalProperties: true
+        emitted_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.050Z'
+        source:
+          type: string
+          example: 'booking-prototipo-central'
+
+    TelemetryStreamPayload:
+      type: object
+      required:
+        - event_name
+        - session_id
+        - vertical
+        - timestamp
+      properties:
+        event_name:
+          type: string
+          enum: [search_submitted, checkout_started, form_step_completed, payment_started, payment_succeeded, payment_failed, booking_confirmed]
+          example: 'checkout_started'
+        session_id:
+          type: string
+          example: '48f7d9a1-52e4-4a2e-8c3b-7a1b5c9d3e5f'
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+          example: 'd9b2d63d-a233-4123-8478-43f112bbad8e'
+        vertical:
+          type: string
+          example: 'vuelos'
+        device:
+          type: string
+          enum: [desktop, mobile, tablet]
+          example: 'desktop'
+        correlationid:
+          type: string
+          example: 'corr-1729810400000-a3f7b2c'
+        traceparent:
+          type: string
+          example: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'
+        properties:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'

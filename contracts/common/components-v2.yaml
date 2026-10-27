@@ -1,0 +1,840 @@
+openapi: 3.0.3
+info:
+  title: Componentes comunes — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    Biblioteca de componentes OpenAPI compartida por todos los contratos internos
+    del gateway / BFF Booking Prototipo (RDA2).
+
+    ## Propósito
+
+    Evitar que cada contrato redefina `ProblemDetails`, encabezados de
+    trazabilidad, esquemas de seguridad ni respuestas de error. Todos los
+    contratos del Booking importan desde aquí:
+
+    ```yaml
+    $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+    $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+    $ref: './common/components-v2.yaml#/components/responses/Problem404'
+    ```
+
+    ## Esquemas de seguridad
+
+    | Esquema | Mecanismo | Usos |
+    |---|---|---|
+    | `SupabaseBearer` | HTTP Bearer JWT | Endpoints de usuario (roles `CLIENTE`, `ADMIN`, `MANTENIMIENTO`) |
+    | `AdminKey` | `X-Admin-Key` en header | Solo pruebas automáticas y evaluación de cátedra |
+    | `ProviderApiKey` | `X-Api-Key` en header | Proveedores externos de alojamientos |
+
+    ## Trazabilidad
+
+    El middleware de `src/main.ts` (líneas 92-97) propaga `X-Correlation-Id`
+    en TODAS las peticiones: si no viene en la cabecera de la solicitud, lo
+    genera con `corr-<timestamp>-<random7>` y lo inyecta tanto en el request
+    como en la respuesta. Esto aplica a **toda** la aplicación (no hay rutas
+    excluidas del middleware de correlación).
+
+    ## Errores — RFC 7807
+
+    Todos los errores usan `Content-Type: application/problem+json` (confirmado
+    en `src/core/filters/rfc7807-exception.filter.ts` línea 114).
+
+    Los códigos de error en `ProblemDetails.code` proceden exclusivamente de
+    `src/core/errors/codigo-error.ts` (`enum CodigoProblema`). Los errores 404
+    y 500 genéricos **no llevan** `code` (diseño intencional: sin miembro
+    genérico NOT_FOUND ni INTERNAL_ERROR en el catálogo).
+
+    ## Estado de implementación
+
+    Todos los componentes de este archivo están **implemented**; describen
+    estructuras reales del código fuente del Booking.
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: Desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Producción (Render)
+
+paths: {}
+
+components:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SECURITY SCHEMES
+  # ─────────────────────────────────────────────────────────────────────────────
+  securitySchemes:
+
+    SupabaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT emitido por Supabase Auth. El guard `SupabaseAuthGuard`
+        (`src/core/guards/supabase-auth.guard.ts`) valida el token contra
+        el servidor de Supabase (`auth.getUser(token)`).
+
+        **Roles reconocidos** (fuente: `src/core/auth/roles.enum.ts`):
+        - `CLIENTE` — usuario final del marketplace.
+        - `ADMIN` — administrador del sistema.
+        - `MANTENIMIENTO` — técnico de mantenimiento.
+
+        Las cabeceras de evaluación `X-Role` y `X-Admin-Key` solo se aceptan
+        en entorno de pruebas, o si `SECURITY_ALLOW_TEST_AUTH=true` y la petición
+        procede de loopback en un entorno no productivo. Nunca se aceptan en producción.
+
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: |
+        Clave administrativa para pruebas automáticas y evaluación de cátedra.
+        Valores aceptados actualmente por `SupabaseAuthGuard`: `admin-secret`
+        o `Admin123!`. **No usar en producción.**
+
+    ProviderApiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: |
+        API key que identifican a los proveedores de alojamientos externos
+        (variable de entorno `ALOJAMIENTOS_API_KEYS` en el backend).
+        Verificado en el middleware CORS bajo `x-api-key` / `X-Api-Key`.
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PARAMETERS (request headers de trazabilidad)
+  # ─────────────────────────────────────────────────────────────────────────────
+  parameters:
+
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Identificador del proceso de negocio completo (ej. una compra de
+        paquete con vuelo + alojamiento). Si no se envía, el middleware de
+        `src/main.ts` lo genera automáticamente con el patrón
+        `corr-<timestamp>-<random7>`. Se propaga sin modificarse por todas
+        las capas y siempre se devuelve en la respuesta.
+      schema:
+        type: string
+        example: corr-1729810400000-a3f7b2c
+
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: |
+        Identificador de un solo salto HTTP. Lo genera cada servicio para
+        distinguir reintentos a nivel de infraestructura.
+      schema:
+        type: string
+        format: uuid
+        example: 7e9f3a12-0b4c-4d8e-a1f2-3c5d6e7f8a9b
+
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: |
+        Cabecera de trazabilidad distribuida W3C Trace Context.
+        Formato: `00-<32hex>-<16hex>-<2hex>`
+        (versión-traceId-parentSpanId-traceFlags).
+      schema:
+        type: string
+        pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+        example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        UUID v4 que identifica unívocamente una operación mutante (POST/PUT/PATCH).
+        Si el servidor ya procesó una petición con esta clave, devuelve la
+        respuesta anterior sin volver a ejecutar la operación
+        (cabecera `Idempotent-Replayed: true` en la respuesta).
+        **Obligatorio** en todas las operaciones críticas (pagos, reservas,
+        emisión de tickets).
+      schema:
+        type: string
+        format: uuid
+        example: 550e8400-e29b-41d4-a716-446655440000
+
+    IdempotencyKeyOptional:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        UUID v4 para idempotencia. Igual que `IdempotencyKey` pero opcional;
+        se recomienda en operaciones mutantes de menor criticidad.
+      schema:
+        type: string
+        format: uuid
+        example: 550e8400-e29b-41d4-a716-446655440001
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # HEADERS (response headers)
+  # ─────────────────────────────────────────────────────────────────────────────
+  headers:
+
+    X-Correlation-Id:
+      description: |
+        Identificador del proceso de negocio devuelto en toda respuesta.
+        Generado o propagado por el middleware de `src/main.ts`.
+      schema:
+        type: string
+        example: corr-1729810400000-a3f7b2c
+
+    Traceparent:
+      description: |
+        Cabecera W3C Trace Context propagada en la respuesta para
+        correlacionar trazas entre servicios.
+      schema:
+        type: string
+        pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+        example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+
+    Retry-After:
+      description: |
+        Segundos que el cliente debe esperar antes de reintentar (RFC 7231 §7.1.3).
+        Presente en respuestas 429 y 503.
+      schema:
+        type: integer
+        minimum: 0
+        example: 60
+
+    Idempotent-Replayed:
+      description: |
+        Presente con valor `true` cuando la respuesta es una repetición de una
+        petición idempotente previamente procesada.
+      schema:
+        type: boolean
+        example: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # SCHEMAS
+  # ─────────────────────────────────────────────────────────────────────────────
+  schemas:
+
+    ProblemDetails:
+      type: object
+      description: |
+        Cuerpo de error conforme a RFC 7807 Problem Details for HTTP APIs.
+        Emitido por `src/core/filters/rfc7807-exception.filter.ts` con
+        `Content-Type: application/problem+json`.
+
+        El campo `code` usa exclusivamente los valores del enum `CodigoProblema`
+        definido en `src/core/errors/codigo-error.ts`. Los errores 404 y 500
+        genéricos **no llevan** `code` (diseño intencional).
+
+        **Códigos válidos para `code`:**
+        - `VALIDATION_FAILED` — 400, falla de validación de DTO
+        - `SEAT_TAKEN` — 409, asiento ya ocupado
+        - `AMOUNT_MISMATCH` — 409, monto no coincide
+        - `BOOKING_NOT_CONFIRMED` — 409, reserva no confirmada
+        - `BAGGAGE_LIMIT_EXCEEDED` — 409, límite de equipaje excedido
+        - `CUTOFF_PASSED` — 409, tiempo de check-in superado
+        - `FARE_NOT_CHANGEABLE` — 409, tarifa no permite cambios
+        - `FLIGHT_ALREADY_DEPARTED` — 409, vuelo ya partió
+        - `CHANGE_OFFER_EXPIRED` — 410, oferta de cambio expirada
+        - `OFFER_NO_LONGER_AVAILABLE` — 410, oferta ya no disponible
+        - `QUOTE_EXPIRED` — 410, cotización de cancelación expirada
+        - `ALREADY_CANCELLED` — 409, reserva ya cancelada
+        - `RATE_LIMIT_EXCEEDED` — 429, límite de tasa excedido
+        - `INFANT_SEAT_NOT_ALLOWED` — 422, asiento no permite infante
+        - `PAYMENT_REFERENCE_INVALID` — 422, referencia de pago inválida
+        - `PAYMENT_NOT_AUTHORIZED` — 422, pago no autorizado
+        - `PNR_CREATION_FAILED` — 422, fallo creación de PNR
+        - `TICKET_ISSUANCE_FAILED` — 422, fallo emisión de boleto
+        - `TICKET_ALREADY_ISSUED` — 409, boleto ya emitido
+        - `CHECK_IN_NOT_AVAILABLE` — 409, check-in no disponible
+        - `CHECK_IN_FAILED` — 422, check-in falló
+        - `BOARDING_PASS_NOT_AVAILABLE` — 409, tarjeta de embarque no disponible
+        - `SEAT_CABIN_MISMATCH` — 422, asiento no corresponde a la cabina
+        - `FLIGHT_STATUS_NOT_AVAILABLE` — 404, estado de vuelo no disponible
+        - `ROOM_NO_LONGER_AVAILABLE` — 409, habitación ya no disponible
+        - `PRICE_CHANGED` — 409, precio cambió
+        - `CANCELLATION_NOT_ALLOWED` — 409, cancelación no permitida
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+      properties:
+        type:
+          type: string
+          description: |
+            URI que identifica el tipo de problema. Usa el esquema `urn:gds:error:<slug>`
+            cuando el código está en el catálogo; `https://httpstatuses.com/<status>` para
+            errores genéricos sin código específico.
+          example: urn:gds:error:validation-failed
+        title:
+          type: string
+          description: Título legible del tipo de problema (inglés, igual que en el catálogo).
+          example: Validation Failed
+        status:
+          type: integer
+          description: Código de estado HTTP de la respuesta.
+          example: 400
+        detail:
+          type: string
+          description: Descripción específica del problema ocurrido en esta petición.
+          example: El campo 'email' no es una dirección de correo válida.
+        instance:
+          type: string
+          description: URI de la petición que originó el problema (valor de `request.url`).
+          example: /pagos/procesar
+        code:
+          type: string
+          description: |
+            Código semántico del catálogo `CodigoProblema` (ausente en errores 404/500 genéricos).
+          example: VALIDATION_FAILED
+        correlation_id:
+          type: string
+          description: Identificador de correlación propagado por el middleware.
+          example: corr-1729810400000-a3f7b2c
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento en que se generó el error (UTC ISO 8601).
+          example: '2026-10-24T23:00:00.000Z'
+        invalidParams:
+          type: array
+          description: Lista de campos que fallaron la validación (presente solo en errores 400).
+          items:
+            $ref: '#/components/schemas/InvalidParam'
+      example:
+        type: urn:gds:error:validation-failed
+        title: Validation Failed
+        status: 400
+        detail: El campo 'monto' debe ser un número positivo.
+        instance: /pagos/procesar
+        code: VALIDATION_FAILED
+        correlation_id: corr-1729810400000-a3f7b2c
+        timestamp: '2026-10-24T23:00:00.000Z'
+        invalidParams:
+          - name: monto
+            reason: Debe ser un número positivo mayor a 0.
+
+    InvalidParam:
+      type: object
+      description: Campo que falló la validación del DTO (parte de `ProblemDetails.invalidParams`).
+      required:
+        - name
+        - reason
+      properties:
+        name:
+          type: string
+          description: Nombre del campo que falló.
+          example: monto
+        reason:
+          type: string
+          description: Razón por la cual falló la validación.
+          example: Debe ser un número positivo mayor a 0.
+
+    Link:
+      type: object
+      description: |
+        Enlace HATEOAS individual. Generado por `HateoasInterceptor`
+        (`src/core/interceptors/hateoas.interceptor.ts`).
+      required:
+        - href
+      properties:
+        href:
+          type: string
+          description: URL del recurso enlazado.
+          example: 'http://localhost:3000/api/v1/vuelos/bookings/abc123'
+        method:
+          type: string
+          description: Método HTTP sugerido para acceder al recurso.
+          enum: [GET, POST, PUT, PATCH, DELETE]
+          example: GET
+      example:
+        href: 'http://localhost:3000/api/v1/vuelos/bookings/abc123'
+        method: GET
+
+    Links:
+      type: object
+      description: |
+        Mapa de relaciones HATEOAS. El interceptor global inyecta `_links`
+        directamente en el objeto de respuesta. Las claves son nombres de relación
+        (`self`, `next`, `reservar`, `tickets`, `cancel`, `checkin`, etc.).
+      additionalProperties:
+        $ref: '#/components/schemas/Link'
+      example:
+        self:
+          href: 'http://localhost:3000/api/v1/vuelos/bookings/abc123'
+          method: GET
+        tickets:
+          href: 'http://localhost:3000/api/v1/vuelos/bookings/abc123/tickets'
+          method: GET
+        cancel:
+          href: 'http://localhost:3000/api/v1/vuelos/bookings/abc123/cancel'
+          method: POST
+
+    CloudEventBase:
+      type: object
+      description: |
+        Estructura base de un evento CloudEvents v1.0 con extensiones de
+        trazabilidad W3C y de correlación de negocio. Fuente:
+        `Faltantes RDA2/docs/PROTO_CLOUD_EVENTS.md`.
+
+        Todos los eventos publicados por Booking deben incluir estos campos.
+        Los eventos de negocio crítico viajan por **RabbitMQ**; los de
+        telemetría y analítica por **Kafka** (regla de arquitectura híbrida,
+        Semana 8 Cátedra).
+      required:
+        - specversion
+        - id
+        - source
+        - type
+        - time
+        - datacontenttype
+      properties:
+        specversion:
+          type: string
+          description: Versión de la especificación CloudEvents.
+          enum: ['1.0']
+          example: '1.0'
+        id:
+          type: string
+          format: uuid
+          description: Identificador único del evento (UUID v4).
+          example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+        source:
+          type: string
+          description: URI que identifica el servicio productor del evento.
+          example: booking.inventory.service
+        type:
+          type: string
+          description: Tipo del evento en formato de dominio invertido.
+          example: com.booking.pagos.pago.procesado
+        subject:
+          type: string
+          description: Recurso afectado por el evento.
+          example: recurso/atraccion/123e4567-e89b-12d3-a456-426614174000
+        time:
+          type: string
+          format: date-time
+          description: Momento de emisión del evento (UTC ISO 8601).
+          example: '2026-10-24T23:00:00.000Z'
+        datacontenttype:
+          type: string
+          description: Tipo de contenido del campo `data`.
+          example: application/json
+        correlationid:
+          type: string
+          description: |
+            Identificador de correlación de negocio. Viaja a nivel de
+            aplicación (logs JSON Lines); no se persiste en base de datos.
+          example: a9f3b8e7-6d2c-4c81-9a42-2e7f61a08d53
+        traceparent:
+          type: string
+          description: Cabecera W3C Trace Context para trazabilidad distribuida.
+          pattern: '^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+          example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+        tracestate:
+          type: string
+          description: Estado adicional del contexto de traza W3C (puede estar vacío).
+          example: ''
+        node_id:
+          type: string
+          description: Identificador del nodo que publicó el evento (trazabilidad de infra).
+          example: booking-node-01
+        data:
+          type: object
+          description: Carga útil específica del evento (estructura varía por tipo de evento).
+          example:
+            recurso_id: '123e4567-e89b-12d3-a456-426614174000'
+            tipo_recurso: atraccion
+            cantidad_disponible: 15
+            delta: -3
+      example:
+        specversion: '1.0'
+        id: f47ac10b-58cc-4372-a567-0e02b2c3d479
+        source: booking.inventory.service
+        type: com.booking.inventory.stock.updated
+        subject: recurso/atraccion/123e4567-e89b-12d3-a456-426614174000
+        time: '2026-10-24T23:00:00.000Z'
+        datacontenttype: application/json
+        correlationid: a9f3b8e7-6d2c-4c81-9a42-2e7f61a08d53
+        traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+        tracestate: ''
+        node_id: booking-node-01
+        data:
+          recurso_id: '123e4567-e89b-12d3-a456-426614174000'
+          tipo_recurso: atraccion
+          cantidad_disponible: 15
+          delta: -3
+
+    LogEstructurado:
+      type: object
+      description: |
+        Estructura mínima de log estructurado requerida por la cátedra (Semana 8).
+        Los logs se escriben en formato **JSON Lines** en archivo; **no se
+        persisten en base de datos**.
+
+        Campos mínimos según el ejemplo de la cátedra:
+        `timestamp`, `service`, `event_received`, `correlation_id`, `status`, `duration_ms`.
+        Se agregan `trace_id`, `span_id` y `node_id` para trazabilidad distribuida completa.
+      required:
+        - timestamp
+        - level
+        - service
+        - event
+        - event_received
+        - correlation_id
+        - status
+        - duration_ms
+        - message
+        - http
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento del log en UTC ISO 8601.
+          example: '2026-10-24T23:00:00.000Z'
+        level:
+          type: string
+          enum: [debug, info, warn, error]
+          description: Severidad del registro.
+          example: info
+        service:
+          type: string
+          description: Nombre del servicio o módulo que generó el log.
+          example: PagosService
+        event_received:
+          type: string
+          description: Nombre del evento o acción recibida que disparó el log.
+          example: PagoSolicitado
+        event:
+          type: string
+          description: Identificador estable del evento de logging.
+          example: http.request.completed
+        correlation_id:
+          type: string
+          description: Identificador de correlación de negocio (columna vertebral de trazabilidad).
+          example: corr-1729810400000-a3f7b2c
+        status:
+          type: string
+          description: Estado del procesamiento del evento.
+          enum: [received, processed, failed, retrying, compensated]
+          example: processed
+        duration_ms:
+          type: integer
+          description: Tiempo de procesamiento en milisegundos.
+          example: 42
+        message:
+          type: string
+          description: Mensaje breve sin credenciales ni cuerpos de petición.
+          example: GET /api/v1/health
+        http:
+          type: object
+          required: [method, path, status]
+          properties:
+            method:
+              type: string
+              example: GET
+            path:
+              type: string
+              description: Ruta sin query string.
+              example: /api/v1/health
+            status:
+              type: integer
+              example: 200
+        error:
+          type: object
+          description: Detalle sanitizado presente cuando la petición falla.
+          required: [name, message]
+          properties:
+            name:
+              type: string
+              example: HttpRequestError
+            message:
+              type: string
+              example: HTTP 500
+        trace_id:
+          type: string
+          description: Identificador de traza W3C (32 hex chars del `traceparent`).
+          example: 0af7651916cd43dd8448eb211c80319c
+        span_id:
+          type: string
+          description: Identificador del span actual (16 hex chars del `traceparent`).
+          example: b7ad6b7169203331
+        node_id:
+          type: string
+          description: Identificador del nodo de infraestructura que procesó el evento.
+          example: booking-node-01
+      example:
+        timestamp: '2026-10-24T23:00:00.000Z'
+        level: info
+        service: PagosService
+        event: http.request.completed
+        event_received: PagoSolicitado
+        correlation_id: corr-1729810400000-a3f7b2c
+        status: processed
+        duration_ms: 42
+        message: POST /api/v1/pagos/procesar
+        http:
+          method: POST
+          path: /api/v1/pagos/procesar
+          status: 200
+        trace_id: 0af7651916cd43dd8448eb211c80319c
+        span_id: b7ad6b7169203331
+        node_id: booking-node-01
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # RESPONSES (errores estándar reutilizables)
+  # ─────────────────────────────────────────────────────────────────────────────
+  responses:
+
+    Problem400:
+      description: Petición inválida — falla de validación de parámetros o cuerpo.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:gds:error:validation-failed
+            title: Validation Failed
+            status: 400
+            detail: El campo 'monto' debe ser un número positivo.
+            instance: /pagos/procesar
+            code: VALIDATION_FAILED
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+            invalidParams:
+              - name: monto
+                reason: Debe ser un número positivo mayor a 0.
+
+    Problem401:
+      description: No autenticado — token JWT ausente, inválido o expirado.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/401'
+            title: Unauthorized
+            status: 401
+            detail: No se proporcionó token de autorización (Falta cabecera Authorization o X-Role).
+            instance: /pagos/procesar
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem402:
+      description: Pago requerido — fondos insuficientes o referencia de pago no válida.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/402'
+            title: Payment Required
+            status: 402
+            detail: La referencia de pago es inválida o los fondos son insuficientes.
+            instance: /pagos/procesar
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem403:
+      description: Prohibido — el usuario no tiene el rol requerido para esta operación.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/403'
+            title: Forbidden
+            status: 403
+            detail: Esta operación requiere permisos de administrador.
+            instance: /admin/usuarios
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem404:
+      description: Recurso no encontrado.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/404'
+            title: Not Found
+            status: 404
+            detail: El recurso solicitado no fue encontrado.
+            instance: /reservas/999
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem409:
+      description: Conflicto — el estado actual del recurso impide la operación.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:gds:error:seat-taken
+            title: Seat Already Taken
+            status: 409
+            detail: El asiento 12A ya está reservado en este vuelo.
+            instance: /vuelos/reservas
+            code: SEAT_TAKEN
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem422:
+      description: Entidad no procesable — la petición está bien formada pero semánticamente inválida.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:gds:error:payment-not-authorized
+            title: Payment Not Authorized
+            status: 422
+            detail: El pago no fue autorizado por la pasarela.
+            instance: /pagos/procesar
+            code: PAYMENT_NOT_AUTHORIZED
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem429:
+      description: Demasiadas peticiones — límite de tasa excedido.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: urn:gds:error:rate-limit-exceeded
+            title: Rate Limit Exceeded
+            status: 429
+            detail: Se ha excedido el límite de peticiones. Intente de nuevo en 60 segundos.
+            instance: /vuelos/buscar
+            code: RATE_LIMIT_EXCEEDED
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem413:
+      description: El cuerpo de la petición supera el tamaño máximo permitido.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/413'
+            title: Payload Too Large
+            status: 413
+            detail: El cuerpo de telemetría supera el máximo de 16 KiB.
+            instance: /telemetry/events
+
+    Problem500:
+      description: Error interno del servidor.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/500'
+            title: Internal Server Error
+            status: 500
+            detail: Error interno del servidor.
+            instance: /pagos/procesar
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem502:
+      description: Bad Gateway — el servicio upstream no respondió correctamente.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/502'
+            title: Bad Gateway
+            status: 502
+            detail: El proveedor externo devolvió una respuesta inválida.
+            instance: /vuelos/buscar
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem503:
+      description: Servicio no disponible — en mantenimiento o sobrecarga temporal.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/503'
+            title: Service Unavailable
+            status: 503
+            detail: El servicio no está disponible temporalmente. Intente de nuevo en 60 segundos.
+            instance: /pagos/procesar
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'
+
+    Problem504:
+      description: Gateway Timeout — el servicio upstream no respondió a tiempo.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/X-Correlation-Id'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+          example:
+            type: 'https://httpstatuses.com/504'
+            title: Gateway Timeout
+            status: 504
+            detail: El proveedor externo no respondió dentro del tiempo límite.
+            instance: /vuelos/buscar
+            correlation_id: corr-1729810400000-a3f7b2c
+            timestamp: '2026-10-24T23:00:00.000Z'

@@ -13,10 +13,12 @@ import { AutosCircuitBreakerAdapter } from './acl/autos-circuit-breaker.adapter'
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../core/guards/roles.guard';
+import { CoreModule } from '../../core/core.module';
 
 @Module({
   imports: [
     CommonModule,
+    CoreModule,
     HttpModule,
     TypeOrmModule.forFeature([Auto, OrderAuto, MantenimientoAuto]),
     CacheModule.register({ ttl: 60 * 1000 })

@@ -14,6 +14,7 @@ import { TiposHabitacionService } from './tipos-habitacion.service';
 import { ProveedoresAlojamientoService } from './proveedores.service';
 import { TelemetryModule } from '../telemetry/telemetry.module';
 import { SesionSupabaseService } from '../../core/auth/sesion-supabase.service';
+import { CoreModule } from '../../core/core.module';
 import {
   GestionAlojamientosGuard,
   ClienteAutenticadoGuard,
@@ -23,6 +24,7 @@ import {
 
 @Module({
   imports: [
+    CoreModule,
     HttpModule,
     CacheModule.register({ ttl: 60000 }),
     TypeOrmModule.forFeature([
@@ -49,4 +51,3 @@ import {
   exports: [AlojamientosService],
 })
 export class AlojamientosModule {}
-

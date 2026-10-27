@@ -78,13 +78,23 @@ export class InventoryService {
   // Almacén en memoria sincronizado del inventario recibido por gRPC
   private readonly stockRegistry = new Map<string, InventoryRecord>();
 
+  // Telemetría real para el Panel 7 (antes eran valores fijos en el frontend)
+  private readonly arranque = Date.now();
+  private readonly marcasRecientes: number[] = [];
+  private totalRecibidos = 0;
+  private totalRechazados = 0;
+  private ultimoMensajeAt: string | null = null;
+  private ultimoStreamHash: string | null = null;
+  private readonly rechazosRecientes: Array<{ at: string; service_id: string | null; motivo: string }> = [];
+  private readonly mensajesPorNodo = new Map<string, number>();
+
   constructor(
     private readonly winstonLogger: WinstonPhysicalLoggerService,
     @Optional() private readonly eventBridge?: KafkaRabbitBridgeService,
     @Optional() private readonly dataSource?: DataSource,
   ) {
     // Sembrar registros de ejemplo para arrancar sincronizado
-    this.stockRegistry.set('PRhu4UBTWPBC_2026-10-25_10:00', {
+    this.stockRegistry.set(this.buildKey('atracciones-dilan', 'PRhu4UBTWPBC', '2026-10-25', '10:00'), {
       service_id: 'atracciones-dilan',
       item_id: 'PRhu4UBTWPBC',
       date: '2026-10-25',
@@ -95,8 +105,87 @@ export class InventoryService {
     });
   }
 
-  private buildKey(itemId: string, date: string, timeSlot: string): string {
-    return `${itemId}_${date}_${timeSlot || 'DEFAULT'}`;
+  /**
+   * La clave incluye el proveedor: dos aerolíneas pueden enviar el mismo
+   * `AV1632-ECONOMY` y no deben pisarse entre sí.
+   */
+  private buildKey(serviceId: string, itemId: string, date: string, timeSlot: string): string {
+    return `${serviceId || 'SIN_NODO'}|${itemId}_${date}_${timeSlot || 'DEFAULT'}`;
+  }
+
+  /**
+   * Mapa nodo -> clave leído de GRPC_NODE_KEYS (JSON), p. ej.
+   * {"NODE_VUE_ECOAIRLINES":"k-123","atracciones-dilan":"k-456"}.
+   * Vacío = modo abierto (desarrollo): se acepta cualquier clave.
+   */
+  private clavesPorNodo(): Record<string, string> {
+    const raw = process.env.GRPC_NODE_KEYS;
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      this.logger.error('GRPC_NODE_KEYS no es un JSON válido; se rechazarán todos los mensajes gRPC.');
+      return { __invalido__: '__invalido__' };
+    }
+  }
+
+  modoAutenticacion(): 'API_KEY' | 'ABIERTO' {
+    return Object.keys(this.clavesPorNodo()).length > 0 ? 'API_KEY' : 'ABIERTO';
+  }
+
+  /**
+   * Valida el origen de un mensaje de stock (contrato de vuelos v2 §9 y
+   * acuerdo con las aerolíneas): `service_id` obligatorio y específico del
+   * nodo, y `x-api-key` emitida por Booking que corresponda a ese nodo.
+   */
+  validarOrigen(serviceId: string | undefined | null, apiKey: string | undefined | null): OrigenValidado {
+    const sid = (serviceId || '').trim();
+    if (!sid) {
+      return { ok: false, grpcCode: 3, motivo: 'service_id es obligatorio.' };
+    }
+    if (SERVICE_IDS_GENERICOS.has(sid.toLowerCase())) {
+      return { ok: false, grpcCode: 3, motivo: `service_id "${sid}" es genérico; envíe el código de su nodo (ej. NODE_VUE_<NOMBRE>).` };
+    }
+    const claves = this.clavesPorNodo();
+    if (Object.keys(claves).length === 0) {
+      return { ok: true };
+    }
+    if (!apiKey) {
+      return { ok: false, grpcCode: 16, motivo: 'Falta x-api-key en la metadata gRPC.' };
+    }
+    const esperada = claves[sid];
+    if (!esperada) {
+      return { ok: false, grpcCode: 7, motivo: `El nodo "${sid}" no está registrado en Booking.` };
+    }
+    if (esperada !== apiKey) {
+      return { ok: false, grpcCode: 7, motivo: `La x-api-key no corresponde al nodo "${sid}".` };
+    }
+    return { ok: true };
+  }
+
+  /** Registra un rechazo para que el admin lo vea en el Panel 7. */
+  registrarRechazo(serviceId: string | null | undefined, motivo: string): void {
+    this.totalRechazados++;
+    this.rechazosRecientes.unshift({ at: new Date().toISOString(), service_id: serviceId || null, motivo });
+    if (this.rechazosRecientes.length > 20) this.rechazosRecientes.length = 20;
+    this.logger.warn(`[gRPC Inbound] Mensaje rechazado (${serviceId || 'sin service_id'}): ${motivo}`);
+    this.winstonLogger.logAudit('GRPC_STOCK_UPDATE_REJECTED', { service_id: serviceId || null, motivo });
+  }
+
+  private registrarRecepcion(serviceId: string): void {
+    const ahora = Date.now();
+    this.totalRecibidos++;
+    this.ultimoMensajeAt = new Date(ahora).toISOString();
+    this.marcasRecientes.push(ahora);
+    while (this.marcasRecientes.length && this.marcasRecientes[0] < ahora - 60_000) {
+      this.marcasRecientes.shift();
+    }
+    this.mensajesPorNodo.set(serviceId, (this.mensajesPorNodo.get(serviceId) || 0) + 1);
+  }
+
+  registrarStreamCompletado(hash: string): void {
+    this.ultimoStreamHash = hash;
   }
 
   /**
@@ -223,8 +312,9 @@ export class InventoryService {
     const timeSlot = event.time_slot || event.timeSlot || 'DEFAULT';
     const delta = event.delta;
 
-    const key = this.buildKey(itemId, date, timeSlot);
+    const key = this.buildKey(serviceId, itemId, date, timeSlot);
     const current = this.stockRegistry.get(key);
+    this.registrarRecepcion(serviceId);
 
     const currentUnits = current ? current.available_units : 10;
     const newUnits = Math.max(0, currentUnits + delta);
@@ -297,9 +387,10 @@ export class InventoryService {
   /**
    * Consulta el stock sincronizado actual para consulta REST o integración.
    */
-  getInventory(itemId?: string, date?: string): InventoryRecord[] {
+  getInventory(itemId?: string, date?: string, serviceId?: string): InventoryRecord[] {
     const records = Array.from(this.stockRegistry.values());
     return records.filter(r => {
+      if (serviceId && r.service_id !== serviceId) return false;
       if (itemId && r.item_id !== itemId) return false;
       if (date && r.date !== date) return false;
       return true;
@@ -335,13 +426,39 @@ export class InventoryService {
    * Métricas y estado del servicio de inventario para monitoreo.
    */
   getStatus() {
+    const ahora = Date.now();
+    const ultimoMinuto = this.marcasRecientes.filter(t => t >= ahora - 60_000).length;
+    const registros = Array.from(this.stockRegistry.values())
+      .sort((a, b) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime());
+
+    const porNodo = new Map<string, { service_id: string; items: number; unidades_disponibles: number; mensajes: number; ultima_actualizacion: string }>();
+    for (const r of registros) {
+      const n = porNodo.get(r.service_id) || {
+        service_id: r.service_id, items: 0, unidades_disponibles: 0,
+        mensajes: this.mensajesPorNodo.get(r.service_id) || 0, ultima_actualizacion: r.last_updated,
+      };
+      n.items++;
+      n.unidades_disponibles += Number(r.available_units) || 0;
+      if (r.last_updated > n.ultima_actualizacion) n.ultima_actualizacion = r.last_updated;
+      porNodo.set(r.service_id, n);
+    }
+
     return {
       status: 'OPERATIONAL',
-      protocol: 'gRPC / HTTP/2 Multiplexed',
-      port: 50051,
+      protocol: 'gRPC / HTTP/2',
+      port: Number(process.env.GRPC_PORT || 50051),
+      auth_mode: this.modoAutenticacion(),
+      uptime_seconds: Math.round((ahora - this.arranque) / 1000),
       total_items_in_registry: this.stockRegistry.size,
-      last_sync: new Date().toISOString(),
-      sample_records: Array.from(this.stockRegistry.values()).slice(-5)
+      total_messages_received: this.totalRecibidos,
+      total_messages_rejected: this.totalRechazados,
+      messages_last_minute: ultimoMinuto,
+      throughput_msg_sec: Math.round((ultimoMinuto / 60) * 100) / 100,
+      last_message_at: this.ultimoMensajeAt,
+      last_sync_hash: this.ultimoStreamHash,
+      nodes: Array.from(porNodo.values()),
+      recent_rejections: this.rechazosRecientes,
+      sample_records: registros.slice(0, 50),
     };
   }
 }

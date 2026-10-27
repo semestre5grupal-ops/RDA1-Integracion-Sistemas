@@ -2,6 +2,7 @@ import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom, timeout, catchError } from 'rxjs';
 import { ConnectorHealthService } from '../../admin/connector-health.service';
+import { TraceContextService } from '../../../core/tracing/trace-context.service';
 
 export enum CircuitState {
   CLOSED = 'CLOSED',       // Tráfico normal
@@ -54,7 +55,10 @@ export class AutosCircuitBreakerAdapter {
   constructor(
     private readonly httpService: HttpService,
     @Optional() private readonly connectorHealthService?: ConnectorHealthService,
-  ) {}
+    @Optional() private readonly traceContext?: TraceContextService,
+  ) {
+    this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
 
   /**
    * Actualiza en vivo la URL del proveedor externo de autos (CE01).

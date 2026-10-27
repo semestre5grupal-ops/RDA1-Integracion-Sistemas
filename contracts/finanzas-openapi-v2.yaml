@@ -1,0 +1,590 @@
+openapi: 3.0.3
+info:
+  title: API Finanzas, Comisiones y Liquidaciones a Proveedores (MS_FIN) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial de Integración — Microservicio de Finanzas B2B (MS_FIN · RDA2)
+
+    > **Sistema Responsable:** Microservicio de Finanzas y Liquidaciones B2B (`MS_FIN`)  
+    > **Módulo:** `src/modules/finanzas/` (Controlador `FinanzasController`, Servicio `FinanzasService`)  
+    > **Esquema de Base de Datos:** `schema_finanzas` (Tablas `liquidaciones_proveedores`, `libro_mayor_comisiones`)  
+    > **Asignatura:** Integración de Sistemas — 6to Semestre (Reto 2: RDA2 · Criterio CE05)  
+    > **Estándar:** OpenAPI Specification 3.0.3 (API-First, RFC 7807 Problem Details, CloudEvents v1.0)  
+    > **Documento de Salida:** `contracts/finanzas-openapi-v2.yaml`
+
+    ---
+
+    ## 1. Propósito y Modelo Económico (Regla 10% / 90%)
+
+    El microservicio `MS_FIN` materializa el modelo de monetización centralizado de Booking Prototipo conforme al **Criterio CE05 de la Rúbrica RDA2**:
+    1. **Comisión del Booking (10%):** Booking retiene el 10% del importe total de cada orden confirmada como tarifa por servicio de agregación, comercialización y orquestación multimodal.
+    2. **Neto Proveedores (90%):** El 90% remanente de cada venta pertenece al socio proveedor (aerolíneas, rentadoras de autos, operadores de atracciones, cadenas hoteleras) y se acumula en su período de liquidación correspondiente.
+    3. **Asiento Inmutable en Libro Mayor:** Cada orden confirmada en la Saga (`SagaOrchestratorService`) genera automáticamente un asiento correlativo en `schema_finanzas.libro_mayor_comisiones`.
+
+    ### 1.1. Ejemplo Numérico Demostrativo
+    Para una compra de paquete turístico por **$220.00 USD** (Tour histórico $70.00 + Alquiler de auto $150.00):
+    - **Total Recaudado por Booking:** `$220.00 USD` (100%)
+    - **Comisión Retenida Booking (10%):** `$22.00 USD`
+    - **Saldo Neto a Liquidar a Socios (90%):** `$198.00 USD`
+      - *Operador de Atracciones (90% de $70.00):* `$63.00 USD`
+      - *Rentadora de Autos (90% de $150.00):* `$135.00 USD`
+
+    ---
+
+    ## 2. Períodos de Liquidación Quincenal
+
+    A diferencia de otros módulos administrativos con cortes mensuales, `MS_FIN` implementa **períodos quincenales exactos**:
+    - **`Q1`:** Ventas generadas entre el día 1 y el día 15 del mes calendario.
+    - **`Q2`:** Ventas generadas desde el día 16 hasta el último día del mes.
+    - **Formato Oficial de Período:** `YYYY-MM-Q1` o `YYYY-MM-Q2` (ej. `2026-10-Q1`, `2026-10-Q2`).
+    
+    Al completar una orden, el servicio localiza la liquidación en estado `PENDIENTE` para ese proveedor y período; si no existe, la inicializa automáticamente.
+
+    ---
+
+    ## 3. Asentamiento de Pagos y Comprobantes Bancarios
+
+    El administrador del sistema o tesorero, tras efectuar la transferencia interbancaria al proveedor:
+    1. Invoca `POST /finanzas/liquidaciones/{id}/pagar` adjuntando la URL del comprobante de transferencia bancaria (`comprobante_url`).
+    2. La liquidación transiciona a estado `PAGADO`, se registra la fecha/hora UTC del desembolso (`fecha_pago`) y se emite auditoría física con Winston (`LIQUIDACION_SOCIO_PAGADA`).
+
+    ---
+
+    ## 4. Solapamiento Arquitectónico Detectado (Hallazgo H-P04-01)
+
+    Se detectó una duplicidad funcional en el repositorio:
+    - **`MS_FIN` (`src/modules/finanzas/finanzas.controller.ts`):** Microservicio canónico de Finanzas B2B con esquema `schema_finanzas`, períodos quincenales y consumo activo por parte del **Panel 4 RDA2** (`frontend/src/components/admin/Panel4_LiquidacionesFinanzas.jsx`).
+    - **`AdminFinanzasService` (`src/modules/admin/admin.controller.ts`):** Módulo administrativo legacy que recalcula métricas agregadas al vuelo consultando tablas de otras verticales y persistiendo en `panel_liquidaciones` con cortes mensuales (`YYYY-MM`), consumido por el widget de `AdminDashboard.jsx`.
+
+    Este contrato OpenAPI formaliza exclusivamente la interfaz oficial de **`MS_FIN` (`/finanzas/*`)**, documentando el solapamiento en el reporte.
+
+    ---
+
+    ## 5. Seguridad y Control de Acceso RBAC
+
+    El controlador `FinanzasController` implementa estrictos controles de seguridad mediante `@UseGuards(SupabaseAuthGuard, RolesGuard)` y `@Roles(Rol.ADMIN)`:
+    - **Token Bearer JWT:** Emitido por Supabase Auth con rol `ADMIN`.
+    - **Bypass de Evaluación Cátedra:** Admite la cabecera opcional `X-Admin-Key` (clave de administración para pruebas automáticas y evaluación).
+    - **Respuestas de Error de Seguridad:**
+      - `401 Unauthorized`: Token ausente, corrupto o clave administrativa inválida.
+      - `403 Forbidden`: Usuario autenticado pero sin rol administrativo `ADMIN`.
+
+    ---
+
+    ## 6. Tabla de Cobertura de Rutas del Microservicio de Finanzas
+
+    | Método | Ruta | Handler | x-microservice | x-status |
+    |---|---|---|---|---|
+    | `GET` | `/finanzas/resumen` | `getResumen` | `MS_FIN` | `implemented` |
+    | `GET` | `/finanzas/liquidaciones` | `getLiquidaciones` | `MS_FIN` | `implemented` |
+    | `POST` | `/finanzas/liquidaciones/{id}/pagar` | `marcarPagada` | `MS_FIN` | `implemented` |
+    | `GET` | `/finanzas/libro-mayor` | `getLibroMayor` | `MS_FIN` | `implemented` |
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: /api/v2
+    description: Relativo a la raíz del host
+  - url: 'http://localhost:3000/api/v2'
+    description: Entorno de desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Entorno de producción (Render)
+
+security:
+  - SupabaseBearer: []
+  - AdminKey: []
+
+tags:
+  - name: Balance Financiero y Comisiones
+    description: Consulta del resumen consolidado de comisiones del 10% y saldos por liquidar.
+  - name: Liquidaciones Quincenales a Socios
+    description: Administración de liquidaciones quincenales (Q1/Q2) a proveedores turísticos y registro de comprobantes de pago.
+  - name: Libro Mayor Contable
+    description: Auditoría cronológica inmutable de asientos contables por orden transaccional confirmada.
+
+paths:
+
+  /finanzas/resumen:
+    get:
+      tags:
+        - Balance Financiero y Comisiones
+      summary: Consultar balance financiero global (10% comisiones Booking vs 90% socios)
+      description: |
+        Retorna el balance financiero consolidado del Booking calculando el total recaudado global,
+        el monto retenido por comisiones del 10%, el total liquidado efectivamente a proveedores
+        y el saldo remanente pendiente de liquidar.
+      operationId: getResumenFinanciero
+      x-source: 'src/modules/finanzas/finanzas.controller.ts#getResumen'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Resumen financiero global calculado en tiempo real.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumenFinancieroResponse'
+              example:
+                total_recaudado_global: 12540.00
+                total_comisiones_booking_10pct: 1254.00
+                total_liquidado_a_socios: 8500.00
+                total_pendiente_de_pago: 2786.00
+                moneda: 'USD'
+                regla_comision: '10% Booking Prototipo / 90% Socio Externo'
+                fecha_corte: '2026-10-24T23:50:00.000Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /finanzas/liquidaciones:
+    get:
+      tags:
+        - Liquidaciones Quincenales a Socios
+      summary: Listar liquidaciones quincenales a proveedores turísticos (Panel 4)
+      description: |
+        Obtiene el listado de liquidaciones quincenales generadas para los socios comerciales
+        en `schema_finanzas.liquidaciones_proveedores`. Permite filtrar por período quincenal
+        específico (`periodo`) y por estado (`PENDIENTE`, `PAGADO`, `CONCILIADO`).
+      operationId: getLiquidaciones
+      x-source: 'src/modules/finanzas/finanzas.controller.ts#getLiquidaciones'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: periodo
+          in: query
+          required: false
+          description: Filtro por código de período quincenal con formato `YYYY-MM-Q1` o `YYYY-MM-Q2`.
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}-Q[12]$'
+            example: '2026-10-Q2'
+        - name: estado
+          in: query
+          required: false
+          description: Filtro por estado operativo de la liquidación.
+          schema:
+            type: string
+            enum: [PENDIENTE, PAGADO, CONCILIADO]
+            example: 'PENDIENTE'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Listado de liquidaciones quincenales correspondientes a los filtros indicados.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LiquidacionProveedorItem'
+              example:
+                - id: 'b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e'
+                  proveedor_codigo: 'NODE_ATR_DILAN'
+                  vertical: 'ATRACCIONES'
+                  periodo: '2026-10-Q2'
+                  total_recaudado: 1400.00
+                  comision_booking_10pct: 140.00
+                  monto_liquidar_socio_90pct: 1260.00
+                  estado: 'PENDIENTE'
+                  comprobante_transferencia_url: null
+                  fecha_pago: null
+                  created_at: '2026-10-16T08:00:00.000Z'
+                - id: 'a2b3c4d5-e6f7-8a9b-0c1d-2e3f4a5b6c7d'
+                  proveedor_codigo: 'NODE_AUT_LOCAL'
+                  vertical: 'AUTOS'
+                  periodo: '2026-10-Q1'
+                  total_recaudado: 3500.00
+                  comision_booking_10pct: 350.00
+                  monto_liquidar_socio_90pct: 3150.00
+                  estado: 'PAGADO'
+                  comprobante_transferencia_url: 'https://banco.local/transferencias/TRX-994821.pdf'
+                  fecha_pago: '2026-10-16T14:30:00.000Z'
+                  created_at: '2026-10-01T08:00:00.000Z'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /finanzas/liquidaciones/{id}/pagar:
+    post:
+      tags:
+        - Liquidaciones Quincenales a Socios
+      summary: Asentar pago de liquidación a socio con comprobante bancario
+      description: |
+        Marca una liquidación quincenal como `PAGADO`, asociando la URL del comprobante de transferencia bancaria
+        adjunto (`comprobante_url`) y registrando la fecha/hora UTC del desembolso financiero.
+        
+        Utilizado por el Panel 4 de Liquidaciones de Finanzas de la consola administrativa.
+      operationId: marcarLiquidacionPagada
+      x-source: 'src/modules/finanzas/finanzas.controller.ts#marcarPagada'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID de la liquidación en `schema_finanzas.liquidaciones_proveedores`.
+          schema:
+            type: string
+            format: uuid
+            example: 'b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Enlace al archivo PDF/imagen del comprobante bancario y observaciones opcionales.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarcarPagadaInput'
+            example:
+              comprobante_url: 'https://banco.pichincha.com/transferencias/COMP-TRX-20261024-8849.pdf'
+              notas: 'Transferencia bancaria procesada vía SPI a cuenta corriente del proveedor.'
+      responses:
+        '200':
+          description: Liquidación asentada como PAGADA exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarcarPagadaResponse'
+              example:
+                success: true
+                mensaje: 'Liquidación 2026-10-Q2 para NODE_ATR_DILAN marcada como PAGADA.'
+                liquidacion:
+                  id: 'b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e'
+                  proveedorCodigo: 'NODE_ATR_DILAN'
+                  vertical: 'ATRACCIONES'
+                  periodo: '2026-10-Q2'
+                  totalRecaudado: 1400.00
+                  comisionBooking10pct: 140.00
+                  montoLiquidarSocio90pct: 1260.00
+                  estado: 'PAGADO'
+                  comprobanteTransferenciaUrl: 'https://banco.pichincha.com/transferencias/COMP-TRX-20261024-8849.pdf'
+                  fechaPago: '2026-10-24T23:55:00.000Z'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          description: Liquidación no encontrada con el identificador UUID suministrado.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/404'
+                title: 'Not Found'
+                status: 404
+                detail: 'Liquidación no encontrada'
+                instance: '/api/v2/finanzas/liquidaciones/b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e/pagar'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /finanzas/libro-mayor:
+    get:
+      tags:
+        - Libro Mayor Contable
+      summary: Consultar libro mayor con desglose del 10% por cada orden confirmada
+      description: |
+        Recupera el historial cronológico inmutable de asientos contables registrados
+        en `schema_finanzas.libro_mayor_comisiones`. Cada asiento vincula la orden transaccional
+        multidominio (`orden_id`), la factura emitida (`factura_id`), la vertical turística
+        y el desglose exacto de la comisión del 10% y el saldo neto del 90%.
+      operationId: getLibroMayor
+      x-source: 'src/modules/finanzas/finanzas.controller.ts#getLibroMayor'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Número máximo de asientos contables a recuperar (por defecto 20).
+          schema:
+            type: integer
+            default: 20
+            example: 20
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Asientos contables recuperados del libro mayor en orden cronológico descendente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LibroMayorAsientoItem'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+components:
+
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+    AdminKey:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+
+  schemas:
+
+    ResumenFinancieroResponse:
+      type: object
+      description: Balance financiero consolidado emitido por `FinanzasService.getResumenFinanciero`.
+      required:
+        - total_recaudado_global
+        - total_comisiones_booking_10pct
+        - total_liquidado_a_socios
+        - total_pendiente_de_pago
+        - moneda
+        - regla_comision
+        - fecha_corte
+      properties:
+        total_recaudado_global:
+          type: number
+          description: Importe acumulado de todas las ventas brutas cobradas por Booking.
+          example: 12540.00
+        total_comisiones_booking_10pct:
+          type: number
+          description: Total de comisiones retenidas por Booking (10% de las ventas).
+          example: 1254.00
+        total_liquidado_a_socios:
+          type: number
+          description: Saldo acumulado que ya fue efectivamente pagado a los proveedores.
+          example: 8500.00
+        total_pendiente_de_pago:
+          type: number
+          description: Saldo neto adeudado a socios comerciales pendiente de transferir.
+          example: 2786.00
+        moneda:
+          type: string
+          example: USD
+        regla_comision:
+          type: string
+          example: 10% Booking Prototipo / 90% Socio Externo
+        fecha_corte:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:50:00.000Z'
+
+    LiquidacionProveedorItem:
+      type: object
+      description: Detalle de liquidación quincenal almacenada en `schema_finanzas.liquidaciones_proveedores`.
+      required:
+        - id
+        - proveedor_codigo
+        - vertical
+        - periodo
+        - total_recaudado
+        - comision_booking_10pct
+        - monto_liquidar_socio_90pct
+        - estado
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 'b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e'
+        proveedor_codigo:
+          type: string
+          description: Código identificador del proveedor o nodo comercial.
+          example: NODE_ATR_DILAN
+        vertical:
+          type: string
+          description: Tienda o vertical turística asociada.
+          example: ATRACCIONES
+        periodo:
+          type: string
+          description: Período quincenal correspondiente (`YYYY-MM-Q1` o `YYYY-MM-Q2`).
+          example: '2026-10-Q2'
+        total_recaudado:
+          type: number
+          description: Sumatoria bruta recaudada en el período por este proveedor.
+          example: 1400.00
+        comision_booking_10pct:
+          type: number
+          description: Comisión del 10% retenida por Booking.
+          example: 140.00
+        monto_liquidar_socio_90pct:
+          type: number
+          description: Importe neto del 90% que debe transferirse al socio.
+          example: 1260.00
+        estado:
+          type: string
+          description: Estado operativo de la liquidación quincenal.
+          enum: [PENDIENTE, PAGADO, CONCILIADO]
+          example: PENDIENTE
+        comprobante_transferencia_url:
+          type: string
+          nullable: true
+          description: URL del comprobante bancario tras efectuarse la transferencia.
+          example: null
+        fecha_pago:
+          type: string
+          format: date-time
+          nullable: true
+          description: Fecha y hora en la que se asentó el pago bancario.
+          example: null
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-16T08:00:00.000Z'
+
+    MarcarPagadaInput:
+      type: object
+      description: DTO de pago de liquidación con comprobante bancario.
+      required:
+        - comprobante_url
+      properties:
+        comprobante_url:
+          type: string
+          description: Enlace web al comprobante de la transferencia interbancaria (PDF o imagen).
+          example: 'https://banco.pichincha.com/transferencias/COMP-TRX-20261024-8849.pdf'
+        notas:
+          type: string
+          description: Observaciones o número de referencia interna de tesorería.
+          example: Transferencia bancaria procesada vía SPI a cuenta corriente del proveedor.
+
+    MarcarPagadaResponse:
+      type: object
+      description: Confirmación del asentamiento del pago bancario.
+      required:
+        - success
+        - mensaje
+        - liquidacion
+      properties:
+        success:
+          type: boolean
+          example: true
+        mensaje:
+          type: string
+          example: Liquidación 2026-10-Q2 para NODE_ATR_DILAN marcada como PAGADA.
+        liquidacion:
+          type: object
+          description: Entidad actualizada en base de datos.
+          properties:
+            id:
+              type: string
+              format: uuid
+              example: 'b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e'
+            proveedorCodigo:
+              type: string
+              example: NODE_ATR_DILAN
+            vertical:
+              type: string
+              example: ATRACCIONES
+            periodo:
+              type: string
+              example: '2026-10-Q2'
+            totalRecaudado:
+              type: number
+              example: 1400.00
+            comisionBooking10pct:
+              type: number
+              example: 140.00
+            montoLiquidarSocio90pct:
+              type: number
+              example: 1260.00
+            estado:
+              type: string
+              example: PAGADO
+            comprobanteTransferenciaUrl:
+              type: string
+              example: 'https://banco.pichincha.com/transferencias/COMP-TRX-20261024-8849.pdf'
+            fechaPago:
+              type: string
+              format: date-time
+              example: '2026-10-24T23:55:00.000Z'
+
+    LibroMayorAsientoItem:
+      type: object
+      description: Asiento contable individual registrado en `schema_finanzas.libro_mayor_comisiones`.
+      required:
+        - id
+        - ordenId
+        - facturaId
+        - vertical
+        - totalVenta
+        - comisionBooking10pct
+        - netoSocio90pct
+        - fechaAsiento
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 'c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f'
+        ordenId:
+          type: string
+          description: Identificador de correlación o código de orden de compra en la Saga.
+          example: SAGA-A1B2C3D4
+        facturaId:
+          type: string
+          format: uuid
+          description: Identificador de la factura fiscal emitida en `schema_facturacion`.
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        vertical:
+          type: string
+          description: Vertical turística que generó el ingreso.
+          example: ATRACCIONES
+        totalVenta:
+          type: number
+          description: Monto bruto cobrado en esta transacción.
+          example: 70.00
+        comisionBooking10pct:
+          type: number
+          description: 10% retenido por Booking Prototipo.
+          example: 7.00
+        netoSocio90pct:
+          type: number
+          description: 90% a transferir al socio comercial.
+          example: 63.00
+        fechaAsiento:
+          type: string
+          format: date-time
+          description: Fecha y hora en la que se asentó la transacción en el libro mayor.
+          example: '2026-10-24T23:15:30.000Z'

@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
 import { randomUUID } from 'crypto';
+import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 import {
   CATEGORIAS_AUTO,
@@ -68,7 +69,10 @@ export class ChatbotToolsExecutorService {
   /** Mapa nombre -> ejecutor. Derivado de `HERRAMIENTAS`; no se escribe a mano. */
   private readonly ejecutores: Record<string, (args: any) => Promise<ResultadoHerramienta>>;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @Optional() traceContext?: TraceContextService,
+  ) {
     this.apiBase =
       config.get<string>('CHATBOT_API_BASE_URL') ||
       `http://127.0.0.1:${config.get<string>('PORT') || 3000}/api/v1`;
@@ -92,6 +96,7 @@ export class ChatbotToolsExecutorService {
       // proxy abierto. `baseURL` es lo único que puede cambiar de host.
       maxRedirects: 0,
     });
+    traceContext?.instrumentAxios(this.http);
 
     this.ejecutores = {
       consultar_vuelos: (a) => this.consultarVuelos(a),

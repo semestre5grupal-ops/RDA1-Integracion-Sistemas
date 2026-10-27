@@ -1,0 +1,14 @@
+# API_DOMAIN y GRPC_DOMAIN vienen de deploy/.env.
+# Sin dominio propio usa sslip.io con la IP de la VM, p. ej.
+#   API_DOMAIN=api.34-123-45-67.sslip.io
+#   GRPC_DOMAIN=grpc.34-123-45-67.sslip.io
+
+{$API_DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000
+}
+
+# gRPC con TLS en el puerto 50051 (el que acordamos con las aerolíneas).
+{$GRPC_DOMAIN}:50051 {
+	reverse_proxy h2c://app:50051
+}

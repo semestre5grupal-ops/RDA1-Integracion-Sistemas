@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import { CacheInterceptor } from '@nestjs/cache-manager';
 import { ChatbotService } from './chatbot.service';
 import { MensajeChatDto, RespuestaChatDto } from './dto/chat-mensaje.dto';
 import { RESPUESTA_SOLO_LECTURA } from './chatbot.prompt';
+import { ChatbotRateLimitGuard } from './chatbot-rate-limit.guard';
 
 /**
  * API del chatbot informativo.
@@ -53,6 +55,7 @@ export class ChatbotController {
    */
   @Post('mensaje')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ChatbotRateLimitGuard)
   @ApiOperation({
     summary: 'Enviar un mensaje al chatbot y recibir su respuesta',
     description:
@@ -64,6 +67,7 @@ export class ChatbotController {
   })
   @ApiResponse({ status: 200, description: 'Respuesta del bot', type: RespuestaChatDto })
   @ApiResponse({ status: 400, description: 'Mensaje vacío o con formato inválido' })
+  @ApiResponse({ status: 429, description: 'Límite de solicitudes excedido.' })
   @ApiResponse({ status: 503, description: 'Chatbot deshabilitado (falta GROQ_API_KEY) o Groq no disponible' })
   async enviar(@Body() dto: MensajeChatDto): Promise<RespuestaChatDto> {
     return this.chatbotService.responder(dto);

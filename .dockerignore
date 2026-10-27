@@ -6,3 +6,6 @@ dist
 .gitignore
 .dockerignore
 *.md
+frontend
+logs
+coverage

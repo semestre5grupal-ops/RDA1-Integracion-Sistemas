@@ -23,6 +23,7 @@ import { DilanAtraccionesAdapter } from './acl/dilan-atracciones.adapter';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { InventoryService } from '../inventory/inventory.service';
 import * as crypto from 'crypto';
+import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 @Injectable()
 export class AtraccionesService {
@@ -50,7 +51,11 @@ export class AtraccionesService {
     private readonly outboxRepo: Repository<EventoOutbox>,
     @Optional()
     private readonly inventoryService?: InventoryService,
-  ) {}
+    @Optional()
+    private readonly traceContext?: TraceContextService,
+  ) {
+    this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
 
   async health(): Promise<any> {
     return {

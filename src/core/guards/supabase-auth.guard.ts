@@ -36,8 +36,12 @@ export class SupabaseAuthGuard implements CanActivate {
     const authHeader = request.headers.authorization;
 
     if (!authHeader) {
+      const allowEvaluationHeaders = this.allowEvaluationHeaders(request);
       const adminKey = request.headers['x-admin-key'];
-      if (adminKey === 'admin-secret' || adminKey === 'Admin123!') {
+      if (
+        allowEvaluationHeaders &&
+        (adminKey === 'admin-secret' || adminKey === 'Admin123!')
+      ) {
         request.user = {
           id: 'admin-local-eval',
           email: 'admin@booking.com',
@@ -48,7 +52,7 @@ export class SupabaseAuthGuard implements CanActivate {
 
       // Soporte para evaluación de roles Cátedra RDA2 (§5) vía cabecera técnica
       const roleHeader = request.headers['x-role'];
-      if (roleHeader) {
+      if (allowEvaluationHeaders && roleHeader) {
         const rolNorm = String(roleHeader).toLowerCase();
         request.user = {
           id: `eval-${rolNorm}`,
@@ -58,7 +62,7 @@ export class SupabaseAuthGuard implements CanActivate {
         return true;
       }
 
-      throw new UnauthorizedException('No se proporcionó token de autorización (Falta cabecera Authorization o X-Role)');
+      throw new UnauthorizedException('No se proporcionó un token de autorización válido.');
     }
 
     const parts = authHeader.split(' ');
@@ -79,5 +83,19 @@ export class SupabaseAuthGuard implements CanActivate {
     // Inyectar el usuario validado en el objeto de la petición para que los controladores lo usen
     request.user = data.user;
     return true;
+  }
+
+  private allowEvaluationHeaders(request: {
+    ip?: string;
+    socket?: { remoteAddress?: string };
+  }): boolean {
+    const environment = process.env.NODE_ENV?.toLowerCase();
+    if (environment === 'test') return true;
+    if (process.env.SECURITY_ALLOW_TEST_AUTH !== 'true' || environment === 'production') {
+      return false;
+    }
+
+    const address = request.ip || request.socket?.remoteAddress;
+    return address === '::1' || address === '127.0.0.1' || address === '::ffff:127.0.0.1';
   }
 }

@@ -33,6 +33,7 @@ export enum CircuitState {
  */
 import { Optional } from '@nestjs/common';
 import { ConnectorHealthService } from '../../admin/connector-health.service';
+import { TraceContextService } from '../../../core/tracing/trace-context.service';
 
 @Injectable()
 export class DilanAtraccionesAdapter {
@@ -50,7 +51,10 @@ export class DilanAtraccionesAdapter {
   constructor(
     private readonly httpService: HttpService,
     @Optional() private readonly connectorHealthService?: ConnectorHealthService,
-  ) {}
+    @Optional() private readonly traceContext?: TraceContextService,
+  ) {
+    this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
 
   /**
    * Actualiza en vivo la URL oficial de la tienda de Dilan (CE01).

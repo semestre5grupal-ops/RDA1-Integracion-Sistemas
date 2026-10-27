@@ -26,6 +26,15 @@ export class TransaccionPago {
   })
   montoTotal: number;
 
+  @Column('numeric', {
+    name: 'monto_reembolsado',
+    precision: 10,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  montoReembolsado: number;
+
   @Column({ type: 'varchar', length: 3, default: 'USD' })
   moneda: string;
 

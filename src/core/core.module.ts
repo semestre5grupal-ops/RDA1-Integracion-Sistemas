@@ -9,6 +9,7 @@ import { EstadoServicio } from './entities/estado-servicio.entity';
 import { Configuracion } from './entities/configuracion.entity';
 
 import { WinstonPhysicalLoggerService } from './logger/winston-logger.service';
+import { TraceContextService } from './tracing/trace-context.service';
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { WinstonPhysicalLoggerService } from './logger/winston-logger.service';
       Configuracion,
     ]),
   ],
-  providers: [WinstonPhysicalLoggerService],
-  exports: [TypeOrmModule, WinstonPhysicalLoggerService],
+  providers: [WinstonPhysicalLoggerService, TraceContextService],
+  exports: [TypeOrmModule, WinstonPhysicalLoggerService, TraceContextService],
 })
 export class CoreModule {}

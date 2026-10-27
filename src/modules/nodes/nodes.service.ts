@@ -5,6 +5,7 @@ import { ConfigProveedor } from './entities';
 import { Atraccion } from '../atracciones/entities/atraccion.entity';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { ConnectorHealthService } from '../admin/connector-health.service';
+import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 @Injectable()
 export class NodesService {
@@ -18,7 +19,17 @@ export class NodesService {
     private readonly winstonLogger: WinstonPhysicalLoggerService,
     @Optional()
     private readonly connectorHealthService?: ConnectorHealthService,
+    @Optional()
+    private readonly traceContext?: TraceContextService,
   ) {}
+
+  private fetchWithTrace(input: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    for (const [name, value] of Object.entries(this.traceContext?.outgoingHeaders() ?? {})) {
+      headers.set(name, value);
+    }
+    return fetch(input, { ...init, headers });
+  }
 
   async listarNodos(): Promise<any[]> {
     this.logger.log('Consultando estado de salud de nodos de proveedores en schema_proveedores');
@@ -339,8 +350,8 @@ export class NodesService {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
 
-        let res = await fetch(pingUrl, { signal: controller.signal }).catch(async () => {
-          return fetch(nodo.baseUrlRest, { signal: controller.signal });
+        let res = await this.fetchWithTrace(pingUrl, { signal: controller.signal }).catch(async () => {
+          return this.fetchWithTrace(nodo.baseUrlRest, { signal: controller.signal });
         });
         clearTimeout(timeout);
         latencia = Date.now() - t0;
@@ -400,10 +411,9 @@ export class NodesService {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
-      const resp = await fetch(targetUrl, {
+      const resp = await this.fetchWithTrace(targetUrl, {
         headers: {
           Accept: 'application/json',
-          'X-Correlation-Id': `sync-${Date.now()}`,
         },
         signal: controller.signal,
       });

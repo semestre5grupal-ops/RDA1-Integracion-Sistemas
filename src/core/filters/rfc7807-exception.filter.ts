@@ -106,6 +106,11 @@ export class Rfc7807ExceptionFilter implements ExceptionFilter {
       status: status,
       detail: detail,
       instance: request.url,
+      correlation_id:
+        typeof request.headers['x-correlation-id'] === 'string'
+          ? request.headers['x-correlation-id']
+          : undefined,
+      timestamp: new Date().toISOString(),
     };
     if (codigo) problemDetails.code = codigo;
     if (invalidParams.length > 0) problemDetails.invalidParams = invalidParams;

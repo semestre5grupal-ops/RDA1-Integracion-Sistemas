@@ -20,16 +20,26 @@ export class NodesController {
 
   @Post('nodes')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Registrar nuevo socio / proveedor en el Gateway de Integración (RDA2)' })
   @ApiResponse({ status: 201, description: 'Proveedor registrado exitosamente en schema_proveedores.' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Acceso restringido (requiere rol ADMIN)' })
   async crearNodoPublic(@Body() body: any) {
     return this.nodesService.crearNodo(body);
   }
 
   @Put('nodes/:codigoNodo')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Actualizar parámetros de conexión de un nodo socio' })
   @ApiParam({ name: 'codigoNodo', description: 'Código o ID del nodo' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Acceso restringido (requiere rol ADMIN)' })
   async actualizarNodoPublic(
     @Param('codigoNodo') codigoNodo: string,
     @Body() body: any,
@@ -39,33 +49,53 @@ export class NodesController {
 
   @Delete('nodes/:codigoNodo')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Eliminar un nodo proveedor' })
   @ApiParam({ name: 'codigoNodo', description: 'Código o ID del nodo' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Acceso restringido (requiere rol ADMIN)' })
   async eliminarNodoPublic(@Param('codigoNodo') codigoNodo: string) {
     return this.nodesService.eliminarNodo(codigoNodo);
   }
 
   @Post('nodes/:codigoNodo/ping')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN, Rol.MANTENIMIENTO)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Disparar ping de diagnóstico HTTP a la URL del socio y medir latencia' })
   @ApiParam({ name: 'codigoNodo', description: 'Código o ID del nodo' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Acceso restringido (requiere rol ADMIN o MANTENIMIENTO)' })
   async pingNodoPublic(@Param('codigoNodo') codigoNodo: string) {
     return this.nodesService.pingNodo(codigoNodo);
   }
 
   @Post('nodes/:codigoNodo/sync')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Sincronizar e importar catálogo de atracciones desde el microservicio socio (OpenAPI v2)' })
   @ApiParam({ name: 'codigoNodo', description: 'Código o ID del nodo socio de atracciones' })
   @ApiResponse({ status: 200, description: 'Catálogo sincronizado exitosamente.' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Acceso restringido (requiere rol ADMIN)' })
   async sincronizarCatalogoPublic(@Param('codigoNodo') codigoNodo: string) {
     return this.nodesService.sincronizarCatalogo(codigoNodo);
   }
 
   @Post('nodes/:codigoNodo/toggle')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN, Rol.MANTENIMIENTO)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Alternar switch de un nodo socio desde el Panel 1 de Administración' })
   @ApiParam({ name: 'codigoNodo', description: 'Código o ID del nodo' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Acceso restringido (requiere rol ADMIN o MANTENIMIENTO)' })
   async toggleNodePublic(
     @Param('codigoNodo') codigoNodo: string,
     @Body() body?: { activar?: boolean },

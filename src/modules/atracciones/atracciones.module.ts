@@ -20,10 +20,12 @@ import { DilanAtraccionesAdapter } from './acl/dilan-atracciones.adapter';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 
 import { InventoryModule } from '../inventory/inventory.module';
+import { CoreModule } from '../../core/core.module';
 
 @Module({
   imports: [
     CommonModule, 
+    CoreModule,
     HttpModule,
     InventoryModule,
     TypeOrmModule.forFeature([

@@ -1,0 +1,908 @@
+openapi: 3.0.3
+info:
+  title: Microservicio de Auditoría Transaccional y Forense (MS_AUD) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    Especificación OpenAPI 3.0.3 del microservicio **Auditoría Transaccional y Forense (`MS_AUD`)**
+    del ecosistema Booking Prototipo (RDA2).
+
+    ---
+
+    ## 1. Misión y Diferenciación Arquitectónica Clave (ADR-003)
+
+    Este contrato implementa la directriz de cátedra y la decisión de arquitectura **ADR-003**:
+
+    | Dimensión de Auditoría | Destino de Almacenamiento | Mecanismo de Consulta | Responsable | Ejemplos |
+    |---|---|---|---|---|
+    | **Auditoría de Negocio** | Base de Datos Relacional (`schema_auditoria`) | Consultas SQL relacionales (`SELECT`, filtros, paginación por cursor) | `MS_AUD` | Quién compró (`cliente_id`, monto, fecha, IP), qué administrador modificó configuraciones (con snapshots anterior/posterior), y Sagas con fallos o compensaciones LIFO. |
+    | **Logs Técnicos y Métricas** | Archivos Planos Rotativos (`logs/*.log`) | Streaming en disco (`tail`, `WinstonPhysicalLoggerService`) | Core Gateway / Winston | Peticiones HTTP perimetrales, tiempos de respuesta (ms), trazas W3C (`traceparent`), pings gRPC en puerto 50051 y stack traces de excepciones. **Cero logs técnicos en la base de datos.** |
+
+    ---
+
+    ## 2. Consumo Asíncrono e Ingesta de Datos (Kafka & RabbitMQ)
+
+    El microservicio `MS_AUD` opera bajo el patrón de **Consola Forense Desacoplada**:
+    1. **Escritura No Pública:** Los registros transaccionales en `schema_auditoria` **no son creados por llamadas REST públicas**.
+       Son asentados asíncronamente por el grupo de consumidores de Apache Kafka `cg-audit-analytics`
+       (Blueprint §7.4) suscrito a los tópicos:
+       * `booking.compras.audit` (o `topic-ordenes-b2b`): Compras finalizadas y liquidaciones aprobadas.
+       * `topic-auditoria-sagas`: Eventos del ciclo de vida de Sagas (`saga.compensating`, `saga.step.failed`).
+       * `admin.acciones`: Trazas de mutaciones del panel administrativo.
+    2. **Ingesta Interna / Worker:** Se expone una ruta de ingesta protegida (`POST /auditoria/transacciones`)
+       exclusivamente accesible por workers internos del sistema o procesos batch autorizados mediante `AdminKey`.
+
+    ---
+
+    ## 3. Modelo de Persistencia Relacional (`schema_auditoria`)
+
+    Definido en `database/01_master_migration_12_schemas.sql` (líneas 554-602) con estricto
+    **aislamiento cross-schema (cero FKs a esquemas de negocio)**:
+
+    1. **Tabla `schema_auditoria.auditoria_transaccional`:**
+       * `id`: UUID (PK).
+       * `modulo`: VARCHAR(50) (ej. `'PAGOS'`, `'CHECKOUT'`, `'CONFIG'`).
+       * `accion`: VARCHAR(100) (ej. `'COMPRA_CONFIRMADA'`, `'KILL_SWITCH_TOGGLED'`).
+       * `registro_id`: VARCHAR(64) ID del recurso afectado.
+       * `usuario_id`: UUID del cliente o administrador.
+       * `usuario_email`: VARCHAR(150) correo electrónico auditado.
+       * `ip_origen`: VARCHAR(45) IPv4 o IPv6 real capturada tras proxies.
+       * `detalles_json`: JSONB con snapshots previos y posteriores o desglose de compra.
+       * `created_at`: TIMESTAMPTZ.
+    2. **Tabla `schema_auditoria.saga_transacciones`:**
+       * `id`: UUID (PK).
+       * `correlation_id`: VARCHAR(64) UNIQUE (Clave de correlación distribuida).
+       * `saga_nombre`: VARCHAR(100) (ej. `'SAGA_CHECKOUT_COMPUESTO'`).
+       * `estado`: VARCHAR(30) (`IN_PROGRESS`, `COMPLETED`, `COMPENSATING`, `FAILED`).
+       * `pasos_totales`: INT (4 pasos habituales: hold vertical, retención auto, pago, facturación).
+       * `paso_actual`: INT.
+       * `error_detalle`: TEXT con la causa raíz del fallo transaccional.
+       * `codigo_compensacion`: VARCHAR(64) (código de reversión emitido, ej. `'REF-SAGA-XXXXXX'`).
+       * `iniciada_at` / `finalizada_at`: TIMESTAMPTZ.
+    3. **Tabla `schema_auditoria.saga_pasos_journal`:**
+       * `id`: UUID (PK).
+       * `saga_id`: UUID con FK interna referenciando `saga_transacciones(id) ON DELETE CASCADE`.
+       * `orden_ejecucion`: INT.
+       * `servicio_nombre`: VARCHAR(60) (ej. `'MS_ATR'`, `'MS_AUT'`, `'MS_PAG'`).
+       * `operacion`: VARCHAR(100) (ej. `'RESERVAR_CUPO'`, `'COBRAR_PASARELA'`).
+       * `endpoint_invocado`: TEXT.
+       * `payload_enviado` / `respuesta_recibida`: JSONB.
+       * `estado_paso`: VARCHAR(30) (`SUCCESS`, `FAILED`, `COMPENSATED`).
+       * `compensacion_endpoint` / `compensacion_payload`: TEXT y JSONB para reversión LIFO.
+       * `created_at`: TIMESTAMPTZ.
+
+    ---
+
+    ## 4. Políticas de Seguridad, Privacidad y Roles (RBAC)
+
+    1. **Privacidad de Datos Financieros:** Los números de tarjeta de crédito (PAN) **nunca** se almacenan
+       completos en `detalles_json`; viajan enmascarados (ej. `4500********9012`). Las claves de acceso y
+       tokens JWT son redactados antes de la persistencia.
+    2. **Visibilidad de la Dirección IP:** La dirección IP de origen (`ip_origen`) es un dato sensible
+       y se expone únicamente a usuarios autenticados con rol `ADMIN`.
+    3. **Acceso Exclusivo:** Todos los endpoints de lectura bajo `/auditoria` exigen autenticación
+       mediante `SupabaseBearer` con verificación estricta de rol `ADMIN`.
+
+    ---
+
+    ## 5. Matriz Comparativa: Cuál Endpoint Responde Qué
+
+    | Endpoint | Microservicio | Fuente de Datos | Alcance y Contenido de la Respuesta |
+    |---|---|---|---|
+    | `GET /admin/auditoria` | `Admin` / P07 | Streaming de archivos físicos rotativos `logs/audit-*.log` | Bitácora técnica y administrativa en tiempo real registrada por `WinstonPhysicalLoggerService`. |
+    | `GET /esb/sagas/{id}` | `MS_ESB` / P01 | Memoria / Tabla activa `saga_transacciones` | Estado operativo de la orquestación en caliente y coordinación de compensaciones inmediatas. |
+    | `GET /auditoria/transacciones` | `MS_AUD` / P17 | Tabla `schema_auditoria.auditoria_transaccional` | Historial forense de compras B2C/B2B (quién compró, montos, IPs, paginación por cursor). |
+    | `GET /auditoria/admin` | `MS_AUD` / P17 | Tabla `schema_auditoria.auditoria_transaccional` | Historial de mutaciones operativas de administradores con **snapshot anterior/posterior**. |
+    | `GET /auditoria/sagas/{id}` | `MS_AUD` / P17 | Tablas `saga_transacciones` + `saga_pasos_journal` | Detalle forense histórico post-mortem de fallas transaccionales y pasos revertidos. |
+    | `GET /observabilidad/telemetry` | `MS_AUD` / P08 | Tabla `telemetry_events` / Logs de red | Métricas de navegación de usuario, conversiones del embudo y latencias APM. |
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: Servidor de desarrollo local (v2)
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Servidor de producción en Render (v2)
+  - url: '/api/v2'
+    description: URL relativa para proxies reversos o API Gateways
+
+tags:
+  - name: Auditoría de Transacciones de Compra
+    description: Consulta forense de transacciones comerciales de clientes (Quién compró, montos, fechas, IPs).
+  - name: Auditoría de Acciones Administrativas
+    description: Trazabilidad de mutaciones operativas efectuadas por usuarios ADMIN con snapshots comparativos.
+  - name: Auditoría Forense de Sagas
+    description: Análisis post-mortem de ejecuciones transaccionales compuestas, fallos de socios y compensaciones LIFO.
+  - name: Ingesta Asíncrona Interna
+    description: Endpoints de escritura interna para workers y consumidores de mensajería (Kafka/RabbitMQ).
+  - name: Auditoría Física de Archivos (Enlace P07)
+    description: Lectura en streaming de archivos físicos planos rotativos en disco (ADR-003).
+
+paths:
+  # ===========================================================================
+  # 1. AUDITORÍA DE TRANSACCIONES DE COMPRA (QUIÉN COMPRÓ)
+  # ===========================================================================
+  /auditoria/transacciones:
+    get:
+      tags:
+        - Auditoría de Transacciones de Compra
+      summary: Consultar auditoría de transacciones de compra (Quién compró)
+      description: |
+        Retorna el registro forense de todas las compras finalizadas y transacciones monetarias
+        asentadas en `schema_auditoria.auditoria_transaccional`.
+        
+        Permite filtrado por cliente, rango de fechas, monto mínimo y paginación eficiente
+        mediante cursor temporal (`cursor` ISO 8601).
+      operationId: listarAuditoriaTransacciones
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: cliente_id
+          in: query
+          required: false
+          description: Filtrar por identificador UUID del cliente comprador.
+          schema:
+            type: string
+            format: uuid
+        - name: fecha_desde
+          in: query
+          required: false
+          description: Fecha inicial de búsqueda en formato ISO 8601.
+          schema:
+            type: string
+            format: date-time
+        - name: fecha_hasta
+          in: query
+          required: false
+          description: Fecha final de búsqueda en formato ISO 8601.
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor opaco de paginación para recuperar la siguiente página de registros.
+          schema:
+            type: string
+            example: '2026-10-24T21:00:00.000Z'
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de registros por página (1 a 100).
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista paginada de transacciones comerciales auditadas.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaAuditoriaTransacciones'
+              example:
+                items:
+                  - id: '7f3b8e7a-9a42-4c81-6d2c-2e7f61a08d53'
+                    modulo: 'CHECKOUT'
+                    accion: 'COMPRA_CONFIRMADA'
+                    registro_id: 'fac-001-002-000045'
+                    usuario_id: '123e4567-e89b-12d3-a456-426614174000'
+                    usuario_email: 'turista.ecuador@epn.edu.ec'
+                    ip_origen: '190.152.12.84'
+                    correlation_id: 'corr-1792972800-abc1234'
+                    monto_total: 155.00
+                    moneda: 'USD'
+                    detalles_json:
+                      factura_numero: '001-002-000000045'
+                      metodo_pago: 'TARJETA_CREDITO'
+                      tarjeta_enmascarada: '4500********9012'
+                      items_comprados: 2
+                      verticales: ['ATRACCIONES', 'AUTOS']
+                    created_at: '2026-10-24T21:45:00.000Z'
+                siguiente_cursor: '2026-10-24T20:15:30.000Z'
+                total_registros_encontrados: 142
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  # ===========================================================================
+  # 2. AUDITORÍA DE ACCIONES ADMINISTRATIVAS (QUÉ ADMIN MODIFICÓ)
+  # ===========================================================================
+  /auditoria/admin:
+    get:
+      tags:
+        - Auditoría de Acciones Administrativas
+      summary: Consultar auditoría de acciones administrativas con snapshots
+      description: |
+        Recupera el historial de intervenciones y cambios de configuración efectuados por
+        usuarios con rol `ADMIN` (conmutación de kill-switches, aprobación de payouts, ajustes globales).
+        
+        Cada registro incluye un snapshot explícito comparando el valor anterior (`antes`)
+        frente al valor modificado (`despues`).
+      operationId: listarAuditoriaAdmin
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: admin_email
+          in: query
+          required: false
+          description: Filtrar por correo electrónico del administrador actuante.
+          schema:
+            type: string
+            format: email
+        - name: modulo
+          in: query
+          required: false
+          description: Módulo administrativo intervenido.
+          schema:
+            type: string
+            enum: [NODOS_RED, FINANZAS_PAYOUTS, AJUSTES_CONFIG, PROVEEDORES, USUARIOS]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Historial de acciones administrativas recuperado con éxito.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaAuditoriaAdmin'
+              example:
+                items:
+                  - id: '8a9b0c1d-2e3f-4a5b-6c7d-8e9f0a1b2c3d'
+                    modulo: 'NODOS_RED'
+                    accion: 'KILL_SWITCH_CONMUTADO'
+                    registro_id: 'NODE_AUT_LOCAL'
+                    admin_id: 'adm-0011-2233-4455'
+                    admin_email: 'admin.seguridad@booking.epn.edu.ec'
+                    ip_origen: '186.101.44.12'
+                    entidad_tipo: 'conector_tienda'
+                    entidad_id: 'autos-local'
+                    snapshot:
+                      campo: 'enabled'
+                      antes: true
+                      despues: false
+                      motivo: 'Simulación de caída de proveedor externo para prueba de resiliencia'
+                    created_at: '2026-10-24T21:15:00.000Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ===========================================================================
+  # 3. AUDITORÍA FORENSE DE SAGAS (SAGAS CON FALLO Y COMPENSACIONES)
+  # ===========================================================================
+  /auditoria/sagas:
+    get:
+      tags:
+        - Auditoría Forense de Sagas
+      summary: Listar bitácora de transacciones Saga para análisis forense
+      description: |
+        Consulta el registro histórico de Sagas ejecutadas en `schema_auditoria.saga_transacciones`.
+        Permite aislar transacciones fallidas (`estado = 'FAILED'` o `'COMPENSATING'`) para
+        auditar qué socio comercial provocó la reversión.
+      operationId: listarAuditoriaSagas
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: estado
+          in: query
+          required: false
+          description: Filtrar por estado transaccional de la Saga.
+          schema:
+            type: string
+            enum: [IN_PROGRESS, COMPLETED, COMPENSATING, FAILED]
+            example: 'FAILED'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista de transacciones Saga recuperadas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SagaTransaccionResumen'
+              example:
+                - id: '4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d'
+                  correlation_id: 'corr-1792972800-abc1234'
+                  saga_nombre: 'SAGA_CHECKOUT_COMPUESTO'
+                  estado: 'FAILED'
+                  pasos_totales: 4
+                  paso_actual: 2
+                  error_detalle: 'Error en reserva de autos: Cupos agotados en tienda externa'
+                  codigo_compensacion: 'REF-SAGA-8F92A1'
+                  iniciada_at: '2026-10-24T21:40:00.000Z'
+                  finalizada_at: '2026-10-24T21:40:03.450Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /auditoria/sagas/{correlationId}:
+    get:
+      tags:
+        - Auditoría Forense de Sagas
+      summary: Obtener detalle forense post-mortem de una Saga y su journal de pasos
+      description: |
+        Recupera el expediente forense completo de una transacción distribuida a partir de su
+        `correlation_id`, incluyendo el detalle paso a paso almacenado en `schema_auditoria.saga_pasos_journal`
+        (endpoints externos invocados, payloads enviados, respuestas recibidas y acciones de compensación LIFO).
+      operationId: obtenerDetalleForenseSaga
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: correlationId
+          in: path
+          required: true
+          description: Identificador de correlación W3C / Correlation-ID de la Saga.
+          schema:
+            type: string
+            example: 'corr-1792972800-abc1234'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Expediente forense completo de la Saga y su journal de pasos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaExpedienteForense'
+              example:
+                id: '4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d'
+                correlation_id: 'corr-1792972800-abc1234'
+                saga_nombre: 'SAGA_CHECKOUT_COMPUESTO'
+                estado: 'FAILED'
+                pasos_totales: 4
+                paso_actual: 2
+                error_detalle: 'Error en reserva de autos: Cupos agotados en tienda externa'
+                codigo_compensacion: 'REF-SAGA-8F92A1'
+                iniciada_at: '2026-10-24T21:40:00.000Z'
+                finalizada_at: '2026-10-24T21:40:03.450Z'
+                pasos_journal:
+                  - orden_ejecucion: 1
+                    servicio_nombre: 'MS_ATR'
+                    operacion: 'RESERVAR_CUPO_ATRACCION'
+                    endpoint_invocado: 'https://atracciones-dilan.onrender.com/api/v2/reservas'
+                    estado_paso: 'COMPENSATED'
+                    compensacion_endpoint: 'https://atracciones-dilan.onrender.com/api/v2/reservas/res-101/cancelar'
+                    created_at: '2026-10-24T21:40:01.000Z'
+                  - orden_ejecucion: 2
+                    servicio_nombre: 'MS_AUT'
+                    operacion: 'BLOQUEAR_VEHICULO'
+                    endpoint_invocado: 'https://renta-autos.onrender.com/api/v2/autos/reservas'
+                    estado_paso: 'FAILED'
+                    compensacion_endpoint: null
+                    created_at: '2026-10-24T21:40:02.500Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  # ===========================================================================
+  # 4. INGESTA ASÍNCRONA INTERNA (WORKERS / BROKERS)
+  # ===========================================================================
+  /auditoria/transacciones/ingesta:
+    post:
+      tags:
+        - Ingesta Asíncrona Interna
+      summary: Endpoint interno para ingesta de registros de auditoría desde workers
+      description: |
+        Punto de entrada de escritura **restringido y no público**.
+        
+        Es invocado internamente por el worker de mensajería (consumidor de Kafka `cg-audit-analytics`
+        o listener de RabbitMQ) para asentar transacciones confirmadas o fallos en `schema_auditoria`.
+        Exige autenticación mediante clave de administración interna (`AdminKey` o mTLS).
+      operationId: asentarAuditoriaInterna
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_AUD
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Registro de auditoría transaccional preformateado por el worker.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestaAuditoriaDto'
+            example:
+              modulo: 'CHECKOUT'
+              accion: 'COMPRA_CONFIRMADA'
+              registro_id: 'fac-001-002-000045'
+              usuario_id: '123e4567-e89b-12d3-a456-426614174000'
+              usuario_email: 'turista.ecuador@epn.edu.ec'
+              ip_origen: '190.152.12.84'
+              correlation_id: 'corr-1792972800-abc1234'
+              detalles_json:
+                factura_id: 'fac-9988'
+                total: 155.00
+      responses:
+        '201':
+          description: Registro de auditoría transaccional persistido con éxito en la base de datos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  id:
+                    type: string
+                    format: uuid
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ===========================================================================
+  # 5. AUDITORÍA FÍSICA EN DISCO (ENLACE CONTRACTUAL CON P07 / ADMIN)
+  # ===========================================================================
+  /admin/auditoria:
+    get:
+      tags:
+        - Auditoría Física de Archivos (Enlace P07)
+      summary: Consultar stream de bitácora técnica y administrativa en disco (ADR-003)
+      description: |
+        Lee directamente las últimas líneas registradas en los archivos físicos rotativos
+        en disco (`logs/audit-YYYY-MM-DD.log`) sin saturar el pool de conexiones de la base de datos.
+        
+        *Nota de Cobertura:* Este endpoint está implementado en `src/modules/admin/admin.controller.ts#getAuditoria`
+        y pertenece contractualmente a la administración física del sistema (P07).
+      operationId: getAdminAuditoriaFisica
+      x-source: 'src/modules/admin/admin.controller.ts#getAuditoria'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de líneas de log físico a recuperar (1 a 1000).
+          schema:
+            type: integer
+            default: 300
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Entradas de log físico formateadas y resumen operativo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaAdminAuditoriaFisica'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+    post:
+      tags:
+        - Auditoría Física de Archivos (Enlace P07)
+      summary: Asentar manualmente un hecho administrativo en la bitácora física
+      description: |
+        Escribe una entrada de log estructurado en el archivo `logs/audit-YYYY-MM-DD.log`.
+        Implementado en `src/modules/admin/admin.controller.ts#registrarAuditoria`.
+      operationId: registrarAdminAuditoriaFisica
+      x-source: 'src/modules/admin/admin.controller.ts#registrarAuditoria'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accion
+              properties:
+                accion:
+                  type: string
+                  example: 'Conmutó kill-switch manualmente'
+                entidadTipo:
+                  type: string
+                  example: 'nodo_red'
+                entidadId:
+                  type: string
+                  example: 'NODE_AUT_LOCAL'
+                detalle:
+                  type: object
+      responses:
+        '201':
+          description: Entrada física registrada exitosamente en archivo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+    AdminKey:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+
+  schemas:
+    # ── ESQUEMAS DE ENTRADA Y DTOs ──
+
+    IngestaAuditoriaDto:
+      type: object
+      required:
+        - modulo
+        - accion
+        - correlation_id
+      description: Payload enviado por el worker de Kafka para asentar un hecho transaccional.
+      properties:
+        modulo:
+          type: string
+          maxLength: 50
+          description: Subsistema o microservicio de origen.
+          example: 'CHECKOUT'
+        accion:
+          type: string
+          maxLength: 100
+          description: Evento o verbo del hecho consumado.
+          example: 'COMPRA_CONFIRMADA'
+        registro_id:
+          type: string
+          maxLength: 64
+          description: Clave de negocio del recurso.
+          example: 'fac-001-002-000045'
+        usuario_id:
+          type: string
+          format: uuid
+          description: Identificador UUID del cliente o actor.
+        usuario_email:
+          type: string
+          format: email
+          description: Correo del usuario involucrado.
+        ip_origen:
+          type: string
+          description: Dirección IP origen capturada.
+          example: '190.152.12.84'
+        correlation_id:
+          type: string
+          maxLength: 64
+          description: Correlation-ID W3C de la transacción.
+          example: 'corr-1792972800-abc1234'
+        detalles_json:
+          type: object
+          description: Metadatos estructurados libres de datos sensibles (tarjetas enmascaradas).
+
+    # ── ESQUEMAS DE SALIDA Y CONSULTA ──
+
+    AuditoriaTransaccionItem:
+      type: object
+      required:
+        - id
+        - modulo
+        - accion
+        - correlation_id
+        - created_at
+      description: Fila de auditoría de transacciones comerciales.
+      properties:
+        id:
+          type: string
+          format: uuid
+        modulo:
+          type: string
+          example: 'CHECKOUT'
+        accion:
+          type: string
+          example: 'COMPRA_CONFIRMADA'
+        registro_id:
+          type: string
+          example: 'fac-001-002-000045'
+        usuario_id:
+          type: string
+          format: uuid
+        usuario_email:
+          type: string
+          format: email
+        ip_origen:
+          type: string
+          description: Visible únicamente para administradores.
+          example: '190.152.12.84'
+        correlation_id:
+          type: string
+          example: 'corr-1792972800-abc1234'
+        monto_total:
+          type: number
+          format: float
+          example: 155.00
+        moneda:
+          type: string
+          example: 'USD'
+        detalles_json:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    RespuestaAuditoriaTransacciones:
+      type: object
+      required:
+        - items
+        - total_registros_encontrados
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditoriaTransaccionItem'
+        siguiente_cursor:
+          type: string
+          description: Cursor para solicitar la página siguiente.
+        total_registros_encontrados:
+          type: integer
+          example: 142
+
+    AuditoriaAdminItem:
+      type: object
+      required:
+        - id
+        - modulo
+        - accion
+        - admin_email
+        - entidad_tipo
+        - created_at
+      description: Registro de mutación administrativa con snapshot comparativo.
+      properties:
+        id:
+          type: string
+          format: uuid
+        modulo:
+          type: string
+          example: 'NODOS_RED'
+        accion:
+          type: string
+          example: 'KILL_SWITCH_CONMUTADO'
+        registro_id:
+          type: string
+        admin_id:
+          type: string
+        admin_email:
+          type: string
+          format: email
+        ip_origen:
+          type: string
+        entidad_tipo:
+          type: string
+          example: 'conector_tienda'
+        entidad_id:
+          type: string
+          example: 'autos-local'
+        snapshot:
+          type: object
+          description: Comparativa del estado antes y después de la modificación.
+          properties:
+            campo:
+              type: string
+              example: 'enabled'
+            antes:
+              description: Valor previo a la modificación.
+            despues:
+              description: Valor resultante tras la modificación.
+            motivo:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    RespuestaAuditoriaAdmin:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditoriaAdminItem'
+
+    SagaTransaccionResumen:
+      type: object
+      required:
+        - id
+        - correlation_id
+        - saga_nombre
+        - estado
+        - pasos_totales
+        - paso_actual
+        - iniciada_at
+      description: Resumen operativo de una transacción Saga en `schema_auditoria`.
+      properties:
+        id:
+          type: string
+          format: uuid
+        correlation_id:
+          type: string
+          example: 'corr-1792972800-abc1234'
+        saga_nombre:
+          type: string
+          example: 'SAGA_CHECKOUT_COMPUESTO'
+        estado:
+          type: string
+          enum: [IN_PROGRESS, COMPLETED, COMPENSATING, FAILED]
+          example: 'FAILED'
+        pasos_totales:
+          type: integer
+          example: 4
+        paso_actual:
+          type: integer
+          example: 2
+        error_detalle:
+          type: string
+        codigo_compensacion:
+          type: string
+          example: 'REF-SAGA-8F92A1'
+        iniciada_at:
+          type: string
+          format: date-time
+        finalizada_at:
+          type: string
+          format: date-time
+
+    SagaPasoJournalItem:
+      type: object
+      required:
+        - orden_ejecucion
+        - servicio_nombre
+        - operacion
+        - endpoint_invocado
+        - estado_paso
+        - created_at
+      description: Registro cronológico de ejecución o compensación de un paso individual de la Saga.
+      properties:
+        orden_ejecucion:
+          type: integer
+          example: 1
+        servicio_nombre:
+          type: string
+          example: 'MS_ATR'
+        operacion:
+          type: string
+          example: 'RESERVAR_CUPO_ATRACCION'
+        endpoint_invocado:
+          type: string
+          example: 'https://atracciones-dilan.onrender.com/api/v2/reservas'
+        payload_enviado:
+          type: object
+        respuesta_recibida:
+          type: object
+        estado_paso:
+          type: string
+          enum: [SUCCESS, FAILED, COMPENSATED]
+          example: 'COMPENSATED'
+        compensacion_endpoint:
+          type: string
+          nullable: true
+        compensacion_payload:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    SagaExpedienteForense:
+      type: object
+      required:
+        - id
+        - correlation_id
+        - saga_nombre
+        - estado
+        - pasos_totales
+        - paso_actual
+        - iniciada_at
+        - pasos_journal
+      description: Expediente forense completo post-mortem de una Saga fallida y sus pasos revertidos.
+      properties:
+        id:
+          type: string
+          format: uuid
+        correlation_id:
+          type: string
+        saga_nombre:
+          type: string
+        estado:
+          type: string
+          enum: [IN_PROGRESS, COMPLETED, COMPENSATING, FAILED]
+        pasos_totales:
+          type: integer
+        paso_actual:
+          type: integer
+        error_detalle:
+          type: string
+        codigo_compensacion:
+          type: string
+        iniciada_at:
+          type: string
+          format: date-time
+        finalizada_at:
+          type: string
+          format: date-time
+        pasos_journal:
+          type: array
+          items:
+            $ref: '#/components/schemas/SagaPasoJournalItem'
+
+    RespuestaAdminAuditoriaFisica:
+      type: object
+      required:
+        - items
+        - resumen
+      description: Respuesta devuelta por `GET /admin/auditoria` a partir del streaming de logs en disco.
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              fecha:
+                type: string
+                format: date-time
+              origen:
+                type: string
+                enum: [ADMIN, SISTEMA]
+              categoria:
+                type: string
+              actor:
+                type: string
+              accion:
+                type: string
+              entidad:
+                type: string
+              detalle:
+                type: string
+              ip:
+                type: string
+        resumen:
+          type: object
+          additionalProperties:
+            type: integer

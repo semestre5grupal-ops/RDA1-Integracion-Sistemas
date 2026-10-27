@@ -7,6 +7,10 @@ import { Rfc7807ExceptionFilter } from './core/filters/rfc7807-exception.filter'
 import { crearValidationPipeGlobal } from './core/validation/validation-pipe';
 import { AjvValidationPipe } from './core/validation/ajv-validation.pipe';
 import { HateoasInterceptor } from './core/interceptors/hateoas.interceptor';
+import { WinstonPhysicalLoggerService } from './core/logger/winston-logger.service';
+import { StructuredHttpRequestMiddleware } from './core/logger/structured-http-request.middleware';
+import { TraceContextInterceptor } from './core/tracing/trace-context.interceptor';
+import { TraceContextService } from './core/tracing/trace-context.service';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -51,7 +55,28 @@ async function bootstrap() {
     { bodyParser: false },
   );
 
-  app.useBodyParser('json', { limit: LIMITE_CUERPO });
+  app.use((req: any, res: any, next: any) => {
+    const correlationId =
+      req.headers['x-correlation-id'] ||
+      `corr-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    req.headers['x-correlation-id'] = correlationId;
+    res.setHeader('X-Correlation-Id', correlationId);
+    next();
+  });
+  const requestLogger = new StructuredHttpRequestMiddleware(
+    app.get(WinstonPhysicalLoggerService),
+  );
+  app.use(requestLogger.use.bind(requestLogger));
+
+  app.useBodyParser('json', {
+    limit: LIMITE_CUERPO,
+    type: ['application/json', 'application/cloudevents+json'],
+    verify: (request, _response, buffer) => {
+      if (/^\/api\/v2\/webhooks(?:\/|\?|$)/.test(request.url || '')) {
+        (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+      }
+    },
+  });
   app.useBodyParser('urlencoded', { limit: LIMITE_CUERPO, extended: true });
 
   // Habilita CORS para que el frontend pueda llamar al backend.
@@ -80,21 +105,18 @@ async function bootstrap() {
       'Idempotency-Key',
       'x-correlation-id',
       'X-Correlation-Id',
+      'traceparent',
+      'node_id',
       'x-device-fingerprint',
       'X-Device-Fingerprint',
       // API key de los sistemas de proveedores (sincronización de alojamientos).
       'x-api-key',
       'X-Api-Key',
+      'x-webhook-signature',
+      'X-Webhook-Signature',
     ],
+    exposedHeaders: ['X-Correlation-Id', 'traceparent', 'node_id', 'Idempotent-Replayed'],
     credentials: true,
-  });
-
-  // Trazabilidad distribuida: Correlation-ID (Consideraciones RDA2 §2)
-  app.use((req: any, res: any, next: any) => {
-    const correlationId = req.headers['x-correlation-id'] || `corr-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    req.headers['x-correlation-id'] = correlationId;
-    res.setHeader('X-Correlation-Id', correlationId);
-    next();
   });
 
   app.setGlobalPrefix('api');
@@ -109,6 +131,9 @@ async function bootstrap() {
 
   // Registrar el filtro global de excepciones para cumplir con la RFC 7807
   app.useGlobalFilters(new Rfc7807ExceptionFilter());
+
+  // Captura la identidad validada por los guards antes de llamadas salientes.
+  app.useGlobalInterceptors(new TraceContextInterceptor(app.get(TraceContextService)));
 
   // HATEOAS: inyectar enlaces en las respuestas (Richardson Nivel 3)
   app.useGlobalInterceptors(new HateoasInterceptor());
@@ -164,7 +189,8 @@ async function bootstrap() {
   await app.startAllMicroservices();
   const httpPort = process.env.PORT || 3000;
   await app.listen(httpPort);
-  console.log(`[Booking Gateway] Servidor HTTP/REST listo en puerto ${httpPort}`);
-  console.log(`[Booking Gateway] Servidor gRPC Inbound listo en puerto ${grpcPort} (proto: ${protoPath})`);
+  const logger = app.get(WinstonPhysicalLoggerService);
+  logger.log(`Servidor HTTP/REST listo en puerto ${httpPort}`);
+  logger.log(`Servidor gRPC Inbound listo en puerto ${grpcPort} (proto: ${protoPath})`);
 }
 bootstrap();

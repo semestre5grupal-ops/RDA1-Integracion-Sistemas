@@ -1,0 +1,931 @@
+openapi: 3.0.3
+info:
+  title: Microservicio de Carrito de Compras (MS_CAR) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    Especificación OpenAPI 3.0.3 del microservicio canónico **Carrito de Compras (`MS_CAR`)**
+    para el ecosistema de integración Booking Prototipo (RDA2).
+
+    ---
+
+    ## 1. Diagnóstico Arquitectónico del Estado Actual (Código vs. Blueprint)
+
+    ### 1.1. Estado Real en el Código Fuente
+    En la implementación actual del backend NestJS:
+    * **No existe un módulo `carritos` en `src/modules/`:** La aplicación carece de `CarritosModule`,
+      `carritos.controller.ts` y `carritos.service.ts`.
+    * **El carrito de compras es volátil y transitorio:**
+      * **En el Frontend:** El carrito vive únicamente como estado efímero en memoria de React y
+        en componentes de vista (ej. modales de checkout directo en `AlojamientoDetail.jsx` y
+        `FacturasPage.jsx`).
+      * **En GraphQL:** La mutación `checkoutOrquestado` (`GraphqlBffResolver`) recibe un arreglo
+        inmediato de ítems (`CheckoutItemInput`) directamente en el cuerpo de la mutación.
+      * **En el ESB:** El endpoint `POST /esb/checkout-saga` recibe la lista de ítems (`CheckoutSagaInput`)
+        como payload plano sin vincularse a un carrito persistido en base de datos.
+    * **Consecuencias del vacío operativo:**
+      * No se produce persistencia física en la base de datos de los ítems en cola de compra.
+      * No es posible calcular tasas de conversión ni disparar el evento de dominio `carritos.abandonados`.
+      * Se confía en los precios e importes unitarios transmitidos por el cliente web, vulnerando el principio
+        de validación autoritativa en el servidor.
+      * No existe sincronización del carrito entre múltiples dispositivos para un mismo cliente.
+
+    ### 1.2. Estado Objetivo en el Blueprint del Equipo (§4, §5.2 y §5.4)
+    La arquitectura oficial diseñada por Paúl Rosero define el microservicio **`MS_CAR`**
+    con persistencia dedicada en el esquema relacional PostgreSQL `schema_carritos` y endpoints
+    bajo `/carritos` (versionado canónico `/api/v2/carritos`).
+
+    ---
+
+    ## 2. Modelo de Persistencia Relacional (`schema_carritos`)
+
+    El modelo implementado en `database/01_master_migration_12_schemas.sql` (líneas 38-67)
+    establece las siguientes entidades con estricto **aislamiento cross-schema (cero FKs externas)**:
+
+    ### 2.1. Tabla `schema_carritos.carritos`
+    * `id`: UUID (Clave Primaria, autogenerada con `gen_random_uuid()`).
+    * `cliente_id`: UUID (Identificador lógico del cliente autenticado, sin FK física a `schema_clientes`).
+    * `estado`: VARCHAR(20) con restricción CHECK (`ACTIVO`, `PROCESADO`, `ABANDONADO`).
+    * `moneda`: VARCHAR(3) fija en `'USD'` (ISO 4217).
+    * `created_at` / `updated_at`: TIMESTAMPTZ con valor por defecto `NOW()`.
+
+    ### 2.2. Tabla `schema_carritos.carrito_items`
+    * `id`: UUID (Clave Primaria).
+    * `carrito_id`: UUID con FK interna referenciando `schema_carritos.carritos(id) ON DELETE CASCADE`.
+    * `vertical`: VARCHAR(30) con restricción CHECK (`ATRACCIONES`, `AUTOS`, `ALOJAMIENTOS`, `VUELOS`, `PAQUETES`).
+    * `item_referencia_id`: VARCHAR(64) correspondiente al ID de catálogo en la tienda socia.
+    * `nombre_producto`: VARCHAR(255) título comercial inmutable del recurso.
+    * `precio_unitario`: NUMERIC(10,2) precio unitario recalculado autoritativamente por el servidor.
+    * `cantidad`: INT mayor a cero.
+    * `detalles_json`: JSONB con especificaciones operativas y de reserva según la vertical.
+    * `subtotal`: NUMERIC(10,2) resultante del producto `precio_unitario * cantidad`.
+    * `created_at`: TIMESTAMPTZ con valor por defecto `NOW()`.
+
+    ---
+
+    ## 3. Reglas de Negocio y Seguridad
+
+    1. **Recálculo Autoritativo de Precios:** El backend nunca confía en el `precio_unitario`
+       enviado por el frontend. Al invocar `POST /carritos/{id}/items`, `MS_CAR` consulta el catálogo
+       vigente de la vertical o el cache de precios del ESB, fija el precio real y genera un
+       **snapshot inmutable** con vigencia de 24 horas (`expires_at`).
+    2. **Identidad y Tenencia Exclusiva:** El `cliente_id` se extrae criptográficamente del token
+       JWT emitido por Supabase (`SupabaseBearer`). Un cliente solo puede consultar o modificar su propio
+       carrito (retorna `403 Forbidden` o `404 Not Found` ante intentos de acceso cruzado).
+    3. **Moneda Única:** Todos los importes se cotizan y liquidan en dólares estadounidenses (`USD`).
+    4. **Conversión a Saga (`POST /carritos/{id}/checkout`):**
+       * Valida que el carrito se encuentre en estado `ACTIVO` y contenga al menos un ítem.
+       * Transiciona el estado del carrito a `PROCESADO`.
+       * Mapea y entrega los ítems estructurados al ESB invocando internamente `POST /api/v2/esb/checkout-saga`.
+       * Retorna la referencia de seguimiento (`correlation_id` y `REF-SAGA-...` o comprobante fiscal).
+    5. **Detección de Abandono y Evento Asíncrono:**
+       * Un carrito en estado `ACTIVO` que no recibe modificaciones tras **2 horas de inactividad**
+         es clasificado como `ABANDONADO` por el worker de detección.
+       * Dicho worker emite el CloudEvent `carritos.abandonados` hacia RabbitMQ (`booking.events`) y
+         Apache Kafka (`topic-ordenes-b2b`), habilitando notificaciones de remarketing y analítica.
+
+    ---
+
+    ## 4. Desglose Estructurado del Campo `detalles_json` por Vertical
+
+    | Vertical | Propiedades JSON Requeridas | Ejemplo Estructurado |
+    |---|---|---|
+    | `ATRACCIONES` | `fecha` (YYYY-MM-DD), `hora_turno` (HH:mm), `adultos` (int), `ninos` (int), `requiere_guia` (bool) | `{"fecha": "2026-10-28", "hora_turno": "10:30", "adultos": 2, "ninos": 1, "requiere_guia": true}` |
+    | `AUTOS` | `fecha_inicio` (ISO), `fecha_fin` (ISO), `dias_alquiler` (int), `seguro_cobertura` (`BASICO\|COMPLETO`), `ciudad_entrega` | `{"fecha_inicio": "2026-11-01T09:00:00Z", "fecha_fin": "2026-11-04T18:00:00Z", "dias_alquiler": 3, "seguro_cobertura": "COMPLETO"}` |
+    | `ALOJAMIENTOS` | `fecha_checkin` (YYYY-MM-DD), `fecha_checkout` (YYYY-MM-DD), `noches` (int), `tipo_habitacion`, `adultos`, `ninos` | `{"fecha_checkin": "2026-11-05", "fecha_checkout": "2026-11-08", "noches": 3, "tipo_habitacion": "Suite Vista Mar", "adultos": 2}` |
+    | `VUELOS` | `fecha_salida` (YYYY-MM-DD), `numero_vuelo`, `origen` (IATA), `destino` (IATA), `clase_cabina`, `asientos_seleccionados` | `{"fecha_salida": "2026-11-01", "numero_vuelo": "AV1632", "origen": "UIO", "destino": "GPS", "clase_cabina": "ECONOMY", "asientos": ["14A"]}` |
+    | `PAQUETES` | `paquete_id` (UUID), `fecha_inicio` (YYYY-MM-DD), `pasajeros` (int), `descuento_combo_pct` (float) | `{"paquete_id": "pkg-9922-8811", "fecha_inicio": "2026-12-01", "pasajeros": 2, "descuento_combo_pct": 15.0}` |
+
+    ---
+
+    ## 5. Tabla de Operaciones del Contrato
+
+    | Método | Ruta | Tag | x-status | x-microservice | Propósito |
+    |---|---|---|:---:|---|---|
+    | `POST` | `/carritos` | Carritos | `planned` | `MS_CAR` | Inicializar un nuevo carrito de compras para el cliente |
+    | `GET` | `/carritos/activo` | Carritos | `planned` | `MS_CAR` | Obtener el carrito activo del cliente autenticado |
+    | `GET` | `/carritos/{id}` | Carritos | `planned` | `MS_CAR` | Consultar un carrito específico por su ID |
+    | `POST` | `/carritos/{id}/items` | Items del Carrito | `planned` | `MS_CAR` | Agregar un ítem validado y con precio snapshot |
+    | `PATCH` | `/carritos/{id}/items/{itemId}` | Items del Carrito | `planned` | `MS_CAR` | Actualizar la cantidad de un ítem existente |
+    | `DELETE` | `/carritos/{id}/items/{itemId}` | Items del Carrito | `planned` | `MS_CAR` | Remover un ítem individual del carrito |
+    | `DELETE` | `/carritos/{id}/items` | Items del Carrito | `planned` | `MS_CAR` | Vaciar todos los ítems contenidos en el carrito |
+    | `POST` | `/carritos/{id}/checkout` | Checkout y Saga | `planned` | `MS_CAR` | Cerrar carrito y despachar compra compuesta hacia el ESB |
+    | `POST` | `/carritos/abandonados/detectar` | Detección de Abandono | `planned` | `MS_CAR` | Ejecutar job de escaneo de carritos inactivos y emitir eventos |
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: Servidor de desarrollo local (v2)
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Servidor de despliegue en Render (v2)
+  - url: '/api/v2'
+    description: URL relativa para proxies reversos o entornos integrados
+
+tags:
+  - name: Carritos
+    description: Gestión del ciclo de vida de los carritos de compras multivertical del cliente.
+  - name: Items del Carrito
+    description: Manipulación granular de productos en cola de compra (adición, actualización de cantidad y purga).
+  - name: Checkout y Transición a Saga
+    description: Conversión de carritos activos en órdenes de compra procesadas y orquestadas por el ESB.
+  - name: Detección de Abandono
+    description: Jobs automáticos de escaneo de inactividad y emisión de CloudEvents para remarketing.
+
+paths:
+  # ===========================================================================
+  # 1. GESTIÓN DE CARRITOS
+  # ===========================================================================
+  /carritos:
+    post:
+      tags:
+        - Carritos
+      summary: Inicializar un nuevo carrito de compras
+      description: |
+        Crea un nuevo carrito de compras en estado `ACTIVO` para el cliente autenticado.
+        Si el cliente ya posee un carrito en estado `ACTIVO`, retorna la instancia existente
+        para evitar duplicaciones de carritos abiertos.
+      operationId: inicializarCarrito
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        description: Parámetros opcionales de inicialización del carrito.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InicializarCarritoDto'
+            example:
+              moneda: 'USD'
+      responses:
+        '201':
+          description: Carrito de compras creado o recuperado exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+              example:
+                id: '8f47ac10-58cc-4372-a567-0e02b2c3d479'
+                cliente_id: '123e4567-e89b-12d3-a456-426614174000'
+                estado: 'ACTIVO'
+                moneda: 'USD'
+                subtotal: 0.00
+                total: 0.00
+                items_count: 0
+                items: []
+                created_at: '2026-10-24T21:45:00.000Z'
+                updated_at: '2026-10-24T21:45:00.000Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /carritos/activo:
+    get:
+      tags:
+        - Carritos
+      summary: Obtener el carrito de compras activo del cliente autenticado
+      description: |
+        Retorna el carrito de compras en estado `ACTIVO` perteneciente al usuario identificado
+        en el token JWT de Supabase, incluyendo todos sus ítems agregados y los totales calculados.
+      operationId: obtenerCarritoActivo
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Carrito activo recuperado con éxito.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+              example:
+                id: '8f47ac10-58cc-4372-a567-0e02b2c3d479'
+                cliente_id: '123e4567-e89b-12d3-a456-426614174000'
+                estado: 'ACTIVO'
+                moneda: 'USD'
+                subtotal: 155.00
+                total: 155.00
+                items_count: 2
+                items:
+                  - id: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+                    vertical: 'ATRACCIONES'
+                    item_referencia_id: 'PRhu4UBTWPBC'
+                    nombre_producto: 'Tour Snorkel Isla Lobos'
+                    precio_unitario: 55.00
+                    cantidad: 2
+                    subtotal: 110.00
+                    detalles_json:
+                      fecha: '2026-10-28'
+                      hora_turno: '10:00'
+                      adultos: 2
+                    created_at: '2026-10-24T21:46:10.000Z'
+                  - id: 'b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e'
+                    vertical: 'AUTOS'
+                    item_referencia_id: 'auto-suv-galapagos'
+                    nombre_producto: 'Alquiler SUV 4x4'
+                    precio_unitario: 45.00
+                    cantidad: 1
+                    subtotal: 45.00
+                    detalles_json:
+                      fecha_inicio: '2026-10-28T09:00:00Z'
+                      fecha_fin: '2026-10-29T18:00:00Z'
+                      dias_alquiler: 1
+                    created_at: '2026-10-24T21:47:00.000Z'
+                created_at: '2026-10-24T21:45:00.000Z'
+                updated_at: '2026-10-24T21:47:00.000Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '404':
+          description: El cliente no posee ningún carrito en estado ACTIVO en este momento.
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/404'
+                title: 'Carrito Activo No Encontrado'
+                status: 404
+                detail: 'No existe ningún carrito de compras activo para el cliente autenticado.'
+                instance: '/api/v2/carritos/activo'
+
+  /carritos/{id}:
+    get:
+      tags:
+        - Carritos
+      summary: Consultar un carrito específico por su ID
+      description: |
+        Recupera el detalle completo de un carrito específico mediante su identificador UUID.
+        Aplica control de acceso: solo el cliente titular o un usuario con rol `ADMIN` pueden consultarlo.
+      operationId: obtenerCarritoPorId
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador único del carrito (UUID).
+          schema:
+            type: string
+            format: uuid
+            example: '8f47ac10-58cc-4372-a567-0e02b2c3d479'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Carrito recuperado exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  # ===========================================================================
+  # 2. MANIPULACIÓN DE ÍTEMS DEL CARRITO
+  # ===========================================================================
+  /carritos/{id}/items:
+    post:
+      tags:
+        - Items del Carrito
+      summary: Agregar un ítem al carrito de compras
+      description: |
+        Agrega un nuevo producto turístico al carrito indicado.
+        
+        **Regla de Seguridad y Consistencia:**
+        El backend valida la existencia del producto en el catálogo de la vertical correspondiente,
+        consulta el precio vigente de forma autoritativa y genera un snapshot inmutable en `carrito_items`.
+        No se acepta ni se confía en precios definidos por el cliente en el cuerpo de la petición.
+      operationId: agregarItemCarrito
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del carrito de compras.
+          schema:
+            type: string
+            format: uuid
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Datos del ítem y especificaciones de la reserva a incorporar.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgregarItemCarritoDto'
+            example:
+              vertical: 'ATRACCIONES'
+              item_referencia_id: 'PRhu4UBTWPBC'
+              nombre_producto: 'Tour Snorkel Isla Lobos'
+              cantidad: 2
+              detalles_json:
+                fecha: '2026-10-28'
+                hora_turno: '10:00'
+                adultos: 2
+                requiere_guia: true
+      responses:
+        '201':
+          description: Ítem agregado con éxito al carrito.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '409':
+          description: Conflicto de inventario (cupos no disponibles en la vertical al momento de la adición).
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+
+    delete:
+      tags:
+        - Items del Carrito
+      summary: Vaciar todos los ítems del carrito
+      description: |
+        Elimina en lote todos los ítems asociados al carrito de compras, restableciendo
+        el subtotal y total a `0.00`. El carrito permanece en estado `ACTIVO`.
+      operationId: vaciarCarrito
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del carrito.
+          schema:
+            type: string
+            format: uuid
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Carrito vaciado exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+              example:
+                id: '8f47ac10-58cc-4372-a567-0e02b2c3d479'
+                cliente_id: '123e4567-e89b-12d3-a456-426614174000'
+                estado: 'ACTIVO'
+                moneda: 'USD'
+                subtotal: 0.00
+                total: 0.00
+                items_count: 0
+                items: []
+                created_at: '2026-10-24T21:45:00.000Z'
+                updated_at: '2026-10-24T21:50:00.000Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  /carritos/{id}/items/{itemId}:
+    patch:
+      tags:
+        - Items del Carrito
+      summary: Actualizar la cantidad de un ítem en el carrito
+      description: |
+        Modifica la cantidad reservada de un ítem individual y recalcula automáticamente
+        el subtotal de la línea y el total global del carrito.
+      operationId: actualizarCantidadItem
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del carrito.
+          schema:
+            type: string
+            format: uuid
+        - name: itemId
+          in: path
+          required: true
+          description: Identificador UUID del ítem dentro del carrito.
+          schema:
+            type: string
+            format: uuid
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Nueva cantidad deseada (debe ser mayor a cero).
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarCantidadItemDto'
+            example:
+              cantidad: 3
+      responses:
+        '200':
+          description: Cantidad e importes actualizados correctamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+    delete:
+      tags:
+        - Items del Carrito
+      summary: Remover un ítem individual del carrito
+      description: |
+        Elimina físicamente un ítem del carrito y recalcula los totales generales.
+      operationId: eliminarItemCarrito
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del carrito.
+          schema:
+            type: string
+            format: uuid
+        - name: itemId
+          in: path
+          required: true
+          description: Identificador UUID del ítem a suprimir.
+          schema:
+            type: string
+            format: uuid
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Ítem eliminado y carrito recalculado con éxito.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarritoDetallado'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  # ===========================================================================
+  # 3. CHECKOUT Y TRANSICIÓN HACIA EL ESB SAGA
+  # ===========================================================================
+  /carritos/{id}/checkout:
+    post:
+      tags:
+        - Checkout y Transición a Saga
+      summary: Convertir carrito a orden de compra y ejecutar Saga en el ESB
+      description: |
+        Paso de checkout formal:
+        1. Valida que el carrito esté en estado `ACTIVO` y que contenga ítems.
+        2. Bloquea el carrito y marca su estado como `PROCESADO`.
+        3. Empaqueta los ítems de `schema_carritos.carrito_items` en un payload formal
+           compatible con `CheckoutSagaInput`.
+        4. Transfiere la ejecución al orquestador del ESB (`POST /api/v2/esb/checkout-saga`)
+           bajo el patrón transaccional Saga LIFO con compensación automática.
+        5. Retorna la confirmación transaccional o el comprobante fiscal generado.
+      operationId: ejecutarCheckoutCarrito
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del carrito de compras.
+          schema:
+            type: string
+            format: uuid
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Clave de idempotencia única (UUID v4) para evitar cobros dobles en caso de reintentos.
+          schema:
+            type: string
+            format: uuid
+            example: '9c0d1e2f-3a4b-5c6d-7e8f-9a0b1c2d3e4f'
+      requestBody:
+        required: true
+        description: Información de facturación y método de pago para procesar la transacción.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutCarritoDto'
+            example:
+              cliente_email: 'usuario.turista@epn.edu.ec'
+              cliente_nombre: 'Carlos Villacís'
+              metodo_pago: 'TARJETA_CREDITO'
+              numero_tarjeta: '4500123456789012'
+      responses:
+        '200':
+          description: Checkout y Saga completados exitosamente. Compra confirmada y facturada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSagaResult'
+              example:
+                success: true
+                correlation_id: 'corr-1792972800-abc1234'
+                estado: 'COMPLETED'
+                factura_id: 'fac-9988-7766'
+                total_pagado: 155.00
+                mensaje: '¡Compra multivertical completada exitosamente! Factura emitida.'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '409':
+          description: |
+            Fallo transaccional durante la Saga. Se ejecutó la compensación automática LIFO
+            y se devuelve el código de referencia de compensación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSagaResult'
+              example:
+                success: false
+                correlation_id: 'corr-1792972800-abc1234'
+                codigo_compensacion: 'REF-SAGA-8F92A1'
+                estado: 'FAILED_COMPENSATED'
+                total_pagado: 0.00
+                mensaje: 'Error al reservar en autos: Cupos agotados. Se ejecutó compensación LIFO exitosa.'
+
+  # ===========================================================================
+  # 4. DETECCIÓN DE CARRIOS ABANDONADOS
+  # ===========================================================================
+  /carritos/abandonados/detectar:
+    post:
+      tags:
+        - Detección de Abandono
+      summary: Ejecutar escaneo batch de carritos inactivos y emitir eventos
+      description: |
+        Job administrativo o tarea cron de mantenimiento (ejecutada periódicamente cada 30 minutos):
+        1. Consulta en `schema_carritos.carritos` todos los carritos en estado `ACTIVO` cuya última
+           actualización supere el umbral de inactividad de **2 horas** (`updated_at < NOW() - INTERVAL '2 hours'`).
+        2. Transiciona su estado a `ABANDONADO`.
+        3. Emite un CloudEvent `carritos.abandonados` hacia RabbitMQ y Kafka por cada carrito detectado
+           para activar acciones de remarketing o notificación por correo.
+      operationId: detectarCarritosAbandonados
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_CAR
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Resumen del procesamiento del job de detección de abandono.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumenCarritosAbandonados'
+              example:
+                carritos_escaneados: 48
+                carritos_marcados_abandonados: 5
+                eventos_emitidos: 5
+                ejecutado_en: '2026-10-24T21:55:00.000Z'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+
+  schemas:
+    # ── ESQUEMAS DE ENTRADA (DTOs) ──
+
+    InicializarCarritoDto:
+      type: object
+      description: Parámetros opcionales al crear un carrito de compras.
+      properties:
+        moneda:
+          type: string
+          enum: [USD]
+          default: USD
+          description: Moneda de cotización ISO 4217.
+
+    AgregarItemCarritoDto:
+      type: object
+      required:
+        - vertical
+        - item_referencia_id
+        - nombre_producto
+        - cantidad
+      description: DTO para incorporar un nuevo producto al carrito.
+      properties:
+        vertical:
+          type: string
+          enum: [ATRACCIONES, AUTOS, ALOJAMIENTOS, VUELOS, PAQUETES]
+          description: Vertical de procedencia del servicio turístico.
+          example: 'ATRACCIONES'
+        item_referencia_id:
+          type: string
+          maxLength: 64
+          description: Identificador del producto en el catálogo de la tienda socia.
+          example: 'PRhu4UBTWPBC'
+        nombre_producto:
+          type: string
+          maxLength: 255
+          description: Nombre o descripción comercial del ítem.
+          example: 'Tour Snorkel Isla Lobos'
+        cantidad:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Cantidad de cupos, pasajes, noches o unidades solicitadas.
+          example: 2
+        detalles_json:
+          type: object
+          description: |
+            Metadatos específicos requeridos por la vertical:
+            * **ATRACCIONES:** `fecha`, `hora_turno`, `adultos`, `ninos`, `requiere_guia`.
+            * **AUTOS:** `fecha_inicio`, `fecha_fin`, `dias_alquiler`, `seguro_cobertura`.
+            * **ALOJAMIENTOS:** `fecha_checkin`, `fecha_checkout`, `noches`, `tipo_habitacion`.
+            * **VUELOS:** `fecha_salida`, `numero_vuelo`, `origen`, `destino`, `clase_cabina`.
+            * **PAQUETES:** `paquete_id`, `fecha_inicio`, `pasajeros`, `descuento_combo_pct`.
+          example:
+            fecha: '2026-10-28'
+            hora_turno: '10:00'
+            adultos: 2
+
+    ActualizarCantidadItemDto:
+      type: object
+      required:
+        - cantidad
+      description: DTO para modificar el número de cupos o unidades de un ítem en el carrito.
+      properties:
+        cantidad:
+          type: integer
+          minimum: 1
+          description: Nueva cantidad total deseada para el ítem.
+          example: 3
+
+    CheckoutCarritoDto:
+      type: object
+      required:
+        - cliente_email
+        - cliente_nombre
+        - metodo_pago
+      description: Datos de pago y titular para convertir el carrito en una orden ejecutada por la Saga.
+      properties:
+        cliente_email:
+          type: string
+          format: email
+          description: Correo electrónico del comprador.
+          example: 'usuario.turista@epn.edu.ec'
+        cliente_nombre:
+          type: string
+          description: Nombres y apellidos del titular.
+          example: 'Carlos Villacís'
+        metodo_pago:
+          type: string
+          enum: [TARJETA_CREDITO, TARJETA_DEBITO, TRANSFERENCIA]
+          description: Método de pago seleccionado.
+          example: 'TARJETA_CREDITO'
+        numero_tarjeta:
+          type: string
+          description: Número de tarjeta de prueba para la pasarela de pagos.
+          example: '4500123456789012'
+
+    # ── ESQUEMAS DE RESPUESTA ──
+
+    CarritoItem:
+      type: object
+      required:
+        - id
+        - vertical
+        - item_referencia_id
+        - nombre_producto
+        - precio_unitario
+        - cantidad
+        - subtotal
+        - created_at
+      description: Representación relacional de un ítem almacenado en `schema_carritos.carrito_items`.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único del ítem dentro del carrito.
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        vertical:
+          type: string
+          enum: [ATRACCIONES, AUTOS, ALOJAMIENTOS, VUELOS, PAQUETES]
+          description: Vertical de negocio asociada.
+          example: 'ATRACCIONES'
+        item_referencia_id:
+          type: string
+          description: Identificador del ítem en la tienda socia.
+          example: 'PRhu4UBTWPBC'
+        nombre_producto:
+          type: string
+          description: Denominación comercial del producto.
+          example: 'Tour Snorkel Isla Lobos'
+        precio_unitario:
+          type: number
+          format: float
+          description: Precio unitario congelado (snapshot) por el servidor en USD.
+          example: 55.00
+        cantidad:
+          type: integer
+          description: Número de cupos o unidades reservadas.
+          example: 2
+        detalles_json:
+          type: object
+          description: Metadatos específicos de la vertical en formato JSONB.
+        subtotal:
+          type: number
+          format: float
+          description: Subtotal liquidado de la línea (`precio_unitario * cantidad`) en USD.
+          example: 110.00
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp de adición del ítem.
+
+    CarritoDetallado:
+      type: object
+      required:
+        - id
+        - cliente_id
+        - estado
+        - moneda
+        - subtotal
+        - total
+        - items_count
+        - items
+        - created_at
+        - updated_at
+      description: Representación completa del carrito de compras y su desglose de ítems.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único del carrito de compras.
+          example: '8f47ac10-58cc-4372-a567-0e02b2c3d479'
+        cliente_id:
+          type: string
+          format: uuid
+          description: Identificador lógico del cliente titular (asociado a `schema_clientes.clientes`).
+          example: '123e4567-e89b-12d3-a456-426614174000'
+        estado:
+          type: string
+          enum: [ACTIVO, PROCESADO, ABANDONADO]
+          description: Estado del ciclo de vida del carrito.
+          example: 'ACTIVO'
+        moneda:
+          type: string
+          enum: [USD]
+          description: Moneda de facturación ISO 4217.
+          example: 'USD'
+        subtotal:
+          type: number
+          format: float
+          description: Suma acumulada de subtotales de los ítems en USD.
+          example: 155.00
+        total:
+          type: number
+          format: float
+          description: Monto total a pagar en USD.
+          example: 155.00
+        items_count:
+          type: integer
+          description: Cantidad total de líneas o ítems presentes en el carrito.
+          example: 2
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarritoItem'
+          description: Colección de productos turísticos agregados.
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp de creación del carrito.
+        updated_at:
+          type: string
+          format: date-time
+          description: Timestamp de última mutación o actividad en el carrito.
+
+    CheckoutSagaResult:
+      type: object
+      required:
+        - success
+        - correlation_id
+        - estado
+        - total_pagado
+        - mensaje
+      description: Resultado del despacho de la compra compuesta hacia el orquestador Saga del ESB.
+      properties:
+        success:
+          type: boolean
+          description: Indica si la Saga completó todas las reservas y el pago con éxito.
+          example: true
+        correlation_id:
+          type: string
+          description: Identificador de correlación distribuida de la transacción Saga.
+          example: 'corr-1792972800-abc1234'
+        codigo_compensacion:
+          type: string
+          description: Código de referencia emitido ante compensación LIFO por fallo transaccional.
+          example: 'REF-SAGA-8F92A1'
+        estado:
+          type: string
+          enum: [COMPLETED, FAILED_COMPENSATED, IN_PROGRESS]
+          description: Estado transaccional final de la Saga.
+          example: 'COMPLETED'
+        factura_id:
+          type: string
+          description: UUID de la factura emitida si el checkout fue exitoso.
+          example: 'fac-9988-7766'
+        total_pagado:
+          type: number
+          format: float
+          description: Monto final cobrado en USD.
+          example: 155.00
+        mensaje:
+          type: string
+          description: Mensaje descriptivo del resultado.
+          example: '¡Compra multivertical completada exitosamente! Factura emitida.'
+
+    ResumenCarritosAbandonados:
+      type: object
+      required:
+        - carritos_escaneados
+        - carritos_marcados_abandonados
+        - eventos_emitidos
+        - ejecutado_en
+      description: Resumen devuelto por el job de detección de carritos abandonados.
+      properties:
+        carritos_escaneados:
+          type: integer
+          description: Total de carritos activos inspeccionados por el worker.
+          example: 48
+        carritos_marcados_abandonados:
+          type: integer
+          description: Número de carritos que superaron las 2 horas de inactividad y fueron transicionados a ABANDONADO.
+          example: 5
+        eventos_emitidos:
+          type: integer
+          description: Total de eventos CloudEvents publicados hacia RabbitMQ y Kafka.
+          example: 5
+        ejecutado_en:
+          type: string
+          format: date-time
+          description: Timestamp ISO 8601 de finalización del escaneo.
+          example: '2026-10-24T21:55:00.000Z'

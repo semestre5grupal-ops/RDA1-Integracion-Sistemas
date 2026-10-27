@@ -1,12 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { createClient } from '@supabase/supabase-js';
+import { KafkaEventBusService } from '../event-bus/kafka/kafka-event-bus.service';
 
 const ES_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const corto = (v: any, max: number) => (v === undefined || v === null ? null : String(v).slice(0, max));
 
 /**
  * Guarda la telemetría del frontend (embudo de conversión, tráfico por vertical).
+ * Emite a Apache Kafka en streaming (tópico booking.telemetry.events) conforme a Cátedra Semana 8 / I04.
  *
  * Se escribe directo en Postgres (misma conexión que el resto del backend), así
  * no depende de SUPABASE_SECRET_KEY. Si la escritura SQL falla se intenta con
@@ -18,7 +20,10 @@ export class TelemetryService {
   private readonly supabase;
   private esquemaListo: Promise<void> | null = null;
 
-  constructor(private readonly dataSource: DataSource) {
+  constructor(
+    private readonly dataSource: DataSource,
+    @Optional() private readonly kafkaService?: KafkaEventBusService,
+  ) {
     const url = process.env.SUPABASE_URL;
     const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     this.supabase = createClient(url || 'https://placeholder.supabase.co', key || 'placeholder');
@@ -72,6 +77,19 @@ export class TelemetryService {
       properties: data?.properties && typeof data.properties === 'object' ? data.properties : {},
     };
     if (!fila.event_name) return { success: false, error: 'event_name es obligatorio' };
+
+    // Cátedra Semana 8: Kafka exclusivo para telemetría de navegación y analítica masiva
+    if (this.kafkaService) {
+      try {
+        const topic = this.kafkaService.TOPICS?.TELEMETRY_EVENTS || 'booking.telemetry.events';
+        await this.kafkaService.emitB2BEvent(topic, fila.session_id, {
+          ...fila,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        this.logger.warn(`Telemetría hacia Kafka falló (${err.message})`);
+      }
+    }
 
     try {
       await this.asegurarEsquema();

@@ -1,0 +1,450 @@
+# ==============================================================================
+# CONTRATO GRAPHQL CANÓNICO (GATEWAY CLIENTE BFF) — BOOKING PROTOTIPO (RDA2)
+# ==============================================================================
+# Punto de Entrada Único (Single Endpoint): POST /graphql
+# Tecnología: Apollo Server v4 / NestJS GraphQL Module (Capa 6 Gateway Aggregator)
+# Trazabilidad: X-Correlation-Id + W3C Trace Context (traceparent)
+# ==============================================================================
+
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+"""
+Elemento unificado del catálogo multivertical de Booking.
+Representa un recurso consolidado de Atracciones, Autos, Alojamientos o Vuelos
+sin acoplamientos ni joins relacionales cross-schema.
+"""
+type CatalogoItem {
+  """Identificador único del ítem o recurso en su vertical de origen"""
+  id: ID!
+
+  """Vertical a la que pertenece el recurso: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Título comercial o denominación del producto turístico"""
+  nombre: String!
+
+  """Descripción textual breve de la oferta o especificaciones del servicio"""
+  descripcion: String
+
+  """Ciudad o destino geográfico de la atracción, auto, hotel o vuelo"""
+  destino: String
+
+  """Precio unitario base de referencia en dólares estadounidenses (USD)"""
+  precio: Float!
+
+  """Indica si el recurso se encuentra activo y disponible para reservas"""
+  disponible: Boolean!
+
+  """URL de la imagen fotográfica principal de portada del recurso"""
+  imagen_url: String
+
+  """Categoría o segmento taxonómico del recurso (ej. 'SUV', 'Aventura')"""
+  categoria: String
+
+  """Calificación promedio o rating asignado por usuarios (rango 1.0 a 10.0)"""
+  rating: Float
+
+  """Metadatos adicionales específicos de la vertical serializados en JSON"""
+  metadata_json: String
+}
+
+"""
+Reserva unificada de cualquier vertical turística consolidada en el perfil del cliente.
+"""
+type ReservaUnificada {
+  """Identificador único de la reserva (UUID o código alfanumérico)"""
+  id: ID!
+
+  """Vertical asociada a la reserva: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Estado transaccional: PENDIENTE | CONFIRMADO | COMPLETADO | CANCELADO | CHECKED_IN"""
+  estado: String!
+
+  """Monto monetario total liquidado de la reserva en USD"""
+  total: Float!
+
+  """Fecha programada de uso del servicio en formato ISO 8601 (YYYY-MM-DD)"""
+  fecha: String
+
+  """Hora o franja horaria de inicio del turno (HH:mm)"""
+  hora: String
+
+  """Nombre y apellido del pasajero o titular principal"""
+  titular_nombre: String
+
+  """Correo electrónico de contacto del titular de la reserva"""
+  titular_email: String
+
+  """Código alfanumérico único para trámites de check-in digital"""
+  codigo_checkin: String
+
+  """Payload o contenido de datos para generar el código QR de acceso digital"""
+  voucher_qr_payload: String
+
+  """Número o identificador de habitación asignada en el hotel (Alojamientos)"""
+  habitacion_asignada: String
+
+  """Clave o PIN digital de apertura de cerradura inteligente (Alojamientos a partir de las 14:00)"""
+  clave_acceso_digital: String
+
+  """Código de asiento asignado en cabina de la aeronave (ej. '14B') (Vuelos)"""
+  asiento_asignado: String
+
+  """Lectura de kilometraje u odómetro al retirar el vehículo de la agencia (Autos)"""
+  km_salida: Float
+
+  """Lectura de kilometraje u odómetro al entregar el vehículo (Autos)"""
+  km_retorno: Float
+
+  """Timestamp de creación y asentamiento de la reserva en formato ISO 8601"""
+  created_at: String
+}
+
+"""
+Respuesta agregada de reservas del cliente resuelta en batch mediante DataLoader anti-N+1.
+"""
+type AggregateBookingResponse {
+  """Identificador del cliente autenticado o consultado"""
+  cliente_id: String!
+
+  """Conteo total de reservas activas o históricas recuperadas"""
+  total_reservas_activas: Int!
+
+  """Lista detallada de reservas individuales consolidadas a través de todas las tiendas"""
+  reservas: [ReservaUnificada!]!
+}
+
+"""
+Detalle de una línea o ítem individual desglosado dentro de una factura fiscal.
+"""
+type FacturaItem {
+  """Identificador único de la línea de detalle"""
+  id: ID!
+
+  """Vertical que proveyó el servicio facturado: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Descripción comercial o concepto del servicio prestado"""
+  descripcion: String!
+
+  """Cantidad de cupos, días, noches o pasajes adquiridos"""
+  cantidad: Int!
+
+  """Precio unitario neto del ítem en USD"""
+  precio_unitario: Float!
+
+  """Subtotal resultante (cantidad * precio_unitario) en USD"""
+  subtotal: Float!
+}
+
+"""
+Información fiscal y de contacto del cliente asociada al comprobante tributario.
+"""
+type ClienteFactura {
+  """Razón social o nombres y apellidos del contribuyente"""
+  nombre: String
+
+  """Correo electrónico registrado para el envío del comprobante electrónico"""
+  email: String
+
+  """Cédula de identidad, RUC o pasaporte del cliente"""
+  cedula_ruc: String
+}
+
+"""
+Factura electrónica completa y consolidada (encabezado, cliente y desglose de líneas).
+"""
+type FacturaCompleta {
+  """Identificador interno de la factura (UUID)"""
+  id: ID!
+
+  """Número oficial secuencial de la factura con formato SRI (ej. '001-002-000000045')"""
+  numero_factura: String!
+
+  """Fecha y hora de emisión del comprobante en formato ISO 8601"""
+  fecha_emision: String
+
+  """Monto base imponible antes de impuestos en USD"""
+  subtotal: Float!
+
+  """Valor liquidado correspondiente al 15% del IVA en USD"""
+  iva_15pct: Float!
+
+  """Monto total final a pagar en USD"""
+  total: Float!
+
+  """Estado tributario de la factura: EMITIDA | PAGADA | ANULADA | REEMBOLSADA"""
+  estado: String!
+
+  """Datos del cliente facturado"""
+  cliente: ClienteFactura
+
+  """Detalle de todas las líneas de servicios adquiridos en la compra compuesta"""
+  items: [FacturaItem!]!
+}
+
+"""
+Detalle de un componente individual dentro de un paquete turístico promocional.
+"""
+type PaqueteItemDetalle {
+  """Identificador único del registro de ítem de paquete"""
+  id: ID!
+
+  """Vertical del componente turístico: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Identificador externo del servicio en el catálogo de la tienda socia"""
+  external_service_id: String!
+
+  """Nombre comercial descriptivo del componente"""
+  nombre_servicio: String!
+
+  """Precio unitario base regular del servicio antes del descuento del combo"""
+  precio_unitario: Float!
+}
+
+"""
+Paquete o combo turístico multivertical con descuento garantizado.
+"""
+type PaqueteCombo {
+  """Identificador único del paquete dinámico (UUID)"""
+  id: ID!
+
+  """Título comercial del paquete (ej. 'Aventura en Galápagos Todo Incluido')"""
+  nombre: String!
+
+  """Descripción detallada de la experiencia y condiciones del combo"""
+  descripcion: String
+
+  """Destino común o ciudad donde converge el paquete"""
+  destino: String!
+
+  """Suma de los precios unitarios de lista sin descuento en USD"""
+  precio_total_original: Float!
+
+  """Porcentaje de descuento aplicado sobre la tarifa base (ej. 15.0)"""
+  descuento_porcentaje: Float!
+
+  """Precio final promocional con descuento aplicado en USD"""
+  precio_final_paquete: Float!
+
+  """Estado operativo del paquete: ACTIVO | INACTIVO"""
+  estado: String!
+
+  """Lista de servicios individuales que conforman el paquete"""
+  items: [PaqueteItemDetalle!]
+}
+
+"""
+Resultado transaccional de la orquestación del checkout compuesto vía Patrón Saga LIFO.
+"""
+type CheckoutResult {
+  """Indica si la compra fue confirmada con éxito (true) o si falló y se compensó (false)"""
+  success: Boolean!
+
+  """Identificador de correlación transaccional distribuida (UUID v4) para auditoría"""
+  correlationId: String
+
+  """Código de referencia de compensación emitido ante reversión (ej. 'REF-SAGA-ABC123')"""
+  codigoCompensacion: String
+
+  """Estado final de la transacción: COMPLETED | FAILED_COMPENSATED | IN_PROGRESS"""
+  estado: String!
+
+  """Identificador de la factura electrónica emitida si el checkout fue exitoso"""
+  facturaId: String
+
+  """Monto monetario final cobrado en USD"""
+  total: Float!
+
+  """Mensaje informativo detallando el resultado de la orquestación o motivo de reversión"""
+  mensaje: String!
+}
+
+"""
+Resultado del trámite de check-in digital adaptado según la vertical turística.
+"""
+type CheckInResult {
+  """Indica si el check-in digital fue procesado satisfactoriamente"""
+  success: Boolean!
+
+  """Vertical sobre la que se ejecutó el check-in: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Identificador de la reserva asociada"""
+  reservaId: String!
+
+  """Mensaje de confirmación con instrucciones de acceso"""
+  mensaje: String!
+
+  """Voucher digital o credencial de acceso codificada en Base64 (Atracciones)"""
+  voucherQrBase64: String
+
+  """Número de habitación asignada en el hotel (Alojamientos)"""
+  habitacionAsignada: String
+
+  """Código digital de acceso o PIN de la cerradura electrónica (Alojamientos)"""
+  claveAccesoDigital: String
+
+  """Número de asiento asignado en la aeronave (Vuelos)"""
+  asientoAsignado: String
+
+  """Código de acceso o localizador PNR generado para el servicio"""
+  codigoAcceso: String
+}
+
+"""
+Estructura de entrada para un ítem a incluir dentro del carrito de compra de la Saga.
+"""
+input CheckoutItemInput {
+  """Vertical del servicio a reservar: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Identificador único del producto o recurso en la tienda socia"""
+  itemId: String!
+
+  """Nombre o descripción del producto"""
+  nombre: String!
+
+  """Cantidad de cupos o unidades solicitadas"""
+  cantidad: Int!
+
+  """Precio unitario cotizado en USD"""
+  precioUnitario: Float!
+
+  """Parámetros específicos de reserva en formato JSON string (fecha, turno, asientos, etc.)"""
+  detallesReservaJson: String
+}
+
+"""
+Estructura de entrada para el checkout compuesto orquestado por la Saga.
+"""
+input CheckoutSagaInputGql {
+  """Identificador opcional del cliente en la base de datos de Booking"""
+  clienteId: String
+
+  """Correo electrónico del comprador para recepción de confirmaciones y factura"""
+  clienteEmail: String!
+
+  """Nombres y apellidos completos del comprador"""
+  clienteNombre: String!
+
+  """Método de pago seleccionado: TARJETA_CREDITO | TARJETA_DEBITO | TRANSFERENCIA"""
+  metodoPago: String
+
+  """Número de tarjeta de crédito/débito para la simulación de cobro"""
+  numeroTarjeta: String
+
+  """Colección de ítems multivertical que componen la compra compuesta"""
+  items: [CheckoutItemInput!]!
+
+  """Parámetro de pruebas para simular fallos de compensación: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS | PAGO"""
+  simularFalloEnPaso: String
+}
+
+"""
+Estructura de entrada para realizar check-in digital en cualquiera de las 4 verticales.
+"""
+input CheckInInputGql {
+  """Vertical correspondiente a la reserva: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+  vertical: String!
+
+  """Identificador único de la reserva"""
+  reservaId: String!
+
+  """Documento de identidad o código de voucher QR (Atracciones)"""
+  qrCode: String
+
+  """Número de licencia de conducir válida para entrega de vehículo (Autos)"""
+  licenciaConductor: String
+
+  """Lectura de kilometraje de salida registrado al retirar el auto (Autos)"""
+  kmSalida: Float
+
+  """Lectura de kilometraje de retorno registrado al devolver el auto (Autos)"""
+  kmLlegada: Float
+
+  """Modalidad de trámite vehicular: ENTREGA | DEVOLUCION (Autos)"""
+  tipoCheckinAuto: String
+}
+
+"""
+Puntos de entrada de consulta declarativa (Queries) en el Gateway GraphQL.
+"""
+type Query {
+  """
+  Catálogo agregado multivertical (Atracciones, Autos, Alojamientos, Vuelos) sin joins cross-schema.
+  Permite filtrado opcional por ciudad de destino y por vertical turística.
+  """
+  catalogoUnificado(
+    """Destino o ciudad de búsqueda (ej. 'Quito', 'Galápagos')"""
+    destino: String,
+    """Vertical de filtrado: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+    vertical: String
+  ): [CatalogoItem!]!
+
+  """
+  Consulta unificada de reservas del cliente con resolución batch y protección anti-N+1 vía DataLoader.
+  Agrupa todas las reservas activas e históricas de atracciones, autos, alojamientos y vuelos.
+  """
+  misReservas(
+    """Identificador o email del cliente"""
+    clienteId: String!
+  ): AggregateBookingResponse!
+
+  """
+  Consulta de factura electrónica consolidada con encabezado, detalle de líneas por vertical y datos fiscales.
+  """
+  obtenerFacturaCompleta(
+    """Número secuencial oficial o ID interno de la factura"""
+    numeroFactura: String!
+  ): FacturaCompleta!
+
+  """
+  Consulta de paquetes turísticos dinámicos y combos multivertical con contratos de descuento B2B vigentes.
+  """
+  obtenerPaquetesDisponibles: [PaqueteCombo!]!
+}
+
+"""
+Puntos de entrada de mutaciones transaccionales (Mutations) en el Gateway GraphQL.
+Todas las mutaciones están protegidas con limitación de tasa (GqlThrottlerGuard) y sanitización de entradas.
+"""
+type Mutation {
+  """
+  Orquestación de compra compuesta multivertical mediante Patrón Saga LIFO y compensación automática.
+  Coordina reservas en tiendas socias, cobra vía pasarela y emite la factura unificada.
+  """
+  checkoutOrquestado(
+    """Datos de la orden de compra, comprador e ítems multivertical"""
+    input: CheckoutSagaInputGql!
+  ): CheckoutResult!
+
+  """
+  Cancelación transaccional de una reserva individual con compensación automática y restitución de aforo.
+  """
+  cancelarReservaConSaga(
+    """Identificador único de la reserva a cancelar"""
+    reservaId: String!,
+    """Vertical de la reserva: ATRACCIONES | AUTOS | ALOJAMIENTOS | VUELOS"""
+    vertical: String!,
+    """Motivo o justificación de la cancelación del servicio"""
+    motivo: String = "Cancelación solicitada por el usuario en marketplace"
+  ): Boolean!
+
+  """
+  Check-in digital multivertical adaptado a cada socio comercial:
+  - Atracciones: emisión de voucher QR y asignación de guía.
+  - Autos: registro de kilometraje y licencia (entrega/devolución con cooldown de 2 horas).
+  - Alojamientos: asignación de habitación y clave digital a partir de las 14:00.
+  - Vuelos: emisión de pase de abordar y asignación de asiento.
+  """
+  realizarCheckInDigital(
+    """Parámetros de entrada para el trámite de check-in digital"""
+    input: CheckInInputGql!
+  ): CheckInResult!
+}

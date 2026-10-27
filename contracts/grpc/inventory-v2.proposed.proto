@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package booking.inventory.v2;
+
+option go_package = "booking/inventory/v2;inventoryv2";
+option java_multiple_files = true;
+option java_package = "ec.edu.epn.booking.inventory.v2";
+option csharp_namespace = "Booking.Inventory.V2";
+
+/**
+ * ============================================================================
+ * SERVICIO gRPC OBJETIVO v2: InventoryStockService (Propuesta RDA2)
+ * ============================================================================
+ * 
+ * Contrato gRPC propuesto para la sincronización de inventario en tiempo real
+ * entre las tiendas satélites (Vuelos, Autos, Atracciones, Alojamientos) y el
+ * Gateway Central Booking Prototipo sobre HTTP/2 (puerto 50051).
+ *
+ * Mejoras respecto a v1 (src/proto/inventory.proto):
+ * 1. Metadata y contexto de trazabilidad W3C + Correlation ID estandarizados.
+ * 2. Soporte para sincronización por lotes (Batch) y delta incremental.
+ * 3. Streaming bidireccional continuo con ACKs inmediatos por evento.
+ * 4. Verificación rápida de disponibilidad (CheckAvailability) previa al hold.
+ * 5. Clasificación granular de recursos (vuelo, auto, atraccion, alojamiento).
+ * 6. Códigos de error de dominio y detalles estructurados.
+ */
+service InventoryStockService {
+  // RPC 1: Actualización puntual unaria de stock para un ítem
+  rpc PushStockUpdate (StockUpdateMessage) returns (StockUpdateAck);
+
+  // RPC 2: Actualización unaria por lote (batch) de múltiples ítems
+  rpc BatchStockUpdate (BatchStockUpdateRequest) returns (BatchStockUpdateResponse);
+
+  // RPC 3: Client-streaming de eventos continuos con resumen final (heredado de v1)
+  rpc StreamInventoryChanges (stream StockChangeEvent) returns (StreamSummary);
+
+  // RPC 4: Streaming bidireccional con acuse de recibo asíncrono por cada evento
+  rpc BiDirectionalStockStream (stream StockChangeEvent) returns (stream StockChangeAck);
+
+  // RPC 5: Verificación unaria rápida de disponibilidad en tiempo real
+  rpc CheckAvailability (CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+}
+
+// ----------------------------------------------------------------------------
+// Mensajes de Contexto y Metadatos de Trazabilidad
+// ----------------------------------------------------------------------------
+
+message TraceContext {
+  // Identificador de correlación transaccional distribuida (UUID v4)
+  string correlation_id = 1;
+  // W3C Trace Context (formato: 00-<trace_id>-<span_id>-<trace_flags>)
+  string traceparent = 2;
+  // W3C Trace State opcional
+  string tracestate = 3;
+  // Identificador del nodo emisor registrado (ej. "NODE_AUT_LOCAL", "NODE_VUE_ECOAIRLINES")
+  string node_id = 4;
+  // Entorno de ejecución: dev | test | prod
+  string environment = 5;
+}
+
+// ----------------------------------------------------------------------------
+// Tipos Enumerados
+// ----------------------------------------------------------------------------
+
+enum ResourceType {
+  RESOURCE_TYPE_UNSPECIFIED = 0;
+  RESOURCE_TYPE_VUELO = 1;
+  RESOURCE_TYPE_AUTO = 2;
+  RESOURCE_TYPE_ATRACCION = 3;
+  RESOURCE_TYPE_ALOJAMIENTO = 4;
+}
+
+enum ErrorDomainCode {
+  ERROR_NONE = 0;
+  ERROR_INVALID_ARGUMENT = 1;
+  ERROR_ITEM_NOT_FOUND = 2;
+  ERROR_NODE_UNAUTHORIZED = 3;
+  ERROR_NEGATIVE_STOCK = 4;
+  ERROR_CONCURRENT_CONFLICT = 5;
+  ERROR_INTERNAL_STORAGE = 6;
+}
+
+// ----------------------------------------------------------------------------
+// Mensajes para RPC 1: PushStockUpdate (Unario individual)
+// ----------------------------------------------------------------------------
+
+message StockUpdateMessage {
+  // Contexto opcional dentro del mensaje (si no viaja en cabeceras gRPC metadata)
+  TraceContext context = 1;
+  // Identificador del servicio / tienda emisora (ej. "atracciones-dilan", "vuelos-aerogal")
+  string service_id = 2;
+  // Tipo de recurso de la vertical
+  ResourceType resource_type = 3;
+  // Identificador único del ítem (ej. "auto-compacto-01", "AV1632-ECONOMY")
+  string item_id = 4;
+  // Fecha en formato ISO 8601 (YYYY-MM-DD)
+  string date = 5;
+  // Franja horaria o turno (ej. "10:30", "DEFAULT")
+  string time_slot = 6;
+  // Cupos remanentes disponibles absolutos
+  int32 available_units = 7;
+  // Precio unitario referencial opcional en centavos USD
+  int32 price_cents = 8;
+  // Timestamp de emisión en Epoch milisegundos
+  int64 timestamp = 9;
+  // Metadatos extensibles clave-valor
+  map<string, string> metadata = 10;
+}
+
+message StockUpdateAck {
+  bool success = 1;
+  string message = 2;
+  int64 processed_at = 3;
+  ErrorDomainCode error_code = 4;
+  string error_detail = 5;
+}
+
+// ----------------------------------------------------------------------------
+// Mensajes para RPC 2: BatchStockUpdate (Unario por lote)
+// ----------------------------------------------------------------------------
+
+message BatchStockUpdateRequest {
+  TraceContext context = 1;
+  string service_id = 2;
+  repeated StockUpdateMessage items = 3;
+  int64 batch_timestamp = 4;
+}
+
+message BatchStockUpdateResponse {
+  bool success = 1;
+  int32 items_received = 2;
+  int32 items_processed_successfully = 3;
+  int32 items_failed = 4;
+  repeated StockItemFailure failures = 5;
+  int64 processed_at = 6;
+}
+
+message StockItemFailure {
+  string item_id = 1;
+  string date = 2;
+  string time_slot = 3;
+  ErrorDomainCode error_code = 4;
+  string error_reason = 5;
+}
+
+// ----------------------------------------------------------------------------
+// Mensajes para RPC 3 y 4: Streaming de Cambios (Client & Bi-directional)
+// ----------------------------------------------------------------------------
+
+message StockChangeEvent {
+  TraceContext context = 1;
+  // Identificador único idempotente del evento de cambio (UUID v4)
+  string event_id = 2;
+  string service_id = 3;
+  ResourceType resource_type = 4;
+  string item_id = 5;
+  string date = 6;
+  string time_slot = 7;
+  // Variación neta (+N liberación/cancelación, -N reserva/bloqueo)
+  int32 delta = 8;
+  // Stock remanente resultante tras aplicar el delta (opcional para validación)
+  int32 resulting_available_units = 9;
+  int64 timestamp = 10;
+  map<string, string> metadata = 11;
+}
+
+message StreamSummary {
+  int32 total_events_processed = 1;
+  int32 successful_events = 2;
+  int32 failed_events = 3;
+  bool is_synchronized = 4;
+  string last_sync_hash = 5;
+  int64 completed_at = 6;
+}
+
+message StockChangeAck {
+  string event_id = 1;
+  bool success = 2;
+  int32 current_available_units = 3;
+  ErrorDomainCode error_code = 4;
+  string error_detail = 5;
+  int64 acknowledged_at = 6;
+}
+
+// ----------------------------------------------------------------------------
+// Mensajes para RPC 5: CheckAvailability (Consulta de disponibilidad)
+// ----------------------------------------------------------------------------
+
+message CheckAvailabilityRequest {
+  TraceContext context = 1;
+  string service_id = 2;
+  ResourceType resource_type = 3;
+  string item_id = 4;
+  string date = 5;
+  string time_slot = 6;
+  int32 requested_units = 7;
+}
+
+message CheckAvailabilityResponse {
+  bool available = 1;
+  int32 available_units = 2;
+  string item_id = 3;
+  string status_message = 4;
+  int64 checked_at = 5;
+}

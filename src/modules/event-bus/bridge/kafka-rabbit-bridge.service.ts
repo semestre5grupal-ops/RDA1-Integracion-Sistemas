@@ -14,30 +14,35 @@ export class KafkaRabbitBridgeService {
   ) {}
 
   /**
-   * Enruta eventos del Topic Exchange de RabbitMQ hacia los tópicos de streaming B2B en Apache Kafka
-   * (Cátedra Consideraciones RDA2 §7).
+   * Enruta eventos del Topic Exchange de RabbitMQ y tópicos de streaming en Apache Kafka
+   * (Cátedra Semana 8 - RabbitMQ transaccional, Kafka solo telemetría y analítica).
    */
   async bridgeEvent(tipoEvento: string, aggregateId: string, payload: any): Promise<void> {
     this.logger.log(`[Dual Event Bridge] Enrutando evento '${tipoEvento}' [ID: ${aggregateId}]`);
 
-    // 1. Enviar a RabbitMQ para amortiguamiento y consumo interno
+    const upper = (tipoEvento || '').toUpperCase();
+
+    // 1. Enviar eventos transaccionales autoritativos a RabbitMQ
     let routingKey = 'general.event';
-    if (tipoEvento.includes('SEARCH')) routingKey = 'search.query';
-    if (tipoEvento.includes('STOCK')) routingKey = 'stock.updated';
-    if (tipoEvento.includes('ORDER') || tipoEvento.includes('RESERVA')) routingKey = 'order.confirmed';
-    if (tipoEvento.includes('SAGA') || tipoEvento.includes('COMPENSATE')) routingKey = 'saga.compensate';
+    if (upper.includes('SEARCH')) routingKey = 'search.query';
+    if (upper.includes('STOCK')) routingKey = 'stock.updated';
+    if (upper.includes('ORDER') || upper.includes('RESERVA') || upper.includes('PAGO')) routingKey = 'order.confirmed';
+    if (upper.includes('SAGA') || upper.includes('COMPENSATE')) routingKey = 'saga.compensate';
 
     await this.rabbitService.publish(routingKey, payload);
 
-    // 2. Replicar a Apache Kafka para streaming B2B y analítica histórica
-    let kafkaTopic = this.kafkaService.TOPICS.AUDITORIA_SAGAS;
-    if (tipoEvento.includes('STOCK') || tipoEvento.includes('CATALOGO')) {
+    // 2. Replicar a Apache Kafka SOLO telemetría y analítica de sincronización de catálogo.
+    // Alcance I04: Quitar el reenvío de ORDER/RESERVA/PAGO/STOCK/COMPENSATE a Kafka.
+    let kafkaTopic: string | null = null;
+    if (upper.includes('CATALOGO')) {
       kafkaTopic = this.kafkaService.TOPICS.CATALOGO_SYNC;
-    } else if (tipoEvento.includes('ORDER') || tipoEvento.includes('RESERVA') || tipoEvento.includes('PAGO')) {
-      kafkaTopic = this.kafkaService.TOPICS.ORDENES_B2B;
+    } else if (upper.includes('TELEMETRY')) {
+      kafkaTopic = this.kafkaService.TOPICS.TELEMETRY_EVENTS;
     }
 
-    await this.kafkaService.emitB2BEvent(kafkaTopic, aggregateId, payload);
+    if (kafkaTopic) {
+      await this.kafkaService.emitB2BEvent(kafkaTopic, aggregateId, payload);
+    }
 
     this.winstonLogger.logAudit('DUAL_EVENT_BUS_BRIDGED', {
       evento: tipoEvento,

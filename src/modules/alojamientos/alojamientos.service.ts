@@ -79,6 +79,7 @@ import { validarCapacidad, validarEstancia, calcularNoches, fechaRelativa } from
 import { ActorCatalogo, exigirPropiedad } from './guards/gestion-alojamientos.guard';
 import { aplanarValidacion } from '../../core/validation/validation-pipe';
 import { esAdministrador, UsuarioSupabase } from '../../core/auth/administradores';
+import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 /** Máximo de alojamientos por petición de sincronización. */
 export const MAX_SINCRONIZACION = 100;
@@ -168,7 +169,11 @@ export class AlojamientosService implements OnModuleInit {
     private readonly proveedoresService: ProveedoresAlojamientoService,
     @Optional()
     private readonly telemetryService?: TelemetryService,
-  ) {}
+    @Optional()
+    private readonly traceContext?: TraceContextService,
+  ) {
+    this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
 
   // =========================================================================
   // TIPOS DE HABITACIÓN Y HUÉSPEDES (apoyo a disponibilidad y reservas)
@@ -2202,4 +2207,3 @@ export class AlojamientosService implements OnModuleInit {
     };
   }
 }
-

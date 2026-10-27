@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom, timeout, catchError, of } from 'rxjs';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
+import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 export interface ConnectorNode {
   id: string;
@@ -30,7 +31,9 @@ export class ConnectorHealthService {
   constructor(
     private readonly httpService: HttpService,
     private readonly winstonLogger: WinstonPhysicalLoggerService,
+    @Optional() private readonly traceContext?: TraceContextService,
   ) {
+    this.traceContext?.instrumentAxios(this.httpService.axiosRef);
     this.initDefaultNodes();
   }
 
