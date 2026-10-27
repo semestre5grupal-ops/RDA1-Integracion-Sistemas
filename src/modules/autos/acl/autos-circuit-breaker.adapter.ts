@@ -138,8 +138,10 @@ export class AutosCircuitBreakerAdapter {
           }
         }, {
           headers: {
+            'Content-Type': 'application/json',
             'Idempotency-Key': idempotencyKey,
-            'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`
+            'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`,
+            ...(process.env.TIENDA_AUTOS_API_KEY ? { 'X-API-Key': process.env.TIENDA_AUTOS_API_KEY } : {}),
           },
           timeout: this.TIMEOUT_MS
         }).pipe(

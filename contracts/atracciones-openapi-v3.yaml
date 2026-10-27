@@ -429,7 +429,7 @@ paths:
         
         Estados de Aforo Operativo:
         * `DISPONIBLE`: Turno con aforo suficiente para reserva.
-        * `ULTIMOS_CUPOS`: Quedan 3 o menos cupos (activa alerta visual de escasez en el marketplace).
+        * `ULTIMOS_CUPOS`: Quedan 5 o menos cupos (activa alerta visual de escasez en el marketplace).
         * `AGOTADO`: Aforo completo (0 cupos disponibles, bloqueo preventivo de reserva).
 
         > **Consistencia en Tiempo Real:** Los cupos son consultados directamente desde la tabla PostgreSQL `schema_atracciones.turnos_aforo`, la cual se mantiene sincronizada con la ingesta gRPC (puerto 50051) y los bloqueos transaccionales de reservas activas.

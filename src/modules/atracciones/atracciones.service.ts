@@ -851,6 +851,7 @@ export class AtraccionesService {
                     'Content-Type': 'application/json',
                     'Idempotency-Key': safeKey,
                     'X-Correlation-Id': dto.correlation_id || `corr-${reservaId}`,
+                    ...(process.env.TIENDA_ATRACCIONES_API_KEY ? { 'X-API-Key': process.env.TIENDA_ATRACCIONES_API_KEY } : {}),
                   },
                   timeout: 5000,
                 },

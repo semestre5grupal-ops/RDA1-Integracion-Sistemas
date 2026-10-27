@@ -350,8 +350,15 @@ export class NodesService {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
 
-        let res = await this.fetchWithTrace(pingUrl, { signal: controller.signal }).catch(async () => {
-          return this.fetchWithTrace(nodo.baseUrlRest, { signal: controller.signal });
+        const pingHeaders: Record<string, string> = {};
+        if (nodo.vertical === 'ATRACCIONES' && process.env.TIENDA_ATRACCIONES_API_KEY) {
+          pingHeaders['X-API-Key'] = process.env.TIENDA_ATRACCIONES_API_KEY;
+        } else if (nodo.vertical === 'AUTOS' && process.env.TIENDA_AUTOS_API_KEY) {
+          pingHeaders['X-API-Key'] = process.env.TIENDA_AUTOS_API_KEY;
+        }
+
+        let res = await this.fetchWithTrace(pingUrl, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+          return this.fetchWithTrace(nodo.baseUrlRest, { headers: pingHeaders, signal: controller.signal });
         });
         clearTimeout(timeout);
         latencia = Date.now() - t0;
@@ -411,10 +418,15 @@ export class NodesService {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
+      const syncHeaders: Record<string, string> = { Accept: 'application/json' };
+      if (nodo.vertical === 'ATRACCIONES' && process.env.TIENDA_ATRACCIONES_API_KEY) {
+        syncHeaders['X-API-Key'] = process.env.TIENDA_ATRACCIONES_API_KEY;
+      } else if (nodo.vertical === 'AUTOS' && process.env.TIENDA_AUTOS_API_KEY) {
+        syncHeaders['X-API-Key'] = process.env.TIENDA_AUTOS_API_KEY;
+      }
+
       const resp = await this.fetchWithTrace(targetUrl, {
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: syncHeaders,
         signal: controller.signal,
       });
       clearTimeout(timeout);

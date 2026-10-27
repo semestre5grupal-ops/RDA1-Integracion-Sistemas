@@ -148,7 +148,8 @@ export class DilanAtraccionesAdapter {
           headers: {
             'Idempotency-Key': idempotencyKey,
             'X-Correlation-Id': correlationId || 'corr-' + Date.now(),
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(process.env.TIENDA_ATRACCIONES_API_KEY ? { 'X-API-Key': process.env.TIENDA_ATRACCIONES_API_KEY } : {}),
           },
           timeout: this.TIMEOUT_MS,
         }).pipe(
@@ -202,7 +203,8 @@ export class DilanAtraccionesAdapter {
           headers: {
             'Idempotency-Key': idempotencyKey,
             'X-Correlation-Id': correlationId || 'corr-cancel-' + Date.now(),
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(process.env.TIENDA_ATRACCIONES_API_KEY ? { 'X-API-Key': process.env.TIENDA_ATRACCIONES_API_KEY } : {}),
           },
           timeout: this.TIMEOUT_MS,
         }).pipe(
@@ -270,7 +272,7 @@ export class DilanAtraccionesAdapter {
         time: item.hora_inicio || item.turno || item.time || item.hora || '10:00 a.m.',
         hora: item.hora_inicio || item.turno || item.time || item.hora || '10:00 a.m.',
         cupos: item.cupos_disponibles ?? item.cupos_libres ?? item.cupos ?? 10,
-        estado: (item.cupos_disponibles === 0 || item.cupos_libres === 0) ? 'AGOTADO' : ((item.cupos_disponibles <= 3 || item.cupos_libres <= 3) ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
+        estado: (item.cupos_disponibles === 0 || item.cupos_libres === 0) ? 'AGOTADO' : ((item.cupos_disponibles <= 5 || item.cupos_libres <= 5) ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
         origen: 'TIENDA_EXTERNA'
       }));
     }
