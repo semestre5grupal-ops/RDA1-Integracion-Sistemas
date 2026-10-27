@@ -1,0 +1,404 @@
+{
+  "consumer": {
+    "name": "BookingPrototipoConsumer"
+  },
+  "interactions": [
+    {
+      "description": "Despacho REST de reserva desde Booking Prototipo con Idempotency-Key",
+      "providerStates": [
+        {
+          "name": "El turno slot-20261025-1030 cuenta con 8 cupos disponibles"
+        }
+      ],
+      "request": {
+        "body": {
+          "adult_count": 2,
+          "attraction_id": "PRhu4UBTWPBC",
+          "booking_reservation_id": "RES-ATR-A1B2C3",
+          "customer": {
+            "email": "turista@epn.edu.ec",
+            "name": "Carlos Mendoza"
+          },
+          "date": "2026-10-25",
+          "slot_id": "slot-20261025-1030",
+          "time": "10:30 a.m.",
+          "total_tickets": 2
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "idem-v3-9932b"
+        },
+        "matchingRules": {
+          "body": {
+            "$.adult_count": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.attraction_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.booking_reservation_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.customer.email": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.customer.name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.date": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.slot_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.time": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total_tickets": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/reservas"
+      },
+      "response": {
+        "body": {
+          "message": "Reserva confirmada en la tienda socia.",
+          "reservation_id": "SOCIO-CONF-8821",
+          "status": "CONFIRMED",
+          "success": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.message": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.reservation_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.success": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "Despacho REST de reserva para un turno agotado",
+      "providerStates": [
+        {
+          "name": "El turno slot-20261025-1030 no tiene cupos suficientes"
+        }
+      ],
+      "request": {
+        "body": {
+          "adult_count": 5,
+          "attraction_id": "PRhu4UBTWPBC",
+          "slot_id": "slot-20261025-1030"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.adult_count": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.attraction_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.slot_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/reservas"
+      },
+      "response": {
+        "body": {
+          "code": "OUT_OF_STOCK",
+          "detail": "No existen suficientes cupos disponibles.",
+          "status": 409,
+          "title": "Cupos Agotados para el Turno Horario",
+          "type": "https://booking.epn.edu.ec/errors/sin-cupos"
+        },
+        "headers": {
+          "Content-Type": "application/problem+json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.detail": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.title": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 409
+      }
+    },
+    {
+      "description": "Petición de disponibilidad de turnos para el 2026-10-25",
+      "providerStates": [
+        {
+          "name": "Existen turnos y aforo disponible para la atracción PRhu4UBTWPBC"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/atracciones/PRhu4UBTWPBC/disponibilidad",
+        "query": {
+          "date": [
+            "2026-10-25"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "atraccion_id": "PRhu4UBTWPBC",
+          "date": "2026-10-25",
+          "time_slots": [
+            {
+              "available_slots": 8,
+              "slot_id": "slot-20261025-1030",
+              "status": "DISPONIBLE",
+              "time": "10:30 a.m.",
+              "total_slots": 25
+            }
+          ],
+          "total_available_slots": 45
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.atraccion_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.date": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.time_slots": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.time_slots[*].available_slots": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.time_slots[*].slot_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.time_slots[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.time_slots[*].time": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.time_slots[*].total_slots": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.total_available_slots": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "17.1.4"
+    },
+    "pactRust": {
+      "ffi": "0.5.8",
+      "models": "1.3.16"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "AtraccionesPartnerProvider"
+  }
+}

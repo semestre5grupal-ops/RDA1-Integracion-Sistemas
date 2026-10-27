@@ -26,7 +26,8 @@
     "prueba:gestion": "npm run build && node dist/modules/vuelos/pruebas/prueba-gestion.js",
     "prueba:db": "npm run build && node dist/modules/vuelos/pruebas/prueba-datos.js && node dist/modules/vuelos/pruebas/prueba-gestion.js",
     "test:api:clientes": "node run_api_tests.js",
-    "test:contracts": "jest --config jest-contracts.config.js --runInBand --forceExit"
+    "test:contracts": "jest --config jest-contracts.config.js --runInBand --forceExit",
+    "test:pact": "jest --config jest-pact.config.js --runInBand --forceExit"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
@@ -45,6 +46,8 @@
     "@nestjs/swagger": "^7.0.0",
     "@nestjs/typeorm": "^10.0.0",
     "@supabase/supabase-js": "^2.117.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "amqplib": "^2.2.0",
     "axios": "^1.6.0",
     "cache-manager": "^5.2.3",
@@ -66,6 +69,7 @@
     "@nestjs/cli": "^10.0.0",
     "@nestjs/schematics": "^10.0.0",
     "@nestjs/testing": "^10.4.22",
+    "@pact-foundation/pact": "^17.1.4",
     "@types/amqplib": "^0.10.8",
     "@types/express": "^4.17.17",
     "@types/jest": "^30.0.0",

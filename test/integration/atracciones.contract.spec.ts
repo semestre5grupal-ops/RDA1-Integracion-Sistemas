@@ -20,8 +20,9 @@ import { DataSource } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { of } from 'rxjs';
+import { AjvValidationPipe } from '../../src/core/validation/ajv-validation.pipe';
 
-describe('Atracciones OpenAPI v2 Contract Tests (Cátedra RDA2 CE07)', () => {
+describe('Atracciones OpenAPI v2 & v3 Contract Tests (Cátedra RDA2 CE07)', () => {
   let app: INestApplication;
 
   const mockRepo = {
@@ -112,9 +113,10 @@ describe('Atracciones OpenAPI v2 Contract Tests (Cátedra RDA2 CE07)', () => {
     app.setGlobalPrefix('api');
     app.enableVersioning({
       type: VersioningType.URI,
-      defaultVersion: ['1', '2'],
+      defaultVersion: ['1', '2', '3'],
       prefix: 'v',
     });
+    app.useGlobalPipes(new AjvValidationPipe());
     await app.init();
   });
 
@@ -246,4 +248,56 @@ describe('Atracciones OpenAPI v2 Contract Tests (Cátedra RDA2 CE07)', () => {
     expect(response.body).toHaveProperty('permite_promociones');
     expect(response.body).toHaveProperty('porcentaje_descuento_maximo');
   });
+
+  // =========================================================================
+  // PRUEBAS DE CONTRATO OPENAPI V3 & REGLAS SEMANA 9
+  // =========================================================================
+
+  it('GET /api/v3/atracciones debe responder bajo el prefijo canónico v3', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v3/atracciones?limit=2&page=1')
+      .expect(HttpStatus.OK);
+
+    expect(response.body).toHaveProperty('data');
+    expect(response.body).toHaveProperty('meta');
+  });
+
+  it('POST /api/v3/atracciones/reservas debe procesar checkout canónico en inglés con slot_id concordante', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v3/atracciones/reservas')
+      .send({
+        attraction_id: 'PRhu4UBTWPBC',
+        slot_id: 'slot-20261025-1000',
+        date: '2026-10-25',
+        time: '10:00 a.m.',
+        adult_count: 1,
+        customer_name: 'Paúl Rosero V3',
+        customer_email: 'paul.rosero@epn.edu.ec',
+      });
+
+    expect([HttpStatus.CREATED, HttpStatus.CONFLICT]).toContain(res.status);
+    if (res.status === HttpStatus.CREATED) {
+      expect(res.body).toHaveProperty('reservation_code');
+      expect(res.body).toHaveProperty('voucher_qr_payload');
+    }
+  });
+
+  it('POST /api/v3/atracciones/reservas debe rechazar con 400 SLOT_TIME_MISMATCH si date/time no coinciden con slot_id', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v3/atracciones/reservas')
+      .send({
+        attraction_id: 'PRhu4UBTWPBC',
+        slot_id: 'slot-20261025-1030', // Franja 10:30
+        date: '2026-10-25',
+        time: '14:00:00', // Discrepancia intencional a las 14:00
+        adult_count: 1,
+        customer_name: 'Turista Inconsistente',
+      })
+      .expect(HttpStatus.BAD_REQUEST);
+
+    expect(res.body).toHaveProperty('type', 'https://booking.epn.edu.ec/errors/slot-mismatch');
+    expect(res.body).toHaveProperty('code', 'SLOT_TIME_MISMATCH');
+    expect(res.body).toHaveProperty('status', 400);
+  });
 });
+

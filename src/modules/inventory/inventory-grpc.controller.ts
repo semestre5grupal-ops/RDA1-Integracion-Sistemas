@@ -35,6 +35,15 @@ export class InventoryGrpcController {
   }
 
   /**
+   * RPC 3: GetSlotAvailability
+   * Consulta puntual de disponibilidad confirmada.
+   */
+  @GrpcMethod('InventoryStockService', 'GetSlotAvailability')
+  getSlotAvailability(data: any): any {
+    return this.inventoryService.getSlotAvailability(data);
+  }
+
+  /**
    * RPC 2: StreamInventoryChanges
    * Streaming continuo HTTP/2 multiplexado para propagación en ráfaga de cambios de stock.
    */
