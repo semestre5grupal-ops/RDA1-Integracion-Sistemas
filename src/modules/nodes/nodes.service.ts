@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigProveedor } from './entities';
 import { Atraccion } from '../atracciones/entities/atraccion.entity';
+import { Auto } from '../autos/entities/auto.entity';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { ConnectorHealthService } from '../admin/connector-health.service';
 import { TraceContextService } from '../../core/tracing/trace-context.service';
@@ -16,7 +17,10 @@ export class NodesService {
     private readonly configRepo: Repository<ConfigProveedor>,
     @InjectRepository(Atraccion)
     private readonly atraccionRepo: Repository<Atraccion>,
-    private readonly winstonLogger: WinstonPhysicalLoggerService,
+    @Optional()
+    @InjectRepository(Auto)
+    private readonly autoRepo?: Repository<Auto>,
+    private readonly winstonLogger?: WinstonPhysicalLoggerService,
     @Optional()
     private readonly connectorHealthService?: ConnectorHealthService,
     @Optional()
@@ -412,6 +416,13 @@ export class NodesService {
     let targetUrl = nodo.baseUrlRest.replace(/\/+$/, '');
     if (nodo.vertical === 'ATRACCIONES' && !targetUrl.includes('/atracciones')) {
       targetUrl += '/atracciones';
+    } else if (nodo.vertical === 'AUTOS' && !targetUrl.includes('/autos')) {
+      targetUrl += '/autos';
+    }
+
+    // Asegurar que se soliciten hasta 50 items (límite máximo del contrato) para traer todo el catálogo sin paginar
+    if (!targetUrl.includes('limit=')) {
+      targetUrl += (targetUrl.includes('?') ? '&' : '?') + 'limit=50';
     }
 
     let itemsExternos: any[] = [];
@@ -458,6 +469,77 @@ export class NodesService {
         success: true,
         count: 0,
         mensaje: `El proveedor '${nodo.nombreProveedor}' respondió correctamente pero su catálogo no devolvió items.`,
+      };
+    }
+
+    if (nodo.vertical === 'AUTOS') {
+      let sincronizados = 0;
+      for (const raw of itemsExternos) {
+        try {
+          const rawId = String(raw.id || raw.item_id || raw.auto_id || raw.vehicle_id || `auto-${Date.now()}-${sincronizados}`);
+          const marca = String(raw.marca || raw.make || raw.brand || 'Chevrolet');
+          const modelo = String(raw.modelo || raw.model || 'Sail');
+          const anio = Number(raw.anio || raw.year || 2024);
+          const categoria = String(raw.categoria || raw.category || 'ECONOMICO').toUpperCase();
+          const transmision = String(raw.transmision || raw.transmission || 'MANUAL').toUpperCase();
+          const capacidad = Number(raw.capacidad_pasajeros || raw.seats || raw.passengers || 5);
+          const precio = Number(raw.precio_diario || raw.price?.total || raw.daily_rate || raw.precio || 40.0);
+          const foto = String(raw.foto_url || raw.image_url || raw.image || (Array.isArray(raw.images) ? raw.images[0] : '') || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800');
+          const ciudad = String(raw.ciudad || raw.city || raw.location || 'Quito');
+
+          if (this.autoRepo) {
+            let entity = await this.autoRepo.findOne({ where: { id: rawId } });
+            if (!entity) {
+              entity = this.autoRepo.create({
+                id: rawId,
+                marca,
+                modelo,
+                anio,
+                categoria,
+                transmision,
+                capacidadPasajeros: capacidad,
+                precioDiario: precio,
+                kilometrajeActual: Number(raw.kilometraje_actual || raw.mileage || 12000),
+                umbralMantenimientoKm: Number(raw.umbral_mantenimiento_km || raw.proximo_mantenimiento_km || 15000),
+                alertaMantenimientoActiva: Boolean(raw.alerta_mantenimiento || false),
+                estadoOperativo: String(raw.estado || raw.status || 'DISPONIBLE'),
+                fotoUrl: foto,
+                ciudad,
+                activo: true,
+              });
+            } else {
+              entity.marca = marca;
+              entity.modelo = modelo;
+              entity.anio = anio;
+              entity.categoria = categoria;
+              entity.transmision = transmision;
+              entity.capacidadPasajeros = capacidad;
+              entity.precioDiario = precio;
+              entity.fotoUrl = foto;
+              entity.ciudad = ciudad;
+              entity.estadoOperativo = String(raw.estado || raw.status || entity.estadoOperativo);
+            }
+            await this.autoRepo.save(entity);
+          }
+          sincronizados++;
+        } catch (itemErr: any) {
+          this.logger.warn(`No se pudo procesar item de auto: ${itemErr.message}`);
+        }
+      }
+
+      this.winstonLogger?.logAudit('CATALOGO_AUTOS_SINCRONIZADO', {
+        codigo_nodo: nodo.codigoNodo,
+        nombre_proveedor: nodo.nombreProveedor,
+        items_recibidos: itemsExternos.length,
+        items_sincronizados: sincronizados,
+        timestamp: new Date().toISOString(),
+      });
+
+      return {
+        success: true,
+        count: sincronizados,
+        total_recibidos: itemsExternos.length,
+        mensaje: `¡Catálogo de autos de '${nodo.nombreProveedor}' sincronizado con éxito! (${sincronizados} vehículos integrados a Booking)`,
       };
     }
 

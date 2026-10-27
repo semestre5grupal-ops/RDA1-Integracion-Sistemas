@@ -155,8 +155,12 @@ export class AutosCircuitBreakerAdapter {
 
       this.handleSuccess();
       return {
-        external_order_id: `EXT-${response.data?.id || Date.now()}`,
-        status: 'CONFIRMED'
+        external_order_id: `EXT-${response.data?.order_id || response.data?.pnr || response.data?.id || Date.now()}`,
+        status: response.data?.status === 'RESERVADO' ? 'CONFIRMED' : (response.data?.status || 'CONFIRMED'),
+        pnr: response.data?.pnr || response.data?.order_id,
+        auto_id: response.data?.auto_id || response.data?.vehicle_id,
+        voucher_qr_data: response.data?.voucher_qr_data || response.data?.voucher_qr_payload,
+        raw_response: response.data,
       };
     } catch (err) {
       this.logger.warn(`[AutosCircuitBreaker] Proveedor externo no respondió o falló (${err.message}). Activando Mock Fallback para no interrumpir el flujo del usuario (CE01).`);

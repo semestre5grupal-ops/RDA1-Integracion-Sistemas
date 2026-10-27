@@ -715,7 +715,13 @@
         },
         "auto_id": {
           "type": "string",
-          "example": "auto-spark-01"
+          "example": "auto-spark-01",
+          "description": "Identificador canónico del vehículo"
+        },
+        "vehicle_id": {
+          "type": "string",
+          "example": "auto-spark-01",
+          "description": "Alias tolerado para auto_id"
         },
         "tipo_cobertura": {
           "type": "string",
@@ -743,7 +749,13 @@
         },
         "voucher_qr_data": {
           "type": "string",
-          "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED"
+          "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED",
+          "description": "Carga útil canónica del voucher QR"
+        },
+        "voucher_qr_payload": {
+          "type": "string",
+          "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED",
+          "description": "Alias tolerado para voucher_qr_data"
         },
         "checklist_mostrador": {
           "type": "array",
@@ -2307,7 +2319,13 @@
           },
           "auto_id": {
             "type": "string",
-            "example": "auto-spark-01"
+            "example": "auto-spark-01",
+            "description": "Identificador canónico del vehículo"
+          },
+          "vehicle_id": {
+            "type": "string",
+            "example": "auto-spark-01",
+            "description": "Alias tolerado para auto_id"
           },
           "tipo_cobertura": {
             "type": "string",
@@ -2335,7 +2353,13 @@
           },
           "voucher_qr_data": {
             "type": "string",
-            "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED"
+            "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED",
+            "description": "Carga útil canónica del voucher QR"
+          },
+          "voucher_qr_payload": {
+            "type": "string",
+            "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED",
+            "description": "Alias tolerado para voucher_qr_data"
           },
           "checklist_mostrador": {
             "type": "array",

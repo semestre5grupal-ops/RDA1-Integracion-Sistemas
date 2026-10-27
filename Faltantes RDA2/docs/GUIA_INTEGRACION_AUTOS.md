@@ -80,19 +80,24 @@ Siguiendo las **buenas prácticas adoptadas por el equipo de Atracciones**, se r
 
 El archivo [inventory.proto](file:///c:/Users/ASUS/Documents/6to%20Semestre/Integraci%C3%B3n%20Sistemas/proyecto/plantilla%20inicial/src/proto/inventory.proto) es **universal y polimórfico**. El equipo de Autos **NO** debe modificarlo, sino acoplarse a él enviando sus vehículos de la siguiente manera:
 
-* **Host Local:** `localhost:50051`
-* **Host Nube (Render):** `rda1-backend-integracion-sistemas.onrender.com:50051`
-* **Servicio:** `inventory.InventoryStockService`
-* **Método RPC:** `PushStockUpdate`
+* **Host Local:** `localhost:50051` (sin TLS / h2c en claro sobre TCP)
+* **Host Inter-Máquinas (Evaluación Cátedra):** Red Privada Tailscale (IP Tailscale de Booking en puerto `50051`)
+* **Host Nube (Render):** `rda1-backend-integracion-sistemas.onrender.com:50051` (o fallback REST `POST /api/v3/inventory/stock`)
+* **Servicio Protobuf Oficial:** `inventory.InventoryStockService` (Package: `inventory`)
+* **Método RPC Canónico:** `PushStockUpdate` (Firma gRPC: `/inventory.InventoryStockService/PushStockUpdate`)
 
-### Mapeo de Parámetros para Autos:
-* `service_id`: Identificador de su nodo (ej. `"NODE_AUT_LOCAL"` o `"autos-rentacar-quito"`).
-* `item_id`: Identificador o placa del vehículo (ej. `"auto-spark-01"`).
-* `date`: Fecha en formato ISO `YYYY-MM-DD` (ej. `"2026-11-15"`).
-* `time_slot`: Hora de turno/recogida (ej. `"10:00"`).
-* `available_units`: **`1`** si el auto está `DISPONIBLE` / `LISTO_PARA_RENTAR`; **`0`** si está `RESERVADO`, `ENTREGADO` o `EN_LIMPIEZA`.
-* `slot_id`: Identificador único de turno o vehículo (ej. `"slot-auto-spark-01-20261115"`).
-* `timestamp`: Unix Epoch en milisegundos (`Date.now()`).
+### Mapeo Canónico de Parámetros para Autos:
+* `service_id`: Código de nodo registrado en Booking con prefijo obligatorio (ej. `"NODE_AUT_LOCAL"` o `"NODE_AUT_CONCESIONARIA1"`).
+* `item_id`: Identificador único o placa del vehículo (ej. `"auto-spark-01"`).
+* `date`: Fecha de recogida en formato ISO `YYYY-MM-DD` (ej. `"2026-11-15"`).
+* `time_slot`: Hora militar del turno/recogida en formato `"HH:mm"` (ej. `"10:00"`, `"14:30"`).
+* `available_units`: **`1`** si el auto está disponible (`LISTO_PARA_RENTAR` / `DISPONIBLE`); **`0`** si está ocupado (`RESERVADO`, `ENTREGADO`, `EN_LIMPIEZA` o `EN_MANTENIMIENTO`).
+* `slot_id`: Identificador unívoco del turno en formato canónico **`slot-YYYYMMDD-HHMM`** (ej. `"slot-20261115-1000"`).
+* `timestamp`: Unix Epoch en milisegundos (`Date.now()`). Debe ser estrictamente creciente para no ser descartado por la regla monotónica (`STALE_TIMESTAMP_IGNORED`).
+
+> [!TIP]
+> **Alquileres de varios días (ej. 15 al 18 de noviembre):**  
+> Cuando un vehículo se alquila por un período de varios días, basta con emitir un evento `PushStockUpdate` con la fecha y hora de retiro (`date = "2026-11-15"`, `time_slot = "10:00"`, `available_units = 0`). Booking actualizará automáticamente el estado operativo del auto a `RESERVADO` en su catálogo central.
 
 ### Ejemplo de Cliente gRPC en Node.js (TypeScript):
 ```typescript
@@ -108,20 +113,22 @@ const packageDef = protoLoader.loadSync(path.resolve('src/proto/inventory.proto'
   oneofs: true,
 });
 const proto = grpc.loadPackageDefinition(packageDef) as any;
+
+// Conexión gRPC sin TLS (en pruebas locales usar localhost:50051; en demo usar IP Tailscale de Booking)
 const client = new proto.inventory.InventoryStockService(
-  'rda1-backend-integracion-sistemas.onrender.com:50051',
+  process.env.BOOKING_GRPC_HOST || 'localhost:50051',
   grpc.credentials.createInsecure()
 );
 
 // Notificar a Booking que el vehículo está DISPONIBLE
 client.PushStockUpdate({
-  service_id: 'autos-rentacar-quito',
+  service_id: 'NODE_AUT_LOCAL',
   item_id: 'auto-spark-01',
   date: '2026-11-15',
   time_slot: '10:00',
   available_units: 1, // 1 = Disponible, 0 = Ocupado
   timestamp: Date.now(),
-  slot_id: 'slot-auto-spark-01-20261115-1000'
+  slot_id: 'slot-20261115-1000'
 }, (err: any, response: any) => {
   if (err) console.error('Error gRPC:', err);
   else console.log('Booking Ack:', response.message, '| Código:', response.error_code);
@@ -134,10 +141,11 @@ client.PushStockUpdate({
 
 Cuando un usuario reserve un auto desde el Booking Central, Booking enviará un `POST /reservas` (o `POST /orders/create`) hacia la URL pública registrada por la concesionaria (`baseUrlRest`).
 
-### 4.1. Cabeceras HTTP Obligatorias
+### 4.1. Cabeceras HTTP Enviadas por Booking
 * `Content-Type: application/json`
 * `Idempotency-Key: <UUID-v4>` (Garantiza que reintentos de red no cobren ni reserven dos veces).
 * `X-Correlation-Id: <string>` (Trazabilidad distribuida para logs y auditoría).
+* `X-API-Key: <string>` *(Opcional / Configurable)*: Si la tienda socia protege sus rutas con clave de API, Booking enviará automáticamente esta cabecera con el valor acordado en el `.env` de Booking (`TIENDA_AUTOS_API_KEY`).
 
 ### 4.2. Cuerpo de la Petición en Inglés Canónico (`CreateAutoOrderRequestV3`)
 ```json
@@ -169,17 +177,20 @@ Cuando un usuario reserve un auto desde el Booking Central, Booking enviará un 
 * **`201 Created` (Éxito):**
   ```json
   {
-    "order_id": "order-aut-987654",
+    "order_id": "CAR7849B",
     "pnr": "CAR7849B",
-    "status": "RESERVADO",
-    "vehicle_id": "auto-spark-01",
-    "voucher_qr_payload": "https://autos.ecuador.com/voucher/CAR7849B",
+    "status": "CONFIRMED",
+    "auto_id": "auto-spark-01",
+    "voucher_qr_data": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED",
     "total_price": {
       "currency": "USD",
       "total": 105.00
     }
   }
   ```
+  > [!NOTE]
+  > **Tolerancia de Alias en Booking:** Booking acepta indistintamente `auto_id` o `vehicle_id`, `status: "CONFIRMED"` o `status: "RESERVADO"`, y `voucher_qr_data` o `voucher_qr_payload`.
+
 * **`409 Conflict` (Sagas y Compensación LIFO):**
   Si el vehículo ya fue reservado o se encuentra en las **2 horas de limpieza**, deben responder estrictamente:
   ```json
@@ -192,6 +203,14 @@ Cuando un usuario reserve un auto desde el Booking Central, Booking enviará un 
     "instance": "/reservas"
   }
   ```
+
+---
+
+## 4.4. Endpoints Consumidos por los Botones del Panel de Booking
+
+El panel administrativo de Booking (`/admin`) interactúa con la tienda mediante dos rutas fijas:
+1. **Botón 🔄 (Ping Diagnóstico de Salud):** Invoca `GET ${baseUrlRest}/health`. Si responde con HTTP 200, el semáforo LED visual se pinta en verde 🟢 `HEALTHY` y calcula la latencia.
+2. **Botón 📥 (Sincronización de Catálogo):** Invoca `GET ${baseUrlRest}/autos`. Importa la lista de vehículos disponibles directamente a Booking. Espera un arreglo JSON `[...]`, `{ items: [...] }` o `{ data: [...] }`.
 * **`422 Unprocessable Entity` (Validaciones Semánticas):**
   Si el conductor es menor de 18 años (`age < 18`) o las fechas son inválidas, responder `422` (este código **NO** activa compensaciones de Saga).
 
