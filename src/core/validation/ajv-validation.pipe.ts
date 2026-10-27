@@ -63,9 +63,27 @@ export class AjvValidationPipe implements PipeTransform {
             );
           }
         }
-        this.logger.log('AJV: Schemas de OpenAPI v3 cargados y compilados exitosamente.');
+        this.logger.log('AJV: Schemas de OpenAPI v3 de Atracciones cargados exitosamente.');
       } else {
         this.logger.warn(`AJV: Archivo de schemas no encontrado en ${schemaPath}`);
+      }
+
+      // Cargar Schemas de Autos v3
+      const autosSchemaPath = path.resolve('contracts/schemas/autos.schema.json');
+      if (fs.existsSync(autosSchemaPath)) {
+        const rawAutos = fs.readFileSync(autosSchemaPath, 'utf8');
+        const autosBundle = JSON.parse(rawAutos);
+        this.ajv.addSchema(autosBundle, 'autos-bundle');
+
+        if (autosBundle.definitions && autosBundle.definitions.CreateAutoOrderRequestV2) {
+          this.validators.set(
+            'CreateAutoOrderRequestV2',
+            this.ajv.compile({
+              $ref: 'autos-bundle#/definitions/CreateAutoOrderRequestV2',
+            }),
+          );
+        }
+        this.logger.log('AJV: Schemas de OpenAPI v3 de Autos cargados exitosamente.');
       }
     } catch (e: any) {
       this.logger.error(`AJV: Error al cargar schemas: ${e.message}`);

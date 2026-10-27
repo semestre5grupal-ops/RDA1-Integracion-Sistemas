@@ -1,0 +1,3189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://booking.epn.edu.ec/schemas/autos.json",
+  "title": "AutosOpenAPIv3Schemas",
+  "definitions": {
+    "EstadoVehiculoEnum": {
+      "type": "string",
+      "description": "Las 6 fases formales de la máquina de estados vehicular exigidas por Cátedra RDA2 §5",
+      "enum": [
+        "DISPONIBLE",
+        "RESERVADO",
+        "LISTO_PARA_ENTREGAR",
+        "ENTREGADO",
+        "EN_LIMPIEZA",
+        "EN_MANTENIMIENTO"
+      ],
+      "example": "DISPONIBLE"
+    },
+    "SearchAutosRequestV2": {
+      "type": "object",
+      "required": [
+        "pickup_location",
+        "pickup_date",
+        "pickup_time",
+        "dropoff_date",
+        "dropoff_time"
+      ],
+      "properties": {
+        "pickup_location": {
+          "type": "string",
+          "description": "Punto de recogida (Ciudad o código IATA como UIO, GYE)",
+          "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+        },
+        "dropoff_location": {
+          "type": "string",
+          "description": "Punto de devolución (Mismo punto o trayecto único)",
+          "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+        },
+        "pickup_date": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-10-20"
+        },
+        "pickup_time": {
+          "type": "string",
+          "description": "Franja horaria estricta en intervalos de 30 minutos",
+          "example": "10:00"
+        },
+        "dropoff_date": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-10-23"
+        },
+        "dropoff_time": {
+          "type": "string",
+          "description": "Franja horaria estricta en intervalos de 30 minutos",
+          "example": "10:00"
+        },
+        "driver_age": {
+          "type": "integer",
+          "description": "Edad del conductor principal (menores de 25 o mayores de 70 aplican recargo; menores de 18 son rechazados con HTTP 422)",
+          "example": 32
+        },
+        "driver_age_bracket": {
+          "type": "boolean",
+          "description": "True si el conductor tiene entre 30 y 65 años (estándar sin recargo)",
+          "default": true
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "ALL",
+            "ECONOMICO",
+            "COMPACTO",
+            "SUV",
+            "PREMIUM",
+            "VAN"
+          ],
+          "default": "ALL"
+        },
+        "transmission": {
+          "type": "string",
+          "enum": [
+            "ALL",
+            "MANUAL",
+            "AUTOMATICO"
+          ],
+          "default": "ALL"
+        }
+      }
+    },
+    "SearchAutosResponseV2": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "example": "req-autos-179200"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "total_results": {
+              "type": "integer",
+              "example": 5
+            },
+            "surcharge_applied": {
+              "type": "boolean",
+              "description": "Aplica si edad < 25 o > 70",
+              "example": false
+            },
+            "surcharge_amount": {
+              "type": "number",
+              "example": 0.0
+            },
+            "pickup_location": {
+              "type": "string",
+              "example": "UIO"
+            },
+            "pickup_date": {
+              "type": "string",
+              "example": "2026-10-20"
+            },
+            "dropoff_date": {
+              "type": "string",
+              "example": "2026-10-23"
+            }
+          }
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/AutoVehiculoCardV2"
+          }
+        }
+      }
+    },
+    "AutoVehiculoCardV2": {
+      "type": "object",
+      "properties": {
+        "vehicle_id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "marca": {
+          "type": "string",
+          "example": "Chevrolet"
+        },
+        "modelo": {
+          "type": "string",
+          "example": "Spark GT"
+        },
+        "categoria": {
+          "type": "string",
+          "example": "ECONOMICO"
+        },
+        "precio_diario": {
+          "type": "number",
+          "format": "float",
+          "example": 35.5
+        },
+        "precio_total": {
+          "type": "number",
+          "format": "float",
+          "example": 106.5
+        },
+        "moneda": {
+          "type": "string",
+          "example": "USD"
+        },
+        "transmision": {
+          "type": "string",
+          "example": "MANUAL"
+        },
+        "asientos": {
+          "type": "integer",
+          "example": 5
+        },
+        "puertas": {
+          "type": "integer",
+          "example": 4
+        },
+        "maletas_grandes": {
+          "type": "integer",
+          "example": 1
+        },
+        "maletas_pequenas": {
+          "type": "integer",
+          "example": 1
+        },
+        "aire_acondicionado": {
+          "type": "boolean",
+          "example": true
+        },
+        "kilometraje_ilimitado": {
+          "type": "boolean",
+          "example": true
+        },
+        "politica_combustible": {
+          "type": "string",
+          "example": "LLENO_A_LLENO"
+        },
+        "cancelacion_gratuita": {
+          "type": "boolean",
+          "example": true
+        },
+        "proveedor": {
+          "type": "object",
+          "properties": {
+            "nombre": {
+              "type": "string",
+              "example": "Europcar"
+            },
+            "rating": {
+              "type": "number",
+              "example": 8.4
+            },
+            "ubicacion": {
+              "type": "string",
+              "example": "En la terminal aérea (Terminal Llegadas)"
+            }
+          }
+        },
+        "estado": {
+          "$ref": "#/components/schemas/EstadoVehiculoEnum"
+        },
+        "kilometraje_actual": {
+          "type": "integer",
+          "example": 5200
+        },
+        "proximo_mantenimiento_km": {
+          "type": "integer",
+          "example": 10000
+        },
+        "mantenimiento_requerido": {
+          "type": "boolean",
+          "example": false
+        },
+        "foto_url": {
+          "type": "string",
+          "example": "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auto_id": {
+          "type": "string",
+          "description": "Alias canónico en español para vehicle_id.",
+          "example": "auto-spark-01"
+        },
+        "id": {
+          "type": "string",
+          "description": "Identificador público del vehículo.",
+          "example": "auto-spark-01"
+        },
+        "brand": {
+          "type": "string",
+          "example": "Chevrolet"
+        },
+        "model": {
+          "type": "string",
+          "example": "Spark GT 1.2"
+        },
+        "category": {
+          "type": "string",
+          "example": "ECONOMICO"
+        },
+        "daily_price": {
+          "type": "number",
+          "example": 35.0
+        },
+        "total_price_usd": {
+          "type": "number",
+          "description": "Total price for selected dates.",
+          "example": 106.5
+        },
+        "currency": {
+          "type": "string",
+          "example": "USD"
+        },
+        "transmission": {
+          "type": "string",
+          "enum": [
+            "MANUAL",
+            "AUTOMATICO"
+          ],
+          "example": "MANUAL"
+        },
+        "seats": {
+          "type": "integer",
+          "example": 5
+        },
+        "doors": {
+          "type": "integer",
+          "example": 5
+        },
+        "air_conditioning": {
+          "type": "boolean",
+          "example": true
+        },
+        "unlimited_mileage": {
+          "type": "boolean",
+          "example": true
+        },
+        "fuel_policy": {
+          "type": "string",
+          "example": "Lleno a Lleno (Full-to-Full)"
+        },
+        "free_cancellation": {
+          "type": "boolean",
+          "example": true
+        },
+        "total_price": {
+          "type": "number",
+          "example": 105.0
+        },
+        "status": {
+          "$ref": "#/components/schemas/EstadoVehiculoEnum"
+        },
+        "cleaning_cooldown": {
+          "$ref": "#/components/schemas/CooldownStatusDto"
+        }
+      }
+    },
+    "AutoFlotaItemV2": {
+      "type": "object",
+      "description": "Registro operativo de un vehículo en el Panel 2 de Gestión de Flota",
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "marca": {
+          "type": "string",
+          "example": "Chevrolet"
+        },
+        "modelo": {
+          "type": "string",
+          "example": "Spark GT"
+        },
+        "categoria": {
+          "type": "string",
+          "example": "ECONOMICO"
+        },
+        "precio_diario": {
+          "type": "number",
+          "example": 35.5
+        },
+        "estado_operativo": {
+          "$ref": "#/components/schemas/EstadoVehiculoEnum"
+        },
+        "cooldown_activo": {
+          "type": "boolean",
+          "description": "True si el auto está en la fase 'EN_LIMPIEZA' con conteo regresivo",
+          "example": false
+        },
+        "segundos_restantes_cooldown": {
+          "type": "integer",
+          "description": "Segundos restantes de las 2 horas de enfriamiento (0 si ya expiró o no aplica)",
+          "example": 5400
+        },
+        "disponible_estimado_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "example": "2026-10-22T14:30:00Z"
+        },
+        "kilometraje_actual": {
+          "type": "integer",
+          "example": 5200
+        },
+        "umbral_mantenimiento_km": {
+          "type": "integer",
+          "example": 10000
+        },
+        "alerta_mantenimiento": {
+          "type": "boolean",
+          "description": "True si kilometraje_actual >= umbral_mantenimiento_km",
+          "example": false
+        },
+        "foto_url": {
+          "type": "string",
+          "example": "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600"
+        }
+      }
+    },
+    "CoberturasResponseV2": {
+      "type": "object",
+      "properties": {
+        "auto_id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "vehiculo": {
+          "type": "string",
+          "example": "Chevrolet Spark GT"
+        },
+        "opciones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tipo": {
+                "type": "string",
+                "enum": [
+                  "BASICA",
+                  "TOTAL"
+                ]
+              },
+              "nombre": {
+                "type": "string",
+                "example": "Cobertura Total / Protección Premium"
+              },
+              "costo_adicional_diario": {
+                "type": "number",
+                "example": 18.0
+              },
+              "franquicia": {
+                "type": "number",
+                "description": "Monto de franquicia (0 en Cobertura Total)",
+                "example": 0.0
+              },
+              "deposito_garantia": {
+                "type": "number",
+                "description": "Depósito retenido en mostrador en tarjeta de crédito",
+                "example": 0.0
+              },
+              "descripcion": {
+                "type": "string",
+                "example": "Elimina totalmente la franquicia ante daños en carrocería, cristales, neumáticos y llaves."
+              },
+              "beneficios": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "CreateAutoOrderRequestV2": {
+      "type": "object",
+      "required": [
+        "vehicle_id",
+        "pickup_date",
+        "dropoff_date",
+        "driver"
+      ],
+      "properties": {
+        "vehicle_id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "dias": {
+          "type": "integer",
+          "example": 3
+        },
+        "tipo_cobertura": {
+          "type": "string",
+          "enum": [
+            "BASICA",
+            "TOTAL"
+          ],
+          "default": "BASICA"
+        },
+        "pickup_location": {
+          "type": "string",
+          "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+        },
+        "dropoff_location": {
+          "type": "string",
+          "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+        },
+        "pickup_date": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-10-20"
+        },
+        "dropoff_date": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-10-23"
+        },
+        "conductor": {
+          "type": "object",
+          "required": [
+            "full_name",
+            "email",
+            "phone",
+            "license_number",
+            "age"
+          ],
+          "properties": {
+            "full_name": {
+              "type": "string",
+              "example": "Carlos Andrés Zambrano"
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "example": "carlos.zambrano@example.com"
+            },
+            "phone": {
+              "type": "string",
+              "example": "+593987654321"
+            },
+            "license_number": {
+              "type": "string",
+              "example": "1723456789"
+            },
+            "country_license": {
+              "type": "string",
+              "example": "Ecuador",
+              "default": "Ecuador"
+            },
+            "age": {
+              "type": "integer",
+              "minimum": 18,
+              "example": 28
+            },
+            "flight_number": {
+              "type": "string",
+              "example": "AV1632"
+            },
+            "nombre": {
+              "type": "string",
+              "example": "Carlos Andrés Zambrano",
+              "description": "Alias en español de full_name"
+            },
+            "correo": {
+              "type": "string",
+              "format": "email",
+              "example": "carlos.zambrano@example.com",
+              "description": "Alias en español de email"
+            },
+            "telefono": {
+              "type": "string",
+              "example": "+593987654321",
+              "description": "Alias en español de phone"
+            },
+            "licencia_conducir": {
+              "type": "string",
+              "example": "1723456789",
+              "description": "Alias en español de license_number"
+            },
+            "edad": {
+              "type": "integer",
+              "example": 28,
+              "description": "Alias en español de age"
+            }
+          }
+        },
+        "auto_id": {
+          "type": "string",
+          "description": "Alias canónico en español para identificador del vehículo.",
+          "example": "auto-spark-01"
+        },
+        "fecha_recogida": {
+          "type": "string",
+          "format": "date",
+          "description": "Alias canónico en español para fecha de retiro (YYYY-MM-DD).",
+          "example": "2026-11-10"
+        },
+        "fecha_devolucion": {
+          "type": "string",
+          "format": "date",
+          "description": "Alias canónico en español para fecha de retorno (YYYY-MM-DD).",
+          "example": "2026-11-12"
+        },
+        "hora_recogida": {
+          "type": "string",
+          "description": "Hora militar estricta en intervalos de 30 minutos (ej. 10:00 o 10:30).",
+          "example": "10:00"
+        },
+        "hora_devolucion": {
+          "type": "string",
+          "description": "Hora militar estricta en intervalos de 30 minutos (ej. 10:00 o 10:30).",
+          "example": "10:00"
+        },
+        "lugar_recogida": {
+          "type": "string",
+          "description": "Alias canónico en español para terminal u oficina de retiro.",
+          "example": "UIO Aeropuerto"
+        },
+        "lugar_devolucion": {
+          "type": "string",
+          "description": "Alias canónico en español para terminal u oficina de retorno.",
+          "example": "UIO Aeropuerto"
+        },
+        "cobertura": {
+          "type": "string",
+          "enum": [
+            "BASICA",
+            "TOTAL",
+            "PREMIUM"
+          ],
+          "description": "Alias canónico en español para nivel de cobertura del seguro.",
+          "example": "TOTAL"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "format": "uuid",
+          "deprecated": true,
+          "description": "DEPRECATED (IETF Draft). La clave de idempotencia DEBE transmitirse en la cabecera HTTP Idempotency-Key para evitar colisiones semánticas."
+        },
+        "driver": {
+          "type": "object",
+          "required": [
+            "full_name",
+            "email",
+            "phone",
+            "license_number",
+            "age"
+          ],
+          "properties": {
+            "full_name": {
+              "type": "string",
+              "example": "Carlos Andrés Zambrano"
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "example": "carlos.zambrano@example.com"
+            },
+            "phone": {
+              "type": "string",
+              "example": "+593987654321"
+            },
+            "license_number": {
+              "type": "string",
+              "example": "1723456789"
+            },
+            "country_license": {
+              "type": "string",
+              "example": "Ecuador",
+              "default": "Ecuador"
+            },
+            "age": {
+              "type": "integer",
+              "minimum": 18,
+              "example": 28
+            },
+            "flight_number": {
+              "type": "string",
+              "example": "AV1632"
+            },
+            "nombre": {
+              "type": "string",
+              "example": "Carlos Andrés Zambrano",
+              "description": "Alias en español de full_name"
+            },
+            "correo": {
+              "type": "string",
+              "format": "email",
+              "example": "carlos.zambrano@example.com",
+              "description": "Alias en español de email"
+            },
+            "telefono": {
+              "type": "string",
+              "example": "+593987654321",
+              "description": "Alias en español de phone"
+            },
+            "licencia_conducir": {
+              "type": "string",
+              "example": "1723456789",
+              "description": "Alias en español de license_number"
+            },
+            "edad": {
+              "type": "integer",
+              "example": 28,
+              "description": "Alias en español de age"
+            }
+          }
+        },
+        "coverage_type": {
+          "type": "string",
+          "enum": [
+            "BASIC",
+            "TOTAL",
+            "BASICA"
+          ],
+          "default": "BASIC",
+          "description": "Tipo de cobertura del seguro (BASIC: con franquicia, TOTAL: franquicia $0)"
+        },
+        "pickup_time": {
+          "type": "string",
+          "example": "10:00",
+          "default": "10:00"
+        },
+        "dropoff_time": {
+          "type": "string",
+          "example": "10:00",
+          "default": "10:00"
+        }
+      }
+    },
+    "AutoOrderResponseV2": {
+      "type": "object",
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "pnr": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "status": {
+          "type": "string",
+          "example": "CONFIRMED"
+        },
+        "auto_id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "tipo_cobertura": {
+          "type": "string",
+          "example": "TOTAL"
+        },
+        "deposito_garantia": {
+          "type": "number",
+          "example": 0.0
+        },
+        "total_price": {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "example": "USD"
+            },
+            "total": {
+              "type": "number",
+              "example": 160.5
+            },
+            "desglose": {
+              "type": "object"
+            }
+          }
+        },
+        "voucher_qr_data": {
+          "type": "string",
+          "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED"
+        },
+        "checklist_mostrador": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refund": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "refund_id": {
+              "type": "string",
+              "example": "REF-AUTO-9921"
+            },
+            "amount": {
+              "type": "number",
+              "example": 160.5
+            },
+            "currency": {
+              "type": "string",
+              "example": "USD"
+            },
+            "status": {
+              "type": "string",
+              "example": "PROCESSED"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "_links": {
+          "type": "object"
+        },
+        "codigo_reserva": {
+          "type": "string",
+          "description": "Alias canónico en español para localizador PNR.",
+          "example": "CAR7849B"
+        },
+        "estado": {
+          "type": "string",
+          "description": "Alias canónico en español para estado de la reserva.",
+          "example": "CONFIRMED"
+        },
+        "moneda": {
+          "type": "string",
+          "description": "Divisa de liquidación (USD).",
+          "example": "USD"
+        },
+        "precio_total_monto": {
+          "type": "number",
+          "description": "Monto total en USD.",
+          "example": 106.5
+        },
+        "reembolso_id": {
+          "type": "string",
+          "description": "Identificador del reembolso monetario ante cancelación o compensación Saga.",
+          "example": "REF-AUTO-9921"
+        },
+        "monto_reembolsado": {
+          "type": "number",
+          "description": "Monto reembolsado al 100% en USD.",
+          "example": 106.5
+        },
+        "cooldown_info": {
+          "$ref": "#/components/schemas/CooldownStatusDto"
+        }
+      }
+    },
+    "CheckinDigitalResponseV2": {
+      "type": "object",
+      "properties": {
+        "reserva_id": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "pnr": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "checkin_status": {
+          "type": "string",
+          "example": "CHECKIN_COMPLETED"
+        },
+        "fast_track_pickup": {
+          "type": "boolean",
+          "example": true
+        },
+        "mensaje": {
+          "type": "string",
+          "example": "Check-in digital exitoso. Presenta tu código QR en el mostrador para retiro express."
+        },
+        "voucher_qr_data": {
+          "type": "string",
+          "example": "AUTOS-CHECKIN-CAR7849B-VERIFIED-1723456789"
+        },
+        "requisitos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CheckinEntregaRequestV2": {
+      "type": "object",
+      "required": [
+        "licencia_conducir",
+        "km_salida"
+      ],
+      "properties": {
+        "licencia_conducir": {
+          "type": "string",
+          "description": "Número de licencia física presentada en mostrador",
+          "example": "1723456789"
+        },
+        "km_salida": {
+          "type": "integer",
+          "description": "Lectura del odómetro al momento de entregar las llaves",
+          "example": 12500
+        },
+        "tecnico_entrega": {
+          "type": "string",
+          "description": "Nombre o ID del agente que formaliza la entrega",
+          "example": "Roberto Paredes (Agente Mostrador UIO)"
+        }
+      }
+    },
+    "CheckinEntregaResponseV2": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": true
+        },
+        "order_id": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "pnr": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "estado_orden": {
+          "type": "string",
+          "example": "ENTREGADO"
+        },
+        "km_salida": {
+          "type": "integer",
+          "example": 12500
+        },
+        "licencia_verificada": {
+          "type": "string",
+          "example": "1723456789"
+        },
+        "mensaje": {
+          "type": "string",
+          "example": "Llaves entregadas al conductor. Auto en tránsito (Fase ENTREGADO)."
+        }
+      }
+    },
+    "CheckinDevolucionRequestV2": {
+      "type": "object",
+      "required": [
+        "km_retorno"
+      ],
+      "properties": {
+        "km_retorno": {
+          "type": "integer",
+          "description": "Odómetro al devolver el auto (debe ser >= km_salida)",
+          "example": 12950
+        },
+        "nivel_combustible": {
+          "type": "integer",
+          "description": "Porcentaje de combustible de 0 a 100",
+          "example": 100
+        },
+        "observaciones": {
+          "type": "string",
+          "example": "Inspección conforme. Sin rayones ni novedades mecánicas."
+        }
+      }
+    },
+    "CheckinDevolucionResponseV2": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": true
+        },
+        "order_id": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "pnr": {
+          "type": "string",
+          "example": "CAR7849B"
+        },
+        "estado_orden": {
+          "type": "string",
+          "example": "COMPLETADA"
+        },
+        "km_retorno": {
+          "type": "integer",
+          "example": 12950
+        },
+        "km_recorridos": {
+          "type": "integer",
+          "example": 450
+        },
+        "cooldown": {
+          "$ref": "#/components/schemas/DevolucionAutoResponseV2"
+        },
+        "alerta_mantenimiento": {
+          "type": "string",
+          "example": "Kilometraje en rango normal."
+        }
+      }
+    },
+    "DevolucionAutoResponseV2": {
+      "type": "object",
+      "properties": {
+        "auto_id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "vehiculo": {
+          "type": "string",
+          "example": "Chevrolet Spark GT"
+        },
+        "estado": {
+          "$ref": "#/components/schemas/EstadoVehiculoEnum"
+        },
+        "cooldown_horas": {
+          "type": "integer",
+          "example": 2
+        },
+        "disponible_desde": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T15:00:00Z"
+        },
+        "mensaje": {
+          "type": "string",
+          "example": "Vehículo en ciclo de limpieza y desinfección. Estará disponible en 2 horas."
+        }
+      }
+    },
+    "RegistroMantenimientoRequestV2": {
+      "type": "object",
+      "required": [
+        "kilometraje_registrado",
+        "nivel_combustible",
+        "tecnico_id"
+      ],
+      "properties": {
+        "tecnico_id": {
+          "type": "string",
+          "example": "tec-rosero-01"
+        },
+        "kilometraje_registrado": {
+          "type": "integer",
+          "example": 10250
+        },
+        "nivel_combustible": {
+          "type": "integer",
+          "description": "Porcentaje de combustible de 0 a 100",
+          "example": 100
+        },
+        "condiciones_carroceria": {
+          "type": "string",
+          "example": "Sin abolladuras. Rasguño leve en paragolpes trasero derecho."
+        },
+        "estado_neumaticos": {
+          "type": "string",
+          "example": "BUENO"
+        },
+        "observaciones": {
+          "type": "string",
+          "example": "Cambio de aceite y filtro realizado."
+        },
+        "mantenimiento_realizado": {
+          "type": "boolean",
+          "default": false
+        },
+        "nuevo_proximo_mantenimiento_km": {
+          "type": "integer",
+          "example": 15000
+        }
+      }
+    },
+    "RegistroMantenimientoResponseV2": {
+      "type": "object",
+      "properties": {
+        "auto_id": {
+          "type": "string",
+          "example": "auto-spark-01"
+        },
+        "marca_modelo": {
+          "type": "string",
+          "example": "Chevrolet Spark GT"
+        },
+        "kilometraje_actual": {
+          "type": "integer",
+          "example": 10250
+        },
+        "proximo_mantenimiento_km": {
+          "type": "integer",
+          "example": 10000
+        },
+        "mantenimiento_requerido": {
+          "type": "boolean",
+          "example": true
+        },
+        "alerta_preventiva": {
+          "type": "string",
+          "example": "ALERTA PREVENTIVA: El vehículo ha superado el límite de 10000 km. Mantenimiento requerido."
+        },
+        "nivel_combustible": {
+          "type": "string",
+          "example": "100%"
+        },
+        "bitacora_id": {
+          "type": "string",
+          "example": "BIT-AUTO-01"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ContratoPromocionesRequestV2": {
+      "type": "object",
+      "required": [
+        "permite_promociones",
+        "porcentaje_descuento_maximo"
+      ],
+      "properties": {
+        "permite_promociones": {
+          "type": "boolean",
+          "description": "¿Acepta participar en combos turísticos combinados con Booking Prototipo? (Cátedra RDA2 §9)",
+          "example": true
+        },
+        "porcentaje_descuento_maximo": {
+          "type": "number",
+          "description": "Porcentaje máximo de descuento autorizado sobre tarifa diaria (0 a 100)",
+          "example": 15.0
+        },
+        "destinos_habilitados": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": [
+            "Quito",
+            "Guayaquil",
+            "Cuenca"
+          ]
+        },
+        "vigencia_hasta": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-12-31"
+        },
+        "condiciones_combo": {
+          "type": "string",
+          "example": "Descuento autorizado del 15% en combos multivertical con hotel o vuelo."
+        }
+      }
+    },
+    "ContratoPromocionesResponseV2": {
+      "type": "object",
+      "properties": {
+        "proveedor_codigo": {
+          "type": "string",
+          "example": "NODE_AUT_LOCAL"
+        },
+        "nombre_socio": {
+          "type": "string",
+          "example": "Renta Autos Ecuador (Flota Partner)"
+        },
+        "vertical": {
+          "type": "string",
+          "example": "AUTOS"
+        },
+        "permite_promociones": {
+          "type": "boolean",
+          "example": true
+        },
+        "porcentaje_descuento_maximo": {
+          "type": "number",
+          "example": 15.0
+        },
+        "destinos_habilitados": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": [
+            "Quito",
+            "Guayaquil",
+            "Cuenca",
+            "Manta"
+          ]
+        },
+        "vigencia_hasta": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-12-31"
+        },
+        "condiciones_combo": {
+          "type": "string",
+          "example": "Descuento autorizado del 15% en combos multivertical con hotel o vuelo."
+        }
+      }
+    },
+    "AutosHealthResponseV2": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "HEALTHY",
+            "DOWN",
+            "DEGRADED"
+          ],
+          "example": "HEALTHY"
+        },
+        "nodo_id": {
+          "type": "string",
+          "example": "NODE_AUT_LOCAL"
+        },
+        "nombre_proveedor": {
+          "type": "string",
+          "example": "Renta Autos Ecuador (Flota Partner)"
+        },
+        "vertical": {
+          "type": "string",
+          "example": "AUTOS"
+        },
+        "version": {
+          "type": "string",
+          "example": "2.0.0"
+        },
+        "uptime_seconds": {
+          "type": "integer",
+          "example": 8420
+        },
+        "latencia_ms": {
+          "type": "integer",
+          "example": 25
+        },
+        "circuit_breaker_estado": {
+          "type": "string",
+          "example": "CLOSED"
+        },
+        "cooldown_activo_count": {
+          "type": "integer",
+          "example": 1
+        },
+        "total_vehiculos": {
+          "type": "integer",
+          "example": 5
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T16:40:00Z"
+        }
+      }
+    },
+    "AutosEventosResponseV2": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "example": 1
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    },
+    "CloudEventAutoOrderConfirmed": {
+      "type": "object",
+      "description": "Evento emitido a RabbitMQ ('booking.events' / routing key 'auto.order.confirmed') y Apache Kafka ('topic-ordenes-b2b')",
+      "required": [
+        "specversion",
+        "type",
+        "source",
+        "id",
+        "time",
+        "correlation_id",
+        "data"
+      ],
+      "properties": {
+        "specversion": {
+          "type": "string",
+          "example": "1.0"
+        },
+        "type": {
+          "type": "string",
+          "example": "ec.edu.epn.booking.autos.order.confirmed"
+        },
+        "source": {
+          "type": "string",
+          "example": "/microservices/ms-autos"
+        },
+        "id": {
+          "type": "string",
+          "example": "evt-car-ord-7762"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T11:00:00Z"
+        },
+        "correlation_id": {
+          "type": "string",
+          "example": "corr-autos-987654"
+        },
+        "datacontenttype": {
+          "type": "string",
+          "example": "application/json"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "order_id": {
+              "type": "string"
+            },
+            "pnr": {
+              "type": "string"
+            },
+            "auto_id": {
+              "type": "string"
+            },
+            "total_price": {
+              "type": "number"
+            },
+            "nuevo_estado_auto": {
+              "type": "string",
+              "example": "RESERVADO"
+            }
+          }
+        }
+      }
+    },
+    "CloudEventAutoCleaningCooldownStarted": {
+      "type": "object",
+      "description": "Evento emitido al iniciar el cooldown de 2 horas tras devolución",
+      "required": [
+        "specversion",
+        "type",
+        "source",
+        "id",
+        "time",
+        "data"
+      ],
+      "properties": {
+        "specversion": {
+          "type": "string",
+          "example": "1.0"
+        },
+        "type": {
+          "type": "string",
+          "example": "ec.edu.epn.booking.autos.cooldown.started"
+        },
+        "source": {
+          "type": "string",
+          "example": "/microservices/ms-autos"
+        },
+        "id": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "auto_id": {
+              "type": "string"
+            },
+            "estado": {
+              "type": "string",
+              "example": "EN_LIMPIEZA"
+            },
+            "cooldown_minutos": {
+              "type": "integer",
+              "example": 120
+            },
+            "disponible_desde": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    },
+    "CloudEventAutoMantenimientoAlerta": {
+      "type": "object",
+      "description": "Evento emitido al superarse el umbral de kilometraje de mantenimiento preventivo",
+      "required": [
+        "specversion",
+        "type",
+        "source",
+        "id",
+        "time",
+        "data"
+      ],
+      "properties": {
+        "specversion": {
+          "type": "string",
+          "example": "1.0"
+        },
+        "type": {
+          "type": "string",
+          "example": "ec.edu.epn.booking.autos.mantenimiento.alerta"
+        },
+        "source": {
+          "type": "string",
+          "example": "/microservices/ms-autos"
+        },
+        "id": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "correlation_id": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "auto_id": {
+              "type": "string"
+            },
+            "kilometraje_actual": {
+              "type": "integer"
+            },
+            "proximo_mantenimiento_km": {
+              "type": "integer"
+            },
+            "severidad": {
+              "type": "string",
+              "example": "WARNING"
+            }
+          }
+        }
+      }
+    },
+    "CloudEventAutoOrderCancelled": {
+      "type": "object",
+      "description": "Evento emitido durante la compensación Saga tras la cancelación de una orden de auto",
+      "required": [
+        "specversion",
+        "type",
+        "source",
+        "id",
+        "time",
+        "correlation_id",
+        "data"
+      ],
+      "properties": {
+        "specversion": {
+          "type": "string",
+          "example": "1.0"
+        },
+        "type": {
+          "type": "string",
+          "example": "ec.edu.epn.booking.autos.order.cancelled"
+        },
+        "source": {
+          "type": "string",
+          "example": "/microservices/ms-autos"
+        },
+        "id": {
+          "type": "string",
+          "example": "evt-car-canc-8831"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T11:15:00Z"
+        },
+        "correlation_id": {
+          "type": "string",
+          "example": "corr-autos-987654"
+        },
+        "datacontenttype": {
+          "type": "string",
+          "example": "application/json"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "order_id": {
+              "type": "string",
+              "example": "CAR7849B"
+            },
+            "pnr": {
+              "type": "string",
+              "example": "CAR7849B"
+            },
+            "auto_id": {
+              "type": "string",
+              "example": "auto-spark-01"
+            },
+            "refund_id": {
+              "type": "string",
+              "example": "REF-AUTO-9921"
+            },
+            "refund_amount": {
+              "type": "number",
+              "example": 106.5
+            },
+            "estado_restituido": {
+              "type": "string",
+              "example": "DISPONIBLE"
+            }
+          }
+        }
+      }
+    },
+    "ProblemDetails": {
+      "type": "object",
+      "description": "Estructura canónica de error conforme a la especificación RFC 7807 (Problem Details for HTTP APIs).",
+      "required": [
+        "type",
+        "title",
+        "status",
+        "detail"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "format": "uri",
+          "description": "URI absoluta o relativa que tipifica el error según la cátedra.",
+          "example": "https://booking.epn.edu.ec/errors/cooldown-activo"
+        },
+        "title": {
+          "type": "string",
+          "description": "Resumen corto y legible del problema.",
+          "example": "Vehículo en Cooldown de Limpieza Obligatorio (2 Horas)"
+        },
+        "status": {
+          "type": "integer",
+          "description": "Código de estado HTTP correspondiente (400, 401, 403, 404, 409, 422, 500, 503).",
+          "example": 409
+        },
+        "detail": {
+          "type": "string",
+          "description": "Explicación detallada del motivo del fallo o contingencia.",
+          "example": "El vehículo auto-spark-01 se encuentra en fase de limpieza y desinfección obligatoria de 120 minutos tras su retorno. Estará disponible nuevamente a las 14:30:00 UTC."
+        },
+        "instance": {
+          "type": "string",
+          "description": "URI de la solicitud que originó el error.",
+          "example": "/api/v2/autos/orders/create"
+        },
+        "code": {
+          "type": "string",
+          "description": "Código nemotécnico unívoco para evaluación algorítmica en el cliente o agregador.",
+          "example": "VEHICLE_IN_CLEANING_COOLDOWN"
+        },
+        "correlation_id": {
+          "type": "string",
+          "description": "Identificador de correlación unívoco propagado para trazabilidad en logs físicos.",
+          "example": "cid-aut-9921b"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Marca de tiempo ISO 8601 UTC en que se generó la excepción.",
+          "example": "2026-10-24T18:30:00Z"
+        },
+        "invalid_params": {
+          "type": "array",
+          "description": "Lista de parámetros o campos que no superaron la validación sintáctica o de negocio.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "example": "pickup_date"
+              },
+              "reason": {
+                "type": "string",
+                "example": "La fecha de recogida no puede ser en el pasado."
+              }
+            }
+          }
+        }
+      }
+    },
+    "CooldownStatusDto": {
+      "type": "object",
+      "description": "Información del temporizador de enfriamiento obligatorio de 2 horas (120 minutos) tras retorno del vehículo (Cátedra RDA2 §5).",
+      "properties": {
+        "cooldown_horas": {
+          "type": "integer",
+          "example": 2
+        },
+        "cooldown_minutos": {
+          "type": "integer",
+          "example": 120
+        },
+        "activo": {
+          "type": "boolean",
+          "example": true
+        },
+        "inicio_cooldown": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-24T12:00:00Z"
+        },
+        "fin_cooldown": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-24T14:00:00Z"
+        },
+        "proximo_estado": {
+          "type": "string",
+          "example": "DISPONIBLE"
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "EstadoVehiculoEnum": {
+        "type": "string",
+        "description": "Las 6 fases formales de la máquina de estados vehicular exigidas por Cátedra RDA2 §5",
+        "enum": [
+          "DISPONIBLE",
+          "RESERVADO",
+          "LISTO_PARA_ENTREGAR",
+          "ENTREGADO",
+          "EN_LIMPIEZA",
+          "EN_MANTENIMIENTO"
+        ],
+        "example": "DISPONIBLE"
+      },
+      "SearchAutosRequestV2": {
+        "type": "object",
+        "required": [
+          "pickup_location",
+          "pickup_date",
+          "pickup_time",
+          "dropoff_date",
+          "dropoff_time"
+        ],
+        "properties": {
+          "pickup_location": {
+            "type": "string",
+            "description": "Punto de recogida (Ciudad o código IATA como UIO, GYE)",
+            "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+          },
+          "dropoff_location": {
+            "type": "string",
+            "description": "Punto de devolución (Mismo punto o trayecto único)",
+            "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+          },
+          "pickup_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-20"
+          },
+          "pickup_time": {
+            "type": "string",
+            "description": "Franja horaria estricta en intervalos de 30 minutos",
+            "example": "10:00"
+          },
+          "dropoff_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-23"
+          },
+          "dropoff_time": {
+            "type": "string",
+            "description": "Franja horaria estricta en intervalos de 30 minutos",
+            "example": "10:00"
+          },
+          "driver_age": {
+            "type": "integer",
+            "description": "Edad del conductor principal (menores de 25 o mayores de 70 aplican recargo; menores de 18 son rechazados con HTTP 422)",
+            "example": 32
+          },
+          "driver_age_bracket": {
+            "type": "boolean",
+            "description": "True si el conductor tiene entre 30 y 65 años (estándar sin recargo)",
+            "default": true
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "ALL",
+              "ECONOMICO",
+              "COMPACTO",
+              "SUV",
+              "PREMIUM",
+              "VAN"
+            ],
+            "default": "ALL"
+          },
+          "transmission": {
+            "type": "string",
+            "enum": [
+              "ALL",
+              "MANUAL",
+              "AUTOMATICO"
+            ],
+            "default": "ALL"
+          }
+        }
+      },
+      "SearchAutosResponseV2": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "example": "req-autos-179200"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "total_results": {
+                "type": "integer",
+                "example": 5
+              },
+              "surcharge_applied": {
+                "type": "boolean",
+                "description": "Aplica si edad < 25 o > 70",
+                "example": false
+              },
+              "surcharge_amount": {
+                "type": "number",
+                "example": 0.0
+              },
+              "pickup_location": {
+                "type": "string",
+                "example": "UIO"
+              },
+              "pickup_date": {
+                "type": "string",
+                "example": "2026-10-20"
+              },
+              "dropoff_date": {
+                "type": "string",
+                "example": "2026-10-23"
+              }
+            }
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutoVehiculoCardV2"
+            }
+          }
+        }
+      },
+      "AutoVehiculoCardV2": {
+        "type": "object",
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "marca": {
+            "type": "string",
+            "example": "Chevrolet"
+          },
+          "modelo": {
+            "type": "string",
+            "example": "Spark GT"
+          },
+          "categoria": {
+            "type": "string",
+            "example": "ECONOMICO"
+          },
+          "precio_diario": {
+            "type": "number",
+            "format": "float",
+            "example": 35.5
+          },
+          "precio_total": {
+            "type": "number",
+            "format": "float",
+            "example": 106.5
+          },
+          "moneda": {
+            "type": "string",
+            "example": "USD"
+          },
+          "transmision": {
+            "type": "string",
+            "example": "MANUAL"
+          },
+          "asientos": {
+            "type": "integer",
+            "example": 5
+          },
+          "puertas": {
+            "type": "integer",
+            "example": 4
+          },
+          "maletas_grandes": {
+            "type": "integer",
+            "example": 1
+          },
+          "maletas_pequenas": {
+            "type": "integer",
+            "example": 1
+          },
+          "aire_acondicionado": {
+            "type": "boolean",
+            "example": true
+          },
+          "kilometraje_ilimitado": {
+            "type": "boolean",
+            "example": true
+          },
+          "politica_combustible": {
+            "type": "string",
+            "example": "LLENO_A_LLENO"
+          },
+          "cancelacion_gratuita": {
+            "type": "boolean",
+            "example": true
+          },
+          "proveedor": {
+            "type": "object",
+            "properties": {
+              "nombre": {
+                "type": "string",
+                "example": "Europcar"
+              },
+              "rating": {
+                "type": "number",
+                "example": 8.4
+              },
+              "ubicacion": {
+                "type": "string",
+                "example": "En la terminal aérea (Terminal Llegadas)"
+              }
+            }
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVehiculoEnum"
+          },
+          "kilometraje_actual": {
+            "type": "integer",
+            "example": 5200
+          },
+          "proximo_mantenimiento_km": {
+            "type": "integer",
+            "example": 10000
+          },
+          "mantenimiento_requerido": {
+            "type": "boolean",
+            "example": false
+          },
+          "foto_url": {
+            "type": "string",
+            "example": "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auto_id": {
+            "type": "string",
+            "description": "Alias canónico en español para vehicle_id.",
+            "example": "auto-spark-01"
+          },
+          "id": {
+            "type": "string",
+            "description": "Identificador público del vehículo.",
+            "example": "auto-spark-01"
+          },
+          "brand": {
+            "type": "string",
+            "example": "Chevrolet"
+          },
+          "model": {
+            "type": "string",
+            "example": "Spark GT 1.2"
+          },
+          "category": {
+            "type": "string",
+            "example": "ECONOMICO"
+          },
+          "daily_price": {
+            "type": "number",
+            "example": 35.0
+          },
+          "total_price_usd": {
+            "type": "number",
+            "description": "Total price for selected dates.",
+            "example": 106.5
+          },
+          "currency": {
+            "type": "string",
+            "example": "USD"
+          },
+          "transmission": {
+            "type": "string",
+            "enum": [
+              "MANUAL",
+              "AUTOMATICO"
+            ],
+            "example": "MANUAL"
+          },
+          "seats": {
+            "type": "integer",
+            "example": 5
+          },
+          "doors": {
+            "type": "integer",
+            "example": 5
+          },
+          "air_conditioning": {
+            "type": "boolean",
+            "example": true
+          },
+          "unlimited_mileage": {
+            "type": "boolean",
+            "example": true
+          },
+          "fuel_policy": {
+            "type": "string",
+            "example": "Lleno a Lleno (Full-to-Full)"
+          },
+          "free_cancellation": {
+            "type": "boolean",
+            "example": true
+          },
+          "total_price": {
+            "type": "number",
+            "example": 105.0
+          },
+          "status": {
+            "$ref": "#/components/schemas/EstadoVehiculoEnum"
+          },
+          "cleaning_cooldown": {
+            "$ref": "#/components/schemas/CooldownStatusDto"
+          }
+        }
+      },
+      "AutoFlotaItemV2": {
+        "type": "object",
+        "description": "Registro operativo de un vehículo en el Panel 2 de Gestión de Flota",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "marca": {
+            "type": "string",
+            "example": "Chevrolet"
+          },
+          "modelo": {
+            "type": "string",
+            "example": "Spark GT"
+          },
+          "categoria": {
+            "type": "string",
+            "example": "ECONOMICO"
+          },
+          "precio_diario": {
+            "type": "number",
+            "example": 35.5
+          },
+          "estado_operativo": {
+            "$ref": "#/components/schemas/EstadoVehiculoEnum"
+          },
+          "cooldown_activo": {
+            "type": "boolean",
+            "description": "True si el auto está en la fase 'EN_LIMPIEZA' con conteo regresivo",
+            "example": false
+          },
+          "segundos_restantes_cooldown": {
+            "type": "integer",
+            "description": "Segundos restantes de las 2 horas de enfriamiento (0 si ya expiró o no aplica)",
+            "example": 5400
+          },
+          "disponible_estimado_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2026-10-22T14:30:00Z"
+          },
+          "kilometraje_actual": {
+            "type": "integer",
+            "example": 5200
+          },
+          "umbral_mantenimiento_km": {
+            "type": "integer",
+            "example": 10000
+          },
+          "alerta_mantenimiento": {
+            "type": "boolean",
+            "description": "True si kilometraje_actual >= umbral_mantenimiento_km",
+            "example": false
+          },
+          "foto_url": {
+            "type": "string",
+            "example": "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=600"
+          }
+        }
+      },
+      "CoberturasResponseV2": {
+        "type": "object",
+        "properties": {
+          "auto_id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "vehiculo": {
+            "type": "string",
+            "example": "Chevrolet Spark GT"
+          },
+          "opciones": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tipo": {
+                  "type": "string",
+                  "enum": [
+                    "BASICA",
+                    "TOTAL"
+                  ]
+                },
+                "nombre": {
+                  "type": "string",
+                  "example": "Cobertura Total / Protección Premium"
+                },
+                "costo_adicional_diario": {
+                  "type": "number",
+                  "example": 18.0
+                },
+                "franquicia": {
+                  "type": "number",
+                  "description": "Monto de franquicia (0 en Cobertura Total)",
+                  "example": 0.0
+                },
+                "deposito_garantia": {
+                  "type": "number",
+                  "description": "Depósito retenido en mostrador en tarjeta de crédito",
+                  "example": 0.0
+                },
+                "descripcion": {
+                  "type": "string",
+                  "example": "Elimina totalmente la franquicia ante daños en carrocería, cristales, neumáticos y llaves."
+                },
+                "beneficios": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreateAutoOrderRequestV2": {
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "pickup_date",
+          "dropoff_date",
+          "driver"
+        ],
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "dias": {
+            "type": "integer",
+            "example": 3
+          },
+          "tipo_cobertura": {
+            "type": "string",
+            "enum": [
+              "BASICA",
+              "TOTAL"
+            ],
+            "default": "BASICA"
+          },
+          "pickup_location": {
+            "type": "string",
+            "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+          },
+          "dropoff_location": {
+            "type": "string",
+            "example": "Aeropuerto Mariscal Sucre (UIO), Quito"
+          },
+          "pickup_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-20"
+          },
+          "dropoff_date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-23"
+          },
+          "conductor": {
+            "type": "object",
+            "required": [
+              "full_name",
+              "email",
+              "phone",
+              "license_number",
+              "age"
+            ],
+            "properties": {
+              "full_name": {
+                "type": "string",
+                "example": "Carlos Andrés Zambrano"
+              },
+              "email": {
+                "type": "string",
+                "format": "email",
+                "example": "carlos.zambrano@example.com"
+              },
+              "phone": {
+                "type": "string",
+                "example": "+593987654321"
+              },
+              "license_number": {
+                "type": "string",
+                "example": "1723456789"
+              },
+              "country_license": {
+                "type": "string",
+                "example": "Ecuador",
+                "default": "Ecuador"
+              },
+              "age": {
+                "type": "integer",
+                "minimum": 18,
+                "example": 28
+              },
+              "flight_number": {
+                "type": "string",
+                "example": "AV1632"
+              },
+              "nombre": {
+                "type": "string",
+                "example": "Carlos Andrés Zambrano",
+                "description": "Alias en español de full_name"
+              },
+              "correo": {
+                "type": "string",
+                "format": "email",
+                "example": "carlos.zambrano@example.com",
+                "description": "Alias en español de email"
+              },
+              "telefono": {
+                "type": "string",
+                "example": "+593987654321",
+                "description": "Alias en español de phone"
+              },
+              "licencia_conducir": {
+                "type": "string",
+                "example": "1723456789",
+                "description": "Alias en español de license_number"
+              },
+              "edad": {
+                "type": "integer",
+                "example": 28,
+                "description": "Alias en español de age"
+              }
+            }
+          },
+          "auto_id": {
+            "type": "string",
+            "description": "Alias canónico en español para identificador del vehículo.",
+            "example": "auto-spark-01"
+          },
+          "fecha_recogida": {
+            "type": "string",
+            "format": "date",
+            "description": "Alias canónico en español para fecha de retiro (YYYY-MM-DD).",
+            "example": "2026-11-10"
+          },
+          "fecha_devolucion": {
+            "type": "string",
+            "format": "date",
+            "description": "Alias canónico en español para fecha de retorno (YYYY-MM-DD).",
+            "example": "2026-11-12"
+          },
+          "hora_recogida": {
+            "type": "string",
+            "description": "Hora militar estricta en intervalos de 30 minutos (ej. 10:00 o 10:30).",
+            "example": "10:00"
+          },
+          "hora_devolucion": {
+            "type": "string",
+            "description": "Hora militar estricta en intervalos de 30 minutos (ej. 10:00 o 10:30).",
+            "example": "10:00"
+          },
+          "lugar_recogida": {
+            "type": "string",
+            "description": "Alias canónico en español para terminal u oficina de retiro.",
+            "example": "UIO Aeropuerto"
+          },
+          "lugar_devolucion": {
+            "type": "string",
+            "description": "Alias canónico en español para terminal u oficina de retorno.",
+            "example": "UIO Aeropuerto"
+          },
+          "cobertura": {
+            "type": "string",
+            "enum": [
+              "BASICA",
+              "TOTAL",
+              "PREMIUM"
+            ],
+            "description": "Alias canónico en español para nivel de cobertura del seguro.",
+            "example": "TOTAL"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid",
+            "deprecated": true,
+            "description": "DEPRECATED (IETF Draft). La clave de idempotencia DEBE transmitirse en la cabecera HTTP Idempotency-Key para evitar colisiones semánticas."
+          },
+          "driver": {
+            "type": "object",
+            "required": [
+              "full_name",
+              "email",
+              "phone",
+              "license_number",
+              "age"
+            ],
+            "properties": {
+              "full_name": {
+                "type": "string",
+                "example": "Carlos Andrés Zambrano"
+              },
+              "email": {
+                "type": "string",
+                "format": "email",
+                "example": "carlos.zambrano@example.com"
+              },
+              "phone": {
+                "type": "string",
+                "example": "+593987654321"
+              },
+              "license_number": {
+                "type": "string",
+                "example": "1723456789"
+              },
+              "country_license": {
+                "type": "string",
+                "example": "Ecuador",
+                "default": "Ecuador"
+              },
+              "age": {
+                "type": "integer",
+                "minimum": 18,
+                "example": 28
+              },
+              "flight_number": {
+                "type": "string",
+                "example": "AV1632"
+              },
+              "nombre": {
+                "type": "string",
+                "example": "Carlos Andrés Zambrano",
+                "description": "Alias en español de full_name"
+              },
+              "correo": {
+                "type": "string",
+                "format": "email",
+                "example": "carlos.zambrano@example.com",
+                "description": "Alias en español de email"
+              },
+              "telefono": {
+                "type": "string",
+                "example": "+593987654321",
+                "description": "Alias en español de phone"
+              },
+              "licencia_conducir": {
+                "type": "string",
+                "example": "1723456789",
+                "description": "Alias en español de license_number"
+              },
+              "edad": {
+                "type": "integer",
+                "example": 28,
+                "description": "Alias en español de age"
+              }
+            }
+          },
+          "coverage_type": {
+            "type": "string",
+            "enum": [
+              "BASIC",
+              "TOTAL",
+              "BASICA"
+            ],
+            "default": "BASIC",
+            "description": "Tipo de cobertura del seguro (BASIC: con franquicia, TOTAL: franquicia $0)"
+          },
+          "pickup_time": {
+            "type": "string",
+            "example": "10:00",
+            "default": "10:00"
+          },
+          "dropoff_time": {
+            "type": "string",
+            "example": "10:00",
+            "default": "10:00"
+          }
+        }
+      },
+      "AutoOrderResponseV2": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "pnr": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "status": {
+            "type": "string",
+            "example": "CONFIRMED"
+          },
+          "auto_id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "tipo_cobertura": {
+            "type": "string",
+            "example": "TOTAL"
+          },
+          "deposito_garantia": {
+            "type": "number",
+            "example": 0.0
+          },
+          "total_price": {
+            "type": "object",
+            "properties": {
+              "currency": {
+                "type": "string",
+                "example": "USD"
+              },
+              "total": {
+                "type": "number",
+                "example": 160.5
+              },
+              "desglose": {
+                "type": "object"
+              }
+            }
+          },
+          "voucher_qr_data": {
+            "type": "string",
+            "example": "BOOKING-CAR-CAR7849B-auto-spark-01-CONFIRMED"
+          },
+          "checklist_mostrador": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "refund": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "refund_id": {
+                "type": "string",
+                "example": "REF-AUTO-9921"
+              },
+              "amount": {
+                "type": "number",
+                "example": 160.5
+              },
+              "currency": {
+                "type": "string",
+                "example": "USD"
+              },
+              "status": {
+                "type": "string",
+                "example": "PROCESSED"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "_links": {
+            "type": "object"
+          },
+          "codigo_reserva": {
+            "type": "string",
+            "description": "Alias canónico en español para localizador PNR.",
+            "example": "CAR7849B"
+          },
+          "estado": {
+            "type": "string",
+            "description": "Alias canónico en español para estado de la reserva.",
+            "example": "CONFIRMED"
+          },
+          "moneda": {
+            "type": "string",
+            "description": "Divisa de liquidación (USD).",
+            "example": "USD"
+          },
+          "precio_total_monto": {
+            "type": "number",
+            "description": "Monto total en USD.",
+            "example": 106.5
+          },
+          "reembolso_id": {
+            "type": "string",
+            "description": "Identificador del reembolso monetario ante cancelación o compensación Saga.",
+            "example": "REF-AUTO-9921"
+          },
+          "monto_reembolsado": {
+            "type": "number",
+            "description": "Monto reembolsado al 100% en USD.",
+            "example": 106.5
+          },
+          "cooldown_info": {
+            "$ref": "#/components/schemas/CooldownStatusDto"
+          }
+        }
+      },
+      "CheckinDigitalResponseV2": {
+        "type": "object",
+        "properties": {
+          "reserva_id": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "pnr": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "checkin_status": {
+            "type": "string",
+            "example": "CHECKIN_COMPLETED"
+          },
+          "fast_track_pickup": {
+            "type": "boolean",
+            "example": true
+          },
+          "mensaje": {
+            "type": "string",
+            "example": "Check-in digital exitoso. Presenta tu código QR en el mostrador para retiro express."
+          },
+          "voucher_qr_data": {
+            "type": "string",
+            "example": "AUTOS-CHECKIN-CAR7849B-VERIFIED-1723456789"
+          },
+          "requisitos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CheckinEntregaRequestV2": {
+        "type": "object",
+        "required": [
+          "licencia_conducir",
+          "km_salida"
+        ],
+        "properties": {
+          "licencia_conducir": {
+            "type": "string",
+            "description": "Número de licencia física presentada en mostrador",
+            "example": "1723456789"
+          },
+          "km_salida": {
+            "type": "integer",
+            "description": "Lectura del odómetro al momento de entregar las llaves",
+            "example": 12500
+          },
+          "tecnico_entrega": {
+            "type": "string",
+            "description": "Nombre o ID del agente que formaliza la entrega",
+            "example": "Roberto Paredes (Agente Mostrador UIO)"
+          }
+        }
+      },
+      "CheckinEntregaResponseV2": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "order_id": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "pnr": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "estado_orden": {
+            "type": "string",
+            "example": "ENTREGADO"
+          },
+          "km_salida": {
+            "type": "integer",
+            "example": 12500
+          },
+          "licencia_verificada": {
+            "type": "string",
+            "example": "1723456789"
+          },
+          "mensaje": {
+            "type": "string",
+            "example": "Llaves entregadas al conductor. Auto en tránsito (Fase ENTREGADO)."
+          }
+        }
+      },
+      "CheckinDevolucionRequestV2": {
+        "type": "object",
+        "required": [
+          "km_retorno"
+        ],
+        "properties": {
+          "km_retorno": {
+            "type": "integer",
+            "description": "Odómetro al devolver el auto (debe ser >= km_salida)",
+            "example": 12950
+          },
+          "nivel_combustible": {
+            "type": "integer",
+            "description": "Porcentaje de combustible de 0 a 100",
+            "example": 100
+          },
+          "observaciones": {
+            "type": "string",
+            "example": "Inspección conforme. Sin rayones ni novedades mecánicas."
+          }
+        }
+      },
+      "CheckinDevolucionResponseV2": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "order_id": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "pnr": {
+            "type": "string",
+            "example": "CAR7849B"
+          },
+          "estado_orden": {
+            "type": "string",
+            "example": "COMPLETADA"
+          },
+          "km_retorno": {
+            "type": "integer",
+            "example": 12950
+          },
+          "km_recorridos": {
+            "type": "integer",
+            "example": 450
+          },
+          "cooldown": {
+            "$ref": "#/components/schemas/DevolucionAutoResponseV2"
+          },
+          "alerta_mantenimiento": {
+            "type": "string",
+            "example": "Kilometraje en rango normal."
+          }
+        }
+      },
+      "DevolucionAutoResponseV2": {
+        "type": "object",
+        "properties": {
+          "auto_id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "vehiculo": {
+            "type": "string",
+            "example": "Chevrolet Spark GT"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVehiculoEnum"
+          },
+          "cooldown_horas": {
+            "type": "integer",
+            "example": 2
+          },
+          "disponible_desde": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-22T15:00:00Z"
+          },
+          "mensaje": {
+            "type": "string",
+            "example": "Vehículo en ciclo de limpieza y desinfección. Estará disponible en 2 horas."
+          }
+        }
+      },
+      "RegistroMantenimientoRequestV2": {
+        "type": "object",
+        "required": [
+          "kilometraje_registrado",
+          "nivel_combustible",
+          "tecnico_id"
+        ],
+        "properties": {
+          "tecnico_id": {
+            "type": "string",
+            "example": "tec-rosero-01"
+          },
+          "kilometraje_registrado": {
+            "type": "integer",
+            "example": 10250
+          },
+          "nivel_combustible": {
+            "type": "integer",
+            "description": "Porcentaje de combustible de 0 a 100",
+            "example": 100
+          },
+          "condiciones_carroceria": {
+            "type": "string",
+            "example": "Sin abolladuras. Rasguño leve en paragolpes trasero derecho."
+          },
+          "estado_neumaticos": {
+            "type": "string",
+            "example": "BUENO"
+          },
+          "observaciones": {
+            "type": "string",
+            "example": "Cambio de aceite y filtro realizado."
+          },
+          "mantenimiento_realizado": {
+            "type": "boolean",
+            "default": false
+          },
+          "nuevo_proximo_mantenimiento_km": {
+            "type": "integer",
+            "example": 15000
+          }
+        }
+      },
+      "RegistroMantenimientoResponseV2": {
+        "type": "object",
+        "properties": {
+          "auto_id": {
+            "type": "string",
+            "example": "auto-spark-01"
+          },
+          "marca_modelo": {
+            "type": "string",
+            "example": "Chevrolet Spark GT"
+          },
+          "kilometraje_actual": {
+            "type": "integer",
+            "example": 10250
+          },
+          "proximo_mantenimiento_km": {
+            "type": "integer",
+            "example": 10000
+          },
+          "mantenimiento_requerido": {
+            "type": "boolean",
+            "example": true
+          },
+          "alerta_preventiva": {
+            "type": "string",
+            "example": "ALERTA PREVENTIVA: El vehículo ha superado el límite de 10000 km. Mantenimiento requerido."
+          },
+          "nivel_combustible": {
+            "type": "string",
+            "example": "100%"
+          },
+          "bitacora_id": {
+            "type": "string",
+            "example": "BIT-AUTO-01"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ContratoPromocionesRequestV2": {
+        "type": "object",
+        "required": [
+          "permite_promociones",
+          "porcentaje_descuento_maximo"
+        ],
+        "properties": {
+          "permite_promociones": {
+            "type": "boolean",
+            "description": "¿Acepta participar en combos turísticos combinados con Booking Prototipo? (Cátedra RDA2 §9)",
+            "example": true
+          },
+          "porcentaje_descuento_maximo": {
+            "type": "number",
+            "description": "Porcentaje máximo de descuento autorizado sobre tarifa diaria (0 a 100)",
+            "example": 15.0
+          },
+          "destinos_habilitados": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "Quito",
+              "Guayaquil",
+              "Cuenca"
+            ]
+          },
+          "vigencia_hasta": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-12-31"
+          },
+          "condiciones_combo": {
+            "type": "string",
+            "example": "Descuento autorizado del 15% en combos multivertical con hotel o vuelo."
+          }
+        }
+      },
+      "ContratoPromocionesResponseV2": {
+        "type": "object",
+        "properties": {
+          "proveedor_codigo": {
+            "type": "string",
+            "example": "NODE_AUT_LOCAL"
+          },
+          "nombre_socio": {
+            "type": "string",
+            "example": "Renta Autos Ecuador (Flota Partner)"
+          },
+          "vertical": {
+            "type": "string",
+            "example": "AUTOS"
+          },
+          "permite_promociones": {
+            "type": "boolean",
+            "example": true
+          },
+          "porcentaje_descuento_maximo": {
+            "type": "number",
+            "example": 15.0
+          },
+          "destinos_habilitados": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "Quito",
+              "Guayaquil",
+              "Cuenca",
+              "Manta"
+            ]
+          },
+          "vigencia_hasta": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-12-31"
+          },
+          "condiciones_combo": {
+            "type": "string",
+            "example": "Descuento autorizado del 15% en combos multivertical con hotel o vuelo."
+          }
+        }
+      },
+      "AutosHealthResponseV2": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "HEALTHY",
+              "DOWN",
+              "DEGRADED"
+            ],
+            "example": "HEALTHY"
+          },
+          "nodo_id": {
+            "type": "string",
+            "example": "NODE_AUT_LOCAL"
+          },
+          "nombre_proveedor": {
+            "type": "string",
+            "example": "Renta Autos Ecuador (Flota Partner)"
+          },
+          "vertical": {
+            "type": "string",
+            "example": "AUTOS"
+          },
+          "version": {
+            "type": "string",
+            "example": "2.0.0"
+          },
+          "uptime_seconds": {
+            "type": "integer",
+            "example": 8420
+          },
+          "latencia_ms": {
+            "type": "integer",
+            "example": 25
+          },
+          "circuit_breaker_estado": {
+            "type": "string",
+            "example": "CLOSED"
+          },
+          "cooldown_activo_count": {
+            "type": "integer",
+            "example": 1
+          },
+          "total_vehiculos": {
+            "type": "integer",
+            "example": 5
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-22T16:40:00Z"
+          }
+        }
+      },
+      "AutosEventosResponseV2": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer",
+                "example": 1
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "CloudEventAutoOrderConfirmed": {
+        "type": "object",
+        "description": "Evento emitido a RabbitMQ ('booking.events' / routing key 'auto.order.confirmed') y Apache Kafka ('topic-ordenes-b2b')",
+        "required": [
+          "specversion",
+          "type",
+          "source",
+          "id",
+          "time",
+          "correlation_id",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "type": {
+            "type": "string",
+            "example": "ec.edu.epn.booking.autos.order.confirmed"
+          },
+          "source": {
+            "type": "string",
+            "example": "/microservices/ms-autos"
+          },
+          "id": {
+            "type": "string",
+            "example": "evt-car-ord-7762"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-22T11:00:00Z"
+          },
+          "correlation_id": {
+            "type": "string",
+            "example": "corr-autos-987654"
+          },
+          "datacontenttype": {
+            "type": "string",
+            "example": "application/json"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string"
+              },
+              "pnr": {
+                "type": "string"
+              },
+              "auto_id": {
+                "type": "string"
+              },
+              "total_price": {
+                "type": "number"
+              },
+              "nuevo_estado_auto": {
+                "type": "string",
+                "example": "RESERVADO"
+              }
+            }
+          }
+        }
+      },
+      "CloudEventAutoCleaningCooldownStarted": {
+        "type": "object",
+        "description": "Evento emitido al iniciar el cooldown de 2 horas tras devolución",
+        "required": [
+          "specversion",
+          "type",
+          "source",
+          "id",
+          "time",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "type": {
+            "type": "string",
+            "example": "ec.edu.epn.booking.autos.cooldown.started"
+          },
+          "source": {
+            "type": "string",
+            "example": "/microservices/ms-autos"
+          },
+          "id": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "correlation_id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "auto_id": {
+                "type": "string"
+              },
+              "estado": {
+                "type": "string",
+                "example": "EN_LIMPIEZA"
+              },
+              "cooldown_minutos": {
+                "type": "integer",
+                "example": 120
+              },
+              "disponible_desde": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "CloudEventAutoMantenimientoAlerta": {
+        "type": "object",
+        "description": "Evento emitido al superarse el umbral de kilometraje de mantenimiento preventivo",
+        "required": [
+          "specversion",
+          "type",
+          "source",
+          "id",
+          "time",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "type": {
+            "type": "string",
+            "example": "ec.edu.epn.booking.autos.mantenimiento.alerta"
+          },
+          "source": {
+            "type": "string",
+            "example": "/microservices/ms-autos"
+          },
+          "id": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "correlation_id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "auto_id": {
+                "type": "string"
+              },
+              "kilometraje_actual": {
+                "type": "integer"
+              },
+              "proximo_mantenimiento_km": {
+                "type": "integer"
+              },
+              "severidad": {
+                "type": "string",
+                "example": "WARNING"
+              }
+            }
+          }
+        }
+      },
+      "CloudEventAutoOrderCancelled": {
+        "type": "object",
+        "description": "Evento emitido durante la compensación Saga tras la cancelación de una orden de auto",
+        "required": [
+          "specversion",
+          "type",
+          "source",
+          "id",
+          "time",
+          "correlation_id",
+          "data"
+        ],
+        "properties": {
+          "specversion": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "type": {
+            "type": "string",
+            "example": "ec.edu.epn.booking.autos.order.cancelled"
+          },
+          "source": {
+            "type": "string",
+            "example": "/microservices/ms-autos"
+          },
+          "id": {
+            "type": "string",
+            "example": "evt-car-canc-8831"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-22T11:15:00Z"
+          },
+          "correlation_id": {
+            "type": "string",
+            "example": "corr-autos-987654"
+          },
+          "datacontenttype": {
+            "type": "string",
+            "example": "application/json"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "example": "CAR7849B"
+              },
+              "pnr": {
+                "type": "string",
+                "example": "CAR7849B"
+              },
+              "auto_id": {
+                "type": "string",
+                "example": "auto-spark-01"
+              },
+              "refund_id": {
+                "type": "string",
+                "example": "REF-AUTO-9921"
+              },
+              "refund_amount": {
+                "type": "number",
+                "example": 106.5
+              },
+              "estado_restituido": {
+                "type": "string",
+                "example": "DISPONIBLE"
+              }
+            }
+          }
+        }
+      },
+      "ProblemDetails": {
+        "type": "object",
+        "description": "Estructura canónica de error conforme a la especificación RFC 7807 (Problem Details for HTTP APIs).",
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri",
+            "description": "URI absoluta o relativa que tipifica el error según la cátedra.",
+            "example": "https://booking.epn.edu.ec/errors/cooldown-activo"
+          },
+          "title": {
+            "type": "string",
+            "description": "Resumen corto y legible del problema.",
+            "example": "Vehículo en Cooldown de Limpieza Obligatorio (2 Horas)"
+          },
+          "status": {
+            "type": "integer",
+            "description": "Código de estado HTTP correspondiente (400, 401, 403, 404, 409, 422, 500, 503).",
+            "example": 409
+          },
+          "detail": {
+            "type": "string",
+            "description": "Explicación detallada del motivo del fallo o contingencia.",
+            "example": "El vehículo auto-spark-01 se encuentra en fase de limpieza y desinfección obligatoria de 120 minutos tras su retorno. Estará disponible nuevamente a las 14:30:00 UTC."
+          },
+          "instance": {
+            "type": "string",
+            "description": "URI de la solicitud que originó el error.",
+            "example": "/api/v2/autos/orders/create"
+          },
+          "code": {
+            "type": "string",
+            "description": "Código nemotécnico unívoco para evaluación algorítmica en el cliente o agregador.",
+            "example": "VEHICLE_IN_CLEANING_COOLDOWN"
+          },
+          "correlation_id": {
+            "type": "string",
+            "description": "Identificador de correlación unívoco propagado para trazabilidad en logs físicos.",
+            "example": "cid-aut-9921b"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Marca de tiempo ISO 8601 UTC en que se generó la excepción.",
+            "example": "2026-10-24T18:30:00Z"
+          },
+          "invalid_params": {
+            "type": "array",
+            "description": "Lista de parámetros o campos que no superaron la validación sintáctica o de negocio.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "example": "pickup_date"
+                },
+                "reason": {
+                  "type": "string",
+                  "example": "La fecha de recogida no puede ser en el pasado."
+                }
+              }
+            }
+          }
+        }
+      },
+      "CooldownStatusDto": {
+        "type": "object",
+        "description": "Información del temporizador de enfriamiento obligatorio de 2 horas (120 minutos) tras retorno del vehículo (Cátedra RDA2 §5).",
+        "properties": {
+          "cooldown_horas": {
+            "type": "integer",
+            "example": 2
+          },
+          "cooldown_minutos": {
+            "type": "integer",
+            "example": 120
+          },
+          "activo": {
+            "type": "boolean",
+            "example": true
+          },
+          "inicio_cooldown": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-24T12:00:00Z"
+          },
+          "fin_cooldown": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-10-24T14:00:00Z"
+          },
+          "proximo_estado": {
+            "type": "string",
+            "example": "DISPONIBLE"
+          }
+        }
+      }
+    }
+  }
+}
