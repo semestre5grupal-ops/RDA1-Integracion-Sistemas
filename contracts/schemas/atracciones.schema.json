@@ -1051,17 +1051,17 @@
       "properties": {
         "slot_id": {
           "type": "string",
-          "description": "Identificador unívoco del turno horario para bloqueo atómico.",
+          "description": "Unique slot identifier for atomic capacity locking.",
           "example": "slot-20261025-1030"
         },
         "time": {
           "type": "string",
-          "description": "Hora del turno en formato legible (12h o 24h).",
+          "description": "Slot time label in 12h or 24h format.",
           "example": "10:30 a.m."
         },
         "time_24h": {
           "type": "string",
-          "description": "Hora del turno en formato 24 horas normalizado (HH:mm:ss).",
+          "description": "24h normalized time format (HH:mm:ss).",
           "example": "10:30:00"
         },
         "total_slots": {
@@ -1473,12 +1473,12 @@
         "document_id": {
           "type": "string",
           "description": "Número de documento de identidad (cédula de 10 dígitos validada por módulo 10 o pasaporte de 6 a 9 caracteres).",
-          "example": "1723456789"
+          "example": "1710034065"
         },
         "numero_documento": {
           "type": "string",
           "description": "Alias canónico en español para número de documento de identidad.",
-          "example": "1723456789"
+          "example": "1710034065"
         }
       }
     },
@@ -1736,7 +1736,7 @@
         "documento_identidad": {
           "type": "string",
           "description": "Documento de identidad físico presentado por el titular en el punto de encuentro.",
-          "example": "1723456789"
+          "example": "1710034065"
         },
         "codigo_voucher_qr": {
           "type": "string",
@@ -1788,7 +1788,7 @@
         },
         "titular_documento": {
           "type": "string",
-          "example": "1723456789"
+          "example": "1710034065"
         },
         "guia_asignado": {
           "type": "string",
@@ -3321,17 +3321,17 @@
         "properties": {
           "slot_id": {
             "type": "string",
-            "description": "Identificador unívoco del turno horario para bloqueo atómico.",
+            "description": "Unique slot identifier for atomic capacity locking.",
             "example": "slot-20261025-1030"
           },
           "time": {
             "type": "string",
-            "description": "Hora del turno en formato legible (12h o 24h).",
+            "description": "Slot time label in 12h or 24h format.",
             "example": "10:30 a.m."
           },
           "time_24h": {
             "type": "string",
-            "description": "Hora del turno en formato 24 horas normalizado (HH:mm:ss).",
+            "description": "24h normalized time format (HH:mm:ss).",
             "example": "10:30:00"
           },
           "total_slots": {
@@ -3743,12 +3743,12 @@
           "document_id": {
             "type": "string",
             "description": "Número de documento de identidad (cédula de 10 dígitos validada por módulo 10 o pasaporte de 6 a 9 caracteres).",
-            "example": "1723456789"
+            "example": "1710034065"
           },
           "numero_documento": {
             "type": "string",
             "description": "Alias canónico en español para número de documento de identidad.",
-            "example": "1723456789"
+            "example": "1710034065"
           }
         }
       },
@@ -4006,7 +4006,7 @@
           "documento_identidad": {
             "type": "string",
             "description": "Documento de identidad físico presentado por el titular en el punto de encuentro.",
-            "example": "1723456789"
+            "example": "1710034065"
           },
           "codigo_voucher_qr": {
             "type": "string",
@@ -4058,7 +4058,7 @@
           },
           "titular_documento": {
             "type": "string",
-            "example": "1723456789"
+            "example": "1710034065"
           },
           "guia_asignado": {
             "type": "string",

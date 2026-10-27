@@ -154,7 +154,7 @@ Cuando un usuario reserve un auto desde el Booking Central, Booking enviará un 
     "full_name": "Carlos Andrés Zambrano",
     "email": "carlos.zambrano@example.com",
     "phone": "+593987654321",
-    "license_number": "1723456789",
+    "license_number": "1710034065",
     "country_license": "Ecuador",
     "age": 28,
     "flight_number": "AV1632"

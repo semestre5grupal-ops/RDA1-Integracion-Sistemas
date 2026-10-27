@@ -146,7 +146,7 @@ Cuando un turista reserva y paga un paquete en Booking, nuestro agregador despac
     "name": "María José Flores",
     "email": "turista@epn.edu.ec",
     "phone": "+593991234567",
-    "document_id": "1724589632"
+    "document_id": "1724589633"
   },
   "special_requirements": "Requiere audio-guía en inglés",
   "booking_reservation_id": "RES-ATR-A1B2C3"
@@ -159,11 +159,14 @@ Cuando un turista reserva y paga un paquete en Booking, nuestro agregador despac
 ```json
 {
   "success": true,
-  "reservation_id": "SOCIO-CONF-9921",
+  "reservation_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "reservation_code": "DEC-7F3K9Q",
   "status": "CONFIRMED",
   "message": "Reserva confirmada exitosamente en la tienda individual."
 }
 ```
+> [!NOTE]
+> **Formato de Identificadores:** `reservation_id` debe ser un UUID v4 canónico (coincidiendo con `res_uuid` de su tabla `reserva`). Si desean enviar un localizador corto para el cliente, pueden incluir `reservation_code` (ej. `"DEC-7F3K9Q"`).
 
 #### B. Sin Cupos Disponibles (`409 Conflict`):
 Si en el milisegundo anterior la tienda socia agotó sus cupos locales, debe responder **estrictamente con `409 Conflict` y `code: "OUT_OF_STOCK"`** (formato Problem Details RFC 7807):
@@ -207,7 +210,7 @@ Toda atracción turística debe soportar la validación física del turista ante
 * **Payload:**
   ```json
   {
-    "documento_identidad": "1724589632",
+    "documento_identidad": "1724589633",
     "guia_asignado": "Carlos Villacís (Licencia MINTUR-441)"
   }
   ```

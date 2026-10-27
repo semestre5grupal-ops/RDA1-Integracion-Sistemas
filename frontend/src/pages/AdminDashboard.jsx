@@ -1098,8 +1098,8 @@ function ProveedoresTab() {
                 ['nombre', 'Nombre del sistema / socio *', 'Ej: Descubre EC (Dilan Mendoza)'],
                 ['equipo', 'Nombre del equipo / Compañero', 'Ej: Grupo 2 – Dilan Mendoza'],
                 ['url', 'URL del sitio web o API *', 'https://descubreec.com'],
-                ['apiBase', 'URL base de la API REST (OpenAPI v2) *', 'https://descubreec.com/api/v2'],
-                ['endpointGrpc', 'Socket gRPC Inbound (Inventario HTTP/2)', 'grpc://booking.epn.edu.ec:50051'],
+                ['apiBase', 'URL base de la API REST del socio (OpenAPI v3 / v2) *', 'https://descubreec.com/api/v2'],
+                ['endpointGrpc', 'Socket gRPC de Booking (o rol Cliente)', 'rda1-backend-integracion-sistemas.onrender.com:50051 (o CLIENTE)'],
                 ['contacto', 'Email de contacto', 'dilan@universidad.edu.ec'],
               ].map(([field, label, placeholder]) => (
                 <div key={field} style={{ marginBottom: 14 }}>

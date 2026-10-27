@@ -526,10 +526,10 @@ paths:
               properties:
                 numero_licencia:
                   type: string
-                  example: '1723456789'
+                  example: '1710034065'
                 documento_identidad:
                   type: string
-                  example: '1723456789'
+                  example: '1710034065'
                 fecha_vencimiento_licencia:
                   type: string
                   format: date
@@ -1245,7 +1245,7 @@ components:
               example: '+593987654321'
             license_number:
               type: string
-              example: '1723456789'
+              example: '1710034065'
             country_license:
               type: string
               example: Ecuador
@@ -1272,7 +1272,7 @@ components:
               description: Alias en español de phone
             licencia_conducir:
               type: string
-              example: '1723456789'
+              example: '1710034065'
               description: Alias en español de license_number
             edad:
               type: integer
@@ -1449,7 +1449,7 @@ components:
             para retiro express.
         voucher_qr_data:
           type: string
-          example: AUTOS-CHECKIN-CAR7849B-VERIFIED-1723456789
+          example: AUTOS-CHECKIN-CAR7849B-VERIFIED-1710034065
         requisitos:
           type: array
           items:
@@ -1463,7 +1463,7 @@ components:
         licencia_conducir:
           type: string
           description: Número de licencia física presentada en mostrador
-          example: '1723456789'
+          example: '1710034065'
         km_salida:
           type: integer
           description: Lectura del odómetro al momento de entregar las llaves
@@ -1492,7 +1492,7 @@ components:
           example: 12500
         licencia_verificada:
           type: string
-          example: '1723456789'
+          example: '1710034065'
         mensaje:
           type: string
           example: Llaves entregadas al conductor. Auto en tránsito (Fase ENTREGADO).

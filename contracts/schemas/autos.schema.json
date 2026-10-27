@@ -510,7 +510,7 @@
             },
             "license_number": {
               "type": "string",
-              "example": "1723456789"
+              "example": "1710034065"
             },
             "country_license": {
               "type": "string",
@@ -544,7 +544,7 @@
             },
             "licencia_conducir": {
               "type": "string",
-              "example": "1723456789",
+              "example": "1710034065",
               "description": "Alias en español de license_number"
             },
             "edad": {
@@ -632,7 +632,7 @@
             },
             "license_number": {
               "type": "string",
-              "example": "1723456789"
+              "example": "1710034065"
             },
             "country_license": {
               "type": "string",
@@ -666,7 +666,7 @@
             },
             "licencia_conducir": {
               "type": "string",
-              "example": "1723456789",
+              "example": "1710034065",
               "description": "Alias en español de license_number"
             },
             "edad": {
@@ -839,7 +839,7 @@
         },
         "voucher_qr_data": {
           "type": "string",
-          "example": "AUTOS-CHECKIN-CAR7849B-VERIFIED-1723456789"
+          "example": "AUTOS-CHECKIN-CAR7849B-VERIFIED-1710034065"
         },
         "requisitos": {
           "type": "array",
@@ -859,7 +859,7 @@
         "licencia_conducir": {
           "type": "string",
           "description": "Número de licencia física presentada en mostrador",
-          "example": "1723456789"
+          "example": "1710034065"
         },
         "km_salida": {
           "type": "integer",
@@ -898,7 +898,7 @@
         },
         "licencia_verificada": {
           "type": "string",
-          "example": "1723456789"
+          "example": "1710034065"
         },
         "mensaje": {
           "type": "string",
@@ -2102,7 +2102,7 @@
               },
               "license_number": {
                 "type": "string",
-                "example": "1723456789"
+                "example": "1710034065"
               },
               "country_license": {
                 "type": "string",
@@ -2136,7 +2136,7 @@
               },
               "licencia_conducir": {
                 "type": "string",
-                "example": "1723456789",
+                "example": "1710034065",
                 "description": "Alias en español de license_number"
               },
               "edad": {
@@ -2224,7 +2224,7 @@
               },
               "license_number": {
                 "type": "string",
-                "example": "1723456789"
+                "example": "1710034065"
               },
               "country_license": {
                 "type": "string",
@@ -2258,7 +2258,7 @@
               },
               "licencia_conducir": {
                 "type": "string",
-                "example": "1723456789",
+                "example": "1710034065",
                 "description": "Alias en español de license_number"
               },
               "edad": {
@@ -2431,7 +2431,7 @@
           },
           "voucher_qr_data": {
             "type": "string",
-            "example": "AUTOS-CHECKIN-CAR7849B-VERIFIED-1723456789"
+            "example": "AUTOS-CHECKIN-CAR7849B-VERIFIED-1710034065"
           },
           "requisitos": {
             "type": "array",
@@ -2451,7 +2451,7 @@
           "licencia_conducir": {
             "type": "string",
             "description": "Número de licencia física presentada en mostrador",
-            "example": "1723456789"
+            "example": "1710034065"
           },
           "km_salida": {
             "type": "integer",
@@ -2490,7 +2490,7 @@
           },
           "licencia_verificada": {
             "type": "string",
-            "example": "1723456789"
+            "example": "1710034065"
           },
           "mensaje": {
             "type": "string",
