@@ -43,6 +43,7 @@ export interface ExternalAutoBookingPayload {
 export class AutosCircuitBreakerAdapter {
   private readonly logger = new Logger(AutosCircuitBreakerAdapter.name);
   private EXTERNAL_API_URL = process.env.TIENDA_AUTOS_URL || process.env.AUTOS_SUPPLIER_URL || 'http://localhost:3000/api/v2/autos';
+  private EXTERNAL_API_KEY = process.env.TIENDA_AUTOS_API_KEY || '';
 
   // Circuit Breaker State
   private circuitState: CircuitState = CircuitState.CLOSED;
@@ -69,10 +70,18 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Actualiza en vivo la API Key del proveedor externo de autos.
+   */
+  setExternalApiKey(apiKey: string) {
+    this.EXTERNAL_API_KEY = apiKey;
+    this.logger.log(`[AutosCircuitBreaker] API Key de proveedor actualizada en vivo.`);
+  }
+
+  /**
    * Consulta flota de vehículos externos con protección por Circuit Breaker.
    * Si la tienda externa falla o el circuito está abierto, retorna Mock Fallback automático (CE01).
    */
-  async fetchExternalCars(searchParams: any, correlationId?: string): Promise<any[]> {
+  async fetchExternalCars(searchParams: any, correlationId?: string, apiKey?: string): Promise<any[]> {
     this.checkCircuit();
 
     if (this.circuitState === CircuitState.OPEN) {
@@ -81,11 +90,13 @@ export class AutosCircuitBreakerAdapter {
     }
 
     try {
+      const key = apiKey || this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY;
       const response = await firstValueFrom(
         this.httpService.get(this.EXTERNAL_API_URL, {
           params: { _limit: 3 },
           headers: {
-            'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`
+            'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`,
+            ...(key ? { 'X-API-Key': key } : {}),
           },
           timeout: this.TIMEOUT_MS
         }).pipe(
@@ -112,7 +123,8 @@ export class AutosCircuitBreakerAdapter {
   async createExternalOrder(
     payload: ExternalAutoBookingPayload,
     idempotencyKey: string,
-    correlationId?: string
+    correlationId?: string,
+    apiKey?: string
   ): Promise<any> {
     this.checkCircuit();
 
@@ -129,6 +141,7 @@ export class AutosCircuitBreakerAdapter {
     const normalizedPhone = this.normalizePhone(payload.conductor.telefono);
 
     try {
+      const key = apiKey || this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY;
       const response = await firstValueFrom(
         this.httpService.post(`${this.EXTERNAL_API_URL}`, {
           ...payload,
@@ -141,7 +154,7 @@ export class AutosCircuitBreakerAdapter {
             'Content-Type': 'application/json',
             'Idempotency-Key': idempotencyKey,
             'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`,
-            ...(process.env.TIENDA_AUTOS_API_KEY ? { 'X-API-Key': process.env.TIENDA_AUTOS_API_KEY } : {}),
+            ...(key ? { 'X-API-Key': key } : {}),
           },
           timeout: this.TIMEOUT_MS
         }).pipe(

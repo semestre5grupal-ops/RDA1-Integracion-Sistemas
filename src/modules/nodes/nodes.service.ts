@@ -37,13 +37,9 @@ export class NodesService {
 
   async listarNodos(): Promise<any[]> {
     this.logger.log('Consultando estado de salud de nodos de proveedores en schema_proveedores');
-    let nodos = await this.configRepo.find({ order: { vertical: 'ASC' } });
-
-    // Si la tabla estuviese vacía, sembrar los 4 nodos estándar
-    if (!nodos || nodos.length === 0) {
-      await this.sembrarNodosPorDefecto();
-      nodos = await this.configRepo.find({ order: { vertical: 'ASC' } });
-    }
+    // Sembrar y asegurar los 20 nodos oficiales estandarizados (5 por vertical)
+    await this.sembrarNodosPorDefecto();
+    let nodos = await this.configRepo.find({ order: { vertical: 'ASC', codigoNodo: 'ASC' } });
 
     return nodos.map(n => {
       // Cálculo del semáforo LED visual (🟢/🟡/🔴) para Panel 1
@@ -77,6 +73,9 @@ export class NodesService {
         api_base: n.baseUrlRest,
         apiBase: n.baseUrlRest,
         endpoint_grpc: n.endpointGrpc,
+        endpointGrpc: n.endpointGrpc,
+        api_key: n.apiKey,
+        apiKey: n.apiKey,
         health_status: n.healthStatus,
         activo: !n.killSwitchActivo,
         estado: n.killSwitchActivo ? 'APAGADO' : (n.healthStatus === 'HEALTHY' ? 'OPERATIVO' : n.healthStatus),
@@ -130,6 +129,7 @@ export class NodesService {
       vertical: vertical,
       baseUrlRest: url.trim(),
       endpointGrpc: dto.endpointGrpc || dto.endpoint_grpc || null,
+      apiKey: (dto.apiKey || dto.api_key || '').trim() || null,
       healthStatus: 'HEALTHY',
       latenciaMs: 25,
       killSwitchActivo: false,
@@ -164,6 +164,9 @@ export class NodesService {
         base_url_rest: guardado.baseUrlRest,
         url: guardado.baseUrlRest,
         endpoint_grpc: guardado.endpointGrpc,
+        endpointGrpc: guardado.endpointGrpc,
+        api_key: guardado.apiKey,
+        apiKey: guardado.apiKey,
         health_status: guardado.healthStatus,
         kill_switch_activo: guardado.killSwitchActivo,
         circuit_breaker_estado: guardado.circuitBreakerEstado,
@@ -229,6 +232,10 @@ export class NodesService {
     if (dto.vertical || dto.tipo) {
       nodo.vertical = (dto.vertical || dto.tipo).toUpperCase();
     }
+    if (dto.apiKey !== undefined || dto.api_key !== undefined) {
+      const rawKey = dto.apiKey !== undefined ? dto.apiKey : dto.api_key;
+      nodo.apiKey = (rawKey || '').trim() || null;
+    }
     if (dto.equipo !== undefined) nodo.equipo = dto.equipo;
     if (dto.contacto !== undefined) nodo.contacto = dto.contacto;
     if (dto.emoji !== undefined) nodo.emoji = dto.emoji;
@@ -271,6 +278,9 @@ export class NodesService {
         base_url_rest: guardado.baseUrlRest,
         url: guardado.baseUrlRest,
         endpoint_grpc: guardado.endpointGrpc,
+        endpointGrpc: guardado.endpointGrpc,
+        api_key: guardado.apiKey,
+        apiKey: guardado.apiKey,
         health_status: guardado.healthStatus,
         kill_switch_activo: guardado.killSwitchActivo,
         circuit_breaker_estado: guardado.circuitBreakerEstado,
@@ -355,10 +365,9 @@ export class NodesService {
         const timeout = setTimeout(() => controller.abort(), 4000);
 
         const pingHeaders: Record<string, string> = {};
-        if (nodo.vertical === 'ATRACCIONES' && process.env.TIENDA_ATRACCIONES_API_KEY) {
-          pingHeaders['X-API-Key'] = process.env.TIENDA_ATRACCIONES_API_KEY;
-        } else if (nodo.vertical === 'AUTOS' && process.env.TIENDA_AUTOS_API_KEY) {
-          pingHeaders['X-API-Key'] = process.env.TIENDA_AUTOS_API_KEY;
+        const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
+        if (partnerKey) {
+          pingHeaders['X-API-Key'] = partnerKey;
         }
 
         let res = await this.fetchWithTrace(pingUrl, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
@@ -420,9 +429,10 @@ export class NodesService {
       targetUrl += '/autos';
     }
 
-    // Asegurar que se soliciten hasta 50 items (límite máximo del contrato) para traer todo el catálogo sin paginar
+    // Fase 3: Parámetro ?limit=50 para traer la totalidad del catálogo del socio sin truncamiento
+    const sep = targetUrl.includes('?') ? '&' : '?';
     if (!targetUrl.includes('limit=')) {
-      targetUrl += (targetUrl.includes('?') ? '&' : '?') + 'limit=50';
+      targetUrl += `${sep}limit=50`;
     }
 
     let itemsExternos: any[] = [];
@@ -430,10 +440,9 @@ export class NodesService {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
       const syncHeaders: Record<string, string> = { Accept: 'application/json' };
-      if (nodo.vertical === 'ATRACCIONES' && process.env.TIENDA_ATRACCIONES_API_KEY) {
-        syncHeaders['X-API-Key'] = process.env.TIENDA_ATRACCIONES_API_KEY;
-      } else if (nodo.vertical === 'AUTOS' && process.env.TIENDA_AUTOS_API_KEY) {
-        syncHeaders['X-API-Key'] = process.env.TIENDA_AUTOS_API_KEY;
+      const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
+      if (partnerKey) {
+        syncHeaders['X-API-Key'] = partnerKey;
       }
 
       const resp = await this.fetchWithTrace(targetUrl, {
@@ -613,59 +622,370 @@ export class NodesService {
   }
 
   private async sembrarNodosPorDefecto(): Promise<void> {
+    const bookingGrpc = process.env.GRPC_ATRACCIONES_URL || '100.93.143.85:50051';
+
     const semillas = [
+      // ── 1. ATRACCIONES (5 Nodos Estandarizados) ──
       {
         codigoNodo: 'NODE_ATR_DILAN',
         nombreProveedor: 'Descubre EC (Dilan Mendoza)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: process.env.TIENDA_ATRACCIONES_URL || 'https://descubreec.com/api/v2',
-        endpointGrpc: process.env.GRPC_ATRACCIONES_URL || 'grpc://booking.epn.edu.ec:50051',
+        baseUrlRest: 'http://100.80.229.90:8080/api/v3',
+        endpointGrpc: bookingGrpc,
+        apiKey: '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568',
         healthStatus: 'HEALTHY',
-        latenciaMs: 38,
+        latenciaMs: 35,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
+        equipo: 'Grupo 2 – Dilan Mendoza',
+        contacto: 'dilan@universidad.edu.ec',
+        emoji: '🎡',
+        descripcion: 'Catálogo de 21 tours y atracciones turísticas en Ecuador (Tailscale)',
       },
       {
-        codigoNodo: 'NODE_AUT_LOCAL',
-        nombreProveedor: 'Renta Autos Ecuador (Flota Partner)',
+        codigoNodo: 'NODE_ATR_ARIEL',
+        nombreProveedor: 'Ariel Tours (Ariel)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 30,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Atracciones – Socio 2',
+        contacto: 'ariel@universidad.edu.ec',
+        emoji: '🌋',
+        descripcion: 'Expediciones y tours volcánicos',
+      },
+      {
+        codigoNodo: 'NODE_ATR_MICHAEL',
+        nombreProveedor: 'Michael Expeditions (Michael)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 30,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Atracciones – Socio 3',
+        contacto: 'michael@universidad.edu.ec',
+        emoji: '🏔️',
+        descripcion: 'Atracciones de alta montaña y senderismo',
+      },
+      {
+        codigoNodo: 'NODE_ATR_ALISSON',
+        nombreProveedor: 'Alisson Adventure (Alisson)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 30,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Atracciones – Socio 4',
+        contacto: 'alisson@universidad.edu.ec',
+        emoji: '🌴',
+        descripcion: 'Tours de selva y aventura amazónica',
+      },
+      {
+        codigoNodo: 'NODE_ATR_GLORIA',
+        nombreProveedor: 'Gloria Travel (Gloria)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 30,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Atracciones – Socio 5',
+        contacto: 'gloria@universidad.edu.ec',
+        emoji: '🐢',
+        descripcion: 'Tours de fauna y conservación ecológica',
+      },
+
+      // ── 2. AUTOS (5 Nodos Estandarizados NODE_AUT_1..5) ──
+      {
+        codigoNodo: 'NODE_AUT_1',
+        nombreProveedor: 'Renta Autos Ecuador — Socio 1 (Flota Principal)',
         vertical: 'AUTOS',
         baseUrlRest: process.env.TIENDA_AUTOS_URL || 'http://localhost:3000/api/v2/autos',
-        endpointGrpc: process.env.GRPC_AUTOS_URL || 'grpc://localhost:50051',
+        endpointGrpc: bookingGrpc,
+        apiKey: process.env.TIENDA_AUTOS_API_KEY || null,
         healthStatus: 'HEALTHY',
         latenciaMs: 25,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
+        equipo: 'Renta Autos – Equipo 1',
+        emoji: '🚗',
+        descripcion: 'Flota sedán, SUV y camionetas en Quito y Guayaquil',
       },
       {
-        codigoNodo: 'NODE_ALO_LOCAL',
-        nombreProveedor: 'Hoteles & Hospedajes Ecuador (Alojamientos Partner)',
-        vertical: 'ALOJAMIENTOS',
-        baseUrlRest: process.env.TIENDA_ALOJAMIENTOS_URL || 'http://localhost:3000/api/v2/alojamientos',
-        endpointGrpc: process.env.GRPC_ALOJAMIENTOS_URL || 'grpc://localhost:50051',
+        codigoNodo: 'NODE_AUT_2',
+        nombreProveedor: 'Renta Autos Ecuador — Socio 2',
+        vertical: 'AUTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/autos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
         healthStatus: 'HEALTHY',
-        latenciaMs: 20,
+        latenciaMs: 28,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
+        equipo: 'Renta Autos – Equipo 2',
+        emoji: '🚙',
+        descripcion: 'Flota 4x4 todoterreno y compactos',
       },
       {
-        codigoNodo: 'NODE_VUE_LOCAL',
-        nombreProveedor: 'TAME / Latam Ecuador (Vuelos Partner)',
+        codigoNodo: 'NODE_AUT_3',
+        nombreProveedor: 'Renta Autos Ecuador — Socio 3',
+        vertical: 'AUTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/autos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 26,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Renta Autos – Equipo 3',
+        emoji: '🚐',
+        descripcion: 'Minivans ejecutivas y transporte grupal',
+      },
+      {
+        codigoNodo: 'NODE_AUT_4',
+        nombreProveedor: 'Renta Autos Ecuador — Socio 4',
+        vertical: 'AUTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/autos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 29,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Renta Autos – Equipo 4',
+        emoji: '🏎️',
+        descripcion: 'Vehículos híbridos y eléctricos ecológicos',
+      },
+      {
+        codigoNodo: 'NODE_AUT_5',
+        nombreProveedor: 'Renta Autos Ecuador — Socio 5',
+        vertical: 'AUTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/autos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 27,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Renta Autos – Equipo 5',
+        emoji: '🛻',
+        descripcion: 'Pickups diésel para rutas interprovinciales',
+      },
+
+      // ── 3. VUELOS (5 Nodos Estandarizados NODE_VUE_1..5) ──
+      {
+        codigoNodo: 'NODE_VUE_1',
+        nombreProveedor: 'AeroEcuador Gateway — Socio 1 (Vuelos Principal)',
         vertical: 'VUELOS',
         baseUrlRest: process.env.TIENDA_VUELOS_URL || 'http://localhost:3000/api/v2/vuelos',
-        endpointGrpc: process.env.GRPC_VUELOS_URL || 'grpc://localhost:50051',
+        endpointGrpc: bookingGrpc,
+        apiKey: process.env.TIENDA_VUELOS_API_KEY || null,
         healthStatus: 'HEALTHY',
         latenciaMs: 42,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
+        equipo: 'Vuelos – Equipo 1',
+        emoji: '✈️',
+        descripcion: 'Rutas nacionales Quito, Guayaquil, Cuenca, Galápagos',
+      },
+      {
+        codigoNodo: 'NODE_VUE_2',
+        nombreProveedor: 'AeroEcuador Gateway — Socio 2',
+        vertical: 'VUELOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 40,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Vuelos – Equipo 2',
+        emoji: '🛫',
+        descripcion: 'Conexiones a Islas Galápagos y Costa',
+      },
+      {
+        codigoNodo: 'NODE_VUE_3',
+        nombreProveedor: 'AeroEcuador Gateway — Socio 3',
+        vertical: 'VUELOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 44,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Vuelos – Equipo 3',
+        emoji: '🛩️',
+        descripcion: 'Vuelos chárter y pista corta Amazonía',
+      },
+      {
+        codigoNodo: 'NODE_VUE_4',
+        nombreProveedor: 'AeroEcuador Gateway — Socio 4',
+        vertical: 'VUELOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 41,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Vuelos – Equipo 4',
+        emoji: '💺',
+        descripcion: 'Rutas regionales y puente aéreo',
+      },
+      {
+        codigoNodo: 'NODE_VUE_5',
+        nombreProveedor: 'AeroEcuador Gateway — Socio 5',
+        vertical: 'VUELOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 43,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Vuelos – Equipo 5',
+        emoji: '🎫',
+        descripcion: 'Tarifas corporativas y convenios estudiantiles',
+      },
+
+      // ── 4. ALOJAMIENTOS (5 Nodos Estandarizados NODE_ALO_1..5) ──
+      {
+        codigoNodo: 'NODE_ALO_1',
+        nombreProveedor: 'Hoteles & Hospedajes Ecuador — Socio 1 (Principal)',
+        vertical: 'ALOJAMIENTOS',
+        baseUrlRest: process.env.TIENDA_ALOJAMIENTOS_URL || 'http://localhost:3000/api/v2/alojamientos',
+        endpointGrpc: bookingGrpc,
+        apiKey: process.env.TIENDA_ALOJAMIENTOS_API_KEY || null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 20,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Alojamientos – Equipo 1',
+        emoji: '🏨',
+        descripcion: 'Hoteles urbanos, cabañas y hostales boutique',
+      },
+      {
+        codigoNodo: 'NODE_ALO_2',
+        nombreProveedor: 'Hoteles & Hospedajes Ecuador — Socio 2',
+        vertical: 'ALOJAMIENTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 22,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Alojamientos – Equipo 2',
+        emoji: '🏡',
+        descripcion: 'Cabañas de campo y ecolodges en la Sierra',
+      },
+      {
+        codigoNodo: 'NODE_ALO_3',
+        nombreProveedor: 'Hoteles & Hospedajes Ecuador — Socio 3',
+        vertical: 'ALOJAMIENTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 21,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Alojamientos – Equipo 3',
+        emoji: '🏖️',
+        descripcion: 'Resorts de playa y suites costeras',
+      },
+      {
+        codigoNodo: 'NODE_ALO_4',
+        nombreProveedor: 'Hoteles & Hospedajes Ecuador — Socio 4',
+        vertical: 'ALOJAMIENTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 23,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Alojamientos – Equipo 4',
+        emoji: '🏕️',
+        descripcion: 'Glamping y alojamientos eco-sostenibles',
+      },
+      {
+        codigoNodo: 'NODE_ALO_5',
+        nombreProveedor: 'Hoteles & Hospedajes Ecuador — Socio 5',
+        vertical: 'ALOJAMIENTOS',
+        baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 24,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Alojamientos – Equipo 5',
+        emoji: '🏢',
+        descripcion: 'Departamentos ejecutivos y apart-hoteles',
       },
     ];
 
     for (const s of semillas) {
-      await this.configRepo.save(this.configRepo.create(s));
+      try {
+        const existente = await this.configRepo.findOne({ where: { codigoNodo: s.codigoNodo } });
+        if (!existente) {
+          await this.configRepo.save(this.configRepo.create(s));
+        } else if (s.codigoNodo === 'NODE_ATR_DILAN') {
+          // Asegurar parámetros Tailscale actualizados para Dilan
+          let modificado = false;
+          if (s.baseUrlRest && existente.baseUrlRest !== s.baseUrlRest) {
+            existente.baseUrlRest = s.baseUrlRest;
+            modificado = true;
+          }
+          if (s.apiKey && existente.apiKey !== s.apiKey) {
+            existente.apiKey = s.apiKey;
+            modificado = true;
+          }
+          if (s.endpointGrpc && existente.endpointGrpc !== s.endpointGrpc) {
+            existente.endpointGrpc = s.endpointGrpc;
+            modificado = true;
+          }
+          if (modificado) {
+            await this.configRepo.save(existente);
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Error sembrando nodo ${s.codigoNodo}: ${err.message}`);
+      }
     }
   }
 }

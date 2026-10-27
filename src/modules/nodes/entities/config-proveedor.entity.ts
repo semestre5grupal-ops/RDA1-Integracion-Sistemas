@@ -21,6 +21,9 @@ export class ConfigProveedor {
   @Column({ name: 'endpoint_grpc', type: 'varchar', length: 100, nullable: true })
   endpointGrpc: string;
 
+  @Column({ name: 'api_key', type: 'varchar', length: 255, nullable: true })
+  apiKey?: string;
+
   @Column({ name: 'health_status', type: 'varchar', length: 20, default: 'HEALTHY' })
   healthStatus: string; // 'HEALTHY', 'DEGRADED', 'DOWN'
 

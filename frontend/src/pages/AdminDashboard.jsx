@@ -739,7 +739,7 @@ function ProveedoresTab() {
 
   const abrirNuevo = () => {
     setForm({
-      nombre: '', equipo: '', url: '', apiBase: '', endpointGrpc: '', tipo: 'Atracciones',
+      nombre: '', equipo: '', url: '', apiBase: '', endpointGrpc: '', apiKey: '', tipo: 'Atracciones',
       descripcion: '', contacto: '', emoji: '🎡', tokenAuth: '', webhookUrl: '',
       healthcheckUrl: '', rateLimit: '', entorno: 'Producción', codigo_nodo: '',
     });
@@ -756,6 +756,7 @@ function ProveedoresTab() {
       url: prov.url || prov.base_url_rest || '',
       apiBase: prov.base_url_rest || prov.apiBase || prov.url || '',
       endpointGrpc: prov.endpoint_grpc || prov.endpointGrpc || '',
+      apiKey: prov.api_key || prov.apiKey || '',
       tipo: prov.tipo || prov.vertical || 'Atracciones',
       descripcion: prov.descripcion || '',
       contacto: prov.contacto || '',
@@ -791,6 +792,8 @@ function ProveedoresTab() {
         baseUrlRest: (form.apiBase || form.url).trim(),
         url: (form.url || form.apiBase).trim(),
         endpointGrpc: form.endpointGrpc ? form.endpointGrpc.trim() : null,
+        apiKey: form.apiKey ? form.apiKey.trim() : null,
+        api_key: form.apiKey ? form.apiKey.trim() : null,
         equipo: form.equipo,
         contacto: form.contacto,
         emoji: form.emoji || '🔗',
@@ -1024,7 +1027,8 @@ function ProveedoresTab() {
             <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
               {[
                 ['🌐 URL Base REST (OpenAPI v2)', detalle.base_url_rest || detalle.url],
-                ['⚡ Socket Inventario gRPC', detalle.endpoint_grpc || detalle.endpointGrpc || 'grpc://booking.epn.edu.ec:50051'],
+                ['⚡ Socket Inventario gRPC', detalle.endpoint_grpc || detalle.endpointGrpc || 'grpc://100.93.143.85:50051'],
+                ['🔑 API Key (X-API-Key M2M)', detalle.api_key || detalle.apiKey ? '••••••••' + (detalle.api_key || detalle.apiKey).slice(-6) : 'No configurada (usa .env fallback)'],
                 ['📧 Correo de Contacto', detalle.contacto || 'No especificado'],
                 ['🚦 Circuit Breaker', detalle.circuit_breaker_estado || 'CLOSED'],
                 ['🛡️ Kill-Switch Activo', detalle.kill_switch_activo ? 'SÍ (Bloqueado)' : 'NO (Operativo)'],
@@ -1098,8 +1102,9 @@ function ProveedoresTab() {
                 ['nombre', 'Nombre del sistema / socio *', 'Ej: Descubre EC (Dilan Mendoza)'],
                 ['equipo', 'Nombre del equipo / Compañero', 'Ej: Grupo 2 – Dilan Mendoza'],
                 ['url', 'URL del sitio web o API *', 'https://descubreec.com'],
-                ['apiBase', 'URL base de la API REST del socio (OpenAPI v3 / v2) *', 'https://descubreec.com/api/v2'],
-                ['endpointGrpc', 'Socket gRPC de Booking (o rol Cliente)', 'rda1-backend-integracion-sistemas.onrender.com:50051 (o CLIENTE)'],
+                ['apiBase', 'URL base de la API REST del socio (OpenAPI v3 / v2) *', 'http://100.80.229.90:8080/api/v3'],
+                ['endpointGrpc', 'Socket gRPC de Booking (o rol Cliente)', '100.93.143.85:50051 (o CLIENTE)'],
+                ['apiKey', 'X-API-Key del socio (Autenticación M2M)', 'Ej: 40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568'],
                 ['contacto', 'Email de contacto', 'dilan@universidad.edu.ec'],
               ].map(([field, label, placeholder]) => (
                 <div key={field} style={{ marginBottom: 14 }}>

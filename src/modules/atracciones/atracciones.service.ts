@@ -805,9 +805,9 @@ export class AtraccionesService {
     if (this.dataSource && this.dataSource.isInitialized) {
       try {
         const partnerConfig = await this.dataSource.query(
-          `SELECT base_url_rest, kill_switch_activo, circuit_breaker_estado 
+          `SELECT base_url_rest, api_key, kill_switch_activo, circuit_breaker_estado 
            FROM schema_proveedores.config_proveedor 
-           WHERE codigo_nodo = $1 OR (vertical = 'atracciones' AND kill_switch_activo = false)
+           WHERE codigo_nodo = $1 OR (LOWER(vertical) = 'atracciones' AND kill_switch_activo = false)
            ORDER BY CASE WHEN codigo_nodo = $1 THEN 0 ELSE 1 END
            LIMIT 1`,
           [partnerNodeCode],
@@ -815,6 +815,8 @@ export class AtraccionesService {
 
         if (partnerConfig && partnerConfig.length > 0) {
           const provider = partnerConfig[0];
+          const partnerApiKey = provider.api_key || process.env.TIENDA_ATRACCIONES_API_KEY;
+
           if (provider.kill_switch_activo) {
             this.logger.warn(`ESB: Kill-Switch activo para proveedor ${partnerNodeCode}. Despacho omitido.`);
           } else if (provider.circuit_breaker_estado === 'OPEN') {
@@ -851,7 +853,7 @@ export class AtraccionesService {
                     'Content-Type': 'application/json',
                     'Idempotency-Key': safeKey,
                     'X-Correlation-Id': dto.correlation_id || `corr-${reservaId}`,
-                    ...(process.env.TIENDA_ATRACCIONES_API_KEY ? { 'X-API-Key': process.env.TIENDA_ATRACCIONES_API_KEY } : {}),
+                    ...(partnerApiKey ? { 'X-API-Key': partnerApiKey } : {}),
                   },
                   timeout: 5000,
                 },
