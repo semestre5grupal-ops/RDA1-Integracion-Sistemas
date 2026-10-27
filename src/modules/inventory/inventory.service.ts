@@ -41,6 +41,17 @@ export interface StreamSummary {
   last_sync_hash: string;
 }
 
+/** Resultado de validar quién envía un mensaje de stock. */
+export interface OrigenValidado {
+  ok: boolean;
+  /** Código gRPC sugerido cuando ok = false (3 INVALID_ARGUMENT, 7 PERMISSION_DENIED, 16 UNAUTHENTICATED). */
+  grpcCode?: number;
+  motivo?: string;
+}
+
+/** Valores genéricos de vertical que NO identifican a un proveedor concreto. */
+const SERVICE_IDS_GENERICOS = new Set(['vuelos', 'autos', 'atracciones', 'alojamientos', 'hoteles']);
+
 export interface SlotAvailabilityRequest {
   service_id?: string;
   item_id: string;
@@ -191,7 +202,7 @@ export class InventoryService {
   /**
    * Procesa la actualización de stock puntual enviada por una tienda externa vía gRPC.
    */
-  processPushStockUpdate(msg: any): StockUpdateAck {
+  processPushStockUpdate(msg: any, source: 'GRPC_PUSH' | 'ADMIN_PANEL' = 'GRPC_PUSH'): StockUpdateAck {
     const itemId = msg.item_id || msg.itemId;
     const serviceId = msg.service_id || msg.serviceId;
     const date = msg.date;
@@ -200,8 +211,9 @@ export class InventoryService {
     const timestamp = Number(msg.timestamp || Date.now());
     const slotId = msg.slot_id || msg.slotId || `slot-${date?.replace(/-/g, '')}-${timeSlot?.replace(/[^0-9]/g, '').slice(0, 4) || '1000'}`;
 
-    const key = this.buildKey(itemId, date, timeSlot);
+    const key = this.buildKey(serviceId, itemId, date, timeSlot);
     const existing = this.stockRegistry.get(key);
+    this.registrarRecepcion(serviceId);
 
     // Protección contra Eventos Desordenados (Monotonic Timestamp Validation)
     if (existing && existing.timestamp && timestamp < existing.timestamp) {
@@ -231,7 +243,7 @@ export class InventoryService {
       last_updated: new Date().toISOString(),
       timestamp,
       slot_id: slotId,
-      source: 'GRPC_PUSH'
+      source
     };
 
     this.stockRegistry.set(key, record);
@@ -401,12 +413,22 @@ export class InventoryService {
    * Consulta puntual de disponibilidad de un turno (RPC gRPC: GetSlotAvailability).
    */
   getSlotAvailability(req: SlotAvailabilityRequest): SlotAvailabilityResponse {
+    const serviceId = req.service_id || '';
     const itemId = req.item_id;
     const date = req.date || new Date().toISOString().split('T')[0];
     const timeSlot = req.time_slot || 'DEFAULT';
-    const key = this.buildKey(itemId, date, timeSlot);
+    
+    // Si viene service_id buscamos la clave exacta; si no viene, buscamos el primer registro coincidente por itemId, date y timeSlot
+    let record = serviceId ? this.stockRegistry.get(this.buildKey(serviceId, itemId, date, timeSlot)) : undefined;
+    if (!record) {
+      for (const r of this.stockRegistry.values()) {
+        if (r.item_id === itemId && r.date === date && (r.time_slot === timeSlot || timeSlot === 'DEFAULT')) {
+          record = r;
+          break;
+        }
+      }
+    }
 
-    const record = this.stockRegistry.get(key);
     const available = record ? record.available_units : 10;
     const slotId = req.slot_id || record?.slot_id || `slot-${date.replace(/-/g, '')}-${timeSlot.replace(/[^0-9]/g, '').slice(0, 4) || '1000'}`;
     const status = available <= 0 ? 'AGOTADO' : (available <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE');
