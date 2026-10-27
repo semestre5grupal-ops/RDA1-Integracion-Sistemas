@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Rfc7807ExceptionFilter } from './core/filters/rfc7807-exception.filter';
 import { crearValidationPipeGlobal } from './core/validation/validation-pipe';
+import { AjvValidationPipe } from './core/validation/ajv-validation.pipe';
 import { HateoasInterceptor } from './core/interceptors/hateoas.interceptor';
 import { WinstonPhysicalLoggerService } from './core/logger/winston-logger.service';
 import { StructuredHttpRequestMiddleware } from './core/logger/structured-http-request.middleware';
@@ -121,15 +122,12 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
-    defaultVersion: ['1', '2'],
+    defaultVersion: ['1', '2', '3'],
     prefix: 'v',
   });
 
-  // `whitelist: true` + `forbidNonWhitelisted: true` es lo que hace que un campo
-  // no declarado en el DTO sea un 400 y no se ignore en silencio. Sin eso, un
-  // cliente podria mandar `{ departureDate: 'ayer' }` creyendo que habia
-  // programado un vuelo.
-  app.useGlobalPipes(crearValidationPipeGlobal());
+  // Validaciones globales: class-validator + AJV en tiempo real con JSON Schema de contratos
+  app.useGlobalPipes(crearValidationPipeGlobal(), new AjvValidationPipe());
 
   // Registrar el filtro global de excepciones para cumplir con la RFC 7807
   app.useGlobalFilters(new Rfc7807ExceptionFilter());

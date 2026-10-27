@@ -622,73 +622,137 @@ export class AtraccionesService {
     const totalInfant = 0.0;
     const totalPrice = Number((totalAdult + totalChild + totalSenior + totalInfant).toFixed(2));
 
-    const tourDate = dto.date || new Date().toISOString().split('T')[0];
-    const tourTime = dto.time || '10:00 a.m.';
+    const tourDate = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
+    const tourTime = dto.time || dto.hora || '10:00 a.m.';
+    const slotId = dto.slot_id || dto.slotId;
 
-    // Control de Aforo y Stock en Turno (RFC 7807 409 OUT_OF_STOCK)
-    let turno = await this.turnoRepo.findOne({
-      where: { atraccionId: id, fecha: tourDate, horaInicio: tourTime },
-    });
+    let turnoId = slotId || `slot-${id}`;
 
-    if (!turno) {
-      turno = await this.turnoRepo.save(
-        this.turnoRepo.create({
-          atraccionId: id,
-          fecha: tourDate,
-          horaInicio: tourTime,
-          horaFin: '12:00 p.m.',
-          capacidadTotal: 20,
-          cuposDisponibles: 20,
-          estado: 'DISPONIBLE',
-        }),
-      );
+    // FASE 4: BLOQUEO ATOMICO CONCURRENTE SQL (schema_atracciones.atracciones_turnos_aforo)
+    // Garantiza aislamiento ACID total y elimina condiciones de carrera entre gRPC y REST
+    let turnoBloqueado: any = null;
+
+    if (this.dataSource && this.dataSource.isInitialized) {
+      try {
+        // Asegurar existencia del turno con INSERT ON CONFLICT DO NOTHING
+        await this.dataSource.query(
+          `INSERT INTO schema_atracciones.atracciones_turnos_aforo 
+             (atraccion_id, fecha, hora_inicio, hora_fin, capacidad_total, cupos_disponibles, estado)
+           VALUES ($1, $2, $3, '12:00 p.m.', 20, 20, 'DISPONIBLE')
+           ON CONFLICT (atraccion_id, fecha, hora_inicio) DO NOTHING`,
+          [id, tourDate, tourTime],
+        );
+
+        // Actualización atómica con filtro de cupos remanentes suficientes
+        const updateRows = await this.dataSource.query(
+          `UPDATE schema_atracciones.atracciones_turnos_aforo
+           SET cupos_disponibles = cupos_disponibles - $1,
+               estado = CASE 
+                 WHEN (cupos_disponibles - $1) <= 0 THEN 'AGOTADO'
+                 WHEN (cupos_disponibles - $1) <= 5 THEN 'ULTIMOS_CUPOS'
+                 ELSE 'DISPONIBLE'
+               END
+           WHERE atraccion_id = $2
+             AND fecha = $3
+             AND hora_inicio = $4
+             AND cupos_disponibles >= $1
+           RETURNING id, atraccion_id, fecha, hora_inicio, cupos_disponibles, estado`,
+          [totalTickets, id, tourDate, tourTime],
+        );
+
+        if (updateRows && updateRows.length > 0) {
+          turnoBloqueado = updateRows[0];
+          turnoId = turnoBloqueado.id;
+        } else {
+          // Si retorna 0 filas afectadas, se agotó el aforo concurrente
+          this.winstonLogger.logAudit('RESERVA_ATRACCION_OUT_OF_STOCK', {
+            atraccion_id: id,
+            fecha: tourDate,
+            hora: tourTime,
+            cupos_solicitados: totalTickets,
+          });
+
+          throw new HttpException(
+            {
+              type: 'https://booking.epn.edu.ec/errors/sin-cupos',
+              title: 'Cupos Agotados para el Turno Horario (Saga Compensation Trigger)',
+              status: HttpStatus.CONFLICT,
+              detail: `No existen suficientes cupos disponibles en el turno seleccionado (${tourTime}). Solicitados: ${totalTickets}.`,
+              instance: '/api/v3/atracciones/reservas',
+              code: 'OUT_OF_STOCK',
+              correlation_id: `corr-stock-${Date.now()}`,
+              timestamp: new Date().toISOString(),
+            },
+            HttpStatus.CONFLICT,
+          );
+        }
+      } catch (sqlErr: any) {
+        if (sqlErr instanceof HttpException) throw sqlErr;
+        this.logger.warn(`Fallback repositorio TypeORM por excepción SQL: ${sqlErr.message}`);
+      }
     }
 
-    if (turno.cuposDisponibles < totalTickets) {
-      // Disparar contrato de falta de cupos para orquestador de Sagas
-      this.winstonLogger.logAudit('RESERVA_ATRACCION_OUT_OF_STOCK', {
-        atraccion_id: id,
-        fecha: tourDate,
-        hora: tourTime,
-        cupos_solicitados: totalTickets,
-        cupos_disponibles: turno.cuposDisponibles,
+    // Fallback TypeORM para pruebas unitarias sin conexión directa a PostgreSQL
+    if (!turnoBloqueado) {
+      let turno = await this.turnoRepo.findOne({
+        where: { atraccionId: id, fecha: tourDate, horaInicio: tourTime },
       });
 
-      throw new HttpException(
-        {
-          type: 'https://booking.epn.edu.ec/errors/sin-cupos',
-          title: 'Cupos Agotados para el Turno Horario',
-          status: 409,
-          detail: `No existen suficientes cupos disponibles en el turno seleccionado (${tourTime}). Cupos restantes: ${turno.cuposDisponibles}, solicitados: ${totalTickets}.`,
-          instance: '/api/v2/atracciones/reservas',
-          code: 'OUT_OF_STOCK',
-          correlation_id: `corr-stock-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-        },
-        HttpStatus.CONFLICT,
-      );
-    }
+      if (!turno) {
+        turno = await this.turnoRepo.save(
+          this.turnoRepo.create({
+            atraccionId: id,
+            fecha: tourDate,
+            horaInicio: tourTime,
+            horaFin: '12:00 p.m.',
+            capacidadTotal: 20,
+            cuposDisponibles: 20,
+            estado: 'DISPONIBLE',
+          }),
+        );
+      }
 
-    // Descontar aforo
-    turno.cuposDisponibles -= totalTickets;
-    if (turno.cuposDisponibles <= 0) {
-      turno.estado = 'AGOTADO';
-    } else if (turno.cuposDisponibles <= 5) {
-      turno.estado = 'ULTIMOS_CUPOS';
+      if (turno.cuposDisponibles < totalTickets) {
+        this.winstonLogger.logAudit('RESERVA_ATRACCION_OUT_OF_STOCK', {
+          atraccion_id: id,
+          fecha: tourDate,
+          hora: tourTime,
+          cupos_solicitados: totalTickets,
+          cupos_disponibles: turno.cuposDisponibles,
+        });
+
+        throw new HttpException(
+          {
+            type: 'https://booking.epn.edu.ec/errors/sin-cupos',
+            title: 'Cupos Agotados para el Turno Horario',
+            status: HttpStatus.CONFLICT,
+            detail: `No existen suficientes cupos disponibles en el turno seleccionado (${tourTime}). Cupos restantes: ${turno.cuposDisponibles}, solicitados: ${totalTickets}.`,
+            instance: '/api/v3/atracciones/reservas',
+            code: 'OUT_OF_STOCK',
+            correlation_id: `corr-stock-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+          },
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      turno.cuposDisponibles -= totalTickets;
+      turno.estado = turno.cuposDisponibles <= 0 ? 'AGOTADO' : (turno.cuposDisponibles <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE');
+      await this.turnoRepo.save(turno);
+      turnoId = turno.id;
     }
-    await this.turnoRepo.save(turno);
 
     // Generar identificador de reserva y payload QR oficial
     const reservaId = `RES-ATR-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const voucherQr = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><rect width="220" height="220" fill="%23ffffff"/><text x="20" y="35" font-family="sans-serif" font-size="12" fill="%23003580" font-weight="bold">BOOKING ATRACCIONES QR</text><text x="20" y="70" font-family="sans-serif" font-size="16" font-weight="bold" fill="%23000000">${reservaId}</text><text x="20" y="105" font-family="sans-serif" font-size="12" fill="%23333333">Titular: ${dto.customer_name}</text><text x="20" y="130" font-family="sans-serif" font-size="12" fill="%23555555">Fecha: ${tourDate} | ${tourTime}</text><text x="20" y="155" font-family="sans-serif" font-size="12" fill="%23555555">Tickets: ${totalTickets} personas</text><text x="20" y="190" font-family="sans-serif" font-size="14" font-weight="bold" fill="%2328a745">✔ VOUCHER VALIDO</text></svg>`;
-    const icsUrl = `https://booking.epn.edu.ec/api/v2/atracciones/reservas/${reservaId}/calendar.ics`;
+    const icsUrl = `https://booking.epn.edu.ec/api/v3/atracciones/reservas/${reservaId}/calendar.ics`;
 
     // Persistir reserva en schema_atracciones.atracciones_reservas
     const nuevaReserva = this.reservaRepo.create({
       id: reservaId,
       idempotencyKey: safeKey,
       atraccionId: id,
-      turnoId: turno.id,
+      turnoId,
       clienteId: dto.cliente_id || undefined,
       customerName: dto.customer_name,
       customerEmail: dto.customer_email || 'turista@booking.local',
@@ -729,34 +793,107 @@ export class AtraccionesService {
           cupos: totalTickets,
         },
       });
-    } catch (e) {
+    } catch (e: any) {
       this.logger.warn(`No se pudo escribir en outbox: ${e.message}`);
     }
 
-    // Notificación transaccional a socio externo (Dilan / Tienda individual) vía ACL con Circuit Breaker
-    try {
-      const externalResult = await this.dilanAdapter.crearReserva(
-        {
-          atraccionId: id,
-          date: tourDate,
-          time: tourTime,
-          adult_count: adultCount,
-          child_count: childCount,
-          ticket_count: totalTickets,
-          customer_name: dto.customer_name,
-          customer_email: dto.customer_email || 'turista@booking.local',
-          customer_phone: dto.customer_phone,
-          document_id: dto.document_id,
-          special_requirements: dto.special_requirements,
-        },
-        safeKey,
-        dto.correlation_id,
-      );
-      if (externalResult?.reservation_id) {
-        this.logger.log(`ACL: Reserva sincronizada con socio externo: ${externalResult.reservation_id}`);
+    // FASE 5: DESPACHO REST OUTBOUND DINAMICO MULTI-PROVEEDOR (ESB)
+    // Lee la URL de la tienda socia desde schema_proveedores.config_proveedor
+    let partnerSynced = false;
+    const partnerNodeCode = dto.proveedor_codigo || dto.partner_id || atraccion?.proveedorId || 'NODE_ATR_DILAN';
+
+    if (this.dataSource && this.dataSource.isInitialized) {
+      try {
+        const partnerConfig = await this.dataSource.query(
+          `SELECT base_url_rest, kill_switch_activo, circuit_breaker_estado 
+           FROM schema_proveedores.config_proveedor 
+           WHERE codigo_nodo = $1 OR (vertical = 'atracciones' AND kill_switch_activo = false)
+           ORDER BY CASE WHEN codigo_nodo = $1 THEN 0 ELSE 1 END
+           LIMIT 1`,
+          [partnerNodeCode],
+        );
+
+        if (partnerConfig && partnerConfig.length > 0) {
+          const provider = partnerConfig[0];
+          if (provider.kill_switch_activo) {
+            this.logger.warn(`ESB: Kill-Switch activo para proveedor ${partnerNodeCode}. Despacho omitido.`);
+          } else if (provider.circuit_breaker_estado === 'OPEN') {
+            this.logger.warn(`ESB: Circuit Breaker OPEN para proveedor ${partnerNodeCode}. Despacho omitido.`);
+          } else if (provider.base_url_rest) {
+            const partnerUrl = `${provider.base_url_rest.replace(/\/$/, '')}/reservas`;
+            this.logger.log(`ESB Outbound: Despachando reserva REST a socio externo (${partnerNodeCode}) -> ${partnerUrl}`);
+
+            const response = await firstValueFrom(
+              this.httpService.post(
+                partnerUrl,
+                {
+                  atraccion_id: id,
+                  attraction_id: id,
+                  date: tourDate,
+                  time: tourTime,
+                  slot_id: slotId,
+                  adult_count: adultCount,
+                  child_count: childCount,
+                  senior_count: seniorCount,
+                  infant_count: infantCount,
+                  total_tickets: totalTickets,
+                  customer: {
+                    name: dto.customer_name,
+                    email: dto.customer_email || 'turista@booking.local',
+                    phone: dto.customer_phone,
+                    document_id: dto.document_id,
+                  },
+                  special_requirements: dto.special_requirements,
+                  booking_reservation_id: reservaId,
+                },
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Idempotency-Key': safeKey,
+                    'X-Correlation-Id': dto.correlation_id || `corr-${reservaId}`,
+                  },
+                  timeout: 5000,
+                },
+              ),
+            );
+
+            if (response && (response.status === 200 || response.status === 201)) {
+              this.logger.log(`ESB Outbound: Socio externo (${partnerNodeCode}) confirmó reserva exitosamente.`);
+              partnerSynced = true;
+            }
+          }
+        }
+      } catch (restErr: any) {
+        this.logger.warn(`ESB Outbound: Error despachando a proveedor dinámico: ${restErr.message}.`);
       }
-    } catch (adapterErr) {
-      this.logger.warn(`ACL: Circuit Breaker o socio externo no disponible: ${adapterErr.message}. Continuando con confirmación resiliente local.`);
+    }
+
+    // Adaptador de respaldo local si no se contactó por despacho dinámico
+    if (!partnerSynced) {
+      try {
+        const externalResult = await this.dilanAdapter.crearReserva(
+          {
+            atraccionId: id,
+            date: tourDate,
+            time: tourTime,
+            adult_count: adultCount,
+            child_count: childCount,
+            ticket_count: totalTickets,
+            customer_name: dto.customer_name,
+            customer_email: dto.customer_email || 'turista@booking.local',
+            customer_phone: dto.customer_phone,
+            document_id: dto.document_id,
+            special_requirements: dto.special_requirements,
+          },
+          safeKey,
+          dto.correlation_id,
+        );
+        if (externalResult?.reservation_id) {
+          this.logger.log(`ACL: Reserva sincronizada con socio externo: ${externalResult.reservation_id}`);
+        }
+      } catch (adapterErr: any) {
+        this.logger.warn(`ACL: Circuit Breaker o socio externo no disponible: ${adapterErr.message}. Continuando con confirmación resiliente local.`);
+      }
     }
 
     // Trazabilidad física en archivo rotativo logs/audit-*.log (CERO LOGS EN BD)

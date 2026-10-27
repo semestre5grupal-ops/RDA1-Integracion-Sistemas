@@ -12,6 +12,7 @@ import { AutosCircuitBreakerAdapter } from '../../src/modules/autos/acl/autos-ci
 import { WinstonPhysicalLoggerService } from '../../src/core/logger/winston-logger.service';
 import { SupabaseAuthGuard } from '../../src/core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../src/core/guards/roles.guard';
+import { Atraccion } from '../../src/modules/atracciones/entities';
 
 describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Breaker (Cátedra RDA2 CE01)', () => {
   let nodesService: NodesService;
@@ -62,6 +63,15 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
         SupabaseAuthGuard,
         RolesGuard,
         { provide: getRepositoryToken(ConfigProveedor), useValue: mockConfigRepo },
+        {
+          provide: getRepositoryToken(Atraccion),
+          useValue: {
+            find: jest.fn().mockResolvedValue([]),
+            findOne: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockImplementation((dto) => dto),
+            save: jest.fn().mockImplementation((dto) => Promise.resolve(dto)),
+          },
+        },
         { provide: HttpService, useValue: mockHttpService },
       ],
     }).compile();

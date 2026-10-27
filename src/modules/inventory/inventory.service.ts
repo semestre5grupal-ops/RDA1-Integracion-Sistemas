@@ -10,12 +10,18 @@ export interface StockUpdateMessage {
   time_slot: string;
   available_units: number;
   timestamp: number | string;
+  slot_id?: string;
 }
 
 export interface StockUpdateAck {
   success: boolean;
   message: string;
   processed_at: number;
+  processedAt?: number;
+  error_code?: string;
+  errorCode?: string;
+  current_available?: number;
+  currentAvailable?: number;
 }
 
 export interface StockChangeEvent {
@@ -26,6 +32,7 @@ export interface StockChangeEvent {
   time_slot: string;
   delta: number;
   timestamp: number | string;
+  slot_id?: string;
 }
 
 export interface StreamSummary {
@@ -34,16 +41,23 @@ export interface StreamSummary {
   last_sync_hash: string;
 }
 
-/** Resultado de validar quién envía un mensaje de stock. */
-export interface OrigenValidado {
-  ok: boolean;
-  /** Código gRPC sugerido cuando ok = false (3 INVALID_ARGUMENT, 7 PERMISSION_DENIED, 16 UNAUTHENTICATED). */
-  grpcCode?: number;
-  motivo?: string;
+export interface SlotAvailabilityRequest {
+  service_id?: string;
+  item_id: string;
+  date?: string;
+  time_slot?: string;
+  slot_id?: string;
 }
 
-/** Valores genéricos de vertical que NO identifican a un proveedor concreto. */
-const SERVICE_IDS_GENERICOS = new Set(['vuelos', 'autos', 'atracciones', 'alojamientos', 'hoteles']);
+export interface SlotAvailabilityResponse {
+  item_id: string;
+  slot_id: string;
+  date: string;
+  time_slot: string;
+  available_units: number;
+  status: string;
+  last_updated_epoch: number;
+}
 
 export interface InventoryRecord {
   service_id: string;
@@ -52,6 +66,8 @@ export interface InventoryRecord {
   time_slot: string;
   available_units: number;
   last_updated: string;
+  timestamp?: number;
+  slot_id?: string;
   source: string;
 }
 
@@ -175,17 +191,36 @@ export class InventoryService {
   /**
    * Procesa la actualización de stock puntual enviada por una tienda externa vía gRPC.
    */
-  processPushStockUpdate(msg: any, source: 'GRPC_PUSH' | 'ADMIN_PANEL' = 'GRPC_PUSH'): any {
+  processPushStockUpdate(msg: any): StockUpdateAck {
     const itemId = msg.item_id || msg.itemId;
     const serviceId = msg.service_id || msg.serviceId;
     const date = msg.date;
     const timeSlot = msg.time_slot || msg.timeSlot || 'DEFAULT';
-    const availableUnits = msg.available_units !== undefined ? msg.available_units : msg.availableUnits;
-    const timestamp = msg.timestamp;
+    const availableUnits = msg.available_units !== undefined ? Number(msg.available_units) : Number(msg.availableUnits);
+    const timestamp = Number(msg.timestamp || Date.now());
+    const slotId = msg.slot_id || msg.slotId || `slot-${date?.replace(/-/g, '')}-${timeSlot?.replace(/[^0-9]/g, '').slice(0, 4) || '1000'}`;
 
-    const key = this.buildKey(serviceId, itemId, date, timeSlot);
-    const prevUnits = this.stockRegistry.get(key)?.available_units ?? null;
-    this.registrarRecepcion(serviceId);
+    const key = this.buildKey(itemId, date, timeSlot);
+    const existing = this.stockRegistry.get(key);
+
+    // Protección contra Eventos Desordenados (Monotonic Timestamp Validation)
+    if (existing && existing.timestamp && timestamp < existing.timestamp) {
+      this.logger.warn(
+        `[gRPC Inbound] Evento descartado para ${itemId}: Timestamp entrante (${timestamp}) es inferior al último procesado (${existing.timestamp}).`
+      );
+      return {
+        success: false,
+        message: `Evento descartado: el timestamp ${timestamp} es anterior al registro vigente (${existing.timestamp}).`,
+        processed_at: Date.now(),
+        processedAt: Date.now(),
+        error_code: 'STALE_TIMESTAMP_IGNORED',
+        errorCode: 'STALE_TIMESTAMP_IGNORED',
+        current_available: existing.available_units,
+        currentAvailable: existing.available_units,
+      };
+    }
+
+    const prevUnits = existing?.available_units ?? null;
 
     const record: InventoryRecord = {
       service_id: serviceId,
@@ -194,13 +229,15 @@ export class InventoryService {
       time_slot: timeSlot,
       available_units: availableUnits,
       last_updated: new Date().toISOString(),
-      source
+      timestamp,
+      slot_id: slotId,
+      source: 'GRPC_PUSH'
     };
 
     this.stockRegistry.set(key, record);
 
     this.logger.log(
-      `[gRPC Inbound] Stock actualizado para ${itemId} (${date} ${timeSlot}): ${prevUnits ?? 'N/A'} -> ${availableUnits} cupos [Origen: ${serviceId}]`
+      `[gRPC Inbound] Stock actualizado para ${itemId} (${date} ${timeSlot} / ${slotId}): ${prevUnits ?? 'N/A'} -> ${availableUnits} cupos [Origen: ${serviceId}]`
     );
 
     // Actualizar tabla relacional en PostgreSQL si la base está conectada
@@ -238,6 +275,7 @@ export class InventoryService {
       item_id: itemId,
       date,
       time_slot: timeSlot,
+      slot_id: slotId,
       previous_units: prevUnits,
       new_available_units: availableUnits,
       timestamp
@@ -256,6 +294,10 @@ export class InventoryService {
       message: `Stock sincronizado exitosamente en Booking Prototipo para ${itemId}: ${availableUnits} unidades disponibles.`,
       processed_at: now,
       processedAt: now,
+      error_code: 'OK',
+      errorCode: 'OK',
+      current_available: availableUnits,
+      currentAvailable: availableUnits,
     };
   }
 
@@ -356,6 +398,31 @@ export class InventoryService {
   }
 
   /**
+   * Consulta puntual de disponibilidad de un turno (RPC gRPC: GetSlotAvailability).
+   */
+  getSlotAvailability(req: SlotAvailabilityRequest): SlotAvailabilityResponse {
+    const itemId = req.item_id;
+    const date = req.date || new Date().toISOString().split('T')[0];
+    const timeSlot = req.time_slot || 'DEFAULT';
+    const key = this.buildKey(itemId, date, timeSlot);
+
+    const record = this.stockRegistry.get(key);
+    const available = record ? record.available_units : 10;
+    const slotId = req.slot_id || record?.slot_id || `slot-${date.replace(/-/g, '')}-${timeSlot.replace(/[^0-9]/g, '').slice(0, 4) || '1000'}`;
+    const status = available <= 0 ? 'AGOTADO' : (available <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE');
+
+    return {
+      item_id: itemId,
+      slot_id: slotId,
+      date,
+      time_slot: timeSlot,
+      available_units: available,
+      status,
+      last_updated_epoch: record?.timestamp || Date.now(),
+    };
+  }
+
+  /**
    * Métricas y estado del servicio de inventario para monitoreo.
    */
   getStatus() {
@@ -395,3 +462,4 @@ export class InventoryService {
     };
   }
 }
+
