@@ -361,9 +361,13 @@ export class NodesService {
 
     if (nodo.baseUrlRest && (nodo.baseUrlRest.startsWith('http://') || nodo.baseUrlRest.startsWith('https://'))) {
       try {
-        const pingUrl = nodo.baseUrlRest.replace(/\/+$/, '') + '/health';
+        const cleanBase = nodo.baseUrlRest.replace(/\/+$/, '');
+        const verticalHealth = nodo.vertical === 'ATRACCIONES' ? `${cleanBase}/atracciones/health` : (nodo.vertical === 'AUTOS' ? `${cleanBase}/autos/health` : `${cleanBase}/health`);
+        const genericHealth = `${cleanBase}/health`;
+        const verticalCatalog = nodo.vertical === 'ATRACCIONES' ? `${cleanBase}/atracciones` : (nodo.vertical === 'AUTOS' ? `${cleanBase}/autos` : cleanBase);
+
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const pingHeaders: Record<string, string> = {};
         const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
@@ -371,8 +375,12 @@ export class NodesService {
           pingHeaders['X-API-Key'] = partnerKey;
         }
 
-        let res = await this.fetchWithTrace(pingUrl, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
-          return this.fetchWithTrace(nodo.baseUrlRest, { headers: pingHeaders, signal: controller.signal });
+        let res = await this.fetchWithTrace(verticalHealth, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+          return this.fetchWithTrace(genericHealth, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+            return this.fetchWithTrace(verticalCatalog, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+              return this.fetchWithTrace(nodo.baseUrlRest, { headers: pingHeaders, signal: controller.signal });
+            });
+          });
         });
         clearTimeout(timeout);
         latencia = Date.now() - t0;
@@ -388,7 +396,8 @@ export class NodesService {
     nodo.latenciaMs = latencia;
     nodo.ultimoPingAt = new Date();
     if (!nodo.killSwitchActivo) {
-      nodo.healthStatus = online ? (latencia > 800 ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
+      const umbralDegradado = nodo.baseUrlRest?.startsWith('https://') ? 3000 : 1200;
+      nodo.healthStatus = online ? (latencia > umbralDegradado ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
     }
     await this.configRepo.save(nodo);
 
@@ -437,7 +446,7 @@ export class NodesService {
     let itemsExternos: any[] = [];
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 15000);
       const syncHeaders: Record<string, string> = { Accept: 'application/json' };
       const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
       if (partnerKey) {
@@ -488,12 +497,37 @@ export class NodesService {
           const marca = String(raw.marca || raw.make || raw.brand || 'Chevrolet');
           const modelo = String(raw.modelo || raw.model || 'Sail');
           const anio = Number(raw.anio || raw.year || 2024);
-          const categoria = String(raw.categoria || raw.category || 'ECONOMICO').toUpperCase();
+          const rawCat = String(raw.categoria || raw.category || 'ECONOMICO').toUpperCase();
+          let categoria = 'ECONOMICO';
+          if (rawCat.includes('SUV') || rawCat.includes('4X4') || rawCat.includes('CAMIONETA')) {
+            categoria = 'SUV';
+          } else if (rawCat.includes('COMPACT')) {
+            categoria = 'COMPACTO';
+          } else if (rawCat.includes('PREMIUM') || rawCat.includes('LUJO') || rawCat.includes('LUXURY')) {
+            categoria = 'PREMIUM';
+          } else if (rawCat.includes('VAN') || rawCat.includes('MINIVAN')) {
+            categoria = 'VAN';
+          } else {
+            categoria = 'ECONOMICO';
+          }
           const rawTrans = String(raw.transmision || raw.transmission || 'MANUAL').toUpperCase();
           const transmision = rawTrans.includes('AUTO') ? 'AUTOMATICA' : 'MANUAL';
           const capacidad = Number(raw.capacidad_pasajeros || raw.seats || raw.asientos || raw.passengers || 5);
           const precio = Number(raw.precio_diario || raw.daily_price || raw.price?.total || raw.daily_rate || (typeof raw.precio === 'number' ? raw.precio : 40.0));
-          const foto = String(raw.foto_url || raw.image_url || raw.image || (Array.isArray(raw.images) ? raw.images[0] : '') || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800');
+          let foto = String(raw.foto_url || raw.image_url || raw.image || (Array.isArray(raw.images) ? raw.images[0] : ''));
+          if (!foto || foto === 'undefined' || foto.trim() === '') {
+            const catUpper = String(categoria).toUpperCase();
+            const modUpper = String(modelo).toUpperCase();
+            if (modUpper.includes('SWIFT') || modUpper.includes('ONIX') || modUpper.includes('RIO')) {
+              foto = 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=800&q=80';
+            } else if (catUpper.includes('SUV') || modUpper.includes('DUSTER') || modUpper.includes('TRACKER') || modUpper.includes('KICKS') || modUpper.includes('TUCSON') || modUpper.includes('RAV4') || modUpper.includes('ECOSPORT') || modUpper.includes('SELTOS') || modUpper.includes('CROSS')) {
+              foto = 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?auto=format&fit=crop&w=800&q=80';
+            } else if (catUpper.includes('SEDAN') || modUpper.includes('SENTRA') || modUpper.includes('MAZDA')) {
+              foto = 'https://images.unsplash.com/photo-1550355291-bbee04a92027?auto=format&fit=crop&w=800&q=80';
+            } else {
+              foto = 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=800&q=80';
+            }
+          }
           const ciudad = String(raw.ubicacion?.ciudad || raw.ciudad || raw.city || raw.location || 'Quito');
 
           if (this.autoRepo) {
@@ -565,6 +599,8 @@ export class NodesService {
         let precio = 55.0;
         if (typeof raw.precio_unitario_adulto === 'number') {
           precio = raw.precio_unitario_adulto;
+        } else if (raw.precio_base) {
+          precio = Number(raw.precio_base) || 55.0;
         } else if (raw.price && typeof raw.price === 'object') {
           precio = Number(raw.price.adult || raw.price.adulto || raw.price.total || 55.0);
         } else if (raw.precio && typeof raw.precio === 'object') {
@@ -579,11 +615,16 @@ export class NodesService {
         let fotosUrls: string[] = [];
         if (Array.isArray(raw.fotos_urls)) fotosUrls = raw.fotos_urls;
         else if (Array.isArray(raw.photos)) fotosUrls = raw.photos;
+        else if (Array.isArray(raw.images)) fotosUrls = raw.images;
+        else if (raw.foto_url) fotosUrls = [raw.foto_url];
+        else if (raw.image_url) fotosUrls = [raw.image_url];
         else if (raw.image) fotosUrls = [raw.image];
 
         let inclusiones: string[] = ['Guía acreditado'];
         if (Array.isArray(raw.inclusiones)) {
           inclusiones = raw.inclusiones;
+        } else if (Array.isArray(raw.incluye)) {
+          inclusiones = raw.incluye;
         } else if (raw.inclusiones && typeof raw.inclusiones === 'object') {
           const keys = Object.entries(raw.inclusiones).filter(([_, v]) => Boolean(v)).map(([k]) => k.replace(/^incluye_|^includes_/, '').replace(/_/g, ' '));
           if (keys.length > 0) inclusiones = keys;
@@ -680,60 +721,60 @@ export class NodesService {
       },
       {
         codigoNodo: 'NODE_ATR_ARIEL',
-        nombreProveedor: 'Ariel Tours (Ariel)',
+        nombreProveedor: 'EcuaTravel (Ariel Chacha)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        baseUrlRest: 'http://100.74.154.34:3001/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: null,
         healthStatus: 'HEALTHY',
-        latenciaMs: 30,
+        latenciaMs: 25,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 2',
+        equipo: 'Atracciones – Ariel Chacha',
         contacto: 'ariel@universidad.edu.ec',
         emoji: '🌋',
-        descripcion: 'Expediciones y tours volcánicos',
+        descripcion: 'Catálogo de tours y expediciones turísticas EcuaTravel v3 (Tailscale 100.74.154.34:3001)',
       },
       {
         codigoNodo: 'NODE_ATR_MICHAEL',
-        nombreProveedor: 'Michael Expeditions (Michael)',
+        nombreProveedor: 'TourGirls (Michael Molina)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        baseUrlRest: 'http://100.126.104.108:3000/api/v2',
         endpointGrpc: bookingGrpc,
-        apiKey: null,
+        apiKey: 'atr_PMaHffqZE4ao_bk1bMuqzA0xXzeAbr5nZ6qOcnV7gsAu_Vh7B65zWOYM',
         healthStatus: 'HEALTHY',
         latenciaMs: 30,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 3',
+        equipo: 'Atracciones – Michael Molina',
         contacto: 'michael@universidad.edu.ec',
         emoji: '🏔️',
-        descripcion: 'Atracciones de alta montaña y senderismo',
+        descripcion: 'Tours de aventura y expedición TourGirls con OpenAPI v2 (Tailscale 100.126.104.108:3000)',
       },
       {
         codigoNodo: 'NODE_ATR_ALISSON',
-        nombreProveedor: 'Alisson Adventure (Alisson)',
+        nombreProveedor: 'Atracciones Ecuador (Alisson Basantes)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        baseUrlRest: 'http://100.67.28.33:3000/api/v3',
         endpointGrpc: bookingGrpc,
-        apiKey: null,
+        apiKey: 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078',
         healthStatus: 'HEALTHY',
         latenciaMs: 30,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 4',
+        equipo: 'Atracciones – Alisson Basantes',
         contacto: 'alisson@universidad.edu.ec',
         emoji: '🌴',
-        descripcion: 'Tours de selva y aventura amazónica',
+        descripcion: 'Tours y experiencias turísticas Atracciones Ecuador v3 (Tailscale 100.67.28.33:3000)',
       },
       {
         codigoNodo: 'NODE_ATR_GLORIA',
-        nombreProveedor: 'Gloria Travel (Gloria)',
+        nombreProveedor: 'Atracciones (Gloria Chushig)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        baseUrlRest: 'http://100.64.117.64:3000/api/v2',
         endpointGrpc: bookingGrpc,
         apiKey: null,
         healthStatus: 'HEALTHY',
@@ -741,10 +782,10 @@ export class NodesService {
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 5',
+        equipo: 'Atracciones – Gloria Chushig',
         contacto: 'gloria@universidad.edu.ec',
         emoji: '🐢',
-        descripcion: 'Tours de fauna y conservación ecológica',
+        descripcion: 'Catálogo de tours y experiencias Atracciones Gloria Chushig v2 (Tailscale 100.64.117.64:3000)',
       },
 
       // ── 2. AUTOS (5 Nodos Estandarizados NODE_AUT_1..5) ──
@@ -766,20 +807,38 @@ export class NodesService {
         descripcion: 'Flota de 34 vehículos con Cooldown 2h y mantenimiento en Quito y Guayaquil (Tailscale)',
       },
       {
-        codigoNodo: 'NODE_AUT_2',
-        nombreProveedor: 'Renta Autos Ecuador — Socio 2',
+        codigoNodo: 'NODE_AUT_MATEO',
+        nombreProveedor: 'MANEJA DE UNA (Mateo Morales)',
         vertical: 'AUTOS',
-        baseUrlRest: 'http://localhost:3000/api/v2/autos',
+        baseUrlRest: 'https://maneja-de-una-v3-api.onrender.com/api/v3',
         endpointGrpc: bookingGrpc,
-        apiKey: null,
+        apiKey: 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
         healthStatus: 'HEALTHY',
-        latenciaMs: 28,
+        latenciaMs: 15,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Renta Autos – Equipo 2',
+        equipo: 'Autos – Mateo Morales',
+        contacto: 'mateo@universidad.edu.ec',
+        emoji: '🚗',
+        descripcion: 'MANEJA DE UNA v3 (Render & Tailscale 100.107.107.48:3000)',
+      },
+      {
+        codigoNodo: 'NODE_AUT_2',
+        nombreProveedor: 'MANEJA DE UNA — Socio 2 (Mateo Morales)',
+        vertical: 'AUTOS',
+        baseUrlRest: 'https://maneja-de-una-v3-api.onrender.com/api/v3',
+        endpointGrpc: bookingGrpc,
+        apiKey: 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+        healthStatus: 'HEALTHY',
+        latenciaMs: 15,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Autos – Mateo Morales',
+        contacto: 'mateo@universidad.edu.ec',
         emoji: '🚙',
-        descripcion: 'Flota 4x4 todoterreno y compactos',
+        descripcion: 'Flota MANEJA DE UNA (Render & Tailscale 100.107.107.48:3000)',
       },
       {
         codigoNodo: 'NODE_AUT_3',

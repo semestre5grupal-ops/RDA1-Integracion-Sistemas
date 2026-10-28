@@ -36,14 +36,18 @@ import { SecurityModule } from './core/security/security.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        url: configService.get<string>('DATABASE_URL'),
-        autoLoadEntities: true,
-        synchronize: false,
-        ssl: { rejectUnauthorized: false }, // Requerido por Supabase en producción
-        extra: { max: 10 }, // Aumentado a 10 para evitar bloqueos en desarrollo
-      }),
+      useFactory: (configService: ConfigService) => {
+        const dbUrl = configService.get<string>('DATABASE_URL') || process.env.DATABASE_URL;
+        console.log('[TypeORM Config] DATABASE_URL obtenida:', dbUrl ? dbUrl.replace(/:[^:@]+@/, ':***@') : 'UNDEFINED');
+        return {
+          type: 'postgres',
+          url: dbUrl,
+          autoLoadEntities: true,
+          synchronize: false,
+          ssl: { rejectUnauthorized: false },
+          extra: { max: 10 },
+        };
+      },
     }),
 
     // Módulos Compartidos

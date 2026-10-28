@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { GrpcMethod, GrpcStreamMethod, RpcException } from '@nestjs/microservices';
 import type { Metadata } from '@grpc/grpc-js';
 import { Observable } from 'rxjs';
@@ -171,5 +171,80 @@ export class InventoryGrpcController {
       { ...body, available_units: units, timestamp: body.timestamp || Date.now() },
       'ADMIN_PANEL',
     );
+  }
+
+  /**
+   * Respaldo HTTP REST para tiendas socias (Consideraciones RDA2 H-P12-04 y §1/§3)
+   * Permite actualizar inventario/stock cuando los socios no pueden o no desean usar gRPC en la nube.
+   * Expuesto automáticamente como:
+   *  - POST /api/v3/inventory/stock (URL oficial consultada por Daniel y las tiendas)
+   *  - POST /api/v2/inventory/stock
+   *  - POST /api/v1/inventory/stock
+   */
+  @Post('stock')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Respaldo HTTP REST: Actualización de stock puntual de tiendas socias (equivalente a PushStockUpdate)' })
+  @ApiHeader({ name: 'X-Api-Key', description: 'API Key del nodo socio registrado en Booking', required: false })
+  @ApiResponse({ status: 200, description: 'Stock actualizado exitosamente vía REST' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos o incompletos' })
+  @ApiResponse({ status: 401, description: 'No autorizado / API Key inválida' })
+  async pushStockHttp(@Body() body: any, @Req() req: any) {
+    const rawKey = req.headers['x-api-key'] || req.headers['X-API-Key'] || req.headers['x-api_key'] || req.headers['authorization'];
+    const apiKey = typeof rawKey === 'string' ? rawKey.replace(/^Bearer\s+/i, '').trim() : undefined;
+
+    let serviceId = body?.service_id || body?.serviceId;
+    const itemId = body?.item_id || body?.itemId || body?.vehicle_id || body?.auto_id;
+    const rawUnits = body?.available_units !== undefined ? body.available_units : (body?.availableUnits !== undefined ? body.availableUnits : body?.units);
+    const units = Number(rawUnits);
+    const date = body?.date || new Date().toISOString().slice(0, 10);
+    const timeSlot = body?.time_slot || body?.timeSlot || 'DEFAULT';
+
+    if (!itemId) {
+      throw new BadRequestException('El campo item_id (o vehicle_id) es obligatorio.');
+    }
+    if (rawUnits === undefined || isNaN(units) || units < 0) {
+      throw new BadRequestException('El campo available_units (número entero >= 0) es obligatorio.');
+    }
+
+    if (!serviceId && apiKey) {
+      serviceId = await this.inventoryService.resolverServiceIdPorApiKey(apiKey);
+    }
+    if (!serviceId) {
+      if (String(itemId).toLowerCase().startsWith('auto-') || String(itemId).includes('sail') || String(itemId).includes('toyota')) {
+        serviceId = 'NODE_AUT_DANIEL';
+      } else {
+        serviceId = 'NODE_ATR_DILAN';
+      }
+    }
+
+    const valid = this.inventoryService.validarOrigen(serviceId, apiKey);
+    if (!valid.ok && this.inventoryService.modoAutenticacion() === 'API_KEY') {
+      throw new UnauthorizedException(valid.motivo);
+    }
+
+    const ack = this.inventoryService.processPushStockUpdate(
+      {
+        service_id: serviceId,
+        item_id: itemId,
+        date,
+        time_slot: timeSlot,
+        available_units: units,
+        timestamp: body?.timestamp || Date.now(),
+        slot_id: body?.slot_id || body?.slotId,
+      },
+      'HTTP_REST',
+    );
+
+    return {
+      success: ack.success,
+      acknowledged: true,
+      message: ack.message || 'Stock actualizado correctamente vía canal HTTP REST',
+      service_id: serviceId,
+      item_id: itemId,
+      date,
+      available_units: units,
+      processed_at: ack.processed_at || Date.now(),
+      source: 'HTTP_REST',
+    };
   }
 }

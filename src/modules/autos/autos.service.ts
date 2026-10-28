@@ -824,7 +824,9 @@ export class AutosService implements OnModuleInit {
             mantenimiento_requerido: alerta,
             proveedor_nombre: prov === 'NODE_AUT_DANIEL' || prov === 'NODE_AUT_RUTALIBRE'
               ? 'RutaLibre (Daniel González)'
-              : `Proveedor (${prov})`,
+              : (prov === 'NODE_AUT_MATEO' || prov === 'NODE_AUT_MANEJADEUNA' || prov === 'NODE_AUT_2'
+                  ? 'MANEJA DE UNA (Mateo Morales)'
+                  : `Proveedor (${prov})`),
             origen: 'PARTNER',
             foto_url: da.fotoUrl,
           };
