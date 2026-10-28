@@ -207,7 +207,7 @@ Pega la configuración de producción (incluyendo la conexión a Supabase y llav
 PORT=3000
 NODE_ENV=production
 TELEMETRY_SINK=none
-GRPC_AUTH_MODE=NONE
+GRPC_AUTH_MODE=NONE 
 
 # Bus de Eventos CloudAMQP (RabbitMQ Gestionado - Little Lemur)
 EVENT_BUS_MODE=rabbitmq
