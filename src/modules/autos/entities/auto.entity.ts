@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Column, Entity, PrimaryColumn, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
 
 export enum EstadoVehiculo {
@@ -12,7 +12,7 @@ export enum EstadoVehiculo {
 
 @Entity({ name: 'autos_catalogo', schema: 'schema_autos' })
 export class Auto {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryColumn({ type: 'varchar', length: 100 })
   id: string;
 
   @Column({ type: 'varchar', length: 60, default: 'Chevrolet' })
@@ -74,6 +74,9 @@ export class Auto {
 
   @Column({ type: 'boolean', default: true })
   activo: boolean;
+
+  @Column({ name: 'proveedor_codigo', type: 'varchar', length: 100, nullable: true })
+  proveedorCodigo?: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

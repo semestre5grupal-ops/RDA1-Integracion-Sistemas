@@ -1,0 +1,1493 @@
+openapi: 3.0.3
+info:
+  title: Observabilidad, Nodos, Telemetría e Inventario — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    Contrato OpenAPI 3.0.3 para la observabilidad operacional, monitoreo de salud de
+    nodos conectores, kill-switches de tiendas externas, ingesta de telemetría del frontend
+    y consulta REST del inventario sincronizado vía gRPC en el Gateway Booking (RDA2).
+
+    ## Propósito y Alcance
+
+    Este contrato formaliza la infraestructura de observabilidad del Gateway central,
+    cubriendo tres áreas fundamentales:
+    1. **Monitoreo de Nodos y Semáforo LED (MS_PROV / MS_AUD):** Detección en tiempo real
+       de disponibilidad de las tiendas socias (Vuelos, Autos, Atracciones, Alojamientos)
+       mediante pings HTTP, semáforos de latencia (🟢/🟡/🔴), Circuit Breakers y control
+       de Kill-Switches para desconexión/contingencia inmediata (ADR-006).
+    2. **Telemetría del Frontend (MS_AUD):** Ingesta masiva de eventos de navegación y
+       embudo de conversión (`telemetry_events`), registrando pasos de búsqueda, checkout
+       y confirmación para análisis de comportamiento y KPIs.
+    3. **Inventario Sincronizado gRPC Inbound (MS_STK):** Consulta REST del estado del
+       socket gRPC en puerto 50051 (`InventoryStockService`) y del registro en memoria de
+       cupos y disponibilidad empujados por microservicios externos.
+    4. **Trazabilidad Distribuida y Grafo de Dependencias (Planificado - Cátedra Semana 8):**
+       Diseño de la API para visualización del grafo acíclico dirigido (DAG) de trazas
+       end-to-end asociadas a un `correlation_id` transaccional.
+
+    > **Nota de Gobernanza de Contratos:** Los endpoints complementarios de monitoreo
+    > en memoria `GET /admin/nodes/health`, `POST /admin/nodes/{serviceId}/toggle` y
+    > `POST /admin/nodes/{serviceId}/ping` implementados en `AdminController` se encuentran
+    > formalizados en el contrato [`admin-openapi-v2.yaml`](./admin-openapi-v2.yaml).
+
+    ## Matriz de Microservicios Responsables (Blueprint §5.2)
+
+    | Vertical / Recurso | Microservicio | Esquema de Base de Datos | Rol / Descripción |
+    |---|---|---|---|
+    | `/nodes`, `/admin/nodes` | `MS_PROV` | `schema_proveedores` (`config_proveedor`) | Catálogo y configuración técnica de conectores socios |
+    | `/telemetry/events` | `MS_AUD` | `telemetry_events` (PostgreSQL) / Kafka | Ingesta de analítica y embudo de conversión |
+    | `/inventory`, `/inventory/status` | `MS_STK` | En memoria (`stockRegistry`) / `turnos_aforo` | Sincronización inbound gRPC HTTP/2 |
+    | `/observabilidad/trazas` | `MS_AUD` | Logging físico / Winston / OpenTelemetry | Reconstrucción del grafo de ejecución transaccional |
+
+    ## Reglas de Resiliencia, Semáforo y Circuit Breakers (ADR-006)
+
+    - **Semáforo Visual de Conectividad:**
+      - 🟢 **Verde (HEALTHY / ONLINE):** Latencia HTTP < 500 ms, tasa de fallos < 5%, Circuit Breaker `CLOSED`.
+      - 🟡 **Amarillo (DEGRADED):** Latencia entre 500 ms y 2,000 ms, o tasa de fallos entre 5% y 50%.
+      - 🔴 **Rojo (DOWN / OFFLINE):** Latencia > 2,000 ms, error HTTP 5xx o Circuit Breaker `OPEN`.
+      - 🔴 **Rojo (KILL_SWITCH_ACTIVE / DISABLED):** Nodo desactivado manualmente (`MANUALLY_OPEN`).
+    - **Timeout Reglamentario de Red:** Timeout estricto de **5,000 ms (5 s)** en sondas de diagnóstico.
+    - **Fallback de Contingencia:** Cuando un nodo se encuentra en Kill-Switch o Circuit Breaker `OPEN`,
+      el Gateway responde con catálogos locales en caché y reservas en modo diferido (`CONFIRMED_FALLBACK`).
+
+    ## Dualidad de Mensajería: RabbitMQ vs Apache Kafka (Cátedra Semana 8)
+
+    - **RabbitMQ (Transaccional y Autoritativo):** Conduce las órdenes críticas, pasos de la Saga
+      y compensaciones reversibles (`Pedidocreado`, `InventarioReservado`, `PagoProcesado`).
+    - **Apache Kafka (Streaming Masivo y Telemetría):** Destino arquitectónico de los eventos
+      de navegación, clics y métricas de rendimiento para evitar saturar la base de datos relacional.
+
+    ## Trazabilidad y Seguridad
+
+    - **Correlation ID:** Obligatorio o propagado automáticamente con cabecera `X-Correlation-Id`.
+    - **Esquemas de Seguridad:**
+      - `SupabaseBearer`: JWT validado por `SupabaseAuthGuard` para operaciones de rol `ADMIN`.
+      - `AdminKey`: Cabecera `X-Admin-Key` para suites de pruebas automatizadas y evaluación académica.
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: API Gateway Booking — Desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: API Gateway Booking — Producción Render
+
+tags:
+  - name: Nodos y Proveedores - Consulta Pública y Conexión
+    description: Consulta del catálogo de tiendas socias, estado de semáforo LED y operaciones de conmutación
+  - name: Nodos y Conectores - Administración Protegida
+    description: Parametrización en vivo de endpoints oficiales REST/gRPC y conmutación segura de kill-switches (ADMIN)
+  - name: Telemetría y Analítica de Navegación
+    description: Ingesta de eventos del embudo de conversión y comportamiento de usuario emitidos por el frontend
+  - name: Inventario Sincronizado gRPC Inbound
+    description: Consulta del estado operativo del socket gRPC y del inventario en memoria recibido desde microservicios
+  - name: Trazabilidad y Observabilidad Distribuida
+    description: Endpoints analíticos para reconstrucción y visualización del grafo transaccional de Sagas (Cátedra)
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. NODOS Y PROVEEDORES (MS_PROV) - RUTAS PÚBLICAS Y DE CONEXIÓN
+  # ─────────────────────────────────────────────────────────────────────────────
+  /nodes:
+    get:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Consultar estado y semáforo LED de los nodos de integración (Panel 1)
+      description: |
+        Retorna la lista completa de nodos de integración registrados en la base de datos
+        (`schema_proveedores.config_proveedor`), incluyendo cálculo dinámico del semáforo LED
+        (🟢 `HEALTHY`, 🟡 `DEGRADED`, 🔴 `DOWN` o `KILL_SWITCH_ACTIVE`), latencia de red,
+        estado del Circuit Breaker y parámetros de conexión REST/gRPC.
+      operationId: listarNodosPublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#listarNodos'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Listado detallado de nodos con semáforo LED visual y métricas de red.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NodoProveedorDetalle'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+    post:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Registrar nuevo socio / proveedor en el Gateway de Integración (RDA2)
+      description: |
+        Crea un nuevo registro de conector proveedor en `schema_proveedores.config_proveedor`.
+        Genera automáticamente un código único de nodo (`NODE_{VERTICAL}_{SLUG}`) si no se provee.
+
+        Requiere sesión Supabase válida y rol `ADMIN`.
+      operationId: crearNodoPublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#crearNodoPublic'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Datos de configuración de red y catálogo del nuevo socio proveedor.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearNodoDto'
+            example:
+              nombreProveedor: 'Tours Galápagos Explorer'
+              vertical: 'ATRACCIONES'
+              baseUrlRest: 'https://galapagos-tours.com/api/v2'
+              endpointGrpc: 'grpc://galapagos.epn.edu.ec:50051'
+              equipo: 'Equipo Galápagos'
+              contacto: 'operaciones@galapagos.com'
+              emoji: '🐢'
+              descripcion: 'Excursiones marítimas y senderismo en islas encantadas'
+      responses:
+        '201':
+          description: Proveedor registrado exitosamente en el catálogo central.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrearNodoResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /nodes/{codigoNodo}:
+    put:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Actualizar parámetros de conexión de un nodo socio (ADMIN)
+      description: |
+        Actualiza los parámetros de red (URL base REST, endpoint gRPC, nombre y contacto)
+        del nodo especificado por su código o UUID en `schema_proveedores.config_proveedor`.
+
+        Requiere sesión Supabase válida y rol `ADMIN`.
+      operationId: actualizarNodoPublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#actualizarNodoPublic'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código único (ej. `NODE_ATR_DILAN`) o UUID del nodo socio.
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarNodoDto'
+      responses:
+        '200':
+          description: Parámetros del nodo actualizados exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActualizarNodoResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+    delete:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Eliminar un nodo proveedor (ADMIN)
+      description: |
+        Elimina permanentemente el registro del nodo de `schema_proveedores.config_proveedor`
+        y registra el evento en la auditoría física forense.
+
+        Requiere sesión Supabase válida y rol `ADMIN`.
+      operationId: eliminarNodoPublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#eliminarNodoPublic'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código del nodo o identificador UUID.
+          schema:
+            type: string
+            example: 'NODE_AUT_LOCAL'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Nodo eliminado correctamente de la base de datos.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  mensaje:
+                    type: string
+                    example: "Proveedor 'Autos Ecuador' (NODE_AUT_LOCAL) eliminado correctamente."
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /nodes/{codigoNodo}/ping:
+    post:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Disparar ping de diagnóstico HTTP a la URL del socio y medir latencia
+      description: |
+        Ejecuta una petición de sonda HTTP hacia la `baseUrlRest` del conector proveedor,
+        midiendo la latencia exacta de ida y vuelta en milisegundos. Aplica un timeout
+        estricto de **5,000 ms (5 s)** conforme al Criterio CE01 de integración. Actualiza
+        `latencia_ms`, `health_status` y `ultimo_ping_at` en base de datos.
+      operationId: pingNodoPublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#pingNodoPublic'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código o ID del conector a sondear.
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Diagnóstico de conectividad completado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingNodoResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /nodes/{codigoNodo}/sync:
+    post:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Sincronizar e importar catálogo de atracciones desde el microservicio socio
+      description: |
+        Invoca la API remota del microservicio socio de atracciones (`baseUrlRest + /atracciones`),
+        valida la estructura de tours y persiste o actualiza los registros en la tabla
+        `schema_atracciones.atracciones`. Emite auditoría física forense en Winston.
+      operationId: sincronizarCatalogoPublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#sincronizarCatalogoPublic'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código del conector socio de atracciones.
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Catálogo remoto importado y sincronizado en base de datos.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncCatalogoResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /nodes/{codigoNodo}/toggle:
+    post:
+      tags:
+        - Nodos y Proveedores - Consulta Pública y Conexión
+      summary: Alternar kill-switch de un nodo socio desde el Panel 1 de Administración
+      description: |
+        Invierte o fuerza el estado del Kill-Switch de un conector externo.
+        - Si se activa: Marca `kill_switch_activo = true`, `health_status = 'DOWN'` y `circuit_breaker_estado = 'OPEN'`.
+          Sincroniza en memoria con `ConnectorHealthService` para interceptar llamadas y activar contingencias.
+        - Si se desactiva: Restablece el tráfico normal hacia el microservicio socio.
+
+        Requiere sesión Supabase válida y rol `ADMIN` o `MANTENIMIENTO`. La ruta se conserva
+        para compatibilidad y el frontend administrativo usa la ruta canónica protegida
+        `/admin/nodes/{codigoNodo}/toggle-killswitch`.
+      operationId: toggleNodePublic
+      x-source: 'src/modules/nodes/nodes.controller.ts#toggleNodePublic'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código único o UUID del nodo socio a conmutar.
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        description: Estado forzado opcional. Si se omite, invierte el valor booleano actual.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                activar:
+                  type: boolean
+                  description: '`true` para activar kill-switch (bloquear), `false` para reactivar.'
+                  example: true
+      responses:
+        '200':
+          description: Estado del Kill-Switch y Circuit Breaker actualizado.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleKillSwitchResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. NODOS Y CONECTORES (MS_PROV) - ADMINISTRACIÓN PROTEGIDA (RBAC ADMIN)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/nodes:
+    get:
+      tags:
+        - Nodos y Conectores - Administración Protegida
+      summary: Consultar estado y semáforo LED de nodos (Protegido por Rol ADMIN)
+      description: |
+        Variante autenticada y protegida por RBAC de la consulta de nodos.
+        Exige sesión válida con rol `ADMIN` (o cabecera `X-Admin-Key` en suites de prueba).
+        Devuelve la totalidad de nodos en `schema_proveedores` con cálculo visual de semáforo LED.
+      operationId: listarNodosAdmin
+      x-source: 'src/modules/nodes/nodes.controller.ts#listarNodosAdmin'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Listado oficial de nodos de integración con métricas y semáforo.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NodoProveedorDetalle'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /admin/nodes/{codigoNodo}:
+    put:
+      tags:
+        - Nodos y Conectores - Administración Protegida
+      summary: Parametrizar en vivo las URLs oficiales de un nodo socio (Rol ADMIN - CE01)
+      description: |
+        Permite al Administrador del sistema reconfigurar dinámicamente en caliente la URL base REST
+        y el endpoint gRPC de un socio sin necesidad de reiniciar el backend ni realizar nuevos despliegues.
+        Sincroniza inmediatamente la base de datos `schema_proveedores` y el monitor en memoria.
+      operationId: actualizarNodoAdmin
+      x-source: 'src/modules/nodes/nodes.controller.ts#actualizarNodo'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código del conector proveedor a reparametrizar.
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarNodoDto'
+            example:
+              baseUrlRest: 'https://descubreec.com/api/v2'
+              endpointGrpc: 'grpc://booking.epn.edu.ec:50051'
+              nombreProveedor: 'Descubre EC (Dilan Mendoza Oficial)'
+      responses:
+        '200':
+          description: Nodo socio parametrizado en vivo exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActualizarNodoResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+    patch:
+      tags:
+        - Nodos y Conectores - Administración Protegida
+      summary: Actualización parcial en vivo de parámetros de red de un nodo (Rol ADMIN)
+      description: |
+        Modifica únicamente los campos enviados en el payload JSON (semántica PATCH)
+        para el nodo indicado, registrando el cambio en la bitácora física de auditoría.
+      operationId: parchearNodoAdmin
+      x-source: 'src/modules/nodes/nodes.controller.ts#parchearNodo'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código del nodo socio.
+          schema:
+            type: string
+            example: 'NODE_AUT_LOCAL'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarNodoDto'
+      responses:
+        '200':
+          description: Actualización parcial aplicada con éxito.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActualizarNodoResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /admin/nodes/{codigoNodo}/toggle-killswitch:
+    post:
+      tags:
+        - Nodos y Conectores - Administración Protegida
+      summary: Alternar en vivo el Kill-Switch de un nodo socio (Rol ADMIN - Protegido)
+      description: |
+        Punto de entrada administrativo formal para conmutar el switch de desconexión rápida
+        de una tienda socia. Exige rol `ADMIN` o `X-Admin-Key`.
+        Persiste el cambio en `schema_proveedores.config_proveedor`, sincroniza en memoria con
+        `ConnectorHealthService` y emite log de seguridad inmutable en `logs/audit-YYYY-MM-DD.log`.
+      operationId: toggleKillSwitchAdmin
+      x-source: 'src/modules/nodes/nodes.controller.ts#toggleKillSwitch'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código del nodo socio (ej. `NODE_ATR_DILAN`).
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                activar:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: Estado del Kill-Switch actualizado inmediatamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleKillSwitchResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /admin/nodes/{codigoNodo}/ping:
+    post:
+      tags:
+        - Nodos y Conectores - Administración Protegida
+      summary: Disparar ping de diagnóstico de latencia y salud a un nodo (Rol ADMIN)
+      description: |
+        Versión protegida del diagnóstico de conectividad hacia el proveedor externo.
+        Valida que el solicitante sea Administrador, ejecuta la sonda HTTP con timeout de 5s
+        y refresca los indicadores en la base de datos relacional.
+      operationId: pingNodoAdmin
+      x-source: 'src/modules/nodes/nodes.controller.ts#pingNodo'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: codigoNodo
+          in: path
+          required: true
+          description: Código del conector a diagnosticar.
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Diagnóstico de latencia completado con éxito.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingNodoResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. TELEMETRÍA Y ANALÍTICA (MS_AUD)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /telemetry/events:
+    post:
+      tags:
+        - Telemetría y Analítica de Navegación
+      summary: Registrar un evento de telemetría del frontend
+      description: |
+        Ingesta eventos del embudo de conversión generados por el hook `useTelemetry`
+        en el navegador del cliente (`frontend/src/hooks/useTelemetry.js`), tales como:
+        - `search_submitted`: Búsquedas de vuelos, autos o tours.
+        - `checkout_started`: Inicio del proceso de pago.
+        - `form_step_completed`: Pasos del wizard de reserva completados.
+        - `payment_started`, `payment_succeeded`, `payment_failed`: Pasarela de pagos.
+        - `booking_confirmed`: Confirmación final de la orden.
+
+        > **Pendiente arquitectónico (H-P08-03):** El backend almacena estos eventos
+        > directamente en la tabla `telemetry_events` de PostgreSQL en lugar de transmitirlos
+        > mediante Apache Kafka, contradiciendo el diseño de la cátedra para tráfico de alto volumen.
+      operationId: trackEvent
+      x-source: 'src/modules/telemetry/telemetry.controller.ts#trackEvent'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Carga útil con la traza de analítica y atributos de la sesión.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryEventDto'
+            example:
+              event_name: 'search_submitted'
+              session_id: '48f7d9a1-52e4-4a2e-8c3b-7a1b5c9d3e5f'
+              user_id: 'd9b2d63d-a233-4123-8478-43f112bbad8e'
+              vertical: 'vuelos'
+              device: 'desktop'
+              properties:
+                origen: 'UIO'
+                destino: 'GYE'
+                esIdaVuelta: false
+      responses:
+        '201':
+          description: Evento de telemetría persistido exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '413':
+          $ref: './common/components-v2.yaml#/components/responses/Problem413'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 4. INVENTARIO SINCRONIZADO gRPC INBOUND (MS_STK)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /inventory/status:
+    get:
+      tags:
+        - Inventario Sincronizado gRPC Inbound
+      summary: Consultar estado y telemetría del servidor gRPC Inbound (Puerto 50051)
+      description: |
+        Retorna la salud operativa del socket gRPC (`InventoryStockService`), protocolo
+        (HTTP/2 Multiplexed), total de ítems almacenados en el registro en memoria
+        (`stockRegistry`), última marca temporal de sincronización y registros de muestra.
+      operationId: getInventoryStatus
+      x-source: 'src/modules/inventory/inventory-grpc.controller.ts#getStatus'
+      x-status: implemented
+      x-microservice: MS_STK
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Estado operativo y telemetría del listener gRPC.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryStatusResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /inventory:
+    get:
+      tags:
+        - Inventario Sincronizado gRPC Inbound
+      summary: Consultar inventario sincronizado recibido mediante gRPC
+      description: |
+        Consulta los registros de stock y cupos disponibles en el almacén en memoria
+        alimentado por las RPCs gRPC `PushStockUpdate` y `StreamInventoryChanges`
+        (definidas en `src/proto/inventory.proto`, formalizadas en P12). Permite filtrar
+        por identificador de ítem y fecha.
+      operationId: getInventory
+      x-source: 'src/modules/inventory/inventory-grpc.controller.ts#getInventory'
+      x-status: implemented
+      x-microservice: MS_STK
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: item_id
+          in: query
+          required: false
+          description: Identificador del ítem (ej. ID de tour o vehículo).
+          schema:
+            type: string
+            example: 'PRhu4UBTWPBC'
+        - name: date
+          in: query
+          required: false
+          description: Fecha de servicio a consultar (formato YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+            example: '2026-10-25'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Catálogo de ítems y cupos disponibles sincronizados por gRPC.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryListResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. TRAZABILIDAD Y OBSERVABILIDAD DISTRIBUIDA (PLANIFICADO - CÁTEDRA SEMANA 8)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /observabilidad/trazas/{correlationId}:
+    get:
+      tags:
+        - Trazabilidad y Observabilidad Distribuida
+      summary: Consultar el grafo completo de ejecución y trazas de un proceso (Saga + REST + Eventos)
+      description: |
+        **Ruta Planificada (`x-status: planned`) para el Dashboard de Trazas (Cátedra RDA2 Semana 8):**
+        Reconstruye el árbol jerárquico de ejecución distribuida (DAG) correspondiente a un
+        `correlation_id` transaccional, correlacionando:
+        1. Pasos de la Saga en `MS_ESB` (evento `PedidoCreado`, compensaciones, rollback).
+        2. Llamadas HTTP hacia los conectores upstream (`MS_VUE`, `MS_AUT`, `MS_ATR`, `MS_ALO`).
+        3. Eventos transaccionales en colas de RabbitMQ y eventos analíticos en particiones de Kafka.
+        4. Trazas físicas en archivos rotativos (`WinstonPhysicalLoggerService`).
+
+        Permite renderizar en el frontend un monitor tipo grafo donde los microservicios activos
+        se colorean en **verde** y los servicios fallidos o compensados en **rojo**.
+      operationId: getTrazaGrafo
+      x-source: 'n/a'
+      x-status: planned
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: correlationId
+          in: path
+          required: true
+          description: Identificador de correlación universal del proceso de negocio.
+          schema:
+            type: string
+            example: 'corr-1729810400000-a3f7b2c'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Grafo acíclico dirigido (DAG) de spans y eventos del proceso distribuido.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceGraphResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+    AdminKey:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+
+  schemas:
+
+    # ── SCHEMAS DE NODOS Y PROVEEDORES ──
+    NodoProveedorDetalle:
+      type: object
+      required:
+        - id
+        - codigo_nodo
+        - nombre_proveedor
+        - vertical
+        - base_url_rest
+        - health_status
+        - activo
+        - semaforo_led
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        codigo_nodo:
+          type: string
+          example: 'NODE_ATR_DILAN'
+        codigo:
+          type: string
+          example: 'NODE_ATR_DILAN'
+        nombre_proveedor:
+          type: string
+          example: 'Descubre EC (Dilan Mendoza)'
+        nombre:
+          type: string
+          example: 'Descubre EC (Dilan Mendoza)'
+        equipo:
+          type: string
+          example: 'Equipo Atracciones'
+        contacto:
+          type: string
+          example: 'dilan@descubreec.com'
+        emoji:
+          type: string
+          example: '🎡'
+        descripcion:
+          type: string
+          example: 'Catálogo de tours turísticos y experiencias'
+        vertical:
+          type: string
+          example: 'ATRACCIONES'
+        tipo:
+          type: string
+          example: 'Atracciones'
+        base_url_rest:
+          type: string
+          format: uri
+          example: 'https://descubreec.com/api/v2'
+        url:
+          type: string
+          format: uri
+          example: 'https://descubreec.com/api/v2'
+        endpoint_grpc:
+          type: string
+          nullable: true
+          example: 'grpc://booking.epn.edu.ec:50051'
+        health_status:
+          type: string
+          enum: [HEALTHY, DEGRADED, DOWN]
+          example: 'HEALTHY'
+        activo:
+          type: boolean
+          description: Indica si el conector está activo (`true`) o bloqueado por kill-switch (`false`).
+          example: true
+        estado:
+          type: string
+          example: 'OPERATIVO'
+        latencia_ms:
+          type: integer
+          example: 45
+        ultimo_ping_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:15:30.000Z'
+        kill_switch_activo:
+          type: boolean
+          example: false
+        circuit_breaker_estado:
+          type: string
+          enum: [CLOSED, OPEN, HALF_OPEN]
+          example: 'CLOSED'
+        tasa_fallos_pct:
+          type: number
+          format: float
+          example: 0.00
+        failCount:
+          type: integer
+          example: 0
+        semaforo_led:
+          $ref: '#/components/schemas/SemaforoLed'
+
+    SemaforoLed:
+      type: object
+      required:
+        - icono
+        - estado
+      properties:
+        icono:
+          type: string
+          description: Ícono semafórico visual para la interfaz gráfica del Panel 1.
+          enum: ['🟢', '🟡', '🔴']
+          example: '🟢'
+        estado:
+          type: string
+          enum: [HEALTHY, DEGRADED, DOWN, KILL_SWITCH_ACTIVE]
+          example: 'HEALTHY'
+
+    CrearNodoDto:
+      type: object
+      required:
+        - nombreProveedor
+        - baseUrlRest
+      properties:
+        nombreProveedor:
+          type: string
+          description: Nombre comercial del socio proveedor.
+          example: 'Renta Autos Guayaquil S.A.'
+        nombre_proveedor:
+          type: string
+          example: 'Renta Autos Guayaquil S.A.'
+        vertical:
+          type: string
+          enum: [VUELOS, AUTOS, ATRACCIONES, ALOJAMIENTOS]
+          default: 'ATRACCIONES'
+          example: 'AUTOS'
+        baseUrlRest:
+          type: string
+          format: uri
+          description: URL base del API REST expuesta por el socio.
+          example: 'https://renta-autos.ec/api/v2'
+        endpointGrpc:
+          type: string
+          nullable: true
+          description: Endpoint gRPC si el socio soporta sincronización de inventario.
+          example: 'grpc://renta-autos.ec:50051'
+        codigoNodo:
+          type: string
+          description: Código opcional. Si se omite, el backend lo genera automáticamente.
+          example: 'NODE_AUT_GYE_01'
+        equipo:
+          type: string
+          example: 'Equipo RentCars'
+        contacto:
+          type: string
+          example: 'soporte@renta-autos.ec'
+        emoji:
+          type: string
+          example: '🚗'
+        descripcion:
+          type: string
+          example: 'Flota de SUVs y sedanes para la costa ecuatoriana'
+
+    CrearNodoResponse:
+      type: object
+      required:
+        - success
+        - mensaje
+        - nodo
+      properties:
+        success:
+          type: boolean
+          example: true
+        mensaje:
+          type: string
+          example: "Proveedor 'Renta Autos Guayaquil S.A.' registrado exitosamente en el Gateway."
+        nodo:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            codigo_nodo:
+              type: string
+              example: 'NODE_AUT_GYE_01'
+            nombre_proveedor:
+              type: string
+              example: 'Renta Autos Guayaquil S.A.'
+            vertical:
+              type: string
+              example: 'AUTOS'
+            base_url_rest:
+              type: string
+              example: 'https://renta-autos.ec/api/v2'
+            health_status:
+              type: string
+              example: 'HEALTHY'
+            kill_switch_activo:
+              type: boolean
+              example: false
+
+    ActualizarNodoDto:
+      type: object
+      properties:
+        baseUrlRest:
+          type: string
+          format: uri
+          example: 'https://descubreec.com/api/v2'
+        endpointGrpc:
+          type: string
+          nullable: true
+          example: 'grpc://booking.epn.edu.ec:50051'
+        nombreProveedor:
+          type: string
+          example: 'Descubre EC (Dilan Mendoza Oficial)'
+        vertical:
+          type: string
+          example: 'ATRACCIONES'
+        equipo:
+          type: string
+          example: 'Equipo Dilan'
+        contacto:
+          type: string
+          example: 'dilan@descubreec.com'
+        emoji:
+          type: string
+          example: '🎡'
+        descripcion:
+          type: string
+          example: 'Catálogo oficial de atracciones'
+
+    ActualizarNodoResponse:
+      type: object
+      required:
+        - success
+        - mensaje
+        - nodo
+      properties:
+        success:
+          type: boolean
+          example: true
+        mensaje:
+          type: string
+          example: "Nodo 'NODE_ATR_DILAN' parametrizado en vivo exitosamente con URL oficial."
+        nodo:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            codigo_nodo:
+              type: string
+              example: 'NODE_ATR_DILAN'
+            base_url_rest:
+              type: string
+              example: 'https://descubreec.com/api/v2'
+            endpoint_grpc:
+              type: string
+              example: 'grpc://booking.epn.edu.ec:50051'
+            health_status:
+              type: string
+              example: 'HEALTHY'
+
+    PingNodoResponse:
+      type: object
+      required:
+        - success
+        - codigo_nodo
+        - latencia_ms
+        - health_status
+        - mensaje
+      properties:
+        success:
+          type: boolean
+          example: true
+        codigo_nodo:
+          type: string
+          example: 'NODE_ATR_DILAN'
+        nombre_proveedor:
+          type: string
+          example: 'Descubre EC (Dilan Mendoza)'
+        url:
+          type: string
+          example: 'https://descubreec.com/api/v2'
+        latencia_ms:
+          type: integer
+          example: 38
+        latenciaMs:
+          type: integer
+          example: 38
+        health_status:
+          type: string
+          enum: [HEALTHY, DEGRADED, DOWN]
+          example: 'HEALTHY'
+        healthStatus:
+          type: string
+          example: 'HEALTHY'
+        status_code:
+          type: integer
+          example: 200
+        tiempo_respuesta:
+          type: string
+          example: '38ms'
+        mensaje:
+          type: string
+          example: 'Ping HTTP exitoso: 38ms (HEALTHY)'
+
+    SyncCatalogoResponse:
+      type: object
+      required:
+        - success
+        - mensaje
+        - total_importados
+      properties:
+        success:
+          type: boolean
+          example: true
+        mensaje:
+          type: string
+          example: 'Catálogo de 14 atracciones sincronizado e importado exitosamente desde Descubre EC.'
+        total_importados:
+          type: integer
+          example: 14
+        atracciones:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                example: 'PRhu4UBTWPBC'
+              nombre:
+                type: string
+                example: 'Tour Volcán Cotopaxi y Laguna Quilotoa'
+              precio:
+                type: number
+                example: 65.00
+
+    ToggleKillSwitchResponse:
+      type: object
+      required:
+        - success
+        - codigo_nodo
+        - kill_switch_activo
+        - estado
+        - mensaje
+      properties:
+        success:
+          type: boolean
+          example: true
+        codigo_nodo:
+          type: string
+          example: 'NODE_ATR_DILAN'
+        id:
+          type: string
+          format: uuid
+        kill_switch_activo:
+          type: boolean
+          example: true
+        killSwitchActivo:
+          type: boolean
+          example: true
+        estado:
+          type: string
+          enum: [APAGADO, OPERATIVO]
+          example: 'APAGADO'
+        mensaje:
+          type: string
+          example: 'Kill-Switch ACTIVADO para Descubre EC. Las peticiones a este socio serán bloqueadas de inmediato.'
+
+    # ── SCHEMAS DE TELEMETRÍA ──
+    TelemetryEventDto:
+      type: object
+      required:
+        - event_name
+      properties:
+        event_name:
+          type: string
+          description: Identificador del evento en el embudo de conversión del frontend.
+          enum:
+            - search_submitted
+            - checkout_started
+            - form_step_completed
+            - payment_started
+            - payment_succeeded
+            - payment_failed
+            - booking_confirmed
+            - page_view
+          example: 'search_submitted'
+        session_id:
+          type: string
+          maxLength: 80
+          description: Identificador de sesión generado en sessionStorage (máximo 80 caracteres).
+          example: '48f7d9a1-52e4-4a2e-8c3b-7a1b5c9d3e5f'
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Identificador del usuario si se encuentra autenticado.
+          example: 'd9b2d63d-a233-4123-8478-43f112bbad8e'
+        vertical:
+          type: string
+          description: Vertical de negocio asociada a la interacción.
+          enum: [vuelos, autos, atracciones, alojamientos, global]
+          example: 'vuelos'
+        device:
+          type: string
+          enum: [desktop, mobile, tablet]
+          example: 'desktop'
+        properties:
+          type: object
+          description: Metadatos libres contextuales de la acción del cliente; máximo 8 KiB serializados.
+          additionalProperties: true
+          example:
+            origen: 'UIO'
+            destino: 'GYE'
+            esIdaVuelta: false
+            step: 1
+
+    # ── SCHEMAS DE INVENTARIO gRPC ──
+    InventoryStatusResponse:
+      type: object
+      required:
+        - status
+        - protocol
+        - port
+        - total_items_in_registry
+        - last_sync
+      properties:
+        status:
+          type: string
+          example: 'OPERATIONAL'
+        protocol:
+          type: string
+          example: 'gRPC / HTTP/2 Multiplexed'
+        port:
+          type: integer
+          example: 50051
+        total_items_in_registry:
+          type: integer
+          description: Cantidad total de franjas y productos en la memoria compartida.
+          example: 18
+        last_sync:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+        sample_records:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryRecord'
+
+    InventoryRecord:
+      type: object
+      required:
+        - service_id
+        - item_id
+        - date
+        - time_slot
+        - available_units
+        - last_updated
+        - source
+      properties:
+        service_id:
+          type: string
+          example: 'atracciones-dilan'
+        item_id:
+          type: string
+          example: 'PRhu4UBTWPBC'
+        date:
+          type: string
+          format: date
+          example: '2026-10-25'
+        time_slot:
+          type: string
+          example: '10:00'
+        available_units:
+          type: integer
+          example: 12
+        last_updated:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:28:15.000Z'
+        source:
+          type: string
+          enum: [SEED_INITIAL, GRPC_PUSH, GRPC_STREAM_DELTA]
+          example: 'GRPC_STREAM_DELTA'
+
+    InventoryListResponse:
+      type: object
+      required:
+        - status
+        - total
+        - data
+      properties:
+        status:
+          type: string
+          example: 'success'
+        total:
+          type: integer
+          example: 1
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryRecord'
+
+    # ── SCHEMAS DE TRAZABILIDAD DISTRIBUIDA (PLANIFICADO) ──
+    TraceGraphResponse:
+      type: object
+      required:
+        - correlation_id
+        - root_process
+        - overall_status
+        - duration_ms
+        - nodes
+        - edges
+      properties:
+        correlation_id:
+          type: string
+          example: 'corr-1729810400000-a3f7b2c'
+        root_process:
+          type: string
+          example: 'CHECKOUT_MULTIVERTICAL_SAGA'
+        overall_status:
+          type: string
+          enum: [COMPLETED, COMPENSATED, FAILED, IN_PROGRESS]
+          example: 'COMPENSATED'
+        duration_ms:
+          type: integer
+          example: 1420
+        nodes:
+          type: array
+          description: Lista de nodos del grafo visual que representan microservicios y brokers involucrados.
+          items:
+            $ref: '#/components/schemas/TraceGraphNode'
+        edges:
+          type: array
+          description: Conexiones dirigidas entre microservicios con protocolo y tipo de transporte.
+          items:
+            $ref: '#/components/schemas/TraceGraphEdge'
+
+    TraceGraphNode:
+      type: object
+      required:
+        - id
+        - label
+        - service
+        - status
+        - duration_ms
+      properties:
+        id:
+          type: string
+          example: 'span-vuelos-bloqueo'
+        label:
+          type: string
+          example: 'MS_VUE: Bloquear Asiento 12A'
+        service:
+          type: string
+          example: 'MS_VUE'
+        status:
+          type: string
+          enum: [SUCCESS, ERROR, COMPENSATED, SKIPPED]
+          description: 'Color en el grafo: SUCCESS -> 🟢 Verde, ERROR -> 🔴 Rojo, COMPENSATED -> 🟡 Amarillo'
+          example: 'SUCCESS'
+        color_led:
+          type: string
+          enum: ['🟢', '🟡', '🔴']
+          example: '🟢'
+        duration_ms:
+          type: integer
+          example: 185
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:00:01.120Z'
+        error_details:
+          type: string
+          nullable: true
+          example: null
+
+    TraceGraphEdge:
+      type: object
+      required:
+        - from
+        - to
+        - protocol
+      properties:
+        from:
+          type: string
+          example: 'span-orchestrator'
+        to:
+          type: string
+          example: 'span-vuelos-bloqueo'
+        protocol:
+          type: string
+          enum: [REST, GRPC, RABBITMQ_AMQP, KAFKA_STREAMING]
+          example: 'REST'
+        event_name:
+          type: string
+          nullable: true
+          example: 'HTTP POST /vuelos/reservas'

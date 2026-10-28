@@ -1,0 +1,647 @@
+<title>Semana 7 · Contratos y Validación</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --bg:#f4f2ed; --surface:#ffffff; --surface-2:#eae6dc;
+    --ink:#1b2630; --ink-soft:#5b6970;
+    --accent:#1f7a6c; --accent-ink:#0f4a41; --accent-soft:#dcefea;
+    --amber:#a85a26; --amber-soft:#f3e3d3;
+    --danger:#a13f3f; --danger-soft:#f4dede;
+    --line: rgba(27,38,48,.14);
+    --radius:10px; --shadow:0 1px 2px rgba(27,38,48,.06);
+    --term-bg:#161b1e; --term-ink:#d7e0e0; --term-accent:#7fd9c4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#10161c; --surface:#161e25; --surface-2:#1c252c;
+      --ink:#e7ecec; --ink-soft:#9fb0b6;
+      --accent:#4fc3ae; --accent-ink:#bdeee2; --accent-soft: rgba(79,195,174,.16);
+      --amber:#e2a164; --amber-soft: rgba(226,161,100,.16);
+      --danger:#e58080; --danger-soft: rgba(229,128,128,.14);
+      --line: rgba(231,236,236,.14); --shadow:0 1px 2px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#10161c; --surface:#161e25; --surface-2:#1c252c;
+    --ink:#e7ecec; --ink-soft:#9fb0b6;
+    --accent:#4fc3ae; --accent-ink:#bdeee2; --accent-soft: rgba(79,195,174,.16);
+    --amber:#e2a164; --amber-soft: rgba(226,161,100,.16);
+    --danger:#e58080; --danger-soft: rgba(229,128,128,.14);
+    --line: rgba(231,236,236,.14); --shadow:0 1px 2px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:'Source Serif 4',Georgia,serif; line-height:1.62;}
+  h1,h2,h3,h4,button,.mono,.badge,nav{font-family:'Manrope',system-ui,sans-serif;}
+  code,pre,.mono-num{font-family:'JetBrains Mono',ui-monospace,monospace;}
+  h1,h2,h3,h4{text-wrap:balance; font-weight:800; letter-spacing:-.01em; color:var(--ink);}
+  a{color:var(--accent-ink);}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+  .topbar{position:sticky; top:0; z-index:5; background:var(--surface); border-bottom:1px solid var(--line); padding:12px clamp(16px,5vw,40px);}
+  .topbar-row{display:flex; align-items:center; justify-content:space-between; gap:16px; max-width:780px; margin:0 auto;}
+  .topbar .kicker{font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-ink); font-weight:700;}
+  .topbar h1{font-size:16px; margin:2px 0 0;}
+  .progress-wrap{display:flex; align-items:center; gap:10px; font-size:11px; color:var(--ink-soft);}
+  .progress-track{width:110px; height:6px; border-radius:4px; background:var(--surface-2); overflow:hidden;}
+  .progress-fill{height:100%; width:0%; background:var(--accent); transition:width .25s;}
+  .theme-btn{font-size:11.5px; font-weight:700; border:1px solid var(--line); background:var(--surface-2); color:var(--ink); padding:6px 10px; border-radius:8px; cursor:pointer;}
+  .theme-btn:hover{border-color:var(--accent);}
+
+  main{padding:44px clamp(16px,5vw,40px) 100px;}
+  .doc{max-width:780px; margin:0 auto;}
+
+  header.hero{margin-bottom:28px;}
+  .hero .kicker{font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent-ink); font-weight:700; display:flex; gap:8px; align-items:center;}
+  .hero .kicker::before{content:""; width:22px; height:1.5px; background:var(--accent);}
+  .hero h1{font-size:clamp(26px,4vw,34px); margin:10px 0 12px;}
+  .hero p{font-family:'Manrope',sans-serif; color:var(--ink-soft); font-size:14px; max-width:64ch; margin:0 0 14px;}
+  .meta-row{display:flex; gap:8px; flex-wrap:wrap;}
+  .badge{font-size:11px; font-weight:700; padding:5px 10px; border-radius:100px; background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--line);}
+
+  .rule-box{font-family:'Manrope',sans-serif; font-size:13px; background:var(--accent-soft); border:1px solid var(--accent); border-radius:9px; padding:14px 16px; margin-bottom:16px; color:var(--ink);}
+  .rule-box strong{color:var(--accent-ink);}
+  .note-box{font-family:'Manrope',sans-serif; font-size:13px; background:var(--surface-2); border:1px dashed var(--line); border-radius:9px; padding:14px 16px; margin-bottom:28px; color:var(--ink-soft);}
+  .note-box strong{color:var(--ink);}
+
+  .checklist{list-style:none; margin:18px 0; padding:0; display:grid; gap:8px;}
+  .checklist li{display:flex; gap:10px; align-items:flex-start; font-family:'Manrope',sans-serif; font-size:13.5px;}
+  .checklist input{margin-top:3px; width:16px; height:16px; accent-color:var(--accent); flex:none;}
+
+  .stepper{display:flex; align-items:flex-start; gap:0; margin:8px 0 40px; overflow-x:auto; padding-bottom:4px;}
+  .stepper-item{flex:1; min-width:62px; display:flex; flex-direction:column; align-items:center; gap:6px; position:relative; background:none; border:none; padding:0; cursor:pointer; font-family:'Manrope',sans-serif;}
+  .stepper-item::after{content:""; position:absolute; top:14px; left:50%; width:100%; height:2px; background:var(--line); z-index:0;}
+  .stepper-item:last-child::after{display:none;}
+  .stepper-item.done::after{background:var(--accent);}
+  .stepper-num{position:relative; z-index:1; width:28px; height:28px; border-radius:50%; background:var(--surface); border:2px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-weight:600; font-size:11.5px; color:var(--ink-soft);}
+  .stepper-item.current .stepper-num{border-color:var(--accent); color:var(--accent-ink);}
+  .stepper-item.done .stepper-num{background:var(--accent); border-color:var(--accent); color:var(--surface);}
+  .stepper-item.locked .stepper-num{opacity:.5;}
+  .stepper-label{font-size:9px; text-align:center; color:var(--ink-soft); line-height:1.2; max-width:70px;}
+  .stepper-item.current .stepper-label{color:var(--ink); font-weight:700;}
+
+  section.step{border-left:2px solid var(--line); padding-left:26px; margin-left:6px; position:relative; margin-bottom:22px; scroll-margin-top:90px; transition:border-color .2s, opacity .2s;}
+  section.step::before{content: attr(data-n); position:absolute; left:-19px; top:-2px; width:36px; height:36px; border-radius:50%; background:var(--surface); border:2px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-weight:600; font-size:13px; color:var(--ink-soft);}
+  section.step.current{border-left-color:var(--accent);}
+  section.step.current::before{border-color:var(--accent); color:var(--accent-ink);}
+  section.step.done::before{background:var(--accent); border-color:var(--accent); color:var(--surface); content:"✓";}
+  section.step.locked{opacity:.5;}
+  section.step .eyebrow{font-size:11.5px; font-weight:700; color:var(--accent-ink); letter-spacing:.05em; display:block; margin-bottom:4px;}
+  section.step h2{font-size:19px; margin:0 0 10px;}
+  section.step h4{font-size:13.5px; margin:16px 0 6px;}
+  section.step p{margin:0 0 12px;}
+  section.step ul, section.step ol{margin:0 0 12px; padding-left:20px;}
+  section.step li{margin-bottom:6px;}
+
+  .verify-box{background:var(--surface); border:1px solid var(--accent); border-radius:9px; padding:14px 16px; margin-top:16px;}
+  .verify-box .vt{font-family:'Manrope',sans-serif; font-weight:700; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--accent-ink); margin-bottom:8px; display:flex; align-items:center; gap:6px;}
+  .verify-box .vt::before{content:"✔";}
+  .verify-list{list-style:none; margin:0; padding:0; display:grid; gap:7px;}
+  .verify-list li{display:flex; gap:9px; align-items:flex-start; font-family:'Manrope',sans-serif; font-size:12.5px;}
+  .verify-list input{margin-top:2px; width:15px; height:15px; accent-color:var(--accent); flex:none;}
+
+  .step-actions{display:flex; align-items:center; gap:12px; margin-top:16px; padding-top:16px; border-top:1px dashed var(--line); flex-wrap:wrap;}
+  .step-done-btn{font-family:'Manrope',sans-serif; font-weight:700; font-size:12.5px; padding:9px 15px; border-radius:8px; border:1px solid var(--accent); background:var(--accent-soft); color:var(--accent-ink); cursor:pointer;}
+  .step-done-btn:hover:not(:disabled){background:var(--accent); color:var(--surface);}
+  .step-done-btn.on{background:var(--accent); color:var(--surface);}
+  .step-done-btn:disabled{opacity:.4; cursor:not-allowed;}
+  .step-done-note{font-family:'Manrope',sans-serif; font-size:11.5px; color:var(--ink-soft);}
+
+  .term{background:var(--term-bg); color:var(--term-ink); border-radius:9px; overflow:hidden; margin:14px 0; box-shadow:var(--shadow); border:1px solid var(--line);}
+  .term-bar{display:flex; align-items:center; justify-content:space-between; padding:8px 14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#8fa0a0; background:rgba(255,255,255,.03); border-bottom:1px solid rgba(255,255,255,.06);}
+  .term-copy{background:transparent; border:1px solid rgba(255,255,255,.18); color:#cfe0e0; font-size:10.5px; padding:3px 8px; border-radius:6px; cursor:pointer; font-family:'Manrope',sans-serif;}
+  .term-copy:hover{border-color:var(--term-accent); color:var(--term-accent);}
+  .term pre{margin:0; padding:14px 16px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:12.5px; line-height:1.65;}
+  .term .k{color:var(--term-accent);}
+  .term .cm{color:#8fa0a0;}
+
+  pre.code-block{background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:14px 16px; overflow-x:auto; font-size:12.3px; line-height:1.6; margin:10px 0;}
+
+  .callout{border-radius:var(--radius); padding:16px 18px; margin:16px 0; font-family:'Manrope',sans-serif; font-size:13.5px; border:1px solid;}
+  .callout.think{background:var(--surface-2); border-color:var(--line);}
+  .callout.warn{background:var(--amber-soft); border-color:var(--amber);}
+  .callout h4{margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.05em;}
+  .callout.think h4{color:var(--ink-soft);}
+  .callout.warn h4{color:var(--amber);}
+  .callout ul,.callout ol{margin:0; padding-left:18px;}
+  .callout li{margin-bottom:5px;}
+
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-family:'Manrope',sans-serif; font-size:13px;}
+  caption{caption-side:top; text-align:left; font-weight:700; font-size:12.5px; color:var(--ink-soft); margin-bottom:8px;}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line);}
+  th{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);}
+  td code{font-size:12px;}
+
+  .ai-box{border:1px solid var(--amber); background:var(--amber-soft); border-radius:var(--radius); padding:18px 20px; margin:18px 0;}
+  .ai-box h4{margin:0 0 10px; font-size:12.5px; color:var(--amber); text-transform:uppercase; letter-spacing:.05em; display:flex; gap:7px; align-items:center;}
+  .ai-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; font-family:'Manrope',sans-serif; font-size:13px;}
+  @media(max-width:600px){.ai-grid{grid-template-columns:1fr;}}
+  .ai-grid h5{margin:0 0 6px; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em;}
+  .ai-grid .yes h5{color:var(--accent-ink);}
+  .ai-grid .no h5{color:var(--danger);}
+  .ai-grid ul{margin:0; padding-left:16px;}
+
+  .declaration{font-family:'JetBrains Mono',monospace; font-size:12px; background:var(--surface-2); border:1px dashed var(--line); border-radius:8px; padding:14px 16px; margin-top:10px; white-space:pre-wrap;}
+
+  .final-check{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:20px 22px; box-shadow:var(--shadow);}
+  footer.doc-foot{margin-top:40px; padding-top:20px; border-top:1px solid var(--line); font-family:'Manrope',sans-serif; font-size:12.5px; color:var(--ink-soft); display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;}
+</style>
+
+<div class="topbar">
+  <div class="topbar-row">
+    <div>
+      <div class="kicker">Semana 7 · Práctica</div>
+      <h1>Contratos y Validación con JSON Schema</h1>
+    </div>
+    <div class="progress-wrap">
+      <span id="progressLabel">0/9 pasos</span>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <button class="theme-btn" id="themeBtn" type="button">Sistema</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="doc">
+    <header class="hero">
+      <span class="kicker">Horas de práctica de laboratorio</span>
+      <h1>Define un contrato schema-first y hazlo cumplir con ajv</h1>
+      <p>Vas a escribir el <strong>JSON Schema</strong> de la entidad Producto como un archivo <code>.json</code> independiente, construir un <code>JsonSchemaValidationPipe</code> propio en NestJS con <strong>ajv</strong>, y luego evolucionar ese esquema —una vez de forma compatible, una vez rompiendo todo— para sentir la diferencia entre un cambio seguro y un breaking change.</p>
+      <div class="meta-row">
+        <span class="badge">2.5 h laboratorio</span>
+        <span class="badge">NestJS · ajv · JSON Schema</span>
+        <span class="badge">Continúa nestjs-productos-api (S1-2)</span>
+      </div>
+    </header>
+
+    <div class="rule-box">
+      <strong>Regla de esta guía:</strong> sigue los pasos en orden, sin saltarte ninguno. El botón "Marcar paso completado" solo se activa cuando confirmas la Verificación del paso. El <strong>Paso 6 (reto)</strong> es donde de verdad se siente qué es un breaking change — no lo apures.
+    </div>
+    <div class="note-box">
+      <strong>Nota:</strong> esta semana no tiene una versión previa en <code>contenido/</code> — se construyó desde el sílabo oficial, retomando el proyecto <code>nestjs-productos-api</code> de las Semanas 1-2 por continuidad.
+    </div>
+
+    <nav class="stepper" id="stepper" aria-label="Ruta paso a paso de contratos y validación">
+      <button class="stepper-item" data-target="step0"><span class="stepper-num">0</span><span class="stepper-label">Entorno</span></button>
+      <button class="stepper-item" data-target="step1"><span class="stepper-num">1</span><span class="stepper-label">Instalar ajv</span></button>
+      <button class="stepper-item" data-target="step2"><span class="stepper-num">2</span><span class="stepper-label">Esquema v1</span></button>
+      <button class="stepper-item" data-target="step3"><span class="stepper-num">3</span><span class="stepper-label">Pipe propio</span></button>
+      <button class="stepper-item" data-target="step4"><span class="stepper-num">4</span><span class="stepper-label">Ver error 400</span></button>
+      <button class="stepper-item" data-target="step5"><span class="stepper-num">5</span><span class="stepper-label">Esquema v2</span></button>
+      <button class="stepper-item" data-target="step6"><span class="stepper-num">6</span><span class="stepper-label">Breaking change</span></button>
+      <button class="stepper-item" data-target="step7"><span class="stepper-num">7</span><span class="stepper-label">Comparar</span></button>
+      <button class="stepper-item" data-target="step8"><span class="stepper-num">8</span><span class="stepper-label">Entregar</span></button>
+    </nav>
+
+    <!-- PASO 0 -->
+    <section class="step" data-n="0" id="step0">
+      <span class="eyebrow">Paso 0</span>
+      <h2>Verificar el entorno y recuperar el proyecto base</h2>
+      <ol>
+        <li>Confirma <code>node --version</code> (18+) y <code>npm --version</code>.</li>
+        <li>Si ya tienes <code>nestjs-productos-api</code> de las Semanas 1-2, ábrelo y ejecuta <code>npm install</code>.</li>
+        <li>Si NO lo tienes, créalo mínimamente (ver abajo) con un controlador de Productos sobre los 3 productos de siempre.</li>
+      </ol>
+      <div class="term">
+        <div class="term-bar"><span>terminal</span><button class="term-copy" data-copy="nest new nestjs-productos-api
+cd nestjs-productos-api
+npm install @nestjs/swagger">Copiar</button></div>
+        <pre><span class="k">$</span> nest new nestjs-productos-api
+<span class="k">$</span> cd nestjs-productos-api
+<span class="k">$</span> npm install @nestjs/swagger</pre>
+      </div>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 0</div>
+        <ul class="verify-list" data-step="step0">
+          <li><input type="checkbox" data-v="0"><span><code>node --version</code> y <code>npm --version</code> responden correctamente.</span></li>
+          <li><input type="checkbox" data-v="1"><span>El proyecto arranca con <code>npm run start:dev</code> sin errores.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step0" data-next="step1" disabled>✓ Marcar paso 0 completado → ir al paso 1</button>
+        <span class="step-done-note">Marca ambas casillas para continuar.</span>
+      </div>
+    </section>
+
+    <!-- PASO 1 -->
+    <section class="step" data-n="1" id="step1">
+      <span class="eyebrow">Paso 1</span>
+      <h2>Instalar <code>ajv</code> y <code>ajv-formats</code></h2>
+      <div class="term">
+        <div class="term-bar"><span>terminal</span><button class="term-copy" data-copy="npm install ajv ajv-formats">Copiar</button></div>
+        <pre><span class="k">$</span> npm install ajv ajv-formats</pre>
+      </div>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 1</div>
+        <ul class="verify-list" data-step="step1">
+          <li><input type="checkbox" data-v="0"><span><code>npm install</code> termina sin errores y ambos paquetes están en <code>package.json</code>.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step1" data-next="step2" disabled>✓ Marcar paso 1 completado → ir al paso 2</button>
+        <span class="step-done-note">Marca la casilla para continuar.</span>
+      </div>
+    </section>
+
+    <!-- PASO 2 -->
+    <section class="step" data-n="2" id="step2">
+      <span class="eyebrow">Paso 2</span>
+      <h2>Escribir el JSON Schema de Producto (schema-first)</h2>
+      <p>Crea <code>src/productos/schemas/producto.schema.json</code> — <strong>antes</strong> de tocar el controlador:</p>
+      <pre class="code-block">{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Producto",
+  "type": "object",
+  "required": ["nombre", "precio"],
+  "properties": {
+    "nombre": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "precio": { "type": "number", "minimum": 0 }
+  },
+  "additionalProperties": false
+}</pre>
+      <div class="callout think">
+        <h4>Piensa</h4>
+        <p style="margin:0;">Este archivo es tu contrato explícito — vive de forma completamente independiente del código TypeScript del controlador. ¿Qué otras restricciones reales tiene tu dominio de Productos?</p>
+      </div>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 2</div>
+        <ul class="verify-list" data-step="step2">
+          <li><input type="checkbox" data-v="0"><span>El archivo existe y es JSON válido (sin errores de sintaxis en el editor).</span></li>
+          <li><input type="checkbox" data-v="1"><span>Puedo explicar en voz alta qué detecta <code>additionalProperties: false</code>.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step2" data-next="step3" disabled>✓ Marcar paso 2 completado → ir al paso 3</button>
+        <span class="step-done-note">Marca ambas casillas para continuar.</span>
+      </div>
+    </section>
+
+    <!-- PASO 3 -->
+    <section class="step" data-n="3" id="step3">
+      <span class="eyebrow">Paso 3</span>
+      <h2>Construir un <code>JsonSchemaValidationPipe</code> propio</h2>
+      <p>Crea <code>src/common/json-schema-validation.pipe.ts</code>:</p>
+      <pre class="code-block">import { PipeTransform, Injectable, BadRequestException } from '@nestjs/common';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+
+const ajv = new Ajv({ allErrors: true });
+addFormats(ajv);
+
+@Injectable()
+export class JsonSchemaValidationPipe implements PipeTransform {
+  constructor(private schema: object) {}
+
+  transform(value: any) {
+    const validate = ajv.compile(this.schema);
+    const valido = validate(value);
+    if (!valido) {
+      throw new BadRequestException({
+        mensaje: 'El cuerpo de la peticion no cumple el contrato JSON Schema',
+        errores: validate.errors,
+      });
+    }
+    return value;
+  }
+}</pre>
+      <p>Aplícalo en <code>POST /productos</code>:</p>
+      <pre class="code-block">import producto from './schemas/producto.schema.json';
+
+@Post()
+crear(@Body(new JsonSchemaValidationPipe(producto)) body: any) {
+  // ... tu logica existente
+}</pre>
+      <div class="callout think">
+        <h4>Piensa</h4>
+        <p style="margin:0;">Contrasta esto con los DTOs + <code>class-validator</code> de la Semana 2: allí las reglas viven como decoradores sobre una clase; aquí viven en un archivo <code>.json</code> externo que el pipe consume en tiempo de ejecución.</p>
+      </div>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 3</div>
+        <ul class="verify-list" data-step="step3">
+          <li><input type="checkbox" data-v="0"><span><code>npm run build</code> no reporta errores de TypeScript.</span></li>
+          <li><input type="checkbox" data-v="1"><span>Puedo explicar sin ver el código la diferencia entre esta validación y la de <code>class-validator</code>.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step3" data-next="step4" disabled>✓ Marcar paso 3 completado → ir al paso 4</button>
+        <span class="step-done-note">Marca ambas casillas para continuar.</span>
+      </div>
+    </section>
+
+    <!-- PASO 4 -->
+    <section class="step" data-n="4" id="step4">
+      <span class="eyebrow">Paso 4</span>
+      <h2>Provocar y observar un error de validación</h2>
+      <p>Arranca el servidor y envía una petición inválida (sin <code>precio</code>):</p>
+      <div class="term">
+        <div class="term-bar"><span>terminal</span><button class="term-copy" data-copy="curl -X POST http://localhost:3000/productos -H &quot;Content-Type: application/json&quot; -d &quot;{\&quot;nombre\&quot;:\&quot;Auriculares\&quot;}&quot;">Copiar</button></div>
+        <pre><span class="k">$</span> curl -X POST http://localhost:3000/productos -H "Content-Type: application/json" -d "{\"nombre\":\"Auriculares\"}"</pre>
+      </div>
+      <p>Ahora envía un campo no declarado (<code>stock</code>) y confirma que también se rechaza:</p>
+      <div class="term">
+        <div class="term-bar"><span>terminal</span><button class="term-copy" data-copy="curl -X POST http://localhost:3000/productos -H &quot;Content-Type: application/json&quot; -d &quot;{\&quot;nombre\&quot;:\&quot;Auriculares\&quot;,\&quot;precio\&quot;:10,\&quot;stock\&quot;:5}&quot;">Copiar</button></div>
+        <pre><span class="k">$</span> curl -X POST http://localhost:3000/productos -H "Content-Type: application/json" -d "{\"nombre\":\"Auriculares\",\"precio\":10,\"stock\":5}"</pre>
+      </div>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 4</div>
+        <ul class="verify-list" data-step="step4">
+          <li><input type="checkbox" data-v="0"><span>Vi el error 400 con el mensaje de <code>ajv</code> cuando falta <code>precio</code>.</span></li>
+          <li><input type="checkbox" data-v="1"><span>Vi el error 400 cuando envié <code>stock</code> (campo no declarado).</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step4" data-next="step5" disabled>✓ Marcar paso 4 completado → ir al paso 5</button>
+        <span class="step-done-note">No sigas sin haber visto ambos errores 400 reales.</span>
+      </div>
+    </section>
+
+    <!-- PASO 5 -->
+    <section class="step" data-n="5" id="step5">
+      <span class="eyebrow">Paso 5</span>
+      <h2>Versionar el esquema: agregar un campo opcional (compatible)</h2>
+      <p>Crea <code>producto.schema.v2.json</code>, copiando el v1 y agregando <code>categoria</code> como <strong>opcional</strong>:</p>
+      <pre class="code-block">{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Producto",
+  "type": "object",
+  "required": ["nombre", "precio"],
+  "properties": {
+    "nombre": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "precio": { "type": "number", "minimum": 0 },
+    "categoria": { "type": "string", "enum": ["electronica", "oficina", "hogar"] }
+  },
+  "additionalProperties": false
+}</pre>
+      <p>Cambia el <code>import</code> del controlador a <code>producto.schema.v2.json</code>, reinicia el servidor y envía <strong>la misma petición vieja</strong> del Paso 4 (sin <code>categoria</code>).</p>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 5</div>
+        <ul class="verify-list" data-step="step5">
+          <li><input type="checkbox" data-v="0"><span>Una petición SIN <code>categoria</code> (formato v1) sigue siendo aceptada por el esquema v2.</span></li>
+          <li><input type="checkbox" data-v="1"><span>Una petición CON <code>categoria: "electronica"</code> también es aceptada.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step5" data-next="step6" disabled>✓ Marcar paso 5 completado → ir al paso 6</button>
+        <span class="step-done-note">Esto es backward compatibility comprobada en la práctica.</span>
+      </div>
+    </section>
+
+    <!-- PASO 6 -->
+    <section class="step" data-n="6" id="step6">
+      <span class="eyebrow">Paso 6 — El corazón de la semana</span>
+      <h2>Reto: provocar un breaking change y detectarlo con un script</h2>
+      <p>Crea <code>producto.schema.v3-breaking.json</code>: copia el v2 pero haz <code>categoria</code> <strong>requerida</strong>. Luego crea <code>check-compatibility.js</code> en la raíz del proyecto:</p>
+      <pre class="code-block">const fs = require('fs');
+
+function esCompatibleBackward(schemaViejo, schemaNuevo) {
+  const problemas = [];
+  const reqNuevo = new Set(schemaNuevo.required || []);
+  const reqViejo = new Set(schemaViejo.required || []);
+
+  for (const campo of reqNuevo) {
+    if (!reqViejo.has(campo) && !(campo in (schemaViejo.properties || {}))) {
+      problemas.push(`Campo requerido nuevo sin default: ${campo}`);
+    }
+  }
+  for (const campo of Object.keys(schemaViejo.properties || {})) {
+    if (!(campo in (schemaNuevo.properties || {}))) {
+      problemas.push(`Campo eliminado: ${campo}`);
+    }
+  }
+  for (const campo of Object.keys(schemaViejo.properties || {})) {
+    const tViejo = schemaViejo.properties[campo]?.type;
+    const tNuevo = schemaNuevo.properties?.[campo]?.type;
+    if (tNuevo && tViejo !== tNuevo) {
+      problemas.push(`Tipo cambiado en ${campo}: ${tViejo} -> ${tNuevo}`);
+    }
+  }
+  return { compatible: problemas.length === 0, problemas };
+}
+
+const viejo = JSON.parse(fs.readFileSync(process.argv[2]));
+const nuevo = JSON.parse(fs.readFileSync(process.argv[3]));
+console.log(JSON.stringify(esCompatibleBackward(viejo, nuevo), null, 2));</pre>
+      <div class="term">
+        <div class="term-bar"><span>terminal</span><button class="term-copy" data-copy="node check-compatibility.js src/productos/schemas/producto.schema.v2.json src/productos/schemas/producto.schema.v3-breaking.json">Copiar</button></div>
+        <pre><span class="k">$</span> node check-compatibility.js src/productos/schemas/producto.schema.v2.json src/productos/schemas/producto.schema.v3-breaking.json</pre>
+      </div>
+      <p>Ejecútalo también comparando v1 → v2 y confirma que reporta <code>compatible: true</code>.</p>
+      <div class="callout warn">
+        <h4>Si el script no reporta el problema esperado</h4>
+        <p style="margin:0;">Revisa que <code>categoria</code> realmente esté en el arreglo <code>required</code> de v3-breaking, y que NO estuviera en <code>required</code> de v2.</p>
+      </div>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 6</div>
+        <ul class="verify-list" data-step="step6">
+          <li><input type="checkbox" data-v="0"><span>El script detecta v2→v3-breaking como <code>compatible: false</code>, con el mensaje correcto sobre <code>categoria</code>.</span></li>
+          <li><input type="checkbox" data-v="1"><span>El script detecta v1→v2 como <code>compatible: true</code>.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step6" data-next="step7" disabled>✓ Marcar paso 6 completado → ir al paso 7</button>
+        <span class="step-done-note">No sigas sin haber visto ambos resultados reales del script.</span>
+      </div>
+    </section>
+
+    <!-- PASO 7 -->
+    <section class="step" data-n="7" id="step7">
+      <span class="eyebrow">Paso 7</span>
+      <h2>Cierre: comparar los tres enfoques de validación</h2>
+      <p>Responde por escrito en tu bitácora, sin ver la teoría:</p>
+      <ol>
+        <li>¿Cuál de los tres (JSON Schema con <code>ajv</code>, DTOs con <code>class-validator</code> de la Semana 2, contrato <code>.proto</code> de la Semana 3) se sintió más "contrato explícito", y por qué?</li>
+        <li>¿En qué escenario preferirías <code>class-validator</code> sobre JSON Schema, y viceversa?</li>
+        <li>Si tu equipo tuviera 5 consumidores externos de esta API, ¿usarías la política BACKWARD o FULL para versionar este esquema? Justifica.</li>
+      </ol>
+      <div class="verify-box">
+        <div class="vt">Verificación del Paso 7</div>
+        <ul class="verify-list" data-step="step7">
+          <li><input type="checkbox" data-v="0"><span>Las 3 respuestas están escritas en mi bitácora, con justificación propia.</span></li>
+        </ul>
+      </div>
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step7" data-next="step8" disabled>✓ Marcar paso 7 completado → ir al paso 8</button>
+        <span class="step-done-note">Marca la casilla para continuar.</span>
+      </div>
+    </section>
+
+    <!-- PASO 8 -->
+    <section class="step" data-n="8" id="step8">
+      <span class="eyebrow">Paso 8</span>
+      <h2>Documentar y subir tu trabajo</h2>
+      <div class="term">
+        <div class="term-bar"><span>terminal</span><button class="term-copy" data-copy="git add .
+git commit -m &quot;feat: validacion schema-first con ajv + chequeo de compatibilidad (Semana 7)&quot;">Copiar</button></div>
+        <pre><span class="k">$</span> git add .
+<span class="k">$</span> git commit -m "feat: validacion schema-first con ajv + chequeo de compatibilidad (Semana 7)"</pre>
+      </div>
+
+      <div class="ai-box">
+        <h4>🤖 Uso de IA en esta práctica</h4>
+        <div class="ai-grid">
+          <div class="yes"><h5>Permitido</h5><ul>
+            <li>Interpretar un error de <code>ajv</code> que no se entiende a primera vista.</li>
+            <li>Revisar si tu JSON Schema le faltan restricciones razonables.</li>
+            <li>Generar casos de prueba adicionales para el script del Paso 6.</li>
+          </ul></div>
+          <div class="no"><h5>No permitido</h5><ul>
+            <li>Pedir el JSON Schema completo de Producto sin intentarlo tú primero.</li>
+            <li>Aceptar la clasificación de compatibilidad de la IA sin ejecutar el script real.</li>
+            <li>Fusionar v1 y v2 en un solo archivo "para simplificar".</li>
+          </ul></div>
+        </div>
+        <div class="declaration">### Declaración de uso de IA
+- Herramienta(s):
+- Nivel de uso:
+- Qué se le pidió:
+- Qué se modificó/verificó manualmente:</div>
+      </div>
+
+      <div class="final-check">
+        <h4 style="margin-top:0;">Checklist de salida</h4>
+        <ul class="checklist" id="exitChecklist">
+          <li><input type="checkbox" data-key="tres-esquemas"><span>Los 3 archivos de esquema (v1, v2, v3-breaking) existen y son JSON válidos.</span></li>
+          <li><input type="checkbox" data-key="pipe"><span>El <code>JsonSchemaValidationPipe</code> rechaza correctamente peticiones inválidas.</span></li>
+          <li><input type="checkbox" data-key="backward"><span>Comprobé backward compatibility real: una petición v1 sigue siendo válida contra v2.</span></li>
+          <li><input type="checkbox" data-key="script"><span><code>check-compatibility.js</code> detecta correctamente ambos casos (compatible e incompatible).</span></li>
+          <li><input type="checkbox" data-key="bitacora"><span>Respondí las 3 preguntas de cierre en mi bitácora.</span></li>
+          <li><input type="checkbox" data-key="git"><span>Hice commit del proyecto.</span></li>
+        </ul>
+      </div>
+
+      <div class="step-actions">
+        <button class="step-done-btn" data-step="step8" disabled>✓ Marcar paso 8 completado</button>
+        <span class="step-done-note">Marca al menos la casilla de verificación abajo.</span>
+      </div>
+      <div class="verify-box" style="margin-top:14px;">
+        <div class="vt">Verificación del Paso 8</div>
+        <ul class="verify-list" data-step="step8">
+          <li><input type="checkbox" data-v="0"><span>Completé el checklist de salida arriba.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="doc-foot">
+      <span>Integración de Sistemas · Semana 7 de 16</span>
+      <a href="web-teoria.html">← Volver a la teoría</a>
+    </footer>
+  </div>
+</main>
+
+<script>
+(function(){
+  const root = document.documentElement;
+  const btn = document.getElementById('themeBtn');
+  const labels = {system:'Sistema', light:'Claro', dark:'Oscuro'};
+  let mode='system';
+  try{ mode = localStorage.getItem('s01-theme') || 'system'; }catch(e){}
+  function apply(){ if(mode==='system'){root.removeAttribute('data-theme');} else {root.setAttribute('data-theme',mode);} btn.textContent = labels[mode]; }
+  btn.addEventListener('click', ()=>{ mode = mode==='system'?'light':mode==='light'?'dark':'system'; try{localStorage.setItem('s01-theme',mode);}catch(e){} apply(); });
+  apply();
+})();
+
+document.querySelectorAll('.term-copy').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const text = btn.getAttribute('data-copy');
+    try{ await navigator.clipboard.writeText(text); btn.textContent='¡Copiado!'; setTimeout(()=>btn.textContent='Copiar',1200); }
+    catch(e){ btn.textContent='No se pudo copiar'; setTimeout(()=>btn.textContent='Copiar',1200); }
+  });
+});
+
+(function(){
+  let state = {};
+  try{ state = JSON.parse(localStorage.getItem('s07-practica-checklist')||'{}'); }catch(e){}
+  const boxes = document.querySelectorAll('#exitChecklist input[type="checkbox"]');
+  function save(){ try{ localStorage.setItem('s07-practica-checklist', JSON.stringify(state)); }catch(e){} }
+  boxes.forEach(b=>{
+    const key = 'exitChecklist:' + b.dataset.key;
+    if(state[key]) b.checked = true;
+    b.addEventListener('change', ()=>{ state[key]=b.checked; save(); });
+  });
+})();
+
+(function(){
+  const STEPS = ['step0','step1','step2','step3','step4','step5','step6','step7','step8'];
+  const stepperItems = Array.from(document.querySelectorAll('.stepper-item'));
+  const sections = STEPS.map(id => document.getElementById(id));
+
+  let doneState = {};
+  let verifyState = {};
+  try{ doneState = JSON.parse(localStorage.getItem('s07-practica-steps')||'{}'); }catch(e){}
+  try{ verifyState = JSON.parse(localStorage.getItem('s07-practica-verify')||'{}'); }catch(e){}
+
+  function saveDone(){ try{ localStorage.setItem('s07-practica-steps', JSON.stringify(doneState)); }catch(e){} }
+  function saveVerify(){ try{ localStorage.setItem('s07-practica-verify', JSON.stringify(verifyState)); }catch(e){} }
+
+  function firstNotDone(){ const idx = STEPS.findIndex(id => !doneState[id]); return idx === -1 ? STEPS.length - 1 : idx; }
+
+  document.querySelectorAll('.verify-list input[type="checkbox"]').forEach(cb=>{
+    const stepId = cb.closest('.verify-list').dataset.step;
+    const key = stepId + ':' + cb.dataset.v;
+    if(verifyState[key]) cb.checked = true;
+    cb.addEventListener('change', ()=>{
+      verifyState[key] = cb.checked;
+      saveVerify();
+      updateStepButton(stepId);
+    });
+  });
+
+  function updateStepButton(stepId){
+    const list = document.querySelector(`.verify-list[data-step="${stepId}"]`);
+    const boxes = list ? Array.from(list.querySelectorAll('input[type="checkbox"]')) : [];
+    const allChecked = boxes.length > 0 && boxes.every(b=>b.checked);
+    const btn = document.querySelector(`.step-done-btn[data-step="${stepId}"]`);
+    if(btn && !doneState[stepId]){ btn.disabled = !allChecked; }
+  }
+
+  function render(){
+    const currentIdx = firstNotDone();
+    STEPS.forEach((id, i)=>{
+      const isDone = !!doneState[id];
+      const isLocked = i > currentIdx;
+      sections[i].classList.toggle('done', isDone);
+      sections[i].classList.toggle('current', i === currentIdx);
+      sections[i].classList.toggle('locked', isLocked);
+      stepperItems[i].classList.toggle('done', isDone);
+      stepperItems[i].classList.toggle('current', i === currentIdx);
+      stepperItems[i].classList.toggle('locked', isLocked);
+      updateStepButton(id);
+    });
+    document.querySelectorAll('.step-done-btn').forEach(btn=>{
+      const id = btn.dataset.step;
+      btn.classList.toggle('on', !!doneState[id]);
+      if(doneState[id]){ btn.disabled = false; btn.textContent = '✓ Paso completado (clic para desmarcar)'; }
+      else { btn.textContent = btn.dataset.label; }
+    });
+    const doneCount = STEPS.filter(id=>doneState[id]).length;
+    document.getElementById('progressLabel').textContent = `${doneCount}/${STEPS.length} pasos`;
+    document.getElementById('progressFill').style.width = (doneCount/STEPS.length*100)+'%';
+  }
+
+  document.querySelectorAll('.step-done-btn').forEach(btn=>{ btn.dataset.label = btn.textContent; });
+
+  document.querySelectorAll('.step-done-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.step;
+      const wasDone = !!doneState[id];
+      if(!wasDone && btn.disabled) return;
+      doneState[id] = !wasDone;
+      saveDone(); render();
+      if(!wasDone && btn.dataset.next){
+        const target = document.getElementById(btn.dataset.next);
+        if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+      }
+    });
+  });
+
+  stepperItems.forEach(item=>{
+    item.addEventListener('click', ()=>{
+      const target = document.getElementById(item.dataset.target);
+      if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
+
+  render();
+})();
+</script>

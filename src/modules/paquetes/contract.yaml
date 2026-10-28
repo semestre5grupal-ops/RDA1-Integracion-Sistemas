@@ -1,0 +1,699 @@
+openapi: 3.0.3
+info:
+  title: API Paquetes Turísticos Dinámicos y Promociones B2B (MS_PKG) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial de Integración — Motor de Paquetes y Promociones (MS_PKG · RDA2)
+
+    > **Sistema Responsable:** Microservicio de Paquetes Dinámicos y Promociones (`MS_PKG` / `ORQ_PKG`)  
+    > **Módulo:** `src/modules/paquetes/` (Controlador `PaquetesController`, Servicio `PaquetesService`)  
+    > **Esquema de Base de Datos:** `schema_paquetes` (Tablas `paquetes`, `paquete_items`, `contrato_promociones`)  
+    > **Asignatura:** Integración de Sistemas — 6to Semestre (Reto 2: RDA2)  
+    > **Estándar:** OpenAPI Specification 3.0.3 (API-First, RFC 7807 Problem Details, CloudEvents v1.0)  
+    > **Documento de Salida:** `contracts/paquetes-openapi-v2.yaml`
+
+    ---
+
+    ## 1. Propósito y Alcance del Módulo de Paquetes y Promociones
+
+    El microservicio `MS_PKG` gestiona el catálogo de combos turísticos y orquesta la creación de **Paquetes Dinámicos Multivertical** (combinaciones de Vuelos, Autos, Hoteles y Atracciones para una misma ciudad de destino).
+
+    Para evitar prácticas comerciales unilaterales, el sistema se rige por la **regla de negocio de la Cátedra (§9 Consideraciones RDA2)**:
+    > *"En el contrato con cada socio se solicita una sola vez: si acepta participar en promociones y cuál es el porcentaje máximo de descuento que estaría dispuesto a aplicar."*
+
+    Booking Central almacena dichos acuerdos en `schema_paquetes.contrato_promociones` y los valida estrictamente antes de autorizar cualquier descuento combinado al turista.
+
+    ---
+
+    ## 2. Acuerdos B2B de Promociones: Quién Guarda Qué
+
+    Para mantener el principio de aislamiento de datos y soberanía de cada microservicio:
+
+    | Sistema / Entidad | Endpoint de Gestión | Esquema / Tabla | Qué Datos Almacena |
+    |---|---|---|---|
+    | **Tienda Atracciones** | `GET/PUT /atracciones/promociones/contrato` | `schema_atracciones.acuerdo_promociones` | Soberanía local: `permite_promociones`, `descuento_maximo_pct`, destinos habilitados y condiciones de cancelación. |
+    | **Tienda Autos** | `GET/PUT /autos/promociones/contrato` | `schema_autos.contrato_promociones` | Soberanía local: autorización de flota para combos, porcentaje tope y ciudades autorizadas. |
+    | **Tienda Vuelos** | `GET/PUT /vuelos/promociones/contrato` | `schema_vuelos.partner_agreements` | Soberanía local: aceptación de paquetes multidominio y descuento máximo por ruta aérea. |
+    | **Booking Central (`MS_PKG`)** | `GET /paquetes/contratos`<br>`PUT /paquetes/contratos/{vertical}` (Planificado) | `schema_paquetes.contrato_promociones` | **Copia Central Sincronizada:** almacena los acuerdos vigentes de todos los socios (`proveedor_codigo`, `vertical`, `permite_promociones`, `descuento_maximo_pct`, `destinos_habilitados`, `vigencia_hasta`). |
+    | **Booking Central (`MS_PKG`)** | `GET /paquetes`<br>`POST /paquetes/dinamico` | `schema_paquetes.paquetes`<br>`schema_paquetes.paquete_items` | **Snapshot Inmutable de Precios:** Guarda el paquete creado con `precio_base_total`, `descuento_combo_pct`, `precio_final_paquete` y los renglones individuales descontados. |
+
+    ---
+
+    ## 3. Algoritmo de Creación y Validación de Paquetes Dinámicos
+
+    Al invocar `POST /paquetes/dinamico`:
+    1. **Validación de Multidominio:** El combo debe incluir al menos 2 ítems de verticales diferentes. Si no, responde `400 Bad Request`.
+    2. **Verificación de Contratos Comerciales B2B:**
+       - Itera cada ítem enviado identificando su `proveedor_codigo`.
+       - Si el proveedor tiene `permite_promociones = false`, la creación se rechaza con `409 Conflict`:
+         `"El proveedor '<codigo>' ha declarado en su contrato que no participa en promociones o combos"`.
+       - Si el proveedor acepta promociones, el descuento máximo permitido se acota al menor de los descuentos autorizados por los socios participantes (`maxDescuentoPermitido = min(contrato.descuento_maximo_pct, 20.0)`).
+    3. **Cálculo del Precio Final y Snapshot Inmutable:**
+       - `descuentoAplicado = min(descuento_solicitado_pct || 10.0, maxDescuentoPermitido)`.
+       - `precioBaseTotal = sum(items.precio_individual)`.
+       - `precioFinalPaquete = round(precioBaseTotal * (1 - descuentoAplicado / 100), 2)`.
+       - Redondeo a 2 decimales exactos en divisa USD.
+       - Se genera un código identificador formal con formato `PKG-<DESTINO>-<HEX6>` (ej. `PKG-QUI-8F2B1C`).
+       - Los precios calculados se congelan de forma inmutable en `schema_paquetes.paquetes` y `schema_paquetes.paquete_items`.
+
+    ---
+
+    ## 4. Relación con el Patrón Saga Orquestado (P01)
+
+    Una vez creado el paquete dinámico mediante este microservicio:
+    - El cliente envía la orden de compra a través del ESB invocando `POST /esb/checkout-saga` (contrato `contracts/esb-sagas-openapi-v2.yaml`).
+    - El orquestador Saga toma cada ítem del paquete y ejecuta secuencialmente las reservas en cada tienda participante (`MS_ATR`, `MS_AUT`, etc.), procesa el cobro consolidado en `MS_PAG` y registra la comisión del Booking en `MS_FIN`.
+    - Si una tienda falla durante la Saga, las reservas previas del paquete se liberan automáticamente en orden inverso (LIFO).
+
+    ---
+
+    ## 5. Tabla de Cobertura de Rutas de la API de Paquetes
+
+    | Método | Ruta | Handler | x-microservice | x-status |
+    |---|---|---|---|---|
+    | `GET` | `/paquetes` | `findAll` | `MS_PKG` | `implemented` |
+    | `GET` | `/paquetes/contratos` | `getContratos` | `MS_PKG` | `implemented` |
+    | `GET` | `/paquetes/{id}` | `findById` | `MS_PKG` | `implemented` |
+    | `POST` | `/paquetes/dinamico` | `crearPaqueteDinamico` | `MS_PKG` | `implemented` |
+    | `PUT` | `/paquetes/contratos/{proveedorCodigo}` | N/A (sincronización B2B) | `MS_PKG` | `planned` |
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: /api/v2
+    description: Relativo a la raíz del host
+  - url: 'http://localhost:3000/api/v2'
+    description: Entorno de desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Entorno de producción (Render)
+
+tags:
+  - name: Paquetes Dinámicos (MS_PKG)
+    description: Catálogo de paquetes turísticos, consulta por identificador y creación de combos multivertical con snapshot inmutable.
+  - name: Acuerdos B2B de Promociones
+    description: Consulta y sincronización centralizada de contratos comerciales B2B y límites de descuento pactados con socios.
+
+paths:
+
+  /paquetes:
+    get:
+      tags:
+        - Paquetes Dinámicos (MS_PKG)
+      summary: Listar paquetes y combos turísticos activos (Multivertical)
+      description: |
+        Recupera el catálogo completo de paquetes turísticos en estado activo almacenados en `schema_paquetes.paquetes`.
+        Incluye el desglose de ítems turísticos participantes (`schema_paquetes.paquete_items`), precios base,
+        porcentaje de descuento de combo aplicado y precio final congelado.
+      operationId: listarPaquetes
+      x-source: 'src/modules/paquetes/paquetes.controller.ts#findAll'
+      x-status: implemented
+      x-microservice: MS_PKG
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Catálogo de paquetes turísticos activos con detalle de ítems.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaqueteDetalleResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /paquetes/contratos:
+    get:
+      tags:
+        - Acuerdos B2B de Promociones
+      summary: Consultar acuerdos y topes de descuento B2B acordados con socios (Cátedra §9)
+      description: |
+        Retorna la colección de contratos comerciales B2B registrados en `schema_paquetes.contrato_promociones`.
+        Expone por cada socio satélite si autoriza promociones (`permite_promociones`), su tope máximo de descuento
+        (`descuento_maximo_pct`), vigencia del acuerdo y lista de ciudades habilitadas.
+      operationId: getContratosPromociones
+      x-source: 'src/modules/paquetes/paquetes.controller.ts#getContratos'
+      x-status: implemented
+      x-microservice: MS_PKG
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Listado de acuerdos B2B de promociones formalizados con los socios.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContratoPromocionesEntity'
+              example:
+                - id: '4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d'
+                  proveedorCodigo: 'NODE_ATR_DILAN'
+                  vertical: 'ATRACCIONES'
+                  permitePromociones: true
+                  descuentoMaximoPct: 15.00
+                  destinosHabilitados:
+                    - Quito
+                    - Baños
+                    - Galápagos
+                  vigenciaHasta: '2026-12-31'
+                - id: '2c3d4e5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f'
+                  proveedorCodigo: 'NODE_AUT_LOCAL'
+                  vertical: 'AUTOS'
+                  permitePromociones: true
+                  descuentoMaximoPct: 20.00
+                  destinosHabilitados:
+                    - Quito
+                    - Guayaquil
+                    - Cuenca
+                  vigenciaHasta: '2026-12-31'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /paquetes/{id}:
+    get:
+      tags:
+        - Paquetes Dinámicos (MS_PKG)
+      summary: Obtener detalle de un paquete turístico por ID o Código
+      description: |
+        Recupera la ficha completa de un paquete turístico buscando por su UUID (`id`)
+        o por su código comercial amigable (`codigo_paquete`, ej. `PKG-QUI-8F2B1C`).
+        Incluye el desglose pormenorizado de los ítems de cada vertical participante.
+      operationId: findPaqueteById
+      x-source: 'src/modules/paquetes/paquetes.controller.ts#findById'
+      x-status: implemented
+      x-microservice: MS_PKG
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID o Código alfanumérico del paquete (ej. `PKG-QUI-8F2B1C`).
+          schema:
+            type: string
+            example: 'PKG-QUI-8F2B1C'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Detalle del paquete turístico recuperado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaqueteDetalleResponse'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /paquetes/dinamico:
+    post:
+      tags:
+        - Paquetes Dinámicos (MS_PKG)
+      summary: Crear paquete turístico dinámico validando acuerdos comerciales de socios (RDA2)
+      description: |
+        Crea un nuevo paquete turístico combinado a partir de una lista de ítems de diferentes verticales.
+        Valida que existan al menos 2 ítems, consulta los topes de descuento en `schema_paquetes.contrato_promociones`
+        y calcula el precio final inmutable respetando el acuerdo más restrictivo de los socios involucrados.
+        
+        Si uno de los socios tiene configurado `permite_promociones: false`, la solicitud se rechaza con HTTP `409 Conflict`.
+      operationId: crearPaqueteDinamico
+      x-source: 'src/modules/paquetes/paquetes.controller.ts#crearPaqueteDinamico'
+      x-status: implemented
+      x-microservice: MS_PKG
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: DTO con destino turístico, descuento sugerido y lista de servicios turísticos a consolidar.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearPaqueteDinamicoInput'
+            example:
+              nombre: 'Combo Escapada Cultural a Quito'
+              descripcion: 'Atracción patrimonial en Centro Histórico más 3 días de alquiler de camioneta SUV.'
+              ciudad_destino: 'Quito'
+              descuento_solicitado_pct: 12.0
+              items:
+                - vertical: 'ATRACCIONES'
+                  item_referencia_id: '8a9b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'
+                  nombre_item: 'Tour Histórico Centro de Quito con Degustación'
+                  precio_individual: 70.00
+                  proveedor_codigo: 'NODE_ATR_DILAN'
+                - vertical: 'AUTOS'
+                  item_referencia_id: '3b4c5d6e-7f8a-9b0c-1d2e-3f4a5b6c7d8e'
+                  nombre_item: 'Renta Chevrolet Tracker Turbo 2025 (3 Días)'
+                  precio_individual: 150.00
+                  proveedor_codigo: 'NODE_AUT_LOCAL'
+      responses:
+        '201':
+          description: Paquete dinámico creado exitosamente con snapshot inmutable de precios.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaqueteCreadoResponse'
+              example:
+                id: '7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d'
+                codigoPaquete: 'PKG-QUI-8F2B1C'
+                nombre: 'Combo Escapada Cultural a Quito'
+                ciudadDestino: 'Quito'
+                precio_base_total: 220.00
+                descuento_combo_pct: 12.00
+                precio_final_paquete: 193.60
+                activo: true
+                items:
+                  - id: '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d'
+                    vertical: 'ATRACCIONES'
+                    itemReferenciaId: '8a9b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'
+                    nombreItem: 'Tour Histórico Centro de Quito con Degustación'
+                    precioIndividual: 70.00
+                    descuentoAplicadoPct: 12.00
+                    precioConDescuento: 61.60
+                  - id: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+                    vertical: 'AUTOS'
+                    itemReferenciaId: '3b4c5d6e-7f8a-9b0c-1d2e-3f4a5b6c7d8e'
+                    nombreItem: 'Renta Chevrolet Tracker Turbo 2025 (3 Días)'
+                    precioIndividual: 150.00
+                    descuentoAplicadoPct: 12.00
+                    precioConDescuento: 132.00
+                mensaje: '¡Paquete dinámico creado con éxito! Se aplicó un 12% de descuento dentro de los límites autorizados por los socios.'
+        '400':
+          description: Petición inválida (por ejemplo, el paquete contiene menos de 2 ítems).
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/400'
+                title: 'Bad Request'
+                status: 400
+                detail: 'Un paquete o combo debe contener al menos 2 ítems de diferentes verticales'
+                instance: '/api/v2/paquetes/dinamico'
+        '409':
+          description: |
+            Conflicto de acuerdo comercial: Uno de los proveedores participantes ha estipulado
+            en su contrato que no participa en promociones o combos.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/409'
+                title: 'Conflict'
+                status: 409
+                detail: "El proveedor 'NODE_ALO_EXCLUSIVO' ha declarado en su contrato que no participa en promociones o combos"
+                instance: '/api/v2/paquetes/dinamico'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /paquetes/contratos/{proveedorCodigo}:
+    put:
+      tags:
+        - Acuerdos B2B de Promociones
+      summary: Actualizar acuerdo B2B de promociones para un proveedor o socio (Planificado)
+      description: |
+        Ruta planificada (`x-status: planned`) para sincronizar centralmente en `schema_paquetes.contrato_promociones`
+        las condiciones comerciales cuando un socio satélite actualiza su cuestionario B2B
+        mediante `PUT /{vertical}/promociones/contrato`. Permite actualizar `permite_promociones`,
+        `descuento_maximo_pct`, `destinos_habilitados` y vigencia.
+      operationId: actualizarContratoPromociones
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_PKG
+      security: []
+      parameters:
+        - name: proveedorCodigo
+          in: path
+          required: true
+          description: Código identificador del socio o tienda satélite (ej. `NODE_ATR_DILAN`).
+          schema:
+            type: string
+            example: 'NODE_ATR_DILAN'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Condiciones comerciales actualizadas del socio.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarContratoPromocionesInput'
+            example:
+              permite_promociones: true
+              descuento_maximo_pct: 18.00
+              destinos_habilitados:
+                - Quito
+                - Baños
+                - Cuenca
+              vigencia_hasta: '2026-12-31'
+      responses:
+        '200':
+          description: Acuerdo comercial B2B actualizado exitosamente en Booking Central.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContratoPromocionesEntity'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+components:
+
+  schemas:
+
+    CrearPaqueteDinamicoInput:
+      type: object
+      description: DTO deducido del método `PaquetesService.crearPaqueteDinamico`.
+      required:
+        - ciudad_destino
+        - items
+      properties:
+        nombre:
+          type: string
+          description: Nombre descriptivo del paquete turístico.
+          example: Combo Escapada Cultural a Quito
+        descripcion:
+          type: string
+          description: Detalle de las actividades y beneficios incluidos.
+          example: Atracción patrimonial más 3 días de alquiler de camioneta SUV.
+        ciudad_destino:
+          type: string
+          description: Ciudad de destino compartida por los servicios turísticos combinados.
+          example: Quito
+        descuento_solicitado_pct:
+          type: number
+          description: Porcentaje de descuento sugerido (sujeto a los topes de los contratos de los socios).
+          minimum: 0
+          maximum: 20.0
+          default: 10.0
+          example: 12.0
+        items:
+          type: array
+          description: Lista de componentes turísticos que integran el combo (mínimo 2).
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/PaqueteItemInput'
+
+    PaqueteItemInput:
+      type: object
+      description: Especificación de un servicio turístico a incluir dentro del combo dinámico.
+      required:
+        - vertical
+        - item_referencia_id
+        - nombre_item
+        - precio_individual
+      properties:
+        vertical:
+          type: string
+          description: Vertical de origen del servicio turístico.
+          enum: [ATRACCIONES, AUTOS, ALOJAMIENTOS, VUELOS]
+          example: ATRACCIONES
+        item_referencia_id:
+          type: string
+          description: UUID o ID técnico del recurso en la tienda satélite.
+          example: '8a9b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'
+        nombre_item:
+          type: string
+          description: Título del servicio turístico.
+          example: Tour Histórico Centro de Quito con Degustación
+        precio_individual:
+          type: number
+          description: Tarifa regular sin descuento comercial.
+          minimum: 0.01
+          example: 70.00
+        proveedor_codigo:
+          type: string
+          description: Código del socio proveedor para verificar contrato B2B en `schema_paquetes.contrato_promociones`.
+          example: NODE_ATR_DILAN
+        detalles_json:
+          type: object
+          description: Metadatos adicionales de la reserva (fechas, pasajeros, turnos).
+          example:
+            date: '2026-11-15'
+            time: '10:00 a.m.'
+
+    PaqueteDetalleResponse:
+      type: object
+      description: Entidad de paquete turístico con snapshot inmutable y lista de ítems desglosados.
+      required:
+        - id
+        - codigoPaquete
+        - nombre
+        - ciudadDestino
+        - precio_base_total
+        - descuento_combo_pct
+        - precio_final_paquete
+        - activo
+        - items
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d'
+        codigoPaquete:
+          type: string
+          description: Código de referencia formal del combo turístico.
+          example: 'PKG-QUI-8F2B1C'
+        nombre:
+          type: string
+          example: Combo Escapada Cultural a Quito
+        descripcion:
+          type: string
+          nullable: true
+          example: Paquete turístico combinado con descuento especial del 12%.
+        ciudadDestino:
+          type: string
+          example: Quito
+        precio_base_total:
+          type: number
+          description: Suma de las tarifas regulares de todos los ítems antes del descuento.
+          example: 220.00
+        descuento_combo_pct:
+          type: number
+          description: Porcentaje de descuento comercial consolidado aplicado al combo.
+          example: 12.00
+        precio_final_paquete:
+          type: number
+          description: Precio final inmutable que el cliente pagará en el checkout.
+          example: 193.60
+        activo:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:45:00.000Z'
+        items:
+          type: array
+          description: Renglones individuales de servicios incluidos en el paquete.
+          items:
+            $ref: '#/components/schemas/PaqueteItemEntity'
+
+    PaqueteCreadoResponse:
+      type: object
+      description: Respuesta devuelta tras la creación exitosa del paquete dinámico.
+      required:
+        - id
+        - codigoPaquete
+        - nombre
+        - ciudadDestino
+        - precio_base_total
+        - descuento_combo_pct
+        - precio_final_paquete
+        - activo
+        - items
+        - mensaje
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d'
+        codigoPaquete:
+          type: string
+          example: 'PKG-QUI-8F2B1C'
+        nombre:
+          type: string
+          example: Combo Escapada Cultural a Quito
+        ciudadDestino:
+          type: string
+          example: Quito
+        precio_base_total:
+          type: number
+          example: 220.00
+        descuento_combo_pct:
+          type: number
+          example: 12.00
+        precio_final_paquete:
+          type: number
+          example: 193.60
+        activo:
+          type: boolean
+          example: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaqueteItemEntity'
+        mensaje:
+          type: string
+          example: ¡Paquete dinámico creado con éxito! Se aplicó un 12% de descuento dentro de los límites autorizados por los socios.
+
+    PaqueteItemEntity:
+      type: object
+      description: Entidad de ítem individual almacenada en `schema_paquetes.paquete_items`.
+      required:
+        - id
+        - vertical
+        - itemReferenciaId
+        - nombreItem
+        - precioIndividual
+        - descuentoAplicadoPct
+        - precioConDescuento
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d'
+        paqueteId:
+          type: string
+          format: uuid
+          example: '7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d'
+        vertical:
+          type: string
+          example: ATRACCIONES
+        itemReferenciaId:
+          type: string
+          example: '8a9b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'
+        nombreItem:
+          type: string
+          example: Tour Histórico Centro de Quito con Degustación
+        precioIndividual:
+          type: number
+          example: 70.00
+        descuentoAplicadoPct:
+          type: number
+          example: 12.00
+        precioConDescuento:
+          type: number
+          example: 61.60
+        detallesJson:
+          type: object
+          description: Metadatos específicos asociados al renglón.
+          example: {}
+
+    ContratoPromocionesEntity:
+      type: object
+      description: Registro de acuerdo comercial B2B persistido en `schema_paquetes.contrato_promociones`.
+      required:
+        - id
+        - proveedorCodigo
+        - vertical
+        - permitePromociones
+        - descuentoMaximoPct
+        - destinosHabilitados
+        - vigenciaHasta
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d'
+        proveedorCodigo:
+          type: string
+          description: Identificador unívoco del socio satélite.
+          example: NODE_ATR_DILAN
+        vertical:
+          type: string
+          description: Tienda o vertical turística a la que pertenece el socio.
+          example: ATRACCIONES
+        permitePromociones:
+          type: boolean
+          description: Indica si el partner autoriza la inclusión de sus servicios en combos.
+          example: true
+        descuentoMaximoPct:
+          type: number
+          description: Porcentaje máximo de descuento autorizado sobre su tarifa regular.
+          example: 15.00
+        destinosHabilitados:
+          type: array
+          description: Ciudades en las que aplica el convenio comercial.
+          items:
+            type: string
+          example:
+            - Quito
+            - Baños
+            - Galápagos
+        vigenciaHasta:
+          type: string
+          format: date
+          description: Fecha de expiración del acuerdo comercial B2B.
+          example: '2026-12-31'
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+
+    ActualizarContratoPromocionesInput:
+      type: object
+      description: DTO para actualización de acuerdo comercial B2B de promociones.
+      required:
+        - permite_promociones
+        - descuento_maximo_pct
+      properties:
+        permite_promociones:
+          type: boolean
+          example: true
+        descuento_maximo_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+          example: 18.00
+        destinos_habilitados:
+          type: array
+          items:
+            type: string
+          example:
+            - Quito
+            - Baños
+            - Cuenca
+        vigencia_hasta:
+          type: string
+          format: date
+          example: '2026-12-31'

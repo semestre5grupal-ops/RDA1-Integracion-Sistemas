@@ -1,0 +1,1264 @@
+openapi: 3.0.3
+info:
+  title: API Enterprise Service Bus & Orquestación Saga LIFO — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial de Integración — ESB y Transacciones Saga LIFO (RDA2)
+
+    > **Sistema Orquestador:** Enterprise Service Bus (Capa 3 & Capa 5 ESB / Booking Gateway)  
+    > **Módulo:** `src/modules/esb/` (Controlador `EsbController`)  
+    > **Asignatura:** Integración de Sistemas — 6to Semestre (Reto 2: RDA2)  
+    > **Estándar:** OpenAPI Specification 3.0.3 (API-First, RFC 7807 Problem Details, CloudEvents v1.0)  
+    > **Documento de Salida:** `contracts/esb-sagas-openapi-v2.yaml`  
+    > **Microservicio Responsable:** `ORQ_RES` (Orquestación de Reservas y Sagas) / `ORQ_FAC` (Vistas Agregadas Fiscales) / `MS_AUD` (Auditoría de Sagas)
+
+    ---
+
+    ## 1. Propósito y Alcance del ESB y Orquestador de Sagas v2
+
+    Este contrato formaliza las operaciones del **Enterprise Service Bus (ESB)** y del **Orquestador de Transacciones Distribuidas (Saga Orchestrator)** de Booking Prototipo. El sistema actúa como el coordinador central que permite realizar transacciones atómicas multidominio entre las 4 tiendas satélites (Atracciones, Autos, Alojamientos y Vuelos) sin requerir transacciones 2PC (Two-Phase Commit) distribuidas, aplicando en su lugar consistencia eventual y compensación automática en orden inverso (LIFO).
+
+    Adicionalmente, el ESB expone **Vistas Agregadas en Memoria**, las cuales operan como el **sustituto oficial de los JOINs SQL cross-schema**, resolviendo la prohibición de llaves foráneas entre esquemas de base de datos independientes.
+
+    ---
+
+    ## 2. Arquitectura del Patrón Saga Orquestado y Flujo Transaccional
+
+    El orquestador central (`SagaOrchestratorService`) implementa el patrón **Saga Orquestada** (§8 Consideraciones de la Cátedra y `ADR-007`). Cada orden compuesta ejecuta una secuencia de pasos atómicos con registro relacional inmediato en `schema_auditoria.saga_transacciones` y `schema_auditoria.saga_pasos_journal`.
+
+    ```
+    [Cliente] ──POST /esb/checkout-saga──> [SagaOrchestratorService]
+                                                    │
+                 ┌──────────────────────────────────┴──────────────────────────────────┐
+                 ▼ (Secuencia Adelante)                                                ▼ (Ante Fallo: Reversos LIFO)
+      1. Reserva Item 1 (MS_ATR / MS_AUT / etc.)                           4. Cancelar Reserva Item 2 (Liberar cupo/stock)
+      2. Reserva Item 2 (MS_ATR / MS_AUT / etc.)                           3. Cancelar Reserva Item 1 (Liberar cupo/stock)
+      3. Cobro Síncrono SOA (MS_PAG)                                       2. Reembolsar Pago (MS_PAG -> Reembolso 100%)
+      4. Liquidación Finanzas 10% (MS_FIN)                                 1. Generar Código REF-SAGA-XXXXXX
+      5. Estado COMPLETED                                                     Estado FAILED / HTTP 409 Conflict
+    ```
+
+    ### 2.1. Secuencia Feliz (Happy Path)
+    1. **Fase 1: Reserva / Hold de Inventario en Verticales:**
+       Itera cada ítem solicitado invocando a su respectivo microservicio (`AtraccionesService.reservar`, `AutosService.createOrder`, o reserva genérica de Alojamientos/Vuelos). Cada reserva confirmada se almacena en memoria en la pila LIFO de compensación y se persiste en `saga_pasos_journal`.
+    2. **Fase 2: Cobro Síncrono SOA (`MS_PAG`):**
+       Una vez que todos los socios retuvieron stock, se invoca a `PagosService.procesarPago` con el importe total consolidado. Si el pago es exitoso, se apila su correspondiente función de reembolso compensatorio.
+    3. **Fase 3: Liquidación de Comisión Booking 10% (`MS_FIN`):**
+       Se invoca a `FinanzasService.registrarVentaYCalcularComision` para liquidar comisiones comerciales de los proveedores turísticos.
+    4. **Fase 4: Finalización Exitosa:**
+       La transacción transita a `COMPLETED` y se registra auditoría física en disco con Winston (`SAGA_CHECKOUT_COMPLETED`).
+
+    ### 2.2. Compensación Automática en Orden Inverso (LIFO)
+    Si cualquiera de los pasos falla (por ejemplo, falta de saldo en el pago, timeout de red o socio sin disponibilidad):
+    1. La transacción transita inmediatamente a `COMPENSATING`.
+    2. Se genera un código único de compensación formal con el formato `REF-SAGA-XXXXXX` (ej. `REF-SAGA-9B2D1F`).
+    3. Se desapilan las operaciones exitosas en orden estrictamente inverso (LIFO - *Last-In, First-Out*):
+       - Si el pago se cobró, se procesa el reembolso total vía `PagosService.procesarReembolso`.
+       - Si se reservó un auto, se cancela vía `AutosService.cancelOrder`.
+       - Si se reservó una atracción, se anula vía `AtraccionesService.cancelarReserva` reintegrando cupos.
+    4. La transacción transita a `FAILED` en `schema_auditoria.saga_transacciones`.
+    5. Se emite una respuesta HTTP `409 Conflict` bajo RFC 7807 (`type: https://booking.epn.edu.ec/errors/saga-rollback`) con el detalle de las acciones compensatorias ejecutadas.
+
+    ### 2.3. Estados de la Transacción Saga
+    | Estado | Descripción |
+    |---|---|
+    | `IN_PROGRESS` | Saga en ejecución activa; procesando reservas de inventario, pago o liquidación. |
+    | `COMPLETED` | Todos los pasos concluyeron con éxito; compra finalizada al 100%. |
+    | `COMPENSATING` | Se produjo un fallo en un paso; ejecutando reversos y liberaciones en orden LIFO. |
+    | `FAILED` | Compensación finalizada; transacción abortada y devuelta con código `REF-SAGA-XXXXXX`. |
+
+    ### 2.4. Tabla de Pasos de la Transacción Compuesta
+    | Orden | Servicio Destino | Operación | Endpoint Interno | Acción Compensatoria Asociada |
+    |---|---|---|---|---|
+    | `1..N` | `MS_ATR` / `MS_AUT` / `MS_ALO` / `MS_VUE` | `RESERVAR_<VERTICAL>` | `/api/v2/<vertical>/reservas` | `CANCELAR_RESERVA` (restitución atómica de stock y aforo) |
+    | `N+1` | `MS_PAG` | `PROCESAR_PAGO` | `/api/v2/pagos/procesar` | `REEMBOLSAR_PAGO` (emisión de comprobante de reembolso total) |
+    | `N+2` | `MS_FIN` | `REGISTRAR_COMISION` | Interno (`FinanzasService`) | N/A (solo se ejecuta si el pago fue aprobado) |
+
+    ---
+
+    ## 3. Mapeo de Eventos EDA ↔ Pasos de la Saga (Cátedra Semana 8)
+
+    Conforme a la regla arquitectónica de la cátedra:
+    > *"RabbitMQ para lo que el negocio no puede fallar (Sagas, compras, transacciones críticas). Kafka para lo que el negocio necesita escalar (telemetría, logs masivos, analítica y replay)."*
+
+    | Paso / Acción | Nombre Estándar Cátedra | Broker Autoritativo (RabbitMQ) | Broker Réplica (Apache Kafka) | Estado en Código Actual |
+    |---|---|---|---|---|
+    | Inicio de Checkout | `PedidoCreado` | `booking.events` / `q.ordenes.confirmadas` | `topic-compras-stream` | **Solo Log Winston** (Hallazgo `H-P01-04`) |
+    | Hold de Stock | `InventarioReservado` | `booking.events` / `q.stock.actualizado` | `topic-catalogo-sync` | **Solo BD / Log** (Hallazgo `H-P01-04`) |
+    | Cobro de Tarjeta | `PagoProcesado` | `booking.events` / `q.pagos.procesados` | `topic-telemetria-audit` | **Solo BD / Log** (Hallazgo `H-P01-04`) |
+    | Rollback Stock | `RestaurarInventario` | `booking.events` / `q.sagas.compensacion` | `topic-audit-compensaciones` | **LIFO en memoria** (Hallazgo `H-P01-04`) |
+    | Rollback Orden | `CancelarPedido` | `booking.events` / `q.sagas.compensacion` | `topic-audit-compensaciones` | **LIFO en memoria** (Hallazgo `H-P01-04`) |
+    | Rollback Pago | `ReembolsarPago` | `booking.events` / `q.sagas.compensacion` | `topic-audit-compensaciones` | **LIFO en memoria** (Hallazgo `H-P01-04`) |
+
+    ---
+
+    ## 4. Vistas Agregadas en Memoria (Sustituto Oficial de SQL JOINs Cross-Schema)
+
+    Para cumplir con el **Criterio Excluyente CE02** y el **ADR-002** (Aislamiento estricto de base de datos por microservicio, 12 esquemas independientes, **cero llaves foráneas entre esquemas**):
+    - Queda estrictamente prohibido realizar sentencias SQL como `SELECT * FROM schema_clientes.clientes JOIN schema_facturacion.facturas_encabezado`.
+    - El servicio `EsbInternalRouterService` resuelve las consultas complejas mediante **agregación en memoria** ejecutando consultas SQL independientes y concurrentes (`Promise.all`):
+      1. `GET /esb/aggregate/mis-reservas/{cliente}`: Consulta en paralelo a `schema_atracciones.atracciones_reservas`, `schema_autos.autos_reservas`, `schema_alojamientos.alojamientos_reservas` y `schema_vuelos.vuelos_reservas`, consolidando un único objeto multimodal para el usuario.
+      2. `GET /esb/aggregate/facturas/{facturaId}`: Consulta el encabezado en `schema_facturacion`, los ítems en `facturas_detalle` y resuelve el cliente en `schema_clientes`, retornando la factura fiscal unificada sin violar las fronteras de datos.
+
+    ---
+
+    ## 5. Observabilidad, Trazabilidad y Dashboard Tipo Grafo
+
+    - **Correlation ID Universal:** Todas las operaciones propagan `X-Correlation-Id` en cabeceras HTTP y generan registros unívocos con el prefijo `SAGA-XXXXXXXX`.
+    - **Bitácora Transaccional:** La tabla `schema_auditoria.saga_pasos_journal` almacena cada payload y respuesta recibida para auditoría forense.
+    - **Dashboard de Monitoreo Tipo Grafo (Semana 8):** La cátedra exige que el panel de observabilidad visualice la Saga como un grafo interactivo con nodos activos en **verde** y nodos fallidos en **rojo**. Dado que `GET /esb/sagas/{correlationId}` solo retorna una lista plana de registros, se define el endpoint planificado `GET /esb/sagas/{correlationId}/traza` (`x-status: planned`) para estructurar los nodos, aristas y árbol de spans OpenTelemetry W3C Trace Context.
+
+    ---
+
+    ## 6. Seguridad y Control de Acceso
+
+    > ⚠️ **DISCREPANCIA CRÍTICA DETECTADA (Hallazgo H-P01-01):**  
+    > En el código fuente actual (`src/modules/esb/esb.controller.ts`), la clase no cuenta con decorador `@UseGuards()`. Por tanto, todas las rutas operan actualmente como públicas (`security: []`). Esto representa un riesgo alto de seguridad en producción que se encuentra debidamente documentado para la revisión.
+
+    ---
+
+    ## 7. Tabla de Cobertura de Rutas de la API ESB
+
+    | Método | Ruta | Handler | x-microservice | x-status |
+    |---|---|---|---|---|
+    | `POST` | `/esb/checkout-saga` | `checkoutSaga` | `ORQ_RES` | `implemented` |
+    | `GET` | `/esb/sagas/{correlationId}` | `getSaga` | `MS_AUD` | `implemented` |
+    | `GET` | `/esb/sagas` | `listarSagas` | `MS_AUD` | `implemented` |
+    | `GET` | `/esb/sagas/{correlationId}/traza` | `obtenerTrazaGrafoSaga` | `MS_AUD` | `planned` |
+    | `GET` | `/esb/aggregate/mis-reservas/{cliente}` | `getMisReservasAgregadas` | `ORQ_RES` | `implemented` |
+    | `GET` | `/esb/aggregate/facturas/{facturaId}` | `getFacturaCompleta` | `ORQ_FAC` | `implemented` |
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: /api/v2
+    description: Relativo a la raíz del host
+  - url: 'http://localhost:3000/api/v2'
+    description: Entorno de desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Entorno de producción (Render)
+
+tags:
+  - name: Saga Orquestada (LIFO)
+    description: Orquestación transaccional distribuida de checkout compuesto y compensación en orden inverso ante fallos.
+  - name: Observabilidad y Auditoría
+    description: Bitácora relacional de pasos ejecutados, estado de Sagas y visualización de trazas en grafo.
+  - name: Vistas Agregadas (Anti-JOIN)
+    description: Agregación en memoria de reservas y facturas como sustituto oficial de SQL JOINs entre esquemas.
+
+paths:
+
+  /esb/checkout-saga:
+    post:
+      tags:
+        - Saga Orquestada (LIFO)
+      summary: Orquestar compra compuesta multivertical con transacciones Saga y compensación LIFO
+      description: |
+        Inicia la transacción distribuida coordinada por el ESB. Ejecuta las reservas de inventario en cada vertical turística solicitada, procesa el cobro consolidado en `MS_PAG` y registra la liquidación de comisiones en `MS_FIN`.
+
+        Si cualquiera de los pasos falla o si se inyecta un fallo mediante `simular_fallo_en_paso`, la transacción se aborta inmediatamente y se ejecutan las compensaciones automáticas en orden estrictamente inverso (LIFO), devolviendo un código `409 Conflict` con el identificador formal `REF-SAGA-XXXXXX`.
+      operationId: checkoutSaga
+      x-source: 'src/modules/esb/esb.controller.ts#checkoutSaga'
+      x-status: implemented
+      x-microservice: ORQ_RES
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/IdempotencyKeyOptional'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Datos del comprador, medios de pago, colección de ítems turísticos a reservar y parámetro opcional para inyección de fallos controlados.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutSagaInput'
+            example:
+              cliente_id: '550e8400-e29b-41d4-a716-446655440000'
+              cliente_email: 'turista.ejemplo@epn.edu.ec'
+              cliente_nombre: 'Alejandro Flores'
+              metodo_pago: 'TARJETA_CREDITO'
+              numero_tarjeta: '4111222233334444'
+              items:
+                - vertical: 'ATRACCIONES'
+                  item_id: '8a9b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d'
+                  nombre: 'Tour Histórico Centro de Quito con Degustación Gastronómica'
+                  cantidad: 2
+                  precio_unitario: 35.00
+                  detalles_reserva:
+                    date: '2026-11-15'
+                    time: '10:00 a.m.'
+                - vertical: 'AUTOS'
+                  item_id: '3b4c5d6e-7f8a-9b0c-1d2e-3f4a5b6c7d8e'
+                  nombre: 'Chevrolet Tracker Turbo 2025'
+                  cantidad: 3
+                  precio_unitario: 50.00
+      responses:
+        '200':
+          description: Saga finalizada exitosamente. Todos los servicios confirmados y comisiones registradas.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+            Idempotent-Replayed:
+              description: 'Indica si la respuesta fue reproducida desde la caché de idempotencia por reintento de cliente'
+              schema:
+                type: boolean
+                example: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSagaSuccessResponse'
+              example:
+                success: true
+                correlation_id: 'SAGA-A1B2C3D4'
+                estado: 'COMPLETED'
+                total_pagado: 220.00
+                pago:
+                  transaccion_id: 'PAG-TRX-8F9E2A'
+                  monto: 220.00
+                  estado: 'APROBADO'
+                  autorizacion: 'AUTH-994821'
+                  fecha_proceso: '2026-10-24T23:15:30.000Z'
+                items_confirmados:
+                  - servicio: 'MS_ATR'
+                    operacion: 'RESERVAR_ATRACCION'
+                    datos:
+                      reservation_id: 'RES-ATR-12345'
+                      status: 'CONFIRMED'
+                  - servicio: 'MS_AUT'
+                    operacion: 'RESERVAR_AUTO'
+                    datos:
+                      pnr: 'AUT-PNR-7788'
+                      status: 'CONFIRMED'
+                mensaje: 'Checkout compuesto finalizado exitosamente. Saga completada al 100%.'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '409':
+          description: |
+            Fallo transaccional durante la Saga. Se ejecutó la compensación automática en orden inverso (LIFO)
+            reintegrando inventario y emitiendo el comprobante de reembolso financiero `REF-SAGA-XXXXXX`.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/SagaRollbackProblemDetails'
+              example:
+                type: 'https://booking.epn.edu.ec/errors/saga-rollback'
+                title: 'Transacción Distribuida Cancelada y Compensada (Saga LIFO)'
+                status: 409
+                detail: 'La compra no pudo completarse debido a un fallo en uno de los pasos (Fondos insuficientes en pasarela de pagos). Se ejecutaron las acciones compensatorias automáticas (liberación de stock y reembolso).'
+                instance: '/api/v2/esb/checkout-saga'
+                correlation_id: 'SAGA-E5F6A7B8'
+                codigo_compensacion: 'REF-SAGA-9B2D1F'
+                compensaciones_ejecutadas:
+                  - servicio: 'MS_AUT'
+                    operacion: 'RESERVAR_AUTO'
+                    estado: 'COMPENSATED'
+                    resultado:
+                      pnr: 'AUT-PNR-7788'
+                      status: 'CANCELLED'
+                  - servicio: 'MS_ATR'
+                    operacion: 'RESERVAR_ATRACCION'
+                    estado: 'COMPENSATED'
+                    resultado:
+                      reservation_id: 'RES-ATR-12345'
+                      status: 'CANCELLED'
+                timestamp: '2026-10-24T23:16:00.000Z'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /esb/sagas/{correlationId}:
+    get:
+      tags:
+        - Observabilidad y Auditoría
+      summary: Consultar bitácora y pasos ejecutados de una transacción Saga por Correlation-ID
+      description: |
+        Retorna la entidad maestra de la transacción almacenada en `schema_auditoria.saga_transacciones`
+        y su bitácora cronológica paso a paso desde `schema_auditoria.saga_pasos_journal`.
+      operationId: getSaga
+      x-source: 'src/modules/esb/esb.controller.ts#getSaga'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security: []
+      parameters:
+        - name: correlationId
+          in: path
+          required: true
+          description: Correlation-ID de la Saga generado al inicio del checkout (ej. `SAGA-A1B2C3D4`).
+          schema:
+            type: string
+            example: SAGA-A1B2C3D4
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Estado consolidado de la Saga y desglose de todos los pasos ejecutados.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaDetalleResponse'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /esb/sagas:
+    get:
+      tags:
+        - Observabilidad y Auditoría
+      summary: Listar transacciones Saga recientes para el Panel 8 de Auditoría y Sagas
+      description: |
+        Devuelve el listado de transacciones Saga ordenadas por fecha de inicio descendente.
+        Utilizado por la consola de auditoría para verificar compras exitosas y transacciones compensadas.
+      operationId: listarSagas
+      x-source: 'src/modules/esb/esb.controller.ts#listarSagas'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Número máximo de registros a recuperar (por defecto 20).
+          schema:
+            type: integer
+            default: 20
+            example: 20
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista de transacciones Saga recientes.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SagaTransaccion'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /esb/sagas/{correlationId}/traza:
+    get:
+      tags:
+        - Observabilidad y Auditoría
+      summary: Visualizar grafo interactivo y árbol de spans OpenTelemetry de la Saga
+      description: |
+        Endpoint planificado para satisfacer el requisito de la cátedra (§6.5 y Semana 8)
+        referente al **Dashboard de Monitoreo Tipo Grafo**. Transforma los registros planos del
+        journal relacional en una estructura de grafo con nodos activos en verde (🟢), nodos
+        fallidos en rojo (🔴), aristas de transición / compensación y árbol de spans W3C Trace Context.
+      operationId: obtenerTrazaGrafoSaga
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_AUD
+      security: []
+      parameters:
+        - name: correlationId
+          in: path
+          required: true
+          description: Correlation-ID de la Saga a renderizar en formato de grafo y trazas.
+          schema:
+            type: string
+            example: SAGA-A1B2C3D4
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Grafo estructurado con nodos semafóricos, aristas de flujo y spans distribuidos.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaGrafoTrazaResponse'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /esb/aggregate/mis-reservas/{cliente}:
+    get:
+      tags:
+        - Vistas Agregadas (Anti-JOIN)
+      summary: 'Sustituto oficial de SQL JOINs: Agregación en memoria de reservas multivertical'
+      description: |
+        Consulta de manera concurrente (`Promise.all`) a los esquemas independientes
+        `schema_atracciones`, `schema_autos`, `schema_alojamientos` y `schema_vuelos`
+        sin ejecutar sentencias SQL JOIN entre esquemas prohibidas por la cátedra (Criterio CE02).
+        Retorna la vista unificada del cliente en el portal 'Mis Reservas'.
+      operationId: getMisReservasAgregadas
+      x-source: 'src/modules/esb/esb.controller.ts#getMisReservasAgregadas'
+      x-status: implemented
+      x-microservice: ORQ_RES
+      security: []
+      parameters:
+        - name: cliente
+          in: path
+          required: true
+          description: Identificador UUID o dirección de correo electrónico del cliente titular.
+          schema:
+            type: string
+            example: turista.ejemplo@epn.edu.ec
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Vista consolidada en memoria de todas las reservas del cliente en las 4 tiendas.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateBookingView'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /esb/aggregate/facturas/{facturaId}:
+    get:
+      tags:
+        - Vistas Agregadas (Anti-JOIN)
+      summary: Ensamblar factura y detalle de ítems sin cross-schema SQL JOINs
+      description: |
+        Recupera el encabezado fiscal en `schema_facturacion.facturas_encabezado`,
+        el detalle de renglones en `schema_facturacion.facturas_detalle` y los datos del
+        comprador en `schema_clientes.clientes` mediante consultas desacopladas,
+        garantizando total aislamiento relacional sin llaves foráneas entre esquemas.
+      operationId: getFacturaCompleta
+      x-source: 'src/modules/esb/esb.controller.ts#getFacturaCompleta'
+      x-status: implemented
+      x-microservice: ORQ_FAC
+      security: []
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          description: Identificador UUID de la factura fiscal emitida.
+          schema:
+            type: string
+            format: uuid
+            example: a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Factura ensamblada con desglose fiscal del 15% IVA y detalle de ítems.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaCompletaView'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+components:
+
+  schemas:
+
+    CheckoutSagaInput:
+      type: object
+      description: DTO de entrada para disparar el flujo transaccional orquestado de compra compuesta.
+      required:
+        - cliente_email
+        - cliente_nombre
+        - items
+      properties:
+        cliente_id:
+          type: string
+          description: Identificador UUID del cliente en `schema_clientes.clientes` (opcional si es compra anónima o nueva).
+          example: 550e8400-e29b-41d4-a716-446655440000
+        cliente_email:
+          type: string
+          format: email
+          description: Correo electrónico del cliente titular para confirmación y emisión de comprobantes.
+          example: turista.ejemplo@epn.edu.ec
+        cliente_nombre:
+          type: string
+          description: Nombre completo del cliente para registros de pasajeros, reservas y conductores.
+          example: Alejandro Flores
+        metodo_pago:
+          type: string
+          description: Método de pago seleccionado para procesar en `MS_PAG`.
+          enum: [TARJETA_CREDITO, TARJETA_DEBITO, TRANSFERENCIA]
+          default: TARJETA_CREDITO
+          example: TARJETA_CREDITO
+        numero_tarjeta:
+          type: string
+          description: Número de tarjeta de crédito/débito para la pasarela simulada.
+          example: '4111222233334444'
+        items:
+          type: array
+          description: Lista de servicios turísticos a reservar en cada tienda satélite.
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CheckoutSagaItemInput'
+        simular_fallo_en_paso:
+          type: string
+          description: |
+            Parámetro para inyección de fallos controlados exigido por la cátedra para evaluar
+            la resiliencia y el rollback compensatorio LIFO.
+            - `PAGO_RECHAZADO`: Simula rechazo por falta de fondos en `MS_PAG`.
+            - `PAGO_TIMEOUT`: Simula timeout de red en la pasarela de pagos.
+            - `INVENTARIO_AGOTADO`: Simula falta de stock en el último ítem turístico de la orden.
+          enum: [PAGO_RECHAZADO, PAGO_TIMEOUT, INVENTARIO_AGOTADO]
+          nullable: true
+          example: null
+
+    CheckoutSagaItemInput:
+      type: object
+      description: Ítem individual perteneciente a una de las 4 verticales turísticas.
+      required:
+        - vertical
+        - item_id
+        - nombre
+        - cantidad
+        - precio_unitario
+      properties:
+        vertical:
+          type: string
+          description: Tienda o vertical a la que pertenece el ítem.
+          enum: [ATRACCIONES, AUTOS, ALOJAMIENTOS, VUELOS, PAQUETES]
+          example: ATRACCIONES
+        item_id:
+          type: string
+          description: Identificador único del servicio (ID atracción, ID vehículo, ID habitación o ID vuelo).
+          example: 8a9b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d
+        nombre:
+          type: string
+          description: Nombre descriptivo del producto o servicio.
+          example: Tour Histórico Centro de Quito
+        cantidad:
+          type: integer
+          description: Cantidad de boletos, días de renta de auto o cupos requeridos.
+          minimum: 1
+          example: 2
+        precio_unitario:
+          type: number
+          description: Precio unitario pactado para el ítem.
+          minimum: 0
+          example: 35.00
+        detalles_reserva:
+          type: object
+          description: Metadatos específicos de la reserva (fechas, turnos horarios, etc.).
+          example:
+            date: '2026-11-15'
+            time: '10:00 a.m.'
+
+    CheckoutSagaSuccessResponse:
+      type: object
+      description: Respuesta devuelta tras la culminación exitosa de la transacción distribuida al 100%.
+      required:
+        - success
+        - correlation_id
+        - estado
+        - total_pagado
+        - pago
+        - items_confirmados
+        - mensaje
+      properties:
+        success:
+          type: boolean
+          example: true
+        correlation_id:
+          type: string
+          description: Correlation-ID unívoco generado para la Saga (ej. `SAGA-A1B2C3D4`).
+          example: SAGA-A1B2C3D4
+        estado:
+          type: string
+          enum: [COMPLETED]
+          example: COMPLETED
+        total_pagado:
+          type: number
+          description: Importe final cobrado en la pasarela de pagos.
+          example: 220.00
+        pago:
+          type: object
+          description: Detalle de la transacción confirmada emitida por `MS_PAG`.
+          properties:
+            transaccion_id:
+              type: string
+              example: PAG-TRX-8F9E2A
+            monto:
+              type: number
+              example: 220.00
+            estado:
+              type: string
+              example: APROBADO
+            autorizacion:
+              type: string
+              example: AUTH-994821
+            fecha_proceso:
+              type: string
+              format: date-time
+              example: '2026-10-24T23:15:30.000Z'
+        items_confirmados:
+          type: array
+          description: Lista de confirmaciones emitidas por cada vertical turística.
+          items:
+            type: object
+            required:
+              - servicio
+              - operacion
+              - datos
+            properties:
+              servicio:
+                type: string
+                example: MS_ATR
+              operacion:
+                type: string
+                example: RESERVAR_ATRACCION
+              datos:
+                type: object
+                description: Payload retornado por el microservicio correspondiente.
+        mensaje:
+          type: string
+          example: Checkout compuesto finalizado exitosamente. Saga completada al 100%.
+
+    SagaRollbackProblemDetails:
+      type: object
+      description: |
+        Documento de error RFC 7807 enriquecido con la información del rollback compensatorio LIFO
+        ejecutado por la Saga ante un fallo transaccional.
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+        - correlation_id
+        - codigo_compensacion
+        - compensaciones_ejecutadas
+        - timestamp
+      properties:
+        type:
+          type: string
+          example: 'https://booking.epn.edu.ec/errors/saga-rollback'
+        title:
+          type: string
+          example: Transacción Distribuida Cancelada y Compensada (Saga LIFO)
+        status:
+          type: integer
+          example: 409
+        detail:
+          type: string
+          example: La compra no pudo completarse debido a un fallo en uno de los pasos. Se ejecutaron las acciones compensatorias automáticas.
+        instance:
+          type: string
+          example: /api/v2/esb/checkout-saga
+        correlation_id:
+          type: string
+          example: SAGA-E5F6A7B8
+        codigo_compensacion:
+          type: string
+          description: Código identificador formal de la compensación (ej. `REF-SAGA-XXXXXX`).
+          example: REF-SAGA-9B2D1F
+        compensaciones_ejecutadas:
+          type: array
+          description: Bitácora de las operaciones compensadas en orden inverso (LIFO).
+          items:
+            $ref: '#/components/schemas/CompensacionEjecutada'
+        timestamp:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:16:00.000Z'
+
+    CompensacionEjecutada:
+      type: object
+      description: Registro de compensación ejecutada sobre un microservicio individual.
+      required:
+        - servicio
+        - operacion
+        - estado
+        - resultado
+      properties:
+        servicio:
+          type: string
+          description: Código del microservicio compensado (ej. `MS_ATR`, `MS_AUT`, `MS_PAG`).
+          example: MS_AUT
+        operacion:
+          type: string
+          description: Operación compensatoria ejecutada.
+          example: RESERVAR_AUTO
+        estado:
+          type: string
+          enum: [COMPENSATED]
+          example: COMPENSATED
+        resultado:
+          type: object
+          description: Respuesta recibida al ejecutar la función compensatoria.
+
+    SagaDetalleResponse:
+      type: object
+      description: Vista consolidada de la transacción Saga y su bitácora journal relacional.
+      required:
+        - saga
+        - journal
+      properties:
+        saga:
+          $ref: '#/components/schemas/SagaTransaccion'
+        journal:
+          type: array
+          description: Pasos registrados secuencialmente en `schema_auditoria.saga_pasos_journal`.
+          items:
+            $ref: '#/components/schemas/SagaPasoJournal'
+
+    SagaTransaccion:
+      type: object
+      description: Entidad maestra de la Saga en `schema_auditoria.saga_transacciones`.
+      required:
+        - id
+        - correlationId
+        - sagaNombre
+        - estado
+        - pasosTotales
+        - pasoActual
+        - iniciadaAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: c9d0e1f2-3a4b-5c6d-7e8f-9a0b1c2d3e4f
+        correlationId:
+          type: string
+          description: Identificador de correlación unívoco de la transacción.
+          example: SAGA-A1B2C3D4
+        sagaNombre:
+          type: string
+          example: SAGA_CHECKOUT_MULTIDOMINIO
+        estado:
+          type: string
+          enum: [IN_PROGRESS, COMPLETED, COMPENSATING, FAILED]
+          example: COMPLETED
+        pasosTotales:
+          type: integer
+          description: Número total de pasos previstos en la orquestación.
+          example: 4
+        pasoActual:
+          type: integer
+          description: Último paso procesado o en ejecución.
+          example: 4
+        errorDetalle:
+          type: string
+          nullable: true
+          description: Mensaje de error capturado en caso de fallo transaccional.
+          example: null
+        codigoCompensacion:
+          type: string
+          nullable: true
+          description: Código de compensación emitido ante rollback (ej. `REF-SAGA-XXXXXX`).
+          example: null
+        iniciadaAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:15:00.000Z'
+        finalizadaAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-24T23:15:35.000Z'
+
+    SagaPasoJournal:
+      type: object
+      description: Registro individual de paso transaccional en `schema_auditoria.saga_pasos_journal`.
+      required:
+        - id
+        - sagaId
+        - ordenEjecucion
+        - servicioNombre
+        - operacion
+        - endpointInvocado
+        - estadoPaso
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: f1e2d3c4-b5a6-7890-1234-56789abcdef0
+        sagaId:
+          type: string
+          format: uuid
+          example: c9d0e1f2-3a4b-5c6d-7e8f-9a0b1c2d3e4f
+        ordenEjecucion:
+          type: integer
+          description: Posición secuencial del paso (1, 2, 3...).
+          example: 1
+        servicioNombre:
+          type: string
+          description: Nombre del microservicio invocado.
+          example: MS_ATR
+        operacion:
+          type: string
+          description: Nombre de la operación de negocio ejecutada.
+          example: RESERVA_ATRACCIONES
+        endpointInvocado:
+          type: string
+          description: Ruta HTTP REST interna invocada por el orquestador.
+          example: /api/v2/atracciones/reservas
+        payloadEnviado:
+          type: object
+          nullable: true
+          description: Copia estructurada del cuerpo enviado.
+        respuestaRecibida:
+          type: object
+          nullable: true
+          description: Copia estructurada de la respuesta devuelta por el microservicio.
+        estadoPaso:
+          type: string
+          enum: [SUCCESS, FAILED, COMPENSATED]
+          example: SUCCESS
+        compensacionEndpoint:
+          type: string
+          nullable: true
+          description: Endpoint registrado para ejecutar la compensación si fuese necesaria.
+          example: null
+        compensacionPayload:
+          type: object
+          nullable: true
+          description: Parámetros necesarios para revertir el paso.
+          example: null
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:15:05.000Z'
+
+    AggregateBookingView:
+      type: object
+      description: Vista unificada multimodal de reservas ensamblada en memoria sin JOINs relacionales.
+      required:
+        - cliente_id
+        - reservas_atracciones
+        - reservas_autos
+        - reservas_alojamientos
+        - reservas_vuelos
+        - total_reservas_activas
+      properties:
+        cliente_id:
+          type: string
+          description: Identificador o email consultado.
+          example: turista.ejemplo@epn.edu.ec
+        cliente_email:
+          type: string
+          format: email
+          nullable: true
+          description: Dirección de correo identificada.
+          example: turista.ejemplo@epn.edu.ec
+        reservas_atracciones:
+          type: array
+          description: Reservas activas en `schema_atracciones.atracciones_reservas`.
+          items:
+            $ref: '#/components/schemas/ReservaAtraccionSummary'
+        reservas_autos:
+          type: array
+          description: Reservas activas en `schema_autos.autos_reservas`.
+          items:
+            $ref: '#/components/schemas/ReservaAutoSummary'
+        reservas_alojamientos:
+          type: array
+          description: Reservas activas en `schema_alojamientos.alojamientos_reservas`.
+          items:
+            $ref: '#/components/schemas/ReservaAlojamientoSummary'
+        reservas_vuelos:
+          type: array
+          description: Reservas activas en `schema_vuelos.vuelos_reservas`.
+          items:
+            $ref: '#/components/schemas/ReservaVueloSummary'
+        total_reservas_activas:
+          type: integer
+          description: Total consolidado de reservas activas en todas las tiendas.
+          example: 4
+
+    ReservaAtraccionSummary:
+      type: object
+      description: Registro sintético de reserva de atracción turística.
+      required:
+        - id
+        - status
+        - total_price
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d
+        status:
+          type: string
+          example: CONFIRMED
+        total_price:
+          type: number
+          example: 70.00
+        date:
+          type: string
+          format: date
+          example: '2026-11-15'
+        time:
+          type: string
+          example: 10:00 a.m.
+        customer_name:
+          type: string
+          example: Alejandro Flores
+        customer_email:
+          type: string
+          example: turista.ejemplo@epn.edu.ec
+        voucher_qr_payload:
+          type: string
+          description: Payload o identificador para renderizado de código QR presencial.
+          example: QR-ATR-7A8B9C0D
+
+    ReservaAutoSummary:
+      type: object
+      description: Registro sintético de reserva de renta de vehículo.
+      required:
+        - id
+        - estado
+        - total
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 4a5b6c7d-8e9f-0a1b-2c3d-4e5f6a7b8c9d
+        estado:
+          type: string
+          example: CONFIRMADA
+        total:
+          type: number
+          example: 150.00
+        fecha_recogida:
+          type: string
+          format: date-time
+          example: '2026-11-15T09:00:00Z'
+        fecha_devolucion:
+          type: string
+          format: date-time
+          example: '2026-11-18T09:00:00Z'
+        nombre_conductor:
+          type: string
+          example: Alejandro Flores
+        km_salida:
+          type: integer
+          nullable: true
+          example: 45200
+        km_retorno:
+          type: integer
+          nullable: true
+          example: null
+
+    ReservaAlojamientoSummary:
+      type: object
+      description: Registro sintético de reserva hotelera.
+      required:
+        - id
+        - estado
+        - precio_total
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f
+        estado:
+          type: string
+          example: CONFIRMADA
+        precio_total:
+          type: number
+          example: 180.00
+        fecha_checkin:
+          type: string
+          format: date
+          example: '2026-11-15'
+        fecha_checkout:
+          type: string
+          format: date
+          example: '2026-11-18'
+        nombre_titular:
+          type: string
+          example: Alejandro Flores
+        habitacion_asignada:
+          type: string
+          example: Suite Presidencial 402
+        clave_acceso_digital:
+          type: string
+          description: Código digital para cerradura inteligente.
+          example: 994821
+
+    ReservaVueloSummary:
+      type: object
+      description: Registro sintético de boleto aéreo.
+      required:
+        - id
+        - estado
+        - precio_total
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8e9f0a1b-2c3d-4e5f-6a7b-8c9d0e1f2a3b
+        estado:
+          type: string
+          example: EMITIDO
+        precio_total:
+          type: number
+          example: 120.00
+        pasajero_nombre:
+          type: string
+          example: Alejandro Flores
+        asiento_asignado:
+          type: string
+          example: 12A
+        checkin_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    FacturaCompletaView:
+      type: object
+      description: Vista consolidada de factura fiscal con desglose tributario e ítems.
+      required:
+        - factura
+        - cliente
+        - items
+      properties:
+        factura:
+          $ref: '#/components/schemas/FacturaEncabezadoView'
+        cliente:
+          $ref: '#/components/schemas/ClienteFacturaView'
+        items:
+          type: array
+          description: Renglones desglosados en `schema_facturacion.facturas_detalle`.
+          items:
+            $ref: '#/components/schemas/FacturaDetalleItemView'
+
+    FacturaEncabezadoView:
+      type: object
+      description: Encabezado de la factura fiscal.
+      required:
+        - id
+        - numero_factura
+        - fecha_emision
+        - subtotal
+        - iva_15pct
+        - total
+        - estado
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d
+        numero_factura:
+          type: string
+          description: Número secuencial fiscal SRI (ej. `001-001-00000452`).
+          example: '001-001-00000452'
+        fecha_emision:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:15:35.000Z'
+        subtotal:
+          type: number
+          example: 191.30
+        iva_15pct:
+          type: number
+          description: Impuesto al Valor Agregado tarifa 15% (Ecuador).
+          example: 28.70
+        total:
+          type: number
+          example: 220.00
+        estado:
+          type: string
+          enum: [EMITIDA, ANULADA, EN_PROCESO]
+          example: EMITIDA
+        transaccion_pago_id:
+          type: string
+          nullable: true
+          example: PAG-TRX-8F9E2A
+
+    ClienteFacturaView:
+      type: object
+      description: Datos del cliente receptor de la factura fiscal.
+      required:
+        - nombre
+        - email
+        - cedula_ruc
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+          example: 550e8400-e29b-41d4-a716-446655440000
+        nombre:
+          type: string
+          example: Alejandro Flores
+        email:
+          type: string
+          format: email
+          example: turista.ejemplo@epn.edu.ec
+        cedula_ruc:
+          type: string
+          description: Cédula o RUC ecuatoriano del contribuyente.
+          example: '1723456789'
+        telefono:
+          type: string
+          nullable: true
+          example: '+593998765432'
+        direccion:
+          type: string
+          nullable: true
+          example: 'Av. Ladrón de Guevara E11-253, Quito'
+
+    FacturaDetalleItemView:
+      type: object
+      description: Renglón individual de detalle de factura fiscal.
+      required:
+        - id
+        - vertical
+        - descripcion
+        - cantidad
+        - precio_unitario
+        - subtotal
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: d1e2f3a4-b5c6-7a8b-9c0d-1e2f3a4b5c6d
+        vertical:
+          type: string
+          example: ATRACCIONES
+        descripcion:
+          type: string
+          example: 2x Tour Histórico Centro de Quito
+        cantidad:
+          type: integer
+          example: 2
+        precio_unitario:
+          type: number
+          example: 35.00
+        subtotal:
+          type: number
+          example: 70.00
+
+    SagaGrafoTrazaResponse:
+      type: object
+      description: Estructura del grafo de observabilidad y spans de la Saga para el Panel de Monitoreo.
+      required:
+        - correlation_id
+        - trace_id
+        - estado_global
+        - nodos
+        - aristas
+        - spans
+      properties:
+        correlation_id:
+          type: string
+          example: SAGA-A1B2C3D4
+        trace_id:
+          type: string
+          example: 0af7651916cd43dd8448eb211c80319c
+        estado_global:
+          type: string
+          enum: [SUCCESS, FAILED, COMPENSATING]
+          example: SUCCESS
+        nodos:
+          type: array
+          description: Microservicios participantes representados como nodos en el grafo semafórico.
+          items:
+            $ref: '#/components/schemas/NodoGrafoSaga'
+        aristas:
+          type: array
+          description: Conexiones dirigidas entre microservicios (adelante o compensación).
+          items:
+            $ref: '#/components/schemas/AristaGrafoSaga'
+        spans:
+          type: array
+          description: Árbol jerárquico de spans OpenTelemetry para análisis de latencia.
+          items:
+            $ref: '#/components/schemas/SpanSaga'
+
+    NodoGrafoSaga:
+      type: object
+      description: Nodo individual dentro del grafo de la Saga.
+      required:
+        - id
+        - servicio
+        - nombre
+        - estado
+        - latencia_ms
+      properties:
+        id:
+          type: string
+          example: node-ms-atr
+        servicio:
+          type: string
+          example: MS_ATR
+        nombre:
+          type: string
+          example: Microservicio Atracciones
+        estado:
+          type: string
+          enum: [GREEN, YELLOW, RED]
+          example: GREEN
+        latencia_ms:
+          type: integer
+          example: 85
+        error:
+          type: string
+          nullable: true
+          example: null
+
+    AristaGrafoSaga:
+      type: object
+      description: Enlace dirigido entre dos nodos en el grafo de la Saga.
+      required:
+        - origen
+        - destino
+        - tipo
+      properties:
+        origen:
+          type: string
+          example: node-orq-res
+        destino:
+          type: string
+          example: node-ms-atr
+        tipo:
+          type: string
+          enum: [FORWARD, COMPENSATION]
+          example: FORWARD
+
+    SpanSaga:
+      type: object
+      description: Registro de span OpenTelemetry para trazabilidad distribuida.
+      required:
+        - span_id
+        - operacion
+        - duracion_ms
+        - status_code
+      properties:
+        span_id:
+          type: string
+          example: b7ad6b7169203331
+        parent_span_id:
+          type: string
+          nullable: true
+          example: null
+        operacion:
+          type: string
+          example: RESERVAR_ATRACCION
+        duracion_ms:
+          type: integer
+          example: 85
+        status_code:
+          type: integer
+          example: 200

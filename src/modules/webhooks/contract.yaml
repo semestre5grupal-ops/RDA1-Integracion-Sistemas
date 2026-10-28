@@ -1,0 +1,651 @@
+openapi: 3.0.3
+info:
+  title: Receptor de Webhooks de Tiendas Externas (Inbound) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    Contrato OpenAPI 3.0.3 formal para el **Receptor de Webhooks Inbound** de Booking Prototipo (RDA2).
+    Este contrato diseña la interfaz canónica mediante la cual las tiendas socias externas
+    (Vuelos, Renta de Autos, Atracciones Turísticas y Alojamientos) notifican al agregador central
+    sobre hechos ocurridos en sus dominios (emisión de tickets, confirmaciones, cancelaciones, cambios
+    de itinerario, activación de cooldowns y alertas técnicas).
+
+    > **Estado de Implementación:** El receptor y la consulta de entregas se implementaron en
+    > `src/modules/webhooks/` (I07). Las reacciones de negocio específicas de cada vertical permanecen
+    > pendientes y los eventos recibidos se publican en RabbitMQ.
+
+    ---
+
+    ## 1. Propósito y Arquitectura Inbound
+
+    En la arquitectura orientada a eventos (EDA) de Booking RDA2, las tiendas socias operan como
+    productores de eventos de dominio. Aunque Booking realiza orquestación síncrona para el checkout
+    (REST HATEOAS), la conciliación asíncrona, las contingencias y las actualizaciones de estado
+    requieren que las tiendas empujen notificaciones push hacia el Gateway central:
+
+    ```
+    ┌─────────────────────────┐          HTTP POST CloudEvent           ┌─────────────────────────┐
+    │  Tiendas Externas       │ ──────────────────────────────────────> │  Booking Gateway        │
+    │  (Vuelos, Autos, etc.)  │    X-Webhook-Signature: sha256=...     │  POST /webhooks/{vert}  │
+    └─────────────────────────┘                                         └───────────┬─────────────┘
+                                                                                    │
+                                                                           Valida Firma HMAC
+                                                                           Deduplica Event ID
+                                                                                    │
+                                                                                    ▼
+                                                                           HTTP 202 Accepted (<1s)
+                                                                                    │
+                                                                                    ▼
+                                                                        Publica a RabbitMQ / Kafka
+    ```
+
+    ---
+
+    ## 2. Protocolo Criptográfico de Autenticidad (HMAC-SHA256)
+
+    Para garantizar que ningún atacante anónimo inyecte eventos ficticios de confirmación o cancelación:
+    1. **Cabecera Obligatoria:** Toda petición debe incluir `X-Webhook-Signature`.
+    2. **Algoritmo:** HMAC con función hash SHA-256 sobre el cuerpo **crudo** (raw body en bytes UTF-8)
+       de la petición HTTP.
+    3. **Formato:** `X-Webhook-Signature: sha256=<hex_digest_64_caracteres>`.
+    4. **Secreto Compartido:** Cada vertical configura su secreto con `WEBHOOK_SECRET_{VERTICAL}`,
+       referenciado desde el entorno (mínimo 16 caracteres); el secreto nunca se almacena en la bitácora.
+    5. **Validación:**
+       ```javascript
+       const hashEsperado = 'sha256=' + crypto.createHmac('sha256', secretProveedor)
+                                              .update(rawBodyBuffer)
+                                              .digest('hex');
+       const esValido = crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(hashEsperado));
+       ```
+    6. **Rechazo Inmediato:** Si la cabecera falta, está mal formada o el hash no coincide con tiempo constante,
+       Booking responde inmediatamente **HTTP 401 Unauthorized** (`RFC 7807 Problem Details`).
+
+    ---
+
+    ## 3. Estándar de Mensajes: CloudEvents v1.0
+
+    Todo evento inbound debe ser entregado bajo la especificación **CloudEvents v1.0** estructurada:
+    - **Content-Type:** `application/cloudevents+json; charset=utf-8`.
+    - **Atributos Obligatorios:** `specversion: "1.0"`, `id` (UUID v4 único del evento), `source` (URI del emisor),
+      `type` (nombre semántico del evento), `time` (marca temporal UTC ISO 8601), `datacontenttype`.
+    - **Extensiones de Trazabilidad:**
+      - `correlationid`: Identificador universal del proceso de negocio (UUID o `corr-*`).
+      - `traceparent`: Encabezado de trazabilidad distribuida W3C (`00-<trace_id>-<span_id>-<flags>`).
+
+    ---
+
+    ## 4. Idempotencia y SLA de Respuesta Rápida (< 1 s)
+
+    Debido a la naturaleza de red no confiable de los webhooks, los emisores aplicarán reintentos automáticos
+    ante fallas temporales. Para garantizar alta disponibilidad:
+    1. **Deduplicación por `id` de Evento:** Booking almacena los IDs de eventos procesados en una caché
+       de alta velocidad (Redis / tabla de entregas).
+    2. **Evento Repetido:** Si se recibe un `id` previamente procesado, Booking responde **HTTP 200 OK**
+       con la cabecera `Idempotent-Replayed: true`, descartando el re-procesamiento.
+    3. **SLA de Respuesta Asíncrona (< 1,000 ms):** Para no bloquear los workers de las tiendas socias
+       ni causar falsos timeouts, el endpoint valida la firma, persiste la entrega y responde
+       inmediatamente **HTTP 202 Accepted**. La ejecución de la lógica de negocio se delega a colas
+       de RabbitMQ de forma totalmente asíncrona.
+
+    ---
+
+    ## 5. Matriz de Reacciones de Booking ante Eventos de Dominio
+
+    | Evento Recibido | Vertical | Reacción de Booking en el Ecosistema | Estado en Booking |
+    |---|---|---|:---:|
+    | `booking.ticket_issued` | Vuelos | Confirmar paquete completo, generar PDF y enviar comprobante por correo | `planned` |
+    | `flight.status_changed` | Vuelos | Notificar al cliente; si el vuelo se retrasa > 4h, ajustar turnos de autos y hotel | `planned` |
+    | `flight.cancelled` | Vuelos | Disparar Saga de compensación: reembolso de vuelo y cancelación de reservas enlazadas | `planned` |
+    | `hold.expired` | Vuelos | Liberar reserva temporal de asientos y limpiar el ítem del carrito de compras (`MS_CAR`) | `planned` |
+    | `auto.order.confirmed` | Autos | Vincular voucher QR al expediente de la reserva y notificar a finanzas para liquidación | `planned` |
+    | `auto.order.cancelled` | Autos | Reversar pago en pasarela (`MS_PAG`) y recalcular comisiones quincenales (`MS_FIN`) | `planned` |
+    | `auto.cleaning.cooldown.started` | Autos | Ocultar inmediatamente el vehículo del catálogo público durante las 2 horas reglamentarias | `planned` |
+    | `auto.mantenimiento.alerta` | Autos | Emitir alerta al Panel 1 y Panel 2 de administración para retiro preventivo de la flota | `planned` |
+    | `atraccion.order.confirmed` | Atracciones | Asignar código PNR y generar pase digital de acceso para check-in con guía | `planned` |
+    | `atraccion.order.cancelled` | Atracciones | Reintegrar cupos al aforo del turno y emitir nota de crédito al cliente | `planned` |
+    | `hotel.order.confirmed` | Alojamientos | Bloquear habitación en catálogo local y emitir confirmación de estancia | `planned` |
+    | `hotel.order.cancelled` | Alojamientos | Liberar fechas en calendario de reservas y conciliar penalidades por política | `planned` |
+
+    ---
+
+    ## 6. Tabla de Equivalencias de Nomenclatura entre Tiendas
+
+    Cada equipo socio estructuró nombres de eventos con convenciones semánticas divergentes:
+
+    | Concepto Canónico de Negocio | Vertical Vuelos (`contracts/vuelos-openapi-v2.yaml`) | Vertical Autos (`contracts/autos-openapi-v2.yaml`) | Vertical Atracciones (`contracts/atracciones-openapi-v2.yaml`) | Vertical Alojamientos (`contracts/alojamientos-openapi.yaml`) |
+    |---|---|---|---|---|
+    | **Reserva Confirmada** | `booking.confirmed` / `booking.ticket_issued` | `auto.order.confirmed` | `atraccion.order.confirmed` | `hotel.order.confirmed` |
+    | **Cancelación / Reversión** | `booking.cancelled` | `auto.order.cancelled` | `atraccion.order.cancelled` | `hotel.order.cancelled` |
+    | **Expiración de Bloqueo** | `hold.expired` | n/a (reserva directa) | `atraccion.hold.expired` | `hotel.hold.expired` |
+    | **Alerta Operativa / Falla**| `flight.status_changed` | `auto.mantenimiento.alerta` | `atraccion.aforo.agotado` | `hotel.room.unavailable` |
+    | **Transición de Estado** | `booking.checked_in` | `auto.cleaning.cooldown.started` | `atraccion.checked_in` | `hotel.guest.checked_in` |
+
+    ---
+
+    ## 7. Política de Reintentos del Emisor y Respaldo Outbox
+
+    - **Backoff Exponencial del Emisor:** Conforme al estándar de vuelos (`contracts/vuelos-openapi-v2.yaml`),
+      el proveedor reintentará la entrega ante respuestas 4xx/5xx o timeouts con los siguientes intervalos:
+      `1 min`, `5 min`, `30 min`, `2 horas`, `6 horas`.
+    - **Feed de Respaldo Outbox:** Si la entrega falla definitivamente tras los 5 reintentos, el evento
+      permanece persistido en el feed Outbox del socio (ej. `GET /{vertical}/eventos`), desde donde
+      el job de reconciliación nocturna de Booking puede auditar y recuperar las pérdidas.
+
+    ---
+
+    ## 8. Registro de Suscripciones y Persistencia de Secretos
+
+    - **Registro de la Suscripción:** Booking se suscribe automáticamente invocando el endpoint
+      `POST /{vertical}/webhooks` expuesto por la tienda externa, transmitiendo:
+      ```json
+      {
+        "url": "https://rda1-backend-integracion-sistemas.onrender.com/api/v2/webhooks/{vertical}",
+        "events": ["booking.confirmed", "booking.cancelled", "flight.status_changed"],
+        "secret": "clave_hmac_aleatoria_minimo_32_bytes"
+      }
+      ```
+    - **Propuesta de Persistencia en Base de Datos (Hallazgo H-P09-02):** Se propone ampliar la tabla
+      `schema_proveedores.config_proveedor` añadiendo los campos:
+      - `webhook_secret`: Hash o clave cifrada para verificación de firma.
+      - `webhook_url`: URL de callback registrada.
+      - `webhook_activo`: Booleano para control de recepción.
+
+      **Implementación I07:** Los secretos no se guardan en `ConfigProveedor`; se referencian desde
+      `WEBHOOK_SECRET_VUELOS`, `WEBHOOK_SECRET_AUTOS`, `WEBHOOK_SECRET_ATRACCIONES` y
+      `WEBHOOK_SECRET_ALOJAMIENTOS`. La migración de I07 crea únicamente la bitácora durable de entregas.
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: API Gateway Booking — Desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: API Gateway Booking — Producción Render
+
+tags:
+  - name: Receptor Inbound de Webhooks
+    description: Recepción y validación criptográfica de eventos CloudEvents emitidos por las tiendas externas
+  - name: Auditoría y Entregas de Webhooks
+    description: Consulta administrativa del historial de eventos recibidos, firmas y estados de entrega
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. RECEPTOR DE WEBHOOKS INBOUND
+  # ─────────────────────────────────────────────────────────────────────────────
+  /webhooks/{vertical}:
+    post:
+      tags:
+        - Receptor Inbound de Webhooks
+      summary: Recibir y encolar evento CloudEvent emitido por una tienda socia externa
+      description: |
+        Punto de entrada universal para la entrega de webhooks desde las cuatro tiendas externas.
+        El parámetro de ruta `{vertical}` identifica el dominio emisor (`vuelos`, `autos`, `atracciones`, `alojamientos`).
+
+        ### Flujo de Ejecución del Receptor:
+        1. **Validación de Vertical:** Verifica que `{vertical}` pertenezca al catálogo permitido (404 si no existe).
+        2. **Verificación Criptográfica:** Obtiene el secreto de proveedor desde `WEBHOOK_SECRET_{VERTICAL}`
+           y valida la cabecera `X-Webhook-Signature` con HMAC-SHA256 en tiempo constante (401 si no coincide).
+        3. **Control de Idempotencia:** Consulta la bitácora durable `schema_auditoria.webhook_entregas` por `event_id`:
+           - Si ya fue procesado: Responde **200 OK** con cabecera `Idempotent-Replayed: true`.
+           - Si es nuevo: Persiste la entrega, publica el evento asíncronamente a RabbitMQ
+             (`booking.webhooks.inbound.{vertical}`) y responde **202 Accepted**.
+        4. Rechaza cuerpos mayores de 1 MB (413) y limita cada IP a 60 solicitudes por minuto (429).
+      operationId: recibirWebhookVertical
+      x-source: 'src/modules/webhooks/webhooks.controller.ts'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - WebhookHmacSignature: []
+      parameters:
+        - name: vertical
+          in: path
+          required: true
+          description: Identificador de la vertical del microservicio socio emisor.
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, alojamientos]
+            example: vuelos
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          description: |
+            Firma HMAC-SHA256 del cuerpo crudo de la petición generada con el secreto compartido del socio.
+            Formato: `sha256=<64_hex_caracteres>`.
+          schema:
+            type: string
+            pattern: '^sha256=[a-f0-9]{64}$'
+            example: 'sha256=a35b1287c9f809d43528b97b0a72382cf89312e0984572c69134a8e235d90184'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+        - $ref: './common/components-v2.yaml#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        description: Notificación estructurada CloudEvents v1.0 serializada en JSON.
+        content:
+          application/cloudevents+json:
+            schema:
+              $ref: '#/components/schemas/InboundCloudEvent'
+            examples:
+              EventoVuelosConfirmado:
+                summary: Vuelos — Emisión de billete confirmada (booking.ticket_issued)
+                value:
+                  specversion: '1.0'
+                  id: '7b8c9d0e-1f2a-4b3c-9d0e-1f2a3b4c5d6e'
+                  source: 'https://vuelos.booking.epn.edu.ec'
+                  type: 'ec.edu.epn.booking.vuelos.booking.ticket_issued'
+                  subject: 'reserva/vuelo/VUE-2026-9921'
+                  time: '2026-10-24T22:30:00.000Z'
+                  datacontenttype: 'application/json'
+                  correlationid: 'corr-1729810400000-a3f7b2c'
+                  traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'
+                  node_id: 'NODE_VUE_CENTRAL'
+                  data:
+                    reserva_id: 'VUE-2026-9921'
+                    codigo_pnr: 'EC9921'
+                    estado: 'EMITIDO'
+                    pasajero:
+                      nombre: 'Carlos Mendoza'
+                      cedula: '1712345678'
+                    vuelo:
+                      numero_vuelo: 'EQ-312'
+                      origen: 'UIO'
+                      destino: 'GYE'
+                      asiento: '12A'
+                    total: 125.50
+                    moneda: 'USD'
+              EventoAutosCooldown:
+                summary: Autos — Inicio de cooldown de limpieza de 2 horas (auto.cleaning.cooldown.started)
+                value:
+                  specversion: '1.0'
+                  id: '3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f'
+                  source: 'https://renta-autos.ec/api/v2'
+                  type: 'auto.cleaning.cooldown.started'
+                  subject: 'vehiculo/auto-spark-01'
+                  time: '2026-10-24T22:35:00.000Z'
+                  datacontenttype: 'application/json'
+                  correlationid: 'corr-1729810400000-a3f7b2c'
+                  traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'
+                  node_id: 'NODE_AUT_LOCAL'
+                  data:
+                    vehiculo_id: 'auto-spark-01'
+                    placa: 'PBX-1234'
+                    estado_operativo: 'EN_LIMPIEZA'
+                    cooldown_segundos: 7200
+                    disponible_desde: '2026-10-25T00:35:00.000Z'
+                    km_retorno: 45210
+              EventoAtraccionesCancelado:
+                summary: Atracciones — Cancelación de turno turístico (atraccion.order.cancelled)
+                value:
+                  specversion: '1.0'
+                  id: '9f0a1b2c-3d4e-5f6a-7b8c-9d0e1f2a3b4c'
+                  source: 'https://descubreec.com/api/v2'
+                  type: 'atraccion.order.cancelled'
+                  subject: 'reserva/atraccion/res-dec-9921'
+                  time: '2026-10-24T22:40:00.000Z'
+                  datacontenttype: 'application/json'
+                  correlationid: 'corr-1729810400000-a3f7b2c'
+                  traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'
+                  node_id: 'NODE_ATR_DILAN'
+                  data:
+                    reserva_id: 'res-dec-9921'
+                    atraccion_id: 'PRhu4UBTWPBC'
+                    motivo: 'Cancelación voluntaria por el cliente dentro del plazo'
+                    cupos_liberados: 2
+                    reembolso_autorizado: true
+      responses:
+        '202':
+          description: |
+            Evento aceptado, firma verificada e ingresado exitosamente a la cola asíncrona de procesamiento.
+            Garantiza tiempo de respuesta inferior a 1 segundo para evitar reintentos del emisor.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAcceptedResponse'
+        '200':
+          description: |
+            Evento previamente procesado y deduplicado con éxito por `id` (Idempotencia).
+            Se responde confirmación al emisor sin re-ejecutar acciones de negocio.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+            Idempotent-Replayed:
+              $ref: './common/components-v2.yaml#/components/headers/Idempotent-Replayed'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookDeduplicatedResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          description: No autorizado — cabecera `X-Webhook-Signature` ausente o no coincide con el HMAC-SHA256 calculado.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/401'
+                title: Invalid Webhook Signature
+                status: 401
+                detail: 'La firma HMAC-SHA256 en X-Webhook-Signature no es válida para el socio vuelos.'
+                instance: '/webhooks/vuelos'
+                correlation_id: 'corr-1729810400000-a3f7b2c'
+                timestamp: '2026-10-24T22:30:00.000Z'
+        '404':
+          description: Vertical no encontrada — no existe un socio registrado para la vertical solicitada.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/404'
+                title: Unknown Vertical
+                status: 404
+                detail: "La vertical 'cruceros' no está registrada en el ecosistema Booking."
+                instance: '/webhooks/cruceros'
+                correlation_id: 'corr-1729810400000-a3f7b2c'
+                timestamp: '2026-10-24T22:30:00.000Z'
+        '413':
+          description: Carga útil demasiado grande — el cuerpo del evento excede el límite máximo permitido (1 MB).
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/413'
+                title: Payload Too Large
+                status: 413
+                detail: 'El cuerpo del CloudEvent excede el tamaño máximo permitido de 1MB.'
+                instance: '/webhooks/vuelos'
+                correlation_id: 'corr-1729810400000-a3f7b2c'
+                timestamp: '2026-10-24T22:30:00.000Z'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. AUDITORÍA DE ENTREGAS DE WEBHOOKS (ADMIN)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /webhooks/{vertical}/entregas:
+    get:
+      tags:
+        - Auditoría y Entregas de Webhooks
+      summary: Consultar historial y estado de entregas de webhooks recibidos (Admin)
+      description: |
+        Permite a los administradores del sistema auditar los eventos recibidos desde una tienda socia,
+        monitorear los estados persistidos (`PROCESADO`, `ERROR`, `EN_COLA`) y verificar los identificadores
+        de correlación y marcas de tiempo. Firmas inválidas se registran en la auditoría de seguridad y
+        los duplicados se reconocen en la respuesta, sin crear una segunda entrega.
+      operationId: listarEntregasWebhooksAdmin
+      x-source: 'src/modules/webhooks/webhooks.controller.ts'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: vertical
+          in: path
+          required: true
+          description: Vertical de negocio a auditar.
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, alojamientos]
+            example: vuelos
+        - name: status
+          in: query
+          required: false
+          description: Filtrar por estado persistido de recepción.
+          schema:
+            type: string
+            enum: [PROCESADO, ERROR, EN_COLA]
+            example: PROCESADO
+        - name: correlationid
+          in: query
+          required: false
+          description: Filtrar por identificador de correlación de negocio.
+          schema:
+            type: string
+            example: 'corr-1729810400000-a3f7b2c'
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de registros por página (máximo 100).
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+            example: 20
+        - name: cursor
+          in: query
+          required: false
+          description: Token de paginación por cursor para navegar grandes volúmenes de entregas.
+          schema:
+            type: string
+            example: 'cur_eyJyZWNlaXZlZF9hdCI6IjIwMjYtMTAtMjQifQ=='
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Listado paginado de entregas de webhooks registradas en la bitácora.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookDeliveriesListResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+    AdminKey:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+    WebhookHmacSignature:
+      type: apiKey
+      in: header
+      name: X-Webhook-Signature
+      description: |
+        Firma criptográfica HMAC-SHA256 generada por el microservicio socio emisor
+        usando la clave secreta compartida (`webhook_secret`).
+        Ejemplo: `sha256=a35b1287c9f809d43528b97b0a72382cf89312e0984572c69134a8e235d90184`.
+
+  schemas:
+
+    # ── SCHEMAS DE ENTRADA CLOUDEVENTS ──
+    InboundCloudEvent:
+      allOf:
+        - $ref: './common/components-v2.yaml#/components/schemas/CloudEventBase'
+        - type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              description: Carga útil de dominio del evento con datos específicos del proveedor.
+              additionalProperties: true
+              example:
+                reserva_id: 'VUE-2026-9921'
+                estado: 'EMITIDO'
+                total: 125.50
+
+    WebhookAcceptedResponse:
+      type: object
+      required:
+        - success
+        - status
+        - message
+        - event_id
+        - vertical
+        - queue_target
+        - received_at
+      properties:
+        success:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [ACCEPTED]
+          example: 'ACCEPTED'
+        message:
+          type: string
+          example: 'CloudEvent recibido, firma verificada y encolado para procesamiento asíncrono.'
+        event_id:
+          type: string
+          format: uuid
+          example: '7b8c9d0e-1f2a-4b3c-9d0e-1f2a3b4c5d6e'
+        vertical:
+          type: string
+          example: 'vuelos'
+        queue_target:
+          type: string
+          example: 'booking.webhooks.inbound.vuelos'
+        received_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.120Z'
+
+    WebhookDeduplicatedResponse:
+      type: object
+      required:
+        - success
+        - status
+        - message
+        - event_id
+        - original_processed_at
+      properties:
+        success:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [DEDUPLICATED]
+          example: 'DEDUPLICATED'
+        message:
+          type: string
+          example: 'Evento duplicado detectado por id; omitido según regla de idempotencia.'
+        event_id:
+          type: string
+          format: uuid
+          example: '7b8c9d0e-1f2a-4b3c-9d0e-1f2a3b4c5d6e'
+        original_processed_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.120Z'
+
+    # ── SCHEMAS DE HISTORIAL DE ENTREGAS ──
+    WebhookDeliveriesListResponse:
+      type: object
+      required:
+        - total
+        - vertical
+        - data
+      properties:
+        total:
+          type: integer
+          example: 24
+        vertical:
+          type: string
+          example: 'vuelos'
+        next_cursor:
+          type: string
+          nullable: true
+          example: 'cur_eyJyZWNlaXZlZF9hdCI6IjIwMjYtMTAtMjQgMjI6MTU6MDAifQ=='
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookDeliveryItem'
+
+    WebhookDeliveryItem:
+      type: object
+      required:
+        - id
+        - event_id
+        - vertical
+        - event_type
+        - status
+        - signature_valid
+        - received_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 'c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f'
+        event_id:
+          type: string
+          format: uuid
+          example: '7b8c9d0e-1f2a-4b3c-9d0e-1f2a3b4c5d6e'
+        vertical:
+          type: string
+          example: 'vuelos'
+        event_type:
+          type: string
+          example: 'ec.edu.epn.booking.vuelos.booking.ticket_issued'
+        source:
+          type: string
+          example: 'https://vuelos.booking.epn.edu.ec'
+        status:
+          type: string
+          enum: [PROCESADO, ERROR, EN_COLA]
+          example: 'PROCESADO'
+        signature_valid:
+          type: boolean
+          example: true
+        correlationid:
+          type: string
+          example: 'corr-1729810400000-a3f7b2c'
+        traceparent:
+          type: string
+          example: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01'
+        received_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.120Z'
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-24T22:30:00.450Z'
+        error_message:
+          type: string
+          nullable: true
+          example: null
+        payload_summary:
+          type: object
+          properties:
+            subject:
+              type: string
+              example: 'reserva/vuelo/VUE-2026-9921'
+            bytes_size:
+              type: integer
+              example: 1048

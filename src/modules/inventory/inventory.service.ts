@@ -175,6 +175,28 @@ export class InventoryService {
     return { ok: true };
   }
 
+  async resolverServiceIdPorApiKey(apiKey: string): Promise<string | null> {
+    if (!apiKey) return null;
+    const claves = this.clavesPorNodo();
+    for (const [sid, key] of Object.entries(claves)) {
+      if (key === apiKey) return sid;
+    }
+    if (this.dataSource && this.dataSource.isInitialized) {
+      try {
+        const res = await this.dataSource.query(
+          `SELECT codigo_nodo FROM schema_proveedores.config_proveedor WHERE api_key = $1 LIMIT 1`,
+          [apiKey],
+        );
+        if (res && res.length > 0) {
+          return res[0].codigo_nodo;
+        }
+      } catch (e: any) {
+        this.logger.debug?.(`Error al resolver service_id por api_key: ${e.message}`);
+      }
+    }
+    return null;
+  }
+
   /** Registra un rechazo para que el admin lo vea en el Panel 7. */
   registrarRechazo(serviceId: string | null | undefined, motivo: string): void {
     this.totalRechazados++;
@@ -202,7 +224,7 @@ export class InventoryService {
   /**
    * Procesa la actualización de stock puntual enviada por una tienda externa vía gRPC.
    */
-  processPushStockUpdate(msg: any, source: 'GRPC_PUSH' | 'ADMIN_PANEL' = 'GRPC_PUSH'): StockUpdateAck {
+  processPushStockUpdate(msg: any, source: 'GRPC_PUSH' | 'ADMIN_PANEL' | 'HTTP_REST' = 'GRPC_PUSH'): StockUpdateAck {
     const itemId = msg.item_id || msg.itemId;
     const serviceId = msg.service_id || msg.serviceId;
     const date = msg.date;

@@ -1,0 +1,1046 @@
+openapi: 3.0.3
+info:
+  title: API de Clientes, Identidad y Gestión de Sesión — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial de Identidad, Autenticación y Perfiles de Cliente (RDA2)
+
+    > **Microservicio de Dominio:** `MS_CLI` (`schema_clientes`)  
+    > **Proveedor de Identidad (IdP Delegado):** Supabase Auth (`auth.users`)  
+    > **Consumidores:** Frontend Booking, API Gateway NestJS, Tiendas Satélites (Vuelos, Autos, Alojamientos, Atracciones)  
+    > **Estándar:** OpenAPI 3.0.3, RFC 7807 Problem Details, CloudEvents v1.0 (Planned)  
+
+    ---
+
+    ## 1. Propósito y Alcance
+
+    Este contrato formaliza la arquitectura de identidad, autenticación, control de acceso
+    basado en roles (RBAC) y perfiles canónicos de clientes para el ecosistema Booking Prototipo.
+
+    En el diseño original v1 (`clientes-openapi.yaml`), se describió un microservicio IdP propio
+    con endpoints `/register`, `/auth/token` y `/me`. En la implementación real del proyecto,
+    la autenticación se encuentra **delegada externamente en Supabase Auth**, mientras que el backend
+    de Booking implementa un **Guard perimetral estricto (`SupabaseAuthGuard`)** y expone operaciones
+    administrativas de gestión de usuarios en el módulo `Admin` (`MS_CLI`).
+
+    ---
+
+    ## 2. Cómo se Autentica y se Identifica a un Cliente Hoy
+
+    1. **Autenticación Delegada en el Frontend (`frontend/src/pages/`):**
+       - El cliente interactúa con `LoginPage.jsx` y `RegisterPage.jsx`.
+       - Ambas páginas consumen directamente el SDK oficial de Supabase (`@supabase/supabase-js`),
+         invocando `supabase.auth.signInWithPassword()` y `supabase.auth.signUp()`.
+       - **Validaciones de Registro en Ecuador:** El frontend exige cédula ecuatoriana de 10 dígitos
+         verificada con el algoritmo de módulo 10 (`validarCedulaEcuatoriana`), celular nacional de 10
+         dígitos iniciando en `09`, nombre, apellido y contraseña robusta (mayúscula, minúscula,
+         número y símbolo). Estos atributos se almacenan en `raw_user_meta_data` de Supabase.
+    2. **Validación Perimetral en Backend (`SupabaseAuthGuard`):**
+       - El middleware del gateway intercepta la cabecera `Authorization: Bearer <JWT>`.
+       - `SesionSupabaseService` valida el token de forma criptográfica contra el servidor de Supabase
+         mediante `supabase.auth.getUser(token)`. Si el token caducó o fue revocado, rechaza con HTTP 401.
+       - Si el token es válido, inyecta el objeto del usuario verificado en `req.user` (`id`, `email`,
+         `app_metadata`, `user_metadata`).
+    3. **Bypass de Evaluación Cátedra RDA2 (§5):**
+       - Para auditorías y pruebas automatizadas sin conexión a Supabase, el guard acepta:
+         - Cabecera `X-Admin-Key` con valores autorizados (`admin-secret` o `Admin123!`).
+         - Cabecera `X-Role` (ej. `X-Role: ADMIN`, `X-Role: MANTENIMIENTO`, `X-Role: CLIENTE`).
+
+    ---
+
+    ## 3. Matriz de Roles × Módulos (RBAC RDA2 §5)
+
+    La plataforma reconoce formalmente tres roles (`src/core/auth/roles.enum.ts`):
+    `CLIENTE`, `ADMIN` y `MANTENIMIENTO`.
+
+    | Rol | Alcance y Facultades | Módulos y Endpoints que lo Exigen | Guard Validador |
+    |---|---|---|---|
+    | `CLIENTE` | Usuario final. Exploración de catálogo, checkout de combos multivertical, consulta de reservas propias y envío de facturas por correo. | `POST /esb/checkout-saga`<br>`POST /pagos/procesar`<br>`POST /facturas/enviar`<br>`GET /esb/aggregate/mis-reservas/{cliente}` | `SupabaseAuthGuard` |
+    | `MANTENIMIENTO` | Personal técnico y operativo de flota de vehículos y atracciones. Registro de check-in de entrega/devolución y talleres. | `POST /autos/orders/{id}/checkin-entrega`<br>`POST /autos/orders/{id}/checkin-devolucion`<br>`POST /autos/{id}/mantenimiento/registro` | `RolesGuard`<br>(`@Roles(Rol.MANTENIMIENTO, Rol.ADMIN)`) |
+    | `ADMIN` | Administrador supremo de Booking. Gestión de usuarios, liquidaciones a proveedores, kill-switches de tiendas y auditoría. | `GET/POST /admin/users`<br>`PUT /admin/users/{id}/action`<br>`GET/POST /finanzas/*`<br>`GET/POST /admin/nodes/*`<br>`GET/PUT /admin/config` | `AdminRoleGuard`<br>(`esAdministrador`) |
+
+    > **Seguridad Crítica sobre Roles:**
+    > La función `esAdministrador` (`src/core/auth/administradores.ts`) evalúa exclusivamente
+    > `app_metadata.role === 'admin'` o pertenencia a la lista fija `ADMIN_EMAILS` (`admin@booking.com`,
+    > `alejandroflores@booking.com`). **Nunca confía en `user_metadata.role`**, ya que este último
+    > puede ser alterado directamente por el usuario desde el navegador.
+
+    ---
+
+    ## 4. Contrato de Identidad hacia las Tiendas Asociadas (Verticales)
+
+    Conforme a lo establecido en la arquitectura de integración (RDA2 §5 y `vuelos-openapi-v2.yaml` §5):
+    - **Las tiendas asociadas NO crean cuentas ni gestionan credenciales:** No existe base de datos
+      de clientes en las aerolíneas ni en las rentadoras de autos para los usuarios de Booking.
+    - **Propagación de Identidad:** Cuando Booking invoca las APIs de los compañeros (Vuelos, Autos,
+      Atracciones, Alojamientos), reenvía las siguientes cabeceras técnicas:
+      - `X-User-Id`: Identificador UUID v4 del cliente autenticado (`req.user.id`).
+      - `X-User-Roles`: Roles del usuario separados por comas (ej. `CLIENTE`).
+      - `X-Correlation-Id`: Trazabilidad transversal de la transacción multivertical.
+    - **Datos de Pasajeros / Huéspedes / Conductores:** Viajan explícitamente en el cuerpo del JSON
+      (`body`), permitiendo que el comprador reserve para un tercero (ej. familiar o acompañante).
+
+    ---
+
+    ## 5. Perfil y Datos Fiscales: Realidad (`schema_clientes`) vs v1
+
+    - En el contrato v1, se definió un objeto anidado `defaultBillingInfo` (`taxIdType`, `taxId`,
+      `legalName`, `address`).
+    - En el modelo relacional real (`src/core/entities/usuario.entity.ts`, mapeado a `schema_clientes.clientes`),
+      la tabla `clientes` almacena directamente los campos fiscales y de contacto a nivel de columna:
+      `nombre`, `email`, `cedula_ruc`, `telefono`, `direccion`, `pais`, `rol`, `estado`.
+    - Esta estructura es la que consume el router interno del ESB (`ORQ_FAC`) para ensamblar comprobantes
+      sin ejecutar SQL JOINs cruzados.
+
+    ---
+
+    ## 6. Clasificación de Endpoints
+
+    | Ruta | Método | Clasificación | Microservicio | Implementación Real / Razón |
+    |---|---|---|---|---|
+    | `/auth/v1/signup` | `POST` | `delegated` | `MS_CLI` (IdP) | Delegado a Supabase Auth (`supabase.auth.signUp`). Registra en `auth.users` y metadatos. |
+    | `/auth/v1/token` | `POST` | `delegated` | `MS_CLI` (IdP) | Delegado a Supabase Auth (`supabase.auth.signInWithPassword`). Emite JWT con claims. |
+    | `/auth/v1/user` | `GET` / `PUT` | `delegated` | `MS_CLI` (IdP) | Delegado a Supabase Auth (`getUser` / `updateUser`). Valida sesión y perfil de metadatos. |
+    | `/auth/v1/logout` | `POST` | `delegated` | `MS_CLI` (IdP) | Delegado a Supabase Auth (`supabase.auth.signOut`). Purga tokens en cliente. |
+    | `/admin/users` | `GET` | `implemented` | `MS_CLI` / Admin | `AdminController.getUsers`: Lista usuarios de `auth.users` con roles y estado. |
+    | `/admin/users` | `POST` | `implemented` | `MS_CLI` / Admin | `AdminController.crearUsuario`: Crea usuarios cliente o admin con hash bcrypt. |
+    | `/admin/users/{id}/action` | `PUT` | `implemented` | `MS_CLI` / Admin | `AdminController.userAction`: Bloquear, desbloquear, promover o degradar admin. |
+    | `/admin/users/{id}/historial` | `GET` | `implemented` | `MS_CLI` / Admin | `AdminController.getUserHistorial`: Historial multivertical de reservas del usuario. |
+    | `/clientes/{id}` | `GET` / `PATCH` | `planned` | `MS_CLI` | Perfil canónico en `schema_clientes.clientes` según blueprint §5.2. |
+    | `/clientes/{id}/rol` | `PATCH` | `planned` | `MS_CLI` | Asignación de rol canónico en base de datos según blueprint §5.2. |
+  contact:
+    name: Alejandro Sebastián Flores Lugmaña — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: API Gateway Booking — Desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: API Gateway Booking — Producción Render
+  - url: '{supabaseUrl}/auth/v1'
+    description: Servidor Delegado de Identidad y Sesión (Supabase Auth)
+    variables:
+      supabaseUrl:
+        default: 'https://placeholder.supabase.co'
+        description: URL base del proyecto Supabase Auth (VITE_SUPABASE_URL)
+
+tags:
+  - name: Autenticación y Sesión Delegada (Supabase Auth)
+    description: Operaciones delegadas de registro, inicio de sesión y emisión de JWT gestionadas por Supabase Auth
+  - name: Administración de Usuarios (MS_CLI / Admin)
+    description: Operaciones operativas y de auditoría de cuentas sobre auth.users expuestas en el backend de Booking
+  - name: Clientes y Perfiles Canónicos (MS_CLI)
+    description: Operaciones de perfil de cliente relacional en schema_clientes.clientes según el blueprint de arquitectura
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. AUTENTICACIÓN Y SESIÓN DELEGADA (SUPABASE AUTH)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /auth/v1/signup:
+    post:
+      tags:
+        - Autenticación y Sesión Delegada (Supabase Auth)
+      summary: Registrar nuevo cliente con metadatos de identidad ecuatoriana
+      description: |
+        Operación delegada en Supabase Auth (`supabase.auth.signUp`).
+
+        Crea el registro de identidad en `auth.users` e inicializa `raw_user_meta_data`
+        con los atributos obligatorios del cliente en Booking Ecuador:
+        - `nombre`, `apellido`, `full_name`.
+        - `cedula`: Cédula ecuatoriana de 10 dígitos validada con algoritmo de módulo 10.
+        - `telefono`: Número de teléfono móvil de 10 dígitos iniciando en `09`.
+
+        *(Documentación oficial Supabase: https://supabase.com/docs/reference/javascript/auth-signup)*
+      operationId: supabaseSignUp
+      x-source: 'frontend/src/pages/RegisterPage.jsx#handleRegister'
+      x-status: delegated
+      x-microservice: MS_CLI
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupabaseSignUpRequest'
+      responses:
+        '200':
+          description: Registro exitoso. Retorna el usuario creado y la sesión inicial (si auto-confirmación está activa).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupabaseAuthResponse'
+        '400':
+          description: Datos inválidos o correo electrónico ya registrado en el sistema.
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '422':
+          description: Formato de contraseña no cumple requisitos mínimos o cédula inválida.
+          $ref: './common/components-v2.yaml#/components/responses/Problem422'
+        '429':
+          description: Límite de tasa de registros de seguridad excedido.
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+
+  /auth/v1/token:
+    post:
+      tags:
+        - Autenticación y Sesión Delegada (Supabase Auth)
+      summary: Iniciar sesión con email y contraseña para emitir JWT
+      description: |
+        Operación delegada en Supabase Auth (`supabase.auth.signInWithPassword`).
+
+        Valida las credenciales contra `auth.users` y emite un token JWT firmado por Supabase
+        con los claims:
+        - `sub`: Identificador UUID único del usuario.
+        - `email`: Correo verificado del usuario.
+        - `app_metadata`: Atributos protegidos del backend (incluyendo `role: 'admin'`).
+        - `user_metadata`: Atributos de perfil del cliente.
+
+        *(Documentación oficial Supabase: https://supabase.com/docs/reference/javascript/auth-signinwithpassword)*
+      operationId: supabaseSignInWithPassword
+      x-source: 'frontend/src/pages/LoginPage.jsx#handleLogin'
+      x-status: delegated
+      x-microservice: MS_CLI
+      security: []
+      parameters:
+        - name: grant_type
+          in: query
+          required: false
+          description: Tipo de concesión OAuth2. Valor por defecto 'password'.
+          schema:
+            type: string
+            default: password
+            example: password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupabaseSignInRequest'
+      responses:
+        '200':
+          description: Credenciales validadas exitosamente. Retorna token JWT y sesión activa.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupabaseAuthResponse'
+        '400':
+          description: Petición mal formada o credenciales ausentes.
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          description: Credenciales inválidas (correo o contraseña incorrectos).
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+
+  /auth/v1/user:
+    get:
+      tags:
+        - Autenticación y Sesión Delegada (Supabase Auth)
+      summary: Obtener perfil del usuario autenticado actual desde el IdP
+      description: |
+        Operación delegada en Supabase Auth (`supabase.auth.getUser`).
+
+        Es el endpoint exacto que invoca el backend de Booking en `SesionSupabaseService.obtenerUsuario`
+        para autenticar de forma no falsificable cada petición protegida por `SupabaseAuthGuard`.
+
+        *(Documentación oficial Supabase: https://supabase.com/docs/reference/javascript/auth-getuser)*
+      operationId: supabaseGetUser
+      x-source: 'src/core/auth/sesion-supabase.service.ts#obtenerUsuario'
+      x-status: delegated
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+      responses:
+        '200':
+          description: Perfil del usuario autenticado recuperado desde el IdP.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupabaseUser'
+        '401':
+          description: Token de autorización inválido, expirado o revocado.
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+
+    put:
+      tags:
+        - Autenticación y Sesión Delegada (Supabase Auth)
+      summary: Actualizar metadatos del usuario autenticado
+      description: |
+        Operación delegada en Supabase Auth (`supabase.auth.updateUser`).
+
+        Permite modificar los atributos de `user_metadata` (nombres, teléfono).
+        Por diseño de seguridad, `app_metadata` queda protegido y solo puede ser
+        alterado por un administrador desde el backend de Booking con clave de servicio.
+
+        *(Documentación oficial Supabase: https://supabase.com/docs/reference/javascript/auth-updateuser)*
+      operationId: supabaseUpdateUser
+      x-source: 'frontend/src/services/supabase.js'
+      x-status: delegated
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupabaseUpdateUserRequest'
+      responses:
+        '200':
+          description: Metadatos de usuario actualizados correctamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupabaseUser'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+
+  /auth/v1/logout:
+    post:
+      tags:
+        - Autenticación y Sesión Delegada (Supabase Auth)
+      summary: Cerrar sesión e invalidar tokens locales
+      description: |
+        Operación delegada en Supabase Auth (`supabase.auth.signOut`).
+
+        Invalida la sesión activa y purga el token de acceso del cliente.
+
+        *(Documentación oficial Supabase: https://supabase.com/docs/reference/javascript/auth-signout)*
+      operationId: supabaseSignOut
+      x-source: 'frontend/src/context/AuthContext.jsx'
+      x-status: delegated
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+      responses:
+        '200':
+          description: Sesión cerrada exitosamente.
+        '204':
+          description: Sesión finalizada sin contenido adicional.
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. ADMINISTRACIÓN DE USUARIOS (MS_CLI / ADMIN EN BACKEND BOOKING)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/users:
+    get:
+      tags:
+        - Administración de Usuarios (MS_CLI / Admin)
+      summary: Listar todos los usuarios registrados en auth.users
+      description: |
+        Recupera el listado consolidado de usuarios leyendo directamente `auth.users`
+        por conexión PostgreSQL o mediante la Admin API de Supabase (`listUsers`).
+
+        Mapea el rol formal (`ADMIN`, `MANTENIMIENTO`, `CLIENTE`), el estado de bloqueo
+        y metadatos de creación. Requiere permisos de administrador (`Rol.ADMIN`).
+      operationId: adminListUsers
+      x-source: 'src/modules/admin/admin.controller.ts#getUsers'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Relación de usuarios registrados en el sistema.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminUserListItem'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '503':
+          description: No se pudo conectar con la base de datos de autenticación ni con la Admin API.
+          $ref: './common/components-v2.yaml#/components/responses/Problem503'
+
+    post:
+      tags:
+        - Administración de Usuarios (MS_CLI / Admin)
+      summary: Crear un usuario (cliente o administrador) desde el panel
+      description: |
+        Crea directamente una cuenta en `auth.users` desde el panel administrativo.
+        Permite asignar rol explícito (`CLIENTE` o `ADMIN`) y genera el hash seguro
+        con factor de coste bcrypt. Requiere permisos de administrador.
+      operationId: adminCreateUser
+      x-source: 'src/modules/admin/admin.controller.ts#crearUsuario'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+      responses:
+        '201':
+          description: Usuario creado exitosamente desde el panel administrativo.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserListItem'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '409':
+          description: Ya existe un usuario registrado con ese correo electrónico.
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+
+  /admin/users/{id}/action:
+    put:
+      tags:
+        - Administración de Usuarios (MS_CLI / Admin)
+      summary: Ejecutar acción de control sobre una cuenta de usuario
+      description: |
+        Aplica mutaciones sobre una cuenta de usuario en `auth.users`:
+        - `bloquear`: Inhabilita el acceso del usuario a la plataforma.
+        - `desbloquear`: Reactiva una cuenta suspendida.
+        - `promover_admin`: Concede privilegios de administrador en `app_metadata.role`.
+        - `quitar_admin`: Degrada la cuenta a cliente (protegido contra autodegradación del propio admin).
+        - `cambiar_password`: Actualiza forzosamente la contraseña con hash bcrypt.
+
+        Toda mutación se registra automáticamente en el log de auditoría administrativa.
+      operationId: adminUserAction
+      x-source: 'src/modules/admin/admin.controller.ts#userAction'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID v4 del usuario en auth.users.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUserActionRequest'
+      responses:
+        '200':
+          description: Acción ejecutada exitosamente. Retorna el estado actualizado del usuario.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserListItem'
+        '400':
+          description: Acción no reconocida o intento de quitarse a sí mismo el rol de administrador.
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  /admin/users/{id}/historial:
+    get:
+      tags:
+        - Administración de Usuarios (MS_CLI / Admin)
+      summary: Consultar historial unificado de compras de un usuario
+      description: |
+        Recupera el consolidado histórico de transacciones del usuario en las 4 verticales
+        turísticas sin recurrir a SQL JOINs cruzados entre bases de datos independientes.
+      operationId: adminGetUserHistorial
+      x-source: 'src/modules/admin/admin.controller.ts#getUserHistorial'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del usuario a consultar.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Historial de compras agregado del usuario.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserHistorialResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. CLIENTES Y PERFILES CANÓNICOS (BLUEPRINT MS_CLI — PLANNED)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /clientes/{id}:
+    get:
+      tags:
+        - Clientes y Perfiles Canónicos (MS_CLI)
+      summary: Consultar perfil canónico de cliente en schema_clientes
+      description: |
+        Endpoint canónico planificado en el blueprint de microservicios (§5.2)
+        para que el ESB y servicios internos consulten la ficha fiscal y de contacto
+        del cliente almacenada en `schema_clientes.clientes`.
+
+        Retorna `nombre`, `cedula_ruc`, `email`, `telefono`, `direccion`, `pais`, `rol` y `estado`.
+      operationId: getClienteCanonico
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del cliente en schema_clientes.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Perfil canónico del cliente recuperado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClienteCanonicalProfile'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+    patch:
+      tags:
+        - Clientes y Perfiles Canónicos (MS_CLI)
+      summary: Actualizar perfil de cliente canónico en base de datos
+      description: |
+        Permite actualizar los datos fiscales y domiciliarios en `schema_clientes.clientes`.
+      operationId: updateClienteCanonico
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del cliente.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClienteUpdateRequest'
+      responses:
+        '200':
+          description: Perfil canónico actualizado correctamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClienteCanonicalProfile'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  /clientes/{id}/rol:
+    patch:
+      tags:
+        - Clientes y Perfiles Canónicos (MS_CLI)
+      summary: Modificar rol canónico del cliente (Blueprint MS_CLI)
+      description: |
+        Ruta administrativa para actualizar el rol en la base de datos relacional
+        `schema_clientes.clientes`. Requiere rol `ADMIN`.
+      operationId: updateClienteRol
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del cliente.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClienteRolUpdateRequest'
+      responses:
+        '200':
+          description: Rol actualizado exitosamente en base de datos.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClienteCanonicalProfile'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+    AdminKey:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+
+  schemas:
+
+    # ── SCHEMAS DELEGADOS SUPABASE AUTH ──
+    SupabaseSignUpRequest:
+      type: object
+      required:
+        - email
+        - password
+        - options
+      properties:
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 30
+          description: Contraseña robusta (mínimo 8 caracteres, mayúscula, minúscula, número y símbolo).
+          example: 'Ecuador2026!'
+        options:
+          type: object
+          required:
+            - data
+          properties:
+            data:
+              type: object
+              required:
+                - nombre
+                - apellido
+                - cedula
+                - telefono
+              properties:
+                nombre:
+                  type: string
+                  minLength: 3
+                  example: 'Juan'
+                apellido:
+                  type: string
+                  minLength: 3
+                  example: 'Pérez'
+                full_name:
+                  type: string
+                  example: 'Juan Pérez'
+                cedula:
+                  type: string
+                  pattern: '^[0-9]{10}$'
+                  description: Cédula ecuatoriana de 10 dígitos validada mediante algoritmo de módulo 10.
+                  example: '1723456789'
+                telefono:
+                  type: string
+                  pattern: '^09[0-9]{8}$'
+                  description: Teléfono móvil de 10 dígitos iniciando con '09'.
+                  example: '0987654321'
+
+    SupabaseSignInRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        password:
+          type: string
+          format: password
+          example: 'Ecuador2026!'
+
+    SupabaseAuthResponse:
+      type: object
+      required:
+        - access_token
+        - token_type
+        - expires_in
+        - user
+      properties:
+        access_token:
+          type: string
+          description: JWT firmado por Supabase con claims de autenticación y rol.
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        token_type:
+          type: string
+          example: 'bearer'
+        expires_in:
+          type: integer
+          description: Tiempo de vida del token en segundos.
+          example: 3600
+        refresh_token:
+          type: string
+          description: Token de actualización opaco.
+          example: 'v1.MrX04s3-...'
+        user:
+          $ref: '#/components/schemas/SupabaseUser'
+
+    SupabaseUser:
+      type: object
+      required:
+        - id
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        app_metadata:
+          type: object
+          description: Metadatos protegidos gestionados exclusivamente con service key del backend.
+          properties:
+            provider:
+              type: string
+              example: 'email'
+            role:
+              type: string
+              description: Rol administrativo o técnico ('admin', 'mantenimiento', 'cliente').
+              example: 'cliente'
+        user_metadata:
+          type: object
+          description: Metadatos del perfil de cliente configurables por el usuario.
+          properties:
+            nombre:
+              type: string
+              example: 'Juan'
+            apellido:
+              type: string
+              example: 'Pérez'
+            full_name:
+              type: string
+              example: 'Juan Pérez'
+            cedula:
+              type: string
+              example: '1723456789'
+            telefono:
+              type: string
+              example: '0987654321'
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+
+    SupabaseUpdateUserRequest:
+      type: object
+      properties:
+        data:
+          type: object
+          description: Atributos a modificar en user_metadata.
+          properties:
+            nombre:
+              type: string
+              example: 'Juan Sebastián'
+            telefono:
+              type: string
+              example: '0987654321'
+
+    # ── SCHEMAS ADMINISTRATIVOS (BACKEND ADMIN) ──
+    AdminUserListItem:
+      type: object
+      required:
+        - id
+        - email
+        - rol
+        - esAdmin
+        - bloqueado
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        nombre:
+          type: string
+          example: 'Juan Pérez'
+        cedula:
+          type: string
+          example: '1723456789'
+        telefono:
+          type: string
+          example: '0987654321'
+        rol:
+          type: string
+          enum: [CLIENTE, ADMIN, MANTENIMIENTO]
+          example: 'CLIENTE'
+        esAdmin:
+          type: boolean
+          description: Indicador booleano derivado de `app_metadata.role === 'admin'` o lista fija `ADMIN_EMAILS`.
+          example: false
+        bloqueado:
+          type: boolean
+          description: Indica si la cuenta se encuentra suspendida o deshabilitada.
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+        lastSignInAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-24T22:15:00.000Z'
+
+    AdminCreateUserRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: 'nuevo.operador@booking.com'
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: 'Operador2026!'
+        rol:
+          type: string
+          enum: [CLIENTE, ADMIN, MANTENIMIENTO]
+          default: CLIENTE
+          example: 'ADMIN'
+
+    AdminUserActionRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [bloquear, desbloquear, promover_admin, quitar_admin, cambiar_password]
+          description: Acción administrativa a ejecutar sobre la cuenta de usuario.
+          example: 'promover_admin'
+        password:
+          type: string
+          format: password
+          nullable: true
+          description: Nueva contraseña requerida únicamente si `action === 'cambiar_password'`.
+          example: 'NuevaPassword2026!'
+
+    AdminUserHistorialResponse:
+      type: object
+      required:
+        - userId
+        - email
+        - totalReservas
+        - reservas
+      properties:
+        userId:
+          type: string
+          format: uuid
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        totalReservas:
+          type: integer
+          example: 4
+        reservas:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - vertical
+              - estado
+              - total
+              - fecha
+            properties:
+              id:
+                type: string
+                example: 'RES-VUE-1002'
+              vertical:
+                type: string
+                example: 'VUELOS'
+              estado:
+                type: string
+                example: 'CONFIRMED'
+              total:
+                type: number
+                format: double
+                example: 125.50
+              fecha:
+                type: string
+                format: date-time
+                example: '2026-10-24T18:00:00.000Z'
+
+    # ── SCHEMAS BLUEPRINT CANÓNICO MS_CLI ──
+    ClienteCanonicalProfile:
+      type: object
+      description: Registro canónico de cliente persistido en `schema_clientes.clientes` (entidad TypeORM `Usuario`).
+      required:
+        - id
+        - email
+        - rol
+        - estado
+        - pais
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        nombre:
+          type: string
+          nullable: true
+          example: 'Juan Sebastián Pérez'
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        cedula_ruc:
+          type: string
+          nullable: true
+          example: '1723456789'
+        telefono:
+          type: string
+          nullable: true
+          example: '0987654321'
+        direccion:
+          type: string
+          nullable: true
+          example: 'Av. Amazonas N24-196 y Colón, Quito'
+        pais:
+          type: string
+          default: 'Ecuador'
+          example: 'Ecuador'
+        rol:
+          type: string
+          enum: [CLIENTE, ADMIN, MANTENIMIENTO]
+          default: 'CLIENTE'
+          example: 'CLIENTE'
+        estado:
+          type: string
+          enum: [ACTIVO, INACTIVO, SUSPENDIDO]
+          default: 'ACTIVO'
+          example: 'ACTIVO'
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+
+    ClienteUpdateRequest:
+      type: object
+      properties:
+        nombre:
+          type: string
+          example: 'Juan Sebastián Pérez'
+        cedula_ruc:
+          type: string
+          example: '1723456789'
+        telefono:
+          type: string
+          example: '0987654321'
+        direccion:
+          type: string
+          example: 'Av. Amazonas N24-196 y Colón, Quito'
+        pais:
+          type: string
+          example: 'Ecuador'
+
+    ClienteRolUpdateRequest:
+      type: object
+      required:
+        - rol
+      properties:
+        rol:
+          type: string
+          enum: [CLIENTE, ADMIN, MANTENIMIENTO]
+          example: 'MANTENIMIENTO'

@@ -1,0 +1,880 @@
+openapi: 3.0.3
+info:
+  title: API Pasarela de Pagos SOA y Simulación Transaccional (MS_PAG) — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial de Integración — Microservicio de Pagos SOA (MS_PAG · RDA2)
+
+    > **Sistema Emisor / Responsable:** Microservicio de Pagos SOA (`MS_PAG`)  
+    > **Módulo:** `src/modules/pagos/` (Controlador `PagosController`, Servicio `PagosService`)  
+    > **Esquema de Base de Datos:** `schema_pagos` (Tabla `transacciones_pago`)  
+    > **Asignatura:** Integración de Sistemas — 6to Semestre (Reto 2: RDA2)  
+    > **Estándar:** OpenAPI Specification 3.0.3 (API-First, RFC 7807 Problem Details, CloudEvents v1.0)  
+    > **Documento de Salida:** `contracts/pagos-openapi-v2.yaml`
+
+    ---
+
+    ## 1. Propósito y Alcance del Microservicio de Pagos
+
+    En el ecosistema multimodal de Booking Prototipo, la regla arquitectónica de transacciones comerciales estipula:
+    1. **Booking Centraliza el Cobro:** Cuando un cliente realiza una compra (sea un paquete multidominio o un servicio individual), la pasarela de pagos central `MS_PAG` procesa la tarjeta de crédito/débito y genera un comprobante con un **`paymentReference`** unívoco (equivalente a `transaccion_id` o `codigo_autorizacion`).
+    2. **Las Tiendas Satélites No Vuelven a Cobrar:** Microservicios como Vuelos (`MS_VUE`), Autos (`MS_AUT`) o Atracciones (`MS_ATR`) **no capturan tarjetas ni cobran directamente**. Reciben el `paymentReference` emitido por Booking y confirman sus reservas con la garantía de cobro previo.
+    3. **Validación de Pago B2B:** Las tiendas externas socias validan autenticidad, estado y monto de `paymentReference` antes de emitir reservas definitivas (`GET /pagos/{paymentReference}`).
+
+    ---
+
+    ## 2. Flujo de Cobro Transaccional e Idempotencia
+
+    El endpoint `POST /pagos/procesar` ejecuta cobros síncronos sobre la pasarela bancaria simulada:
+
+    ```
+    [Cliente / ESB] ──POST /pagos/procesar (Idempotency-Key)──> [PagosService]
+                                                                        │
+                                       ┌────────────────────────────────┴────────────────────────────────┐
+                                       ▼ (Existe Key previa)                                             ▼ (Nueva Key)
+                           Retornar Transacción Previa                                          ¿Simulador activo?
+                           (es_idempotente: true)                                        ┌───────────────┴───────────────┐
+                                                                                         ▼                               ▼
+                                                                                 TIMEOUT_RED (5.5s)              RECHAZO_FONDOS
+                                                                                 HTTP 504 Gateway Timeout        HTTP 402 Payment Required
+                                                                                         │                               │
+                                                                                         └───────────────┬───────────────┘
+                                                                                                         ▼ (Flujo Normal)
+                                                                                                 Generar AUTH-PAG-XXXX
+                                                                                                 Guardar en schema_pagos
+                                                                                                 HTTP 200 Aprobado
+    ```
+
+    - **Manejo de Idempotencia:**
+      El servicio consulta en `schema_pagos.transacciones_pago` por `idempotency_key`. Si ya existe una transacción previa con esa clave, no vuelve a procesar el cargo financiero y devuelve inmediatamente la transacción original con la bandera `es_idempotente: true`.
+    - **Discrepancia en el Código Actual (Hallazgo H-P02-02):**
+      En el código actual, la cabecera `Idempotency-Key` no es estrictamente obligatoria. Si falta, el controlador genera una clave temporal arbitraria `idem-pay-${Date.now()}`. Esto se documenta fielmente y se registra como hallazgo para exigir obligatoriedad en producción.
+
+    ---
+
+    ## 3. Inyección de Fallos y Simulador SOA (Panel 6)
+
+    Para dar soporte a la evaluación de resiliencia de la cátedra (§7 Consideraciones RDA2 y Circuit Breakers), el microservicio implementa un motor de inyección de contingencias en memoria:
+    - **`NORMAL`:** Procesa la transacción con la latencia bancaria configurada (`latencia_ms`, por defecto 250 ms) y emite código de autorización `AUTH-PAG-XXXXXXXX`.
+    - **`RECHAZO_FONDOS`:** Inyecta denegación por saldo insuficiente. Registra la transacción con estado `RECHAZADO` en `schema_pagos` y arroja HTTP `402 Payment Required` con código `INSUFFICIENT_FUNDS`.
+    - **`TIMEOUT_RED`:** Aplica una demora forzada de 5.5 segundos (superior al timeout estándar de 5s exigido en la cátedra para disparar Circuit Breakers) y arroja HTTP `504 Gateway Timeout` con código `PAYMENT_GATEWAY_TIMEOUT`.
+    - **`ERROR_INTERNO`:** Simula contingencia técnica inesperada en la red adquirente.
+    - **`FRAUDE`:** Rechaza determinísticamente la operación por control de fraude.
+    - En producción, activar el simulador requiere `PAGOS_SIMULADOR_HABILITADO=true`.
+
+    > ⚠️ **Endpoints de Configuración del Simulador:**  
+    > `GET /pagos/simulador/config` y `POST /pagos/simulador/config` son de uso exclusivo administrativo y de laboratorio docente (Panel 6).
+
+    ---
+
+    ## 4. Reembolsos Compensatorios (Saga LIFO) y Finanzas
+
+    - **Reembolso Transaccional:**
+      El endpoint `POST /pagos/reembolsos` atiende las solicitudes de rollback compensatorio emitidas por el orquestador Saga (`ORQ_RES`) o por el portal postventa.
+    - **Identificador Formal de Reembolso:**
+      Genera un comprobante formal con prefijo `REF-PAG-XXXXXXXX` (ej. `REF-PAG-A1B2C3D4`) y actualiza el estado del registro a `REEMBOLSADO`.
+    - **Idempotencia de Reembolso:**
+      Si la transacción ya fue reembolsada con anterioridad, responde confirmando el estado previo sin duplicar abonos financieros.
+    - **Impacto Financiero B2B (Liquidación de Proveedores - P04):**
+      Cuando una vertical (ej. Vuelos o Atracciones) aprueba la cancelación de un servicio, la tienda calcula la penalidad o monto neto reembolsable (`refund.amount`). Booking emite el reembolso al usuario final y, en el ciclo de liquidación quincenal/mensual de `MS_FIN`, debita dicho valor de los fondos a transferir al socio comercial.
+
+    ---
+
+    ## 5. Mapeo de Eventos EDA (Asíncronos)
+
+    Conforme al diseño de la Arquitectura de Microservicios RDA2 (§8 y Cátedra Semana 8), `MS_PAG` debe publicar eventos de dominio para desacoplar a los consumidores:
+
+    | Evento CloudEvents | Nombre Semántico | Broker Principal (RabbitMQ) | Broker Réplica (Kafka) | Estado en Código Actual |
+    |---|---|---|---|---|
+    | `com.booking.payment.completed` | Pago aprobado, rechazado o fraude evaluado | `booking.events` / `q.pagos.procesados` | — | RabbitMQ |
+    | `com.booking.payment.refunded` | Reembolso parcial o total | `booking.events` / `q.sagas.compensacion` | — | RabbitMQ |
+
+    ---
+
+    ## 6. Identificador Público `paymentReference`
+
+    - **Definición Oficial:**
+      En este contrato se establece que el **`paymentReference`** válido ante tiendas externas corresponde al **`transaccion_id`** (UUID v4) o alternativamente al **`codigo_autorizacion`** (`AUTH-PAG-XXXXXXXX`).
+    - **Discrepancia del Frontend (Hallazgo H-P02-03):**
+      Actualmente el frontend (`FormularioReserva.jsx`) genera un string aleatorio en el navegador (`pay_${uuid.slice(0,18)}`) sin consultar al backend, lo que imposibilita la verificación cruzada por parte de los socios.
+
+    ---
+
+    ## 7. Tabla de Operaciones y Cobertura (rutas implementadas)
+
+    | Método | Ruta | Handler | x-microservice | x-status |
+    |---|---|---|---|---|
+    | `POST` | `/pagos/procesar` | `procesarPago` | `MS_PAG` | `implemented` |
+    | `POST` | `/pagos/reembolsos` | `procesarReembolso` | `MS_PAG` | `implemented` |
+    | `GET` | `/pagos/simulador/config` | `getConfigSimulador` | `MS_PAG` | `implemented` |
+    | `POST` | `/pagos/simulador/config` | `updateConfigSimulador` | `MS_PAG` | `implemented` |
+    | `GET` | `/pagos/transacciones` | `getTransacciones` | `MS_PAG` | `implemented` |
+    | `GET` | `/pagos/{paymentReference}` | `validarPaymentReference` | `MS_PAG` | `implemented` |
+    | `POST` | `/pagos/{paymentReference}/reservas` | `asociarReserva` | `MS_PAG` | `implemented` |
+
+  contact:
+    name: Equipo Booking Prototipo — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: /api/v2
+    description: Relativo a la raíz del host
+  - url: 'http://localhost:3000/api/v2'
+    description: Entorno de desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Entorno de producción (Render)
+
+tags:
+  - name: Pasarela de Pagos (MS_PAG)
+    description: Procesamiento síncrono de cobros con tarjeta, validación de idempotencia y compensación de reembolsos.
+  - name: Simulador de Fallos SOA
+    description: Administración de inyección de latencia, rechazo de fondos y timeouts para pruebas de Circuit Breaker.
+  - name: Auditoría y Validación
+    description: Consulta de transacciones históricas y validación externa de referencias de pago por tiendas socias.
+
+paths:
+
+  /pagos/procesar:
+    post:
+      tags:
+        - Pasarela de Pagos (MS_PAG)
+      summary: Procesar cobro transaccional con Idempotency-Key e inyección de fallos
+      description: |
+        Ejecuta el cargo síncrono del importe especificado. Valida la clave de idempotencia
+        contra `schema_pagos.transacciones_pago`; si ya fue procesada, retorna la respuesta previa.
+        
+        Permite simular escenarios controlados de fallo (`RECHAZO_FONDOS`, `TIMEOUT_RED`) para
+        evaluar la resiliencia del sistema y los circuit breakers.
+      operationId: procesarPago
+      x-source: 'src/modules/pagos/pagos.controller.ts#procesarPago'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/IdempotencyKeyOptional'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: DTO de cobro con importe monetario, medio de pago y parámetros opcionales de simulación.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcesarPagoInput'
+            example:
+              monto: 220.00
+              metodo_pago: 'TARJETA_CREDITO'
+              numero_tarjeta: '4111222233334444'
+              cliente_id: '550e8400-e29b-41d4-a716-446655440000'
+              factura_id: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+              carrito_id: '7b8c9d0e-1f2a-3b4c-5d6e-7f8a9b0c1d2e'
+              simular_escenario: 'NORMAL'
+      responses:
+        '200':
+          description: Pago aprobado exitosamente por la pasarela adquirente. Código de autorización emitido.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoAprobadoResponse'
+              example:
+                transaccion_id: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+                codigo_autorizacion: 'AUTH-PAG-A1B2C3D4'
+                estado: 'APROBADO'
+                monto: 220.00
+                moneda: 'USD'
+                fecha_procesamiento: '2026-10-24T23:30:00.000Z'
+                mensaje: 'Pago procesado exitosamente. Código de autorización generado.'
+                es_idempotente: false
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '402':
+          description: |
+            Pago rechazado por fondos insuficientes en la cuenta o tarjeta del cliente
+            (activado por simulación `RECHAZO_FONDOS` o rechazo bancario real).
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/402'
+                title: 'Payment Required'
+                status: 402
+                detail: 'Transacción denegada: Fondos insuficientes en la tarjeta proporcionada.'
+                instance: '/api/v2/pagos/procesar'
+                code: 'INSUFFICIENT_FUNDS'
+                correlation_id: 'corr-1729810400000-a3f7b2c'
+                timestamp: '2026-10-24T23:30:05.000Z'
+        '504':
+          description: |
+            Timeout de red bancaria simulado (latencia forzada de 5.5 segundos para evaluación de Circuit Breaker).
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/problem+json:
+              schema:
+                $ref: './common/components-v2.yaml#/components/schemas/ProblemDetails'
+              example:
+                type: 'https://httpstatuses.com/504'
+                title: 'Gateway Timeout'
+                status: 504
+                detail: 'Gateway Timeout: La pasarela de pagos no respondió dentro del límite reglamentario (Circuit Breaker activado).'
+                instance: '/api/v2/pagos/procesar'
+                code: 'PAYMENT_GATEWAY_TIMEOUT'
+                correlation_id: 'corr-1729810400000-a3f7b2c'
+                timestamp: '2026-10-24T23:30:10.000Z'
+        '409':
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /pagos/reembolsos:
+    post:
+      tags:
+        - Pasarela de Pagos (MS_PAG)
+      summary: Emitir reembolso compensatorio para el patrón Saga LIFO
+      description: |
+        Ejecuta la restitución monetaria de una transacción previamente aprobada.
+        Permite búsqueda por `transaccion_id` o por `codigo_autorizacion`.
+        Genera el código único formal de reembolso `REF-PAG-XXXXXXXX` y garantiza
+        operación idempotente ante peticiones repetidas.
+      operationId: procesarReembolso
+      x-source: 'src/modules/pagos/pagos.controller.ts#procesarReembolso'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/IdempotencyKeyOptional'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Criterios para identificar la transacción a reembolsar y monto compensatorio.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcesarReembolsoInput'
+            example:
+              transaccion_id: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+              monto: 220.00
+              motivo: 'Rollback compensatorio automático Saga LIFO por falla en reserva'
+      responses:
+        '200':
+          description: Reembolso financiero compensado exitosamente con código emitido.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReembolsoResponse'
+              example:
+                success: true
+                codigo_reembolso: 'REF-PAG-7B8A9C0D'
+                estado: 'REEMBOLSADO'
+                monto_reembolsado: 220.00
+                monto_reembolsado_acumulado: 220.00
+                transaccion_id: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+                fecha_reembolso: '2026-10-24T23:31:00.000Z'
+                mensaje: 'Reembolso compensatorio ejecutado exitosamente dentro del flujo Saga.'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '409':
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /pagos/simulador/config:
+    get:
+      tags:
+        - Simulador de Fallos SOA
+      summary: Consultar configuración del simulador de fallos de pagos SOA (Panel 6)
+      description: |
+        Retorna el estado operativo actual de la pasarela de pagos simulada:
+        el modo activo (`NORMAL`, `RECHAZO_FONDOS`, `TIMEOUT_RED`, `ERROR_INTERNO`, `FRAUDE`)
+        y la latencia simulada en milisegundos.
+      operationId: getConfigSimulador
+      x-source: 'src/modules/pagos/pagos.controller.ts#getConfigSimulador'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Configuración actual del simulador transaccional.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigSimuladorResponse'
+              example:
+                modo_actual: 'NORMAL'
+                latencia_ms: 250
+                modos_disponibles:
+                  - NORMAL
+                  - RECHAZO_FONDOS
+                  - TIMEOUT_RED
+                  - ERROR_INTERNO
+                  - FRAUDE
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+    post:
+      tags:
+        - Simulador de Fallos SOA
+      summary: Ajustar en caliente el modo de inyección de fallos
+      description: |
+        Modifica en tiempo de ejecución las condiciones de respuesta de la pasarela de pagos.
+        Permite a los docentes y evaluadores activar fallos controlados para verificar
+        el comportamiento del orquestador Saga, las compensaciones LIFO y los Circuit Breakers.
+        En producción se requiere `PAGOS_SIMULADOR_HABILITADO=true` para activarlo.
+      operationId: updateConfigSimulador
+      x-source: 'src/modules/pagos/pagos.controller.ts#updateConfigSimulador'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Nuevo modo de operación y latencia opcional en milisegundos.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConfigSimuladorInput'
+            example:
+              modo: 'RECHAZO_FONDOS'
+              latencia_ms: 300
+      responses:
+        '200':
+          description: Configuración del simulador actualizada exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigSimuladorResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /pagos/transacciones:
+    get:
+      tags:
+        - Auditoría y Validación
+      summary: Listar historial de transacciones de pago para el Panel de Control
+      description: |
+        Recupera los registros históricos de pagos aprobados, rechazados y reembolsados
+        almacenados en `schema_pagos.transacciones_pago`, ordenados por fecha descendente.
+      operationId: getTransacciones
+      x-source: 'src/modules/pagos/pagos.controller.ts#getTransacciones'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de transacciones a retornar (por defecto 20).
+          schema:
+            type: integer
+            default: 20
+            example: 20
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista de transacciones persistidas en `schema_pagos`.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransaccionPagoEntity'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /pagos/{paymentReference}:
+    get:
+      tags:
+        - Auditoría y Validación
+      summary: Validar estado y monto de un pago por paymentReference
+      description: |
+        Permite a ADMIN/SERVICE o a la tienda autenticada con `X-Api-Key` verificar síncronamente
+        el cobro realizado por Booking antes de confirmar reservas o emitir boletos. La API key
+        solo permite consultar pagos cuyo `carrito_id` coincide con el identificador de tienda
+        configurado. La respuesta nunca incluye datos de tarjeta.
+        
+        Permite validar tanto el UUID de transacción (`transaccion_id`) como el código de autorización
+        (`AUTH-PAG-XXXXXXXX`). Responde `404 Not Found` bajo RFC 7807 si la referencia no existe.
+      operationId: validarPaymentReference
+      x-source: 'src/modules/pagos/pagos.controller.ts#validarPaymentReference'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security:
+        - BearerAuth: []
+        - X-Api-Key: []
+      parameters:
+        - name: paymentReference
+          in: path
+          required: true
+          description: Identificador de pago público generado por Booking (`transaccion_id` o `codigo_autorizacion`).
+          schema:
+            type: string
+            example: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Referencia de pago validada exitosamente con estado y monto verificado.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidacionPagoResponse'
+              example:
+                payment_reference: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+                status: 'CAPTURED'
+                amount: 220.00
+                refunded_amount: 0
+                currency: 'USD'
+                captured_at: '2026-10-24T23:30:00.000Z'
+                auth_code: 'AUTH-PAG-A1B2C3D4'
+                bookings: []
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+  /pagos/{paymentReference}/reservas:
+    post:
+      tags:
+        - Auditoría y Validación
+      summary: Asociar una reserva confirmada a una referencia de pago
+      description: |
+        Registra el identificador de reserva creado después del cobro. ADMIN/SERVICE o la
+        tienda propietaria (X-Api-Key) puede asociar sus reservas; repetir la misma asociación
+        no crea duplicados.
+      operationId: asociarReserva
+      x-source: 'src/modules/pagos/pagos.controller.ts#asociarReserva'
+      x-status: implemented
+      x-microservice: MS_PAG
+      security:
+        - BearerAuth: []
+        - X-Api-Key: []
+      parameters:
+        - name: paymentReference
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsociarReservaPagoInput'
+      responses:
+        '200':
+          description: Reserva asociada o ya asociada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payment_reference, reserva_id, associated]
+                properties:
+                  payment_reference:
+                    type: string
+                  reserva_id:
+                    type: string
+                  associated:
+                    type: boolean
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Supabase con rol ADMIN o SERVICE.
+    X-Api-Key:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: |
+        API key de tienda mapeada a `carrito_id` mediante `PAGOS_STORE_API_KEYS`.
+        Solo permite leer y asociar reservas de los pagos de ese carrito/tienda.
+
+  schemas:
+
+    ProcesarPagoInput:
+      type: object
+      description: DTO de solicitud de cobro deducido de la implementación del servicio `PagosService.procesarPago`.
+      required:
+        - monto
+      properties:
+        monto:
+          type: number
+          description: Monto total a cobrar en dólares estadounidenses (USD).
+          minimum: 0.01
+          example: 220.00
+        metodo_pago:
+          type: string
+          description: Modalidad de pago seleccionada.
+          enum: [TARJETA_CREDITO, TARJETA_DEBITO, TRANSFERENCIA]
+          default: TARJETA_CREDITO
+          example: TARJETA_CREDITO
+        numero_tarjeta:
+          type: string
+          description: Número de tarjeta de crédito/débito a procesar.
+          example: '4111222233334444'
+        cliente_id:
+          type: string
+          format: uuid
+          description: Identificador del cliente titular en `schema_clientes`.
+          example: '550e8400-e29b-41d4-a716-446655440000'
+        factura_id:
+          type: string
+          format: uuid
+          description: Identificador de la factura asociada en `schema_facturacion`.
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        carrito_id:
+          type: string
+          format: uuid
+          description: Identificador del carrito de compras en `schema_carritos`.
+          example: '7b8c9d0e-1f2a-3b4c-5d6e-7f8a9b0c1d2e'
+        simular_escenario:
+          type: string
+          description: |
+            Parámetro opcional para inyección de contingencias transaccionales puntuales.
+            Sobrescribe la configuración global del simulador para esta solicitud.
+          enum: [NORMAL, RECHAZO_FONDOS, TIMEOUT_RED, ERROR_INTERNO, FRAUDE]
+          example: NORMAL
+        idempotency_key:
+          type: string
+          deprecated: true
+          description: Compatibilidad con clientes v1; se recomienda `Idempotency-Key` en la cabecera.
+
+    PagoAprobadoResponse:
+      type: object
+      description: Estructura devuelta tras la autorización exitosa de un pago bancario.
+      required:
+        - transaccion_id
+        - codigo_autorizacion
+        - estado
+        - monto
+        - moneda
+        - mensaje
+      properties:
+        transaccion_id:
+          type: string
+          format: uuid
+          description: Identificador único de la transacción en `schema_pagos.transacciones_pago` (sirve de `paymentReference`).
+          example: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+        codigo_autorizacion:
+          type: string
+          description: Código de aprobación adquirente generado (ej. `AUTH-PAG-XXXXXXXX`).
+          example: 'AUTH-PAG-A1B2C3D4'
+        estado:
+          type: string
+          enum: [APROBADO]
+          example: APROBADO
+        monto:
+          type: number
+          example: 220.00
+        moneda:
+          type: string
+          example: USD
+        fecha_procesamiento:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:30:00.000Z'
+        mensaje:
+          type: string
+          example: Pago procesado exitosamente. Código de autorización generado.
+        es_idempotente:
+          type: boolean
+          description: Indica si la respuesta proviene de la memoria idempotente por clave repetida.
+          example: false
+
+    ProcesarReembolsoInput:
+      type: object
+      description: DTO de solicitud de reembolso transaccional para compensación Saga.
+      properties:
+        transaccion_id:
+          type: string
+          format: uuid
+          description: UUID de la transacción de pago original en `schema_pagos`.
+          example: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+        codigo_autorizacion:
+          type: string
+          description: Código de autorización de la transacción a revertir.
+          example: 'AUTH-PAG-A1B2C3D4'
+        monto:
+          type: number
+          description: Monto a reembolsar (si se omite, se reembolsa el 100% del pago original).
+          minimum: 0.01
+          example: 220.00
+        motivo:
+          type: string
+          description: Justificación del reembolso (ej. cancelación de orden o compensación Saga).
+          example: Rollback compensatorio automático Saga LIFO por falla en reserva
+        idempotency_key:
+          type: string
+          deprecated: true
+          description: Compatibilidad con clientes v1; se recomienda `Idempotency-Key` en la cabecera.
+
+    ReembolsoResponse:
+      type: object
+      description: Comprobante formal de reembolso compensatorio emitido.
+      required:
+        - success
+        - codigo_reembolso
+        - estado
+        - monto_reembolsado
+        - monto_reembolsado_acumulado
+        - transaccion_id
+        - fecha_reembolso
+        - mensaje
+      properties:
+        success:
+          type: boolean
+          example: true
+        codigo_reembolso:
+          type: string
+          description: Código identificador formal de reembolso (ej. `REF-PAG-XXXXXXXX`).
+          example: 'REF-PAG-7B8A9C0D'
+        estado:
+          type: string
+          enum: [REEMBOLSO_PARCIAL, REEMBOLSADO]
+          example: REEMBOLSADO
+        transaccion_id:
+          type: string
+          format: uuid
+        monto_reembolsado:
+          type: number
+          example: 220.00
+        monto_reembolsado_acumulado:
+          type: number
+          example: 220.00
+        fecha_reembolso:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:31:00.000Z'
+        mensaje:
+          type: string
+          example: Reembolso compensatorio ejecutado exitosamente dentro del flujo Saga.
+
+    ConfigSimuladorResponse:
+      type: object
+      description: Configuración actual del simulador de contingencias bancarias SOA.
+      required:
+        - modo_actual
+        - latencia_ms
+        - modos_disponibles
+      properties:
+        modo_actual:
+          type: string
+          enum: [NORMAL, RECHAZO_FONDOS, TIMEOUT_RED, ERROR_INTERNO, FRAUDE]
+          example: NORMAL
+        latencia_ms:
+          type: integer
+          description: Retardo artificial inyectado en milisegundos.
+          example: 250
+        modos_disponibles:
+          type: array
+          items:
+            type: string
+          example:
+            - NORMAL
+            - RECHAZO_FONDOS
+            - TIMEOUT_RED
+            - ERROR_INTERNO
+            - FRAUDE
+
+    UpdateConfigSimuladorInput:
+      type: object
+      description: Parámetros para ajuste en caliente de inyección de contingencias.
+      required:
+        - modo
+      properties:
+        modo:
+          type: string
+          description: Modo de operación a fijar en la pasarela.
+          enum: [NORMAL, RECHAZO_FONDOS, TIMEOUT_RED, ERROR_INTERNO, FRAUDE]
+          example: RECHAZO_FONDOS
+        latencia_ms:
+          type: integer
+          description: Latencia artificial en milisegundos (mínimo 0).
+          minimum: 0
+          default: 250
+          example: 300
+
+    TransaccionPagoEntity:
+      type: object
+      description: Registro relacional completo de la tabla `schema_pagos.transacciones_pago`.
+      required:
+        - id
+        - idempotencyKey
+        - montoTotal
+        - moneda
+        - metodoPago
+        - estado
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+        idempotencyKey:
+          type: string
+          example: 'idem-pay-1729810400000'
+        facturaId:
+          type: string
+          format: uuid
+          nullable: true
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        carritoId:
+          type: string
+          format: uuid
+          nullable: true
+          example: '7b8c9d0e-1f2a-3b4c-5d6e-7f8a9b0c1d2e'
+        clienteId:
+          type: string
+          format: uuid
+          nullable: true
+          example: '550e8400-e29b-41d4-a716-446655440000'
+        montoTotal:
+          type: number
+          example: 220.00
+        moneda:
+          type: string
+          example: USD
+        metodoPago:
+          type: string
+          example: TARJETA_CREDITO
+        estado:
+          type: string
+          enum: [INICIADA, APROBADO, RECHAZADO, FRAUDE, REEMBOLSO_PARCIAL, REEMBOLSADO, ERROR_TIMEOUT]
+          example: APROBADO
+        codigoAutorizacion:
+          type: string
+          nullable: true
+          example: 'AUTH-PAG-A1B2C3D4'
+        codigoReembolso:
+          type: string
+          nullable: true
+          example: null
+        mensajePasarela:
+          type: string
+          nullable: true
+          example: Cobro aprobado por la red adquirente.
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T23:30:00.000Z'
+
+    ValidacionPagoResponse:
+      type: object
+      description: Respuesta de validación de pago para verificación por parte de aerolíneas o tiendas satélites.
+      required:
+        - payment_reference
+        - status
+        - amount
+        - currency
+        - captured_at
+        - refunded_amount
+        - bookings
+      properties:
+        payment_reference:
+          type: string
+          description: Identificador verificado (`transaccion_id` o `codigo_autorizacion`).
+          example: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
+        status:
+          type: string
+          description: Estado normalizado del cobro para el consumidor externo.
+          enum: [CAPTURED, PARTIALLY_REFUNDED, REFUNDED, FAILED]
+          example: CAPTURED
+        amount:
+          type: number
+          description: Monto total capturado (cero si el cobro fue rechazado).
+          example: 220.00
+        refunded_amount:
+          type: number
+          description: Monto reembolsado acumulado hasta el momento.
+          example: 25.00
+        currency:
+          type: string
+          description: Código de divisa ISO 4217.
+          example: USD
+        captured_at:
+          type: string
+          format: date-time
+          description: Marca temporal de captura del cobro.
+          example: '2026-10-24T23:30:00.000Z'
+        correlation_id:
+          type: string
+          nullable: true
+          description: Identificador de correlación del proceso de compra.
+          example: SAGA-A1B2C3D4
+        auth_code:
+          type: string
+          nullable: true
+          description: Código de autorización de la red adquirente.
+          example: AUTH-PAG-A1B2C3D4
+        bookings:
+          type: array
+          description: Identificadores de reservas asociadas explícitamente a este pago.
+          items:
+            type: string
+          example: [RES-VUE-123]
+
+    AsociarReservaPagoInput:
+      type: object
+      additionalProperties: false
+      required: [reserva_id]
+      properties:
+        reserva_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Identificador de negocio de la reserva ya creada.
+          example: RES-VUE-123

@@ -35,6 +35,15 @@ export class NodesService {
     return fetch(input, { ...init, headers });
   }
 
+  async buscarNodoPorCodigoOId(codigoOId: string): Promise<ConfigProveedor | null> {
+    if (!codigoOId) return null;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(codigoOId);
+    if (isUuid) {
+      return this.configRepo.findOne({ where: [{ codigoNodo: codigoOId }, { id: codigoOId }] });
+    }
+    return this.configRepo.findOne({ where: { codigoNodo: codigoOId } });
+  }
+
   async listarNodos(): Promise<any[]> {
     this.logger.log('Consultando estado de salud de nodos de proveedores en schema_proveedores');
     // Sembrar y asegurar los 20 nodos oficiales estandarizados (5 por vertical)
@@ -182,16 +191,14 @@ export class NodesService {
    * Elimina un nodo proveedor de schema_proveedores.config_proveedor
    */
   async eliminarNodo(codigoNodo: string): Promise<any> {
-    const nodo = await this.configRepo.findOne({
-      where: [{ codigoNodo }, { id: codigoNodo }],
-    });
+    const nodo = await this.buscarNodoPorCodigoOId(codigoNodo);
     if (!nodo) {
       throw new HttpException(`Nodo con código o id '${codigoNodo}' no encontrado`, HttpStatus.NOT_FOUND);
     }
 
     await this.configRepo.remove(nodo);
 
-    this.winstonLogger.logAudit('NODO_PROVEEDOR_ELIMINADO', {
+    this.winstonLogger?.logAudit('NODO_PROVEEDOR_ELIMINADO', {
       codigo_nodo: nodo.codigoNodo,
       nombre_proveedor: nodo.nombreProveedor,
       timestamp: new Date().toISOString(),
@@ -210,9 +217,7 @@ export class NodesService {
     codigoNodo: string,
     dto: any,
   ): Promise<any> {
-    const nodo = await this.configRepo.findOne({
-      where: [{ codigoNodo }, { id: codigoNodo }],
-    });
+    const nodo = await this.buscarNodoPorCodigoOId(codigoNodo);
     if (!nodo) {
       throw new HttpException(`Nodo con código o id '${codigoNodo}' no encontrado`, HttpStatus.NOT_FOUND);
     }
@@ -293,9 +298,7 @@ export class NodesService {
   }
 
   async toggleKillSwitch(codigoNodo: string, activar?: boolean): Promise<any> {
-    const nodo = await this.configRepo.findOne({
-      where: [{ codigoNodo }, { id: codigoNodo }],
-    });
+    const nodo = await this.buscarNodoPorCodigoOId(codigoNodo);
     if (!nodo) {
       throw new HttpException(`Nodo con código o id '${codigoNodo}' no encontrado`, HttpStatus.NOT_FOUND);
     }
@@ -322,7 +325,7 @@ export class NodesService {
     }
 
     // Auditoría Winston obligatoria (Cero logs en BD)
-    this.winstonLogger.logAudit('KILL_SWITCH_PROVEEDOR_ALTERADO', {
+    this.winstonLogger?.logAudit('KILL_SWITCH_PROVEEDOR_ALTERADO', {
       codigo_nodo: nodo.codigoNodo,
       nombre_proveedor: nodo.nombreProveedor,
       vertical: nodo.vertical,
@@ -347,9 +350,7 @@ export class NodesService {
    * Ping de diagnóstico HTTP real a la URL del socio con medición de latencia
    */
   async pingNodo(codigoNodo: string): Promise<any> {
-    const nodo = await this.configRepo.findOne({
-      where: [{ codigoNodo }, { id: codigoNodo }],
-    });
+    const nodo = await this.buscarNodoPorCodigoOId(codigoNodo);
     if (!nodo) {
       throw new HttpException(`Nodo con código o id '${codigoNodo}' no encontrado`, HttpStatus.NOT_FOUND);
     }
@@ -360,9 +361,13 @@ export class NodesService {
 
     if (nodo.baseUrlRest && (nodo.baseUrlRest.startsWith('http://') || nodo.baseUrlRest.startsWith('https://'))) {
       try {
-        const pingUrl = nodo.baseUrlRest.replace(/\/+$/, '') + '/health';
+        const cleanBase = nodo.baseUrlRest.replace(/\/+$/, '');
+        const verticalHealth = nodo.vertical === 'ATRACCIONES' ? `${cleanBase}/atracciones/health` : (nodo.vertical === 'AUTOS' ? `${cleanBase}/autos/health` : `${cleanBase}/health`);
+        const genericHealth = `${cleanBase}/health`;
+        const verticalCatalog = nodo.vertical === 'ATRACCIONES' ? `${cleanBase}/atracciones` : (nodo.vertical === 'AUTOS' ? `${cleanBase}/autos` : cleanBase);
+
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const pingHeaders: Record<string, string> = {};
         const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
@@ -370,8 +375,12 @@ export class NodesService {
           pingHeaders['X-API-Key'] = partnerKey;
         }
 
-        let res = await this.fetchWithTrace(pingUrl, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
-          return this.fetchWithTrace(nodo.baseUrlRest, { headers: pingHeaders, signal: controller.signal });
+        let res = await this.fetchWithTrace(verticalHealth, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+          return this.fetchWithTrace(genericHealth, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+            return this.fetchWithTrace(verticalCatalog, { headers: pingHeaders, signal: controller.signal }).catch(async () => {
+              return this.fetchWithTrace(nodo.baseUrlRest, { headers: pingHeaders, signal: controller.signal });
+            });
+          });
         });
         clearTimeout(timeout);
         latencia = Date.now() - t0;
@@ -387,7 +396,8 @@ export class NodesService {
     nodo.latenciaMs = latencia;
     nodo.ultimoPingAt = new Date();
     if (!nodo.killSwitchActivo) {
-      nodo.healthStatus = online ? (latencia > 800 ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
+      const umbralDegradado = nodo.baseUrlRest?.startsWith('https://') ? 3000 : 1200;
+      nodo.healthStatus = online ? (latencia > umbralDegradado ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
     }
     await this.configRepo.save(nodo);
 
@@ -406,9 +416,7 @@ export class NodesService {
    * Sincroniza e importa el catálogo de atracciones del proveedor externo hacia Booking (OpenAPI v2)
    */
   async sincronizarCatalogo(codigoNodo: string): Promise<any> {
-    const nodo = await this.configRepo.findOne({
-      where: [{ codigoNodo }, { id: codigoNodo }],
-    });
+    const nodo = await this.buscarNodoPorCodigoOId(codigoNodo);
     if (!nodo) {
       throw new HttpException(`Nodo con código o id '${codigoNodo}' no encontrado`, HttpStatus.NOT_FOUND);
     }
@@ -438,7 +446,7 @@ export class NodesService {
     let itemsExternos: any[] = [];
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 15000);
       const syncHeaders: Record<string, string> = { Accept: 'application/json' };
       const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
       if (partnerKey) {
@@ -489,12 +497,38 @@ export class NodesService {
           const marca = String(raw.marca || raw.make || raw.brand || 'Chevrolet');
           const modelo = String(raw.modelo || raw.model || 'Sail');
           const anio = Number(raw.anio || raw.year || 2024);
-          const categoria = String(raw.categoria || raw.category || 'ECONOMICO').toUpperCase();
-          const transmision = String(raw.transmision || raw.transmission || 'MANUAL').toUpperCase();
-          const capacidad = Number(raw.capacidad_pasajeros || raw.seats || raw.passengers || 5);
-          const precio = Number(raw.precio_diario || raw.price?.total || raw.daily_rate || raw.precio || 40.0);
-          const foto = String(raw.foto_url || raw.image_url || raw.image || (Array.isArray(raw.images) ? raw.images[0] : '') || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800');
-          const ciudad = String(raw.ciudad || raw.city || raw.location || 'Quito');
+          const rawCat = String(raw.categoria || raw.category || 'ECONOMICO').toUpperCase();
+          let categoria = 'ECONOMICO';
+          if (rawCat.includes('SUV') || rawCat.includes('4X4') || rawCat.includes('CAMIONETA')) {
+            categoria = 'SUV';
+          } else if (rawCat.includes('COMPACT')) {
+            categoria = 'COMPACTO';
+          } else if (rawCat.includes('PREMIUM') || rawCat.includes('LUJO') || rawCat.includes('LUXURY')) {
+            categoria = 'PREMIUM';
+          } else if (rawCat.includes('VAN') || rawCat.includes('MINIVAN')) {
+            categoria = 'VAN';
+          } else {
+            categoria = 'ECONOMICO';
+          }
+          const rawTrans = String(raw.transmision || raw.transmission || 'MANUAL').toUpperCase();
+          const transmision = rawTrans.includes('AUTO') ? 'AUTOMATICA' : 'MANUAL';
+          const capacidad = Number(raw.capacidad_pasajeros || raw.seats || raw.asientos || raw.passengers || 5);
+          const precio = Number(raw.precio_diario || raw.daily_price || raw.price?.total || raw.daily_rate || (typeof raw.precio === 'number' ? raw.precio : 40.0));
+          let foto = String(raw.foto_url || raw.image_url || raw.image || (Array.isArray(raw.images) ? raw.images[0] : ''));
+          if (!foto || foto === 'undefined' || foto.trim() === '') {
+            const catUpper = String(categoria).toUpperCase();
+            const modUpper = String(modelo).toUpperCase();
+            if (modUpper.includes('SWIFT') || modUpper.includes('ONIX') || modUpper.includes('RIO')) {
+              foto = 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=800&q=80';
+            } else if (catUpper.includes('SUV') || modUpper.includes('DUSTER') || modUpper.includes('TRACKER') || modUpper.includes('KICKS') || modUpper.includes('TUCSON') || modUpper.includes('RAV4') || modUpper.includes('ECOSPORT') || modUpper.includes('SELTOS') || modUpper.includes('CROSS')) {
+              foto = 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?auto=format&fit=crop&w=800&q=80';
+            } else if (catUpper.includes('SEDAN') || modUpper.includes('SENTRA') || modUpper.includes('MAZDA')) {
+              foto = 'https://images.unsplash.com/photo-1550355291-bbee04a92027?auto=format&fit=crop&w=800&q=80';
+            } else {
+              foto = 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=800&q=80';
+            }
+          }
+          const ciudad = String(raw.ubicacion?.ciudad || raw.ciudad || raw.city || raw.location || 'Quito');
 
           if (this.autoRepo) {
             let entity = await this.autoRepo.findOne({ where: { id: rawId } });
@@ -510,11 +544,12 @@ export class NodesService {
                 precioDiario: precio,
                 kilometrajeActual: Number(raw.kilometraje_actual || raw.mileage || 12000),
                 umbralMantenimientoKm: Number(raw.umbral_mantenimiento_km || raw.proximo_mantenimiento_km || 15000),
-                alertaMantenimientoActiva: Boolean(raw.alerta_mantenimiento || false),
+                alertaMantenimientoActiva: Boolean(raw.alerta_mantenimiento || raw.mantenimiento_requerido || false),
                 estadoOperativo: String(raw.estado || raw.status || 'DISPONIBLE'),
                 fotoUrl: foto,
                 ciudad,
                 activo: true,
+                proveedorCodigo: nodo.codigoNodo,
               });
             } else {
               entity.marca = marca;
@@ -527,6 +562,8 @@ export class NodesService {
               entity.fotoUrl = foto;
               entity.ciudad = ciudad;
               entity.estadoOperativo = String(raw.estado || raw.status || entity.estadoOperativo);
+              entity.alertaMantenimientoActiva = Boolean(raw.alerta_mantenimiento || raw.mantenimiento_requerido || entity.alertaMantenimientoActiva);
+              entity.proveedorCodigo = nodo.codigoNodo;
             }
             await this.autoRepo.save(entity);
           }
@@ -558,7 +595,44 @@ export class NodesService {
         const rawId = String(raw.id || raw.item_id || raw.slug || `atrac-${Date.now()}-${sincronizados}`);
         const slug = String(raw.slug || rawId.toLowerCase().replace(/[^a-z0-9]/g, '-'));
         const nombre = raw.nombre || raw.name || raw.title || 'Atracción Turística';
-        const precio = Number(raw.precio_unitario_adulto || raw.price?.total || raw.precio || 55.0);
+        
+        let precio = 55.0;
+        if (typeof raw.precio_unitario_adulto === 'number') {
+          precio = raw.precio_unitario_adulto;
+        } else if (raw.precio_base) {
+          precio = Number(raw.precio_base) || 55.0;
+        } else if (raw.price && typeof raw.price === 'object') {
+          precio = Number(raw.price.adult || raw.price.adulto || raw.price.total || 55.0);
+        } else if (raw.precio && typeof raw.precio === 'object') {
+          precio = Number(raw.precio.adulto || raw.precio.adult || raw.precio.total || 55.0);
+        } else if (typeof raw.precio === 'number') {
+          precio = raw.precio;
+        } else if (raw.precio_unitario_adulto) {
+          precio = Number(raw.precio_unitario_adulto) || 55.0;
+        }
+        if (isNaN(precio) || precio <= 0) precio = 55.0;
+
+        let fotosUrls: string[] = [];
+        if (Array.isArray(raw.fotos_urls)) fotosUrls = raw.fotos_urls;
+        else if (Array.isArray(raw.photos)) fotosUrls = raw.photos;
+        else if (Array.isArray(raw.images)) fotosUrls = raw.images;
+        else if (raw.foto_url) fotosUrls = [raw.foto_url];
+        else if (raw.image_url) fotosUrls = [raw.image_url];
+        else if (raw.image) fotosUrls = [raw.image];
+
+        let inclusiones: string[] = ['Guía acreditado'];
+        if (Array.isArray(raw.inclusiones)) {
+          inclusiones = raw.inclusiones;
+        } else if (Array.isArray(raw.incluye)) {
+          inclusiones = raw.incluye;
+        } else if (raw.inclusiones && typeof raw.inclusiones === 'object') {
+          const keys = Object.entries(raw.inclusiones).filter(([_, v]) => Boolean(v)).map(([k]) => k.replace(/^incluye_|^includes_/, '').replace(/_/g, ' '));
+          if (keys.length > 0) inclusiones = keys;
+        }
+
+        const ratingVal = Number(raw.rating_general || raw.rating?.score || raw.calificacion?.score || 9.5);
+        const rating = isNaN(ratingVal) ? 9.5 : ratingVal;
+        const reviewsCount = Number(raw.reviews_count || raw.rating?.review_count || raw.calificacion?.review_count || 10) || 10;
 
         let entity = await this.atraccionRepo.findOne({ where: [{ id: rawId }, { slug }] });
         if (!entity) {
@@ -580,11 +654,11 @@ export class NodesService {
             puntoEncuentro: raw.punto_encuentro || raw.meeting_point || 'Punto de encuentro indicado en voucher',
             latitud: raw.latitud || -0.220164,
             longitud: raw.longitud || -78.512327,
-            fotosUrls: Array.isArray(raw.fotos_urls) ? raw.fotos_urls : (raw.image ? [raw.image] : []),
-            inclusiones: Array.isArray(raw.inclusiones) ? raw.inclusiones : ['Guía acreditado'],
+            fotosUrls,
+            inclusiones,
             exclusiones: Array.isArray(raw.exclusiones) ? raw.exclusiones : [],
-            ratingGeneral: raw.rating_general || 9.5,
-            reviewsCount: raw.reviews_count || 10,
+            ratingGeneral: rating,
+            reviewsCount,
             activo: true,
             proveedorId: nodo.id,
             proveedorCodigo: nodo.codigoNodo,
@@ -594,6 +668,8 @@ export class NodesService {
           entity.precioUnitarioAdulto = precio;
           if (raw.descripcion_corta) entity.descripcionCorta = raw.descripcion_corta;
           if (raw.descripcion_larga) entity.descripcionLarga = raw.descripcion_larga;
+          if (fotosUrls.length > 0) entity.fotosUrls = fotosUrls;
+          if (inclusiones.length > 0) entity.inclusiones = inclusiones;
           entity.proveedorId = nodo.id;
           entity.proveedorCodigo = nodo.codigoNodo;
         }
@@ -605,7 +681,7 @@ export class NodesService {
       }
     }
 
-    this.winstonLogger.logAudit('CATALOGO_PROVEEDOR_SINCRONIZADO', {
+    this.winstonLogger?.logAudit('CATALOGO_PROVEEDOR_SINCRONIZADO', {
       codigo_nodo: nodo.codigoNodo,
       nombre_proveedor: nodo.nombreProveedor,
       items_recibidos: itemsExternos.length,
@@ -630,7 +706,7 @@ export class NodesService {
         codigoNodo: 'NODE_ATR_DILAN',
         nombreProveedor: 'Descubre EC (Dilan Mendoza)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://100.80.229.90:8080/api/v3',
+        baseUrlRest: 'http://100.88.114.108:8080/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568',
         healthStatus: 'HEALTHY',
@@ -645,105 +721,124 @@ export class NodesService {
       },
       {
         codigoNodo: 'NODE_ATR_ARIEL',
-        nombreProveedor: 'Ariel Tours (Ariel)',
+        nombreProveedor: 'EcuaTravel (Ariel Chacha)',
         vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
+        baseUrlRest: 'http://100.74.154.34:3001/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
-        killSwitchActivo: false,
-        circuitBreakerEstado: 'CLOSED',
-        tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 2',
-        contacto: 'ariel@universidad.edu.ec',
-        emoji: '🌋',
-        descripcion: 'Expediciones y tours volcánicos',
-      },
-      {
-        codigoNodo: 'NODE_ATR_MICHAEL',
-        nombreProveedor: 'Michael Expeditions (Michael)',
-        vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
-        endpointGrpc: bookingGrpc,
-        apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
-        killSwitchActivo: false,
-        circuitBreakerEstado: 'CLOSED',
-        tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 3',
-        contacto: 'michael@universidad.edu.ec',
-        emoji: '🏔️',
-        descripcion: 'Atracciones de alta montaña y senderismo',
-      },
-      {
-        codigoNodo: 'NODE_ATR_ALISSON',
-        nombreProveedor: 'Alisson Adventure (Alisson)',
-        vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
-        endpointGrpc: bookingGrpc,
-        apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
-        killSwitchActivo: false,
-        circuitBreakerEstado: 'CLOSED',
-        tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 4',
-        contacto: 'alisson@universidad.edu.ec',
-        emoji: '🌴',
-        descripcion: 'Tours de selva y aventura amazónica',
-      },
-      {
-        codigoNodo: 'NODE_ATR_GLORIA',
-        nombreProveedor: 'Gloria Travel (Gloria)',
-        vertical: 'ATRACCIONES',
-        baseUrlRest: 'http://localhost:3000/api/v3/atracciones',
-        endpointGrpc: bookingGrpc,
-        apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
-        killSwitchActivo: false,
-        circuitBreakerEstado: 'CLOSED',
-        tasaFallosPct: 0.00,
-        equipo: 'Atracciones – Socio 5',
-        contacto: 'gloria@universidad.edu.ec',
-        emoji: '🐢',
-        descripcion: 'Tours de fauna y conservación ecológica',
-      },
-
-      // ── 2. AUTOS (5 Nodos Estandarizados NODE_AUT_1..5) ──
-      {
-        codigoNodo: 'NODE_AUT_1',
-        nombreProveedor: 'Renta Autos Ecuador — Socio 1 (Flota Principal)',
-        vertical: 'AUTOS',
-        baseUrlRest: process.env.TIENDA_AUTOS_URL || 'http://localhost:3000/api/v2/autos',
-        endpointGrpc: bookingGrpc,
-        apiKey: process.env.TIENDA_AUTOS_API_KEY || null,
         healthStatus: 'HEALTHY',
         latenciaMs: 25,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Renta Autos – Equipo 1',
-        emoji: '🚗',
-        descripcion: 'Flota sedán, SUV y camionetas en Quito y Guayaquil',
+        equipo: 'Atracciones – Ariel Chacha',
+        contacto: 'ariel@universidad.edu.ec',
+        emoji: '🌋',
+        descripcion: 'Catálogo de tours y expediciones turísticas EcuaTravel v3 (Tailscale 100.74.154.34:3001)',
       },
       {
-        codigoNodo: 'NODE_AUT_2',
-        nombreProveedor: 'Renta Autos Ecuador — Socio 2',
-        vertical: 'AUTOS',
-        baseUrlRest: 'http://localhost:3000/api/v2/autos',
+        codigoNodo: 'NODE_ATR_MICHAEL',
+        nombreProveedor: 'TourGirls (Michael Molina)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://100.126.104.108:3000/api/v2',
         endpointGrpc: bookingGrpc,
-        apiKey: null,
+        apiKey: 'atr_PMaHffqZE4ao_bk1bMuqzA0xXzeAbr5nZ6qOcnV7gsAu_Vh7B65zWOYM',
         healthStatus: 'HEALTHY',
-        latenciaMs: 28,
+        latenciaMs: 30,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
-        equipo: 'Renta Autos – Equipo 2',
+        equipo: 'Atracciones – Michael Molina',
+        contacto: 'michael@universidad.edu.ec',
+        emoji: '🏔️',
+        descripcion: 'Tours de aventura y expedición TourGirls con OpenAPI v2 (Tailscale 100.126.104.108:3000)',
+      },
+      {
+        codigoNodo: 'NODE_ATR_ALISSON',
+        nombreProveedor: 'Atracciones Ecuador (Alisson Basantes)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://100.67.28.33:3000/api/v3',
+        endpointGrpc: bookingGrpc,
+        apiKey: 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078',
+        healthStatus: 'HEALTHY',
+        latenciaMs: 30,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Atracciones – Alisson Basantes',
+        contacto: 'alisson@universidad.edu.ec',
+        emoji: '🌴',
+        descripcion: 'Tours y experiencias turísticas Atracciones Ecuador v3 (Tailscale 100.67.28.33:3000)',
+      },
+      {
+        codigoNodo: 'NODE_ATR_GLORIA',
+        nombreProveedor: 'Atracciones (Gloria Chushig)',
+        vertical: 'ATRACCIONES',
+        baseUrlRest: 'http://100.64.117.64:3000/api/v2',
+        endpointGrpc: bookingGrpc,
+        apiKey: null,
+        healthStatus: 'HEALTHY',
+        latenciaMs: 30,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Atracciones – Gloria Chushig',
+        contacto: 'gloria@universidad.edu.ec',
+        emoji: '🐢',
+        descripcion: 'Catálogo de tours y experiencias Atracciones Gloria Chushig v2 (Tailscale 100.64.117.64:3000)',
+      },
+
+      // ── 2. AUTOS (5 Nodos Estandarizados NODE_AUT_1..5) ──
+      {
+        codigoNodo: 'NODE_AUT_RUTALIBRE',
+        nombreProveedor: 'RutaLibre Renta de Autos (Daniel González)',
+        vertical: 'AUTOS',
+        baseUrlRest: 'http://100.124.9.75:3000/api/v3',
+        endpointGrpc: bookingGrpc,
+        apiKey: 'KdAHH2_mzMP3feumO8jrQk1TTwwJ7DHInvvB94Hp7os',
+        healthStatus: 'HEALTHY',
+        latenciaMs: 8,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Autos – Daniel González',
+        contacto: 'daniel@universidad.edu.ec',
+        emoji: '🚗',
+        descripcion: 'Flota de 34 vehículos con Cooldown 2h y mantenimiento en Quito y Guayaquil (Tailscale)',
+      },
+      {
+        codigoNodo: 'NODE_AUT_MATEO',
+        nombreProveedor: 'MANEJA DE UNA (Mateo Morales)',
+        vertical: 'AUTOS',
+        baseUrlRest: 'https://maneja-de-una-v3-api.onrender.com/api/v3',
+        endpointGrpc: bookingGrpc,
+        apiKey: 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+        healthStatus: 'HEALTHY',
+        latenciaMs: 15,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Autos – Mateo Morales',
+        contacto: 'mateo@universidad.edu.ec',
+        emoji: '🚗',
+        descripcion: 'MANEJA DE UNA v3 (Render & Tailscale 100.107.107.48:3000)',
+      },
+      {
+        codigoNodo: 'NODE_AUT_2',
+        nombreProveedor: 'MANEJA DE UNA — Socio 2 (Mateo Morales)',
+        vertical: 'AUTOS',
+        baseUrlRest: 'https://maneja-de-una-v3-api.onrender.com/api/v3',
+        endpointGrpc: bookingGrpc,
+        apiKey: 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+        healthStatus: 'HEALTHY',
+        latenciaMs: 15,
+        killSwitchActivo: false,
+        circuitBreakerEstado: 'CLOSED',
+        tasaFallosPct: 0.00,
+        equipo: 'Autos – Mateo Morales',
+        contacto: 'mateo@universidad.edu.ec',
         emoji: '🚙',
-        descripcion: 'Flota 4x4 todoterreno y compactos',
+        descripcion: 'Flota MANEJA DE UNA (Render & Tailscale 100.107.107.48:3000)',
       },
       {
         codigoNodo: 'NODE_AUT_3',

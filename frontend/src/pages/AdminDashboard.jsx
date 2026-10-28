@@ -663,6 +663,7 @@ function ProveedoresTab() {
   const [confirmDel, setConfirmDel] = useState(null);
   const [filtroTipo, setFiltroTipo] = useState('Todos');
   const [filtroEstado, setFiltroEstado] = useState('Todos');
+  const [busqueda, setBusqueda] = useState('');
   const [syncing, setSyncing] = useState({});
   const [aviso, setAviso] = useState(null);
 
@@ -734,7 +735,13 @@ function ProveedoresTab() {
     const okEstado = filtroEstado === 'Todos'
       || (filtroEstado === 'Online' && h?.online)
       || (filtroEstado === 'Offline' && h && !h.online && !h.checking);
-    return okTipo && okEstado;
+    const q = busqueda.toLowerCase().trim();
+    const okBusqueda = !q
+      || (p.nombre_proveedor || p.nombre || '').toLowerCase().includes(q)
+      || (p.codigo_nodo || p.codigo || '').toLowerCase().includes(q)
+      || (p.equipo || '').toLowerCase().includes(q)
+      || (p.base_url_rest || p.url || '').toLowerCase().includes(q);
+    return okTipo && okEstado && okBusqueda;
   });
 
   const abrirNuevo = () => {
@@ -890,7 +897,22 @@ function ProveedoresTab() {
 
       {/* Barra de herramientas */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="🔍 Buscar (Dilan, NODE_ATR...)"
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 20,
+              border: `1px solid ${C.blue}`,
+              fontSize: '0.82rem',
+              outline: 'none',
+              minWidth: 220,
+              background: '#f8fafc',
+            }}
+          />
           {tiposFiltro.map(t => (
             <button key={t} onClick={() => setFiltroTipo(t)} style={{ padding: '6px 14px', borderRadius: 20, border: `1px solid ${filtroTipo === t ? C.blue : C.border}`, background: filtroTipo === t ? C.blue : 'white', color: filtroTipo === t ? 'white' : C.text, cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, transition: 'all 0.2s' }}>
               {t}
@@ -2973,9 +2995,21 @@ export function AdminDashboard() {
     if(activeTab==='gestion'){fetchUsers();fetchReservas();}
   },[activeTab]);
 
-  const handleRefresh=()=>{
-    fetchStats(true);checkServices();setRefreshKey(k=>k+1);
-    if(activeTab==='gestion'){fetchUsers(true);fetchReservas(true);}
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.allSettled([
+        fetchStats(true),
+        checkServices(),
+        activeTab === 'gestion' ? Promise.allSettled([fetchUsers(true), fetchReservas(true)]) : Promise.resolve(),
+      ]);
+      setRefreshKey(k => k + 1);
+      setLastRefresh(new Date());
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   return (
@@ -2991,7 +3025,32 @@ export function AdminDashboard() {
           </div>
           <div style={{display:'flex',alignItems:'center',gap:12}}>
             {lastRefresh&&<span style={{fontSize:'0.75rem',opacity:0.7}}>Actualizado: {lastRefresh.toLocaleTimeString('es-EC')}</span>}
-            <button onClick={handleRefresh} style={{background:'rgba(255,255,255,0.15)',border:'1px solid rgba(255,255,255,0.3)',color:'white',padding:'6px 14px',borderRadius:6,cursor:'pointer',fontSize:'0.8rem',fontWeight:600}}>↻ Refrescar</button>
+            <button 
+              onClick={handleRefresh} 
+              disabled={isRefreshing}
+              style={{
+                background: isRefreshing ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.15)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                color: 'white',
+                padding: '6px 14px',
+                borderRadius: 6,
+                cursor: isRefreshing ? 'wait' : 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s',
+              }}
+            >
+              <span style={{
+                display: 'inline-block',
+                animation: isRefreshing ? 'spin 0.8s linear infinite' : 'none'
+              }}>
+                ↻
+              </span>
+              {isRefreshing ? 'Refrescando…' : '↻ Refrescar'}
+            </button>
           </div>
         </div>
       </div>
@@ -3041,14 +3100,14 @@ export function AdminDashboard() {
               ))}
             </div>
 
-            {subPanelRda2 === 'panel1' && <Panel1_NodosProveedores />}
-            {subPanelRda2 === 'panel2' && <Panel2_GestionFlotaAutos />}
-            {subPanelRda2 === 'panel3' && <Panel3_ArbolCategoriasAtracciones />}
-            {subPanelRda2 === 'panel4' && <Panel4_LiquidacionesFinanzas />}
-            {subPanelRda2 === 'panel5' && <Panel5_ConsolaFiscalFacturas />}
-            {subPanelRda2 === 'panel6' && <Panel6_SimuladorPagosSOA />}
-            {subPanelRda2 === 'panel7' && <Panel7_MonitorStockGrpc />}
-            {subPanelRda2 === 'panel8' && <Panel8_AuditoriaSagas />}
+            {subPanelRda2 === 'panel1' && <Panel1_NodosProveedores refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel2' && <Panel2_GestionFlotaAutos refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel3' && <Panel3_ArbolCategoriasAtracciones refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel4' && <Panel4_LiquidacionesFinanzas refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel5' && <Panel5_ConsolaFiscalFacturas refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel6' && <Panel6_SimuladorPagosSOA refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel7' && <Panel7_MonitorStockGrpc refreshKey={refreshKey} />}
+            {subPanelRda2 === 'panel8' && <Panel8_AuditoriaSagas refreshKey={refreshKey} />}
           </div>
         )}
         {activeTab==='observabilidad'&&<ObservabilidadTab stats={stats} loadingStats={loadingStats} serviceHealth={serviceHealth} refreshKey={refreshKey}/>}

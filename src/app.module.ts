@@ -23,6 +23,7 @@ import { GraphqlBffModule } from './modules/graphql/graphql-bff.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { TraceContextMiddleware } from './core/tracing/trace-context.middleware';
 import { SecurityModule } from './core/security/security.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
 
 @Module({
   imports: [
@@ -36,14 +37,18 @@ import { SecurityModule } from './core/security/security.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        url: configService.get<string>('DATABASE_URL'),
-        autoLoadEntities: true,
-        synchronize: false,
-        ssl: { rejectUnauthorized: false }, // Requerido por Supabase en producción
-        extra: { max: 10 }, // Aumentado a 10 para evitar bloqueos en desarrollo
-      }),
+      useFactory: (configService: ConfigService) => {
+        const dbUrl = configService.get<string>('DATABASE_URL') || process.env.DATABASE_URL;
+        console.log('[TypeORM Config] DATABASE_URL obtenida:', dbUrl ? dbUrl.replace(/:[^:@]+@/, ':***@') : 'UNDEFINED');
+        return {
+          type: 'postgres',
+          url: dbUrl,
+          autoLoadEntities: true,
+          synchronize: false,
+          ssl: { rejectUnauthorized: false },
+          extra: { max: 10 },
+        };
+      },
     }),
 
     // Módulos Compartidos
@@ -99,6 +104,9 @@ import { SecurityModule } from './core/security/security.module';
 
     // Capa 6: Capa de Agregación GraphQL BFF (/graphql con Apollo Server y DataLoaders)
     GraphqlBffModule,
+
+    // Catálogo formal de contratos por microservicio (RDA2)
+    ContractsModule,
   ],
   controllers: [],
   providers: [TraceContextMiddleware],

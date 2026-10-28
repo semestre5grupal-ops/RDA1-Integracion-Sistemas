@@ -47,7 +47,7 @@ export class RabbitMqEventBusService implements OnModuleInit, OnModuleDestroy {
     const url = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     try {
       this.logger.log(`[RabbitMQ] Intentando conexión con broker en ${url}`);
-      this.connection = await amqp.connect(url, { timeout: 1000 });
+      this.connection = await amqp.connect(url, { timeout: 10000 });
       this.channel = await this.connection.createChannel();
 
       // Declarar Topic Exchange
