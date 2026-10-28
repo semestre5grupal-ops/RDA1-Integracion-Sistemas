@@ -48,9 +48,9 @@ Ejecuta estos comandos en tu PowerShell local paso a paso:
 ### Paso 3.1: Definir variables y crear el Grupo de Recursos
 ```powershell
 $RG = "rg-booking-puce"
-$LOCATION = "eastus"        # Región recomendada (cercana a Supabase US-West/East)
+$LOCATION = "brazilsouth"   # Región autorizada para Azure for Students PUCE (São Paulo)
 $VM_NAME = "vm-booking-core"
-$DNS_LABEL = "booking-puce" # Resultará en: booking-puce.eastus.cloudapp.azure.com
+$DNS_LABEL = "booking-puce" # Resultará en: booking-puce.brazilsouth.cloudapp.azure.com
 $ADMIN_USER = "azureuser"
 
 # Crear el Resource Group
@@ -66,7 +66,7 @@ az network public-ip create `
   --sku Standard `
   --dns-name $DNS_LABEL
 ```
-> 📌 Tu DNS público mundial será: `booking-puce.eastus.cloudapp.azure.com`
+> 📌 Tu DNS público mundial será: `booking-puce.brazilsouth.cloudapp.azure.com`
 
 ### Paso 3.3: Crear el Network Security Group (NSG) y abrir puertos
 ```powershell
@@ -137,7 +137,7 @@ az vm create `
 ### Paso 4.1: Conectarte a la VM por SSH
 Desde tu terminal de PowerShell:
 ```powershell
-ssh azureuser@booking-puce.eastus.cloudapp.azure.com
+ssh azureuser@booking-puce.brazilsouth.cloudapp.azure.com
 ```
 
 ### Paso 4.2: Script de Aprovisionamiento Rápido (Node 22, Git, PM2, Caddy)
@@ -211,12 +211,12 @@ GRPC_AUTH_MODE=NONE
 
 # Bus de Eventos CloudAMQP (RabbitMQ Gestionado - Little Lemur)
 EVENT_BUS_MODE=rabbitmq
-RABBITMQ_URL=amqps://<usuario>:<password>@<servidor>.cloudamqp.com/<vhost>
+RABBITMQ_URL=amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku
 
 # Base de Datos PostgreSQL Supabase (con pooler activo)
-DATABASE_URL=postgresql://postgres.owseuntgcgvflqpnmwcc:7r2K3XoP4qRtY!s8@aws-0-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true
+DATABASE_URL=postgresql://postgres.owseuntgcgvflqpnmwcc:Semestre%402026@aws-0-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true
 SUPABASE_URL=https://owseuntgcgvflqpnmwcc.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw
 
 # URLs de Microservicios Socios
 TIENDA_AUTOS_URL=https://rutalibre-autos-api.azurewebsites.net/api/v3
@@ -225,7 +225,8 @@ TIENDA_AUTOS_API_KEY=LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA
 TIENDA_AUTOS_MATEO_URL=https://maneja-de-una-v3-api.onrender.com/api/v3
 TIENDA_AUTOS_MATEO_API_KEY=Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=
 
-TIENDA_ATRACCIONES_URL=http://100.67.28.33:3000/api/v3
+TIENDA_ATRACCIONES_URL=https://descubre-gateway.livelymoss-5ea81cc6.chilecentral.azurecontainerapps.io/api/v3
+TIENDA_ATRACCIONES_API_KEY=40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568
 
 # Llaves gRPC para nodos socios (en formato JSON)
 GRPC_NODE_KEYS={"NODE_AUT_DANIEL":"LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA","NODE_AUT_MATEO":"Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=","NODE_ATR_ALISSON":"API_KEY_ALISSON"}
@@ -261,7 +262,7 @@ sudo nano /etc/caddy/Caddyfile
 ```
 Reemplaza todo su contenido por:
 ```caddy
-booking-puce.eastus.cloudapp.azure.com {
+booking-puce.brazilsouth.cloudapp.azure.com {
     reverse_proxy localhost:3000
 }
 ```
@@ -285,17 +286,17 @@ Deberás ver la línea verde de confirmación:
 
 ### 2. Probar API REST con HTTPS en el navegador o terminal:
 ```bash
-curl -I https://booking-puce.eastus.cloudapp.azure.com/api/v3/health
+curl -I https://booking-puce.brazilsouth.cloudapp.azure.com/api/v3/health
 ```
 Respuesta esperada: `HTTP/2 200` con estado del orquestador.
 
 ### 3. Probar Swagger UI:
 Abre en tu navegador:
-`https://booking-puce.eastus.cloudapp.azure.com/api/docs`
+`https://booking-puce.brazilsouth.cloudapp.azure.com/api/docs`
 
 ### 4. Probar el Endpoint de Respaldo HTTP REST de Stock:
 ```bash
-curl -X POST https://booking-puce.eastus.cloudapp.azure.com/api/v3/inventory/stock \
+curl -X POST https://booking-puce.brazilsouth.cloudapp.azure.com/api/v3/inventory/stock \
   -H "Content-Type: application/json" \
   -H "X-API-Key: LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA" \
   -d '{
@@ -320,9 +321,9 @@ Respuesta esperada:
 ### 5. Probar Puerto gRPC Nativo (Puerto 50051):
 Desde cualquier máquina con `grpcurl` o desde los clientes de tus compañeros:
 ```bash
-nc -zv booking-puce.eastus.cloudapp.azure.com 50051
+nc -zv booking-puce.brazilsouth.cloudapp.azure.com 50051
 ```
-Respuesta: `Connection to booking-puce.eastus.cloudapp.azure.com 50051 port [tcp/*] succeeded!`
+Respuesta: `Connection to booking-puce.brazilsouth.cloudapp.azure.com 50051 port [tcp/*] succeeded!`
 
 ---
 
@@ -330,8 +331,8 @@ Respuesta: `Connection to booking-puce.eastus.cloudapp.azure.com 50051 port [tcp
 
 | Canal | Dirección Oficial de Booking en Azure | Protocolo / Auth |
 | :--- | :--- | :--- |
-| **REST API Base** | `https://booking-puce.eastus.cloudapp.azure.com/api/v3` | HTTPS / JSON |
-| **Health Check** | `https://booking-puce.eastus.cloudapp.azure.com/api/v3/health` | GET público |
-| **Push Stock REST (Respaldo)** | `https://booking-puce.eastus.cloudapp.azure.com/api/v3/inventory/stock` | POST / Header `X-API-Key` |
-| **gRPC Server Nativo** | `booking-puce.eastus.cloudapp.azure.com:50051` | gRPC TCP (Insecure/Cleartext o con TLS según cliente) |
-| **Swagger Documentación** | `https://booking-puce.eastus.cloudapp.azure.com/api/docs` | Web Browser |
+| **REST API Base** | `https://booking-puce.brazilsouth.cloudapp.azure.com/api/v3` | HTTPS / JSON |
+| **Health Check** | `https://booking-puce.brazilsouth.cloudapp.azure.com/api/v3/health` | GET público |
+| **Push Stock REST (Respaldo)** | `https://booking-puce.brazilsouth.cloudapp.azure.com/api/v3/inventory/stock` | POST / Header `X-API-Key` |
+| **gRPC Server Nativo** | `booking-puce.brazilsouth.cloudapp.azure.com:50051` | gRPC TCP (Insecure/Cleartext o con TLS según cliente) |
+| **Swagger Documentación** | `https://booking-puce.brazilsouth.cloudapp.azure.com/api/docs` | Web Browser |

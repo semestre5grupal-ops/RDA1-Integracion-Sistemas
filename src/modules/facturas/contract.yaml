@@ -1,0 +1,1077 @@
+openapi: 3.0.3
+info:
+  title: API de Facturación y Comprobantes Fiscales — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial de Facturación y Comprobantes Fiscales (RDA2)
+
+    > **Microservicio Emisor:** `MS_FAC` (`schema_facturacion`)  
+    > **Orquestador Agregador:** `ORQ_FAC` (`schema_facturacion` + `schema_clientes` vía ESB sin SQL JOINs)  
+    > **Estándar:** OpenAPI 3.0.3, RFC 7807 Problem Details, CloudEvents v1.0 (Planned)  
+    > **Normativa Fiscal de Referencia:** Servicio de Rentas Internas (SRI) del Ecuador — IVA 15% vigente.  
+
+    ---
+
+    ## 1. Propósito y Alcance
+
+    El microservicio de facturación administra el ciclo de vida fiscal y contable
+    de las compras consolidadas y reservas individuales generadas a través del
+    ecosistema Booking Prototipo (Vuelos, Alojamientos, Autos y Atracciones).
+
+    Responsabilidades arquitectónicas:
+    1. **Despacho Operativo por SMTP:** Recepción del comprobante PDF en Base64
+       y transmisión segura por correo electrónico al usuario autenticado (`MS_FAC`).
+    2. **Persistencia Fiscal Canónica (`schema_facturacion`):** Estructura relacional
+       de dos niveles (`facturas_encabezado` y `facturas_detalle`) con soporte para
+       desglose de IVA 15%, número secuencial SRI (`001-002-XXXXXXXXX`), clave de
+       idempotencia y trazabilidad de pago (`MS_FAC`).
+    3. **Ensamblado Orquestado Multidominio (`ORQ_FAC`):** Agregación en memoria RAM
+       en la capa ESB (`GET /esb/aggregate/facturas/{facturaId}`) y GraphQL BFF
+       (`obtenerFacturaCompleta`) sustituyendo uniones relacionales `JOIN` entre
+       bases de datos independientes (Criterio Excluyente CE02).
+
+    ---
+
+    ## 2. Cómo Nace una Factura Hoy en el Sistema
+
+    A partir de la inspección exhaustiva del código fuente del backend y del frontend,
+    se evidencia el flujo real de generación y entrega de comprobantes:
+
+    1. **Generación en el Navegador del Cliente (`frontend/src/utils/facturaPdf.js`):**
+       - El cliente finaliza una compra confirmada en cualquiera de las cuatro verticales.
+       - La función `construirFacturaPdf(reserva)` utiliza la librería cliente `jsPDF`
+         para componer en memoria el comprobante con formato gráfico de factura electrónica
+         del SRI: RUC corporativo (`1722418520001`), razón social (`BOOKING ECUADOR S.A.`),
+         matriz en Quito, numeración secuencial (`001-002-XXXXXXXXX`) y clave de acceso
+         sintética de 49 dígitos generada al vuelo con `generarClaveAcceso()`.
+       - **Desglose Impositivo:** El total pagado se descompone bajo normativa ecuatoriana
+         vigente: `subtotal = total / 1.15` y `iva = total - subtotal`.
+    2. **Descarga Inmediata y Exportación:**
+       - El usuario puede descargar el PDF directamente a su disco local (`doc.save()`).
+       - Para el despacho por correo, `facturaComoBase64(reserva)` serializa el documento a
+         una cadena Base64 limpia (removiendo el prefijo `data:application/pdf;base64,`).
+    3. **Reenvío Seguro por Correo (`POST /facturas/enviar`):**
+       - `frontend/src/services/facturasApi.js` invoca `POST /facturas/enviar`.
+       - `FacturasController` intercepta la petición con `SupabaseAuthGuard`.
+       - **Protección Antispam / Anti-Relay:** El backend extrae el destinatario obligatorio
+         del claim `email` del token JWT verificado (`req.user.email`). El cliente HTTP no
+         puede elegir el correo de destino.
+       - **Validaciones Rigurosas:** Se verifica la longitud del Base64 (máximo 2.5 MB,
+         aproximadamente 1.8 MB de PDF real) y se comprueba la firma binaria mágica
+         `%PDF-` en los primeros bytes antes de procesar el archivo.
+       - **Despacho SMTP:** El servicio utiliza Nodemailer con transporte reutilizable
+         (con soporte para Gmail / STARTTLS en puerto 587) para entregar el correo.
+    4. **Estado de Persistencia Relacional:**
+       - Existen las tablas `schema_facturacion.facturas_encabezado` y `facturas_detalle`
+         (junto con sus entidades TypeORM `Factura` y `FacturaItem`).
+       - Sin embargo, **ningún controlador REST ni la Saga de checkout insertan registros**
+         en estas tablas durante el flujo ordinario de compra. La persistencia en base
+         de datos permanece como capacidad planificada (`x-status: planned`).
+
+    ---
+
+    ## 3. Mapeo de Identificadores Externos (`producto_id_externo`)
+
+    Para vincular cada línea de detalle (`FacturaItem`) con el registro operativo de
+    la vertical correspondiente en una compra multivertical, se establece el siguiente
+    estándar canónico:
+
+    | Vertical | Entidad Origen | Atributo Origen | Ejemplo de `producto_id_externo` | Contrato OpenAPI Referencia |
+    |---|---|---|---|---|
+    | `VUELOS` | `vuelos_reservas` | `bookingId` / `id` (UUID) | `UIO-GYE-20261025` o `f47ac10b-...` | `vuelos-openapi-v2.yaml` |
+    | `ALOJAMIENTOS` | `alojamientos_reservas` | `order_id` / `id` (UUID) | `7c9e6679-7425-40de-944b-e07fc1f90ae7` | `alojamientos-openapi-v2.yaml` |
+    | `ATRACCIONES` | `atracciones_reservas` | `reservation_id` (UUID) | `DEC-7F3K9Q` o `8b1deb4d-...` | `atracciones-openapi-v2.yaml` |
+    | `AUTOS` | `autos_reservas` | `order_id` / `pnr` | `CAR7849B` o `550e8400-...` | `autos-openapi-v2.yaml` |
+
+    ---
+
+    ## 4. Estado de Implementación de Rutas (v1 vs v2)
+
+    | Ruta | Método | Estado v2 | Microservicio | Implementación Real / Razón |
+    |---|---|---|---|---|
+    | `/facturas/enviar` | `POST` | `implemented` | `MS_FAC` | `FacturasController.enviar`: Reenvío SMTP de PDF Base64 con validación `%PDF-` y token Supabase. |
+    | `/facturas` | `POST` | `planned` | `MS_FAC` | Emisión fiscal en `schema_facturacion`. Soportada por `Factura` y `FacturaItem`, no expuesta en controlador. |
+    | `/facturas` | `GET` | `planned` | `MS_FAC` | Listado paginado de facturas por cliente y estado. |
+    | `/facturas/{facturaId}` | `GET` | `planned` | `MS_FAC` | Consulta REST directa de factura cruda en `MS_FAC`. |
+    | `/facturas/{facturaId}/pdf` | `GET` | `planned` | `MS_FAC` | Generación server-side de PDF binario (actualmente delegada al cliente browser con jsPDF). |
+    | `/facturas/{facturaId}/anular` | `PATCH` | `planned` | `MS_FAC` | Transición de estado a `ANULADA_POR_COMPENSACION`. |
+    | `/esb/aggregate/facturas/{facturaId}` | `GET` | `implemented` | `ORQ_FAC` | `EsbController.getFacturaCompleta`: Ensamblado en memoria sin SQL JOINs cruzados. |
+
+    ---
+
+    ## 5. Eventos de Dominio EDA (CloudEvents v1.0 — Planned)
+
+    Conforme a la arquitectura orientada a eventos (EDA) definida para Booking Prototipo,
+    la facturación responderá a eventos transaccionales y publicará el comprobante emitido:
+
+    - **Eventos Consumidos (Triggers de Facturación):**
+      - `ec.edu.epn.booking.vuelos.booking.ticket_issued` (Emisión de pasaje aéreo).
+      - `ec.edu.epn.booking.alojamientos.order_created` (Confirmación de hospedaje).
+      - `ec.edu.epn.booking.atracciones.reservation_confirmed` (Confirmación de boletería).
+      - `ec.edu.epn.booking.autos.order.confirmed` (Confirmación de alquiler de vehículo).
+      - `ec.edu.epn.booking.saga.checkout_completed` (Finalización exitosa de compra multivertical).
+    - **Eventos Emitidos:**
+      - `ec.edu.epn.booking.facturacion.factura_emitida` (Publicado tras asentar el encabezado y líneas).
+      - `ec.edu.epn.booking.facturacion.factura_anulada` (Publicado ante compensación transaccional).
+
+    ---
+
+    ## 6. Seguridad y Manejo de Errores
+
+    - **Autenticación:** El endpoint implementado `/facturas/enviar` exige obligatoriamente
+      `SupabaseAuthGuard` (`SupabaseBearer`). Peticiones sin token o con token revocado
+      reciben HTTP 401.
+    - **Trazabilidad:** Cabecera `X-Correlation-Id` generada/propagada en todas las peticiones
+      por el middleware global (`src/main.ts`).
+    - **Formato de Error:** Todos los errores HTTP devuelven `application/problem+json`
+      conforme a RFC 7807, reutilizando la biblioteca de componentes comunes `components-v2.yaml`.
+  contact:
+    name: Alejandro Sebastián Flores Lugmaña — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: Desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: Producción (Render)
+  - url: '/api/v2'
+    description: Ruta relativa de la API Gateway v2
+
+security:
+  - SupabaseBearer: []
+
+tags:
+  - name: Facturas - Envíos y Correo
+    description: Operaciones operativas de despacho y transmisión de facturas por SMTP (MS_FAC)
+  - name: Facturas - Emisión y Consulta Fiscal
+    description: Emisión, consulta y anulación de comprobantes fiscales en base de datos relacional (MS_FAC)
+  - name: Facturas - Agregación ESB
+    description: Ensamblado de facturas multivertical sin SQL JOINs en la capa ESB (ORQ_FAC)
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. ENVIAR FACTURA POR CORREO (IMPLEMENTADO)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /facturas/enviar:
+    post:
+      tags:
+        - Facturas - Envíos y Correo
+      summary: Enviar la factura en PDF al correo del usuario autenticado
+      description: |
+        Recibe el PDF generado en el navegador codificado en Base64 y lo reenvía
+        como archivo adjunto mediante protocolo SMTP (Nodemailer / Gmail).
+
+        **Reglas de seguridad y diseño:**
+        - El destinatario se toma exclusivamente del claim `email` del JWT de Supabase
+          validado por `SupabaseAuthGuard`. El cliente no puede especificarlo en el cuerpo
+          para evitar ataques de relay o spam masivo.
+        - Se valida que el Base64 no exceda 2,500,000 caracteres (~1.8 MB de PDF decodificado).
+        - Se comprueba la firma binaria mágica `%PDF-` en la cabecera del archivo decodificado.
+        - El nombre del adjunto se sanitiza a partir del `pnr` con el patrón `Factura_<pnr>.pdf`.
+      operationId: enviarFactura
+      x-source: 'src/modules/facturas/facturas.controller.ts#enviar'
+      x-status: implemented
+      x-microservice: MS_FAC
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: Carga útil con el PDF codificado en Base64 y los metadatos de la reserva.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnviarFacturaRequest'
+      responses:
+        '200':
+          description: Correo enviado exitosamente con la factura en PDF adjunta.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnviarFacturaResponse'
+        '400':
+          description: El Base64 recibido no es un PDF válido o supera el límite de tamaño.
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          description: Falta el token de Supabase o no contiene un correo electrónico válido.
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '502':
+          description: El servidor SMTP upstream rechazó el envío del mensaje.
+          $ref: './common/components-v2.yaml#/components/responses/Problem502'
+        '503':
+          description: El servicio de envío de correos no está configurado o fue deshabilitado por el administrador.
+          $ref: './common/components-v2.yaml#/components/responses/Problem503'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. EMITIR FACTURA RELACIONAL (PLANNED)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /facturas:
+    post:
+      tags:
+        - Facturas - Emisión y Consulta Fiscal
+      summary: Emitir una nueva factura fiscal en base de datos
+      description: |
+        Asienta un nuevo comprobante fiscal en `schema_facturacion.facturas_encabezado`
+        y sus respectivas líneas de detalle en `facturas_detalle`.
+
+        **Comportamiento transaccional:**
+        - Requiere cabecera obligatoria `Idempotency-Key` (UUID v4).
+        - Si ya existe una factura asociada al mismo `Idempotency-Key` o `carrito_id`,
+          retorna el registro preexistente con HTTP 200 sin duplicar cobros fiscales.
+        - La identidad fiscal del cliente se vincula a su perfil verificado en Supabase.
+        - *(Operación planificada del contrato v1 alineada con el modelo TypeORM `Factura`)*.
+      operationId: emitirFactura
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_FAC
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/IdempotencyKey'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmitirFacturaRequest'
+      responses:
+        '201':
+          description: Factura fiscal emitida exitosamente.
+          headers:
+            Location:
+              description: URI canónica del nuevo recurso fiscal creado.
+              schema:
+                type: string
+                format: uri
+                example: '/api/v2/facturas/f47ac10b-58cc-4372-a567-0e02b2c3d479'
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '200':
+          description: Factura previamente generada para la misma clave de idempotencia o carrito.
+          headers:
+            Idempotent-Replayed:
+              $ref: './common/components-v2.yaml#/components/headers/Idempotent-Replayed'
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '409':
+          description: Conflicto — el carrito no se encuentra pagado o presenta inconsistencias de montos.
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+        '422':
+          $ref: './common/components-v2.yaml#/components/responses/Problem422'
+
+    get:
+      tags:
+        - Facturas - Emisión y Consulta Fiscal
+      summary: Listar facturas del usuario autenticado (paginado)
+      description: |
+        Retorna la relación cronológica de comprobantes fiscales emitidos a nombre
+        del usuario autenticado extraído del token JWT.
+
+        Permite filtrado por estado (`EMITIDA`, `PAGADA`, `ANULADA_POR_COMPENSACION`)
+        y por rango de fechas de emisión.
+        *(Operación planificada del contrato v1)*.
+      operationId: listarFacturas
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_FAC
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: estado
+          in: query
+          description: Filtrar por estado fiscal de la factura.
+          required: false
+          schema:
+            type: string
+            enum: [EMITIDA, PAGADA, ANULADA_POR_COMPENSACION]
+            example: EMITIDA
+        - name: desde
+          in: query
+          description: Fecha de inicio del intervalo (ISO 8601 YYYY-MM-DD).
+          required: false
+          schema:
+            type: string
+            format: date
+            example: '2026-10-01'
+        - name: hasta
+          in: query
+          description: Fecha de corte del intervalo (ISO 8601 YYYY-MM-DD).
+          required: false
+          schema:
+            type: string
+            format: date
+            example: '2026-10-31'
+        - name: limit
+          in: query
+          description: Cantidad máxima de comprobantes a listar por página.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+        - name: cursor
+          in: query
+          description: Cursor opaco para paginación eficiente.
+          required: false
+          schema:
+            type: string
+            example: 'eyJpZCI6ImY0N2FjMTBiIn0='
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista paginada de comprobantes fiscales del usuario.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaListResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. DETALLE Y DESCARGA DE FACTURA (PLANNED)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /facturas/{facturaId}:
+    get:
+      tags:
+        - Facturas - Emisión y Consulta Fiscal
+      summary: Obtener detalle completo de una factura por ID
+      description: |
+        Recupera el encabezado fiscal y las líneas de detalle asociadas a un identificador
+        único en `schema_facturacion`.
+
+        > **Nota de Arquitectura:** Para consultar la vista agregada con datos del cliente
+        > sin ejecutar sentencias SQL `JOIN` cruzadas, se recomienda utilizar el endpoint
+        > orquestado `GET /esb/aggregate/facturas/{facturaId}` o la query GraphQL BFF
+        > `obtenerFacturaCompleta`.
+        *(Operación planificada del contrato v1)*.
+      operationId: obtenerFactura
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_FAC
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          description: Identificador UUID v4 de la factura.
+          schema:
+            type: string
+            format: uuid
+            example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Detalle completo de la factura.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  /facturas/{facturaId}/pdf:
+    get:
+      tags:
+        - Facturas - Emisión y Consulta Fiscal
+      summary: Descargar factura generada en formato PDF binario
+      description: |
+        Genera y transmite en tiempo real el archivo PDF correspondiente al comprobante
+        fiscal como un stream binario (`application/pdf`).
+
+        > **Implementación Actual:** En el frontend, este proceso se ejecuta en el navegador
+        > mediante la librería `jsPDF` (`frontend/src/utils/facturaPdf.js`). Este endpoint
+        > formaliza la generación server-side planificada para integraciones B2B o clientes sin UI.
+        *(Operación planificada del contrato v1)*.
+      operationId: descargarFacturaPdf
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_FAC
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          description: Identificador UUID de la factura para generar el PDF.
+          schema:
+            type: string
+            format: uuid
+            example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Archivo PDF del comprobante fiscal en formato binario.
+          headers:
+            Content-Disposition:
+              description: Instrucción para descarga forzada con nombre de archivo seguro.
+              schema:
+                type: string
+                example: 'attachment; filename="Factura_FAC-2026-000001.pdf"'
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 4. ANULAR FACTURA (PLANNED)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /facturas/{facturaId}/anular:
+    patch:
+      tags:
+        - Facturas - Emisión y Consulta Fiscal
+      summary: Anular una factura emitida por compensación o nota de crédito
+      description: |
+        Conmuta el estado de la factura a `ANULADA_POR_COMPENSACION` registrando el
+        motivo formal en el historial de auditoría fiscal.
+
+        Solo procede sobre facturas en estado `EMITIDA` o `PAGADA`. Requiere permisos
+        administrativos (rol `ADMIN`).
+        *(Operación planificada del contrato v1)*.
+      operationId: anularFactura
+      x-source: n/a
+      x-status: planned
+      x-microservice: MS_FAC
+      security:
+        - SupabaseBearer: []
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          description: Identificador UUID de la factura a anular.
+          schema:
+            type: string
+            format: uuid
+            example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnularFacturaRequest'
+      responses:
+        '200':
+          description: Factura anulada exitosamente. Retorna la entidad con estado actualizado.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '409':
+          description: La factura ya se encuentra anulada o su estado no permite reversiones fiscales.
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. AGREGACIÓN EN ESB SIN CROSS-SCHEMA JOINS (IMPLEMENTADO)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /esb/aggregate/facturas/{facturaId}:
+    get:
+      tags:
+        - Facturas - Agregación ESB
+      summary: Ensamblar factura y detalle de ítems sin cross-schema SQL JOINs
+      description: |
+        Pilar fundamental del desacoplamiento relacional (Cátedra RDA2 CE02 / CE06).
+
+        El router interno del ESB consulta en paralelo:
+        1. Encabezado fiscal en `schema_facturacion.facturas_encabezado`.
+        2. Líneas de detalle en `schema_facturacion.facturas_detalle`.
+        3. Datos de contacto del cliente en `schema_clientes.clientes`.
+
+        Los objetos se fusionan en memoria RAM sin emitir una sola sentencia SQL con `JOIN`
+        entre esquemas independientes. Es consumido internamente por el router del ESB
+        y por el resolver de GraphQL BFF (`obtenerFacturaCompleta`).
+      operationId: getFacturaCompletaAgregada
+      x-source: 'src/modules/esb/esb.controller.ts#getFacturaCompleta'
+      x-status: implemented
+      x-microservice: ORQ_FAC
+      security: []
+      parameters:
+        - name: facturaId
+          in: path
+          required: true
+          description: Identificador UUID de la factura a ensamblar.
+          schema:
+            type: string
+            format: uuid
+            example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Factura ensamblada exitosamente con datos de cliente y líneas de detalle.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacturaOrquestadaResponse'
+        '404':
+          description: Factura no encontrada en el esquema de facturación.
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+
+  schemas:
+
+    # ── REQUEST: ENVIAR FACTURA (IMPLEMENTADO) ──
+    EnviarFacturaRequest:
+      type: object
+      required:
+        - pdfBase64
+        - pnr
+      properties:
+        pdfBase64:
+          type: string
+          minLength: 64
+          maxLength: 2500000
+          description: |
+            Contenido del documento PDF codificado en Base64 (sin el prefijo `data:application/pdf;base64,`).
+            El backend valida estrictamente que inicie con los bytes mágicos `%PDF-`.
+          example: 'JVBERi0xLjQKJcTl8uXr...'
+        pnr:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: |
+            Código de reserva (PNR o localizador alfanumérico). Se sanitiza eliminando
+            caracteres de control para componer el nombre del archivo adjunto `Factura_<pnr>.pdf`.
+          example: 'QZXEDP'
+        concepto:
+          type: string
+          maxLength: 200
+          nullable: true
+          description: Descripción opcional que se muestra en el cuerpo del correo.
+          example: 'Vuelo Quito → Guayaquil'
+
+    # ── RESPONSE: ENVIAR FACTURA (IMPLEMENTADO) ──
+    EnviarFacturaResponse:
+      type: object
+      required:
+        - enviado
+        - destinatario
+        - pnr
+        - archivo
+        - message_id
+      properties:
+        enviado:
+          type: boolean
+          description: Indica si el correo fue aceptado por el servidor SMTP para entrega.
+          example: true
+        destinatario:
+          type: string
+          format: email
+          description: Dirección de correo tomada del token JWT del usuario autenticado.
+          example: 'viajero.ecuador@epn.edu.ec'
+        pnr:
+          type: string
+          description: Localizador de la reserva confirmada.
+          example: 'QZXEDP'
+        archivo:
+          type: string
+          description: Nombre del archivo PDF adjunto en el correo.
+          example: 'Factura_QZXEDP.pdf'
+        message_id:
+          type: string
+          description: Identificador único asignado por el servidor SMTP (Nodemailer/Gmail).
+          example: '<b679a978-6821-4d32-b7e6-281b67200ef8@gmail.com>'
+
+    # ── REQUEST: EMITIR FACTURA (PLANNED) ──
+    EmitirFacturaRequest:
+      type: object
+      required:
+        - carrito_id
+        - billing_info
+        - metodo_pago
+        - referencia_pago
+      properties:
+        carrito_id:
+          type: string
+          format: uuid
+          description: Identificador del carrito convertido que origina el comprobante.
+          example: 'c1234567-89ab-cdef-0123-456789abcdef'
+        billing_info:
+          $ref: '#/components/schemas/BillingInfo'
+        metodo_pago:
+          type: string
+          enum: [TARJETA_CREDITO, TARJETA_DEBITO, TRANSFERENCIA, PAYPAL, EFECTIVO]
+          description: Medio de pago utilizado para saldar la orden.
+          example: 'TARJETA_CREDITO'
+        referencia_pago:
+          type: string
+          description: Identificador de la transacción capturada en la pasarela de pagos.
+          example: 'pay_3NxQ1mJZqEvB77a'
+        transaccion_pago_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Clave foránea lógica apuntando a `schema_pagos.transacciones_pago`.
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        notas:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Observaciones contables adicionales.
+          example: 'Compra combinada de paquete turístico Quito colonial.'
+
+    # ── REQUEST: ANULAR FACTURA (PLANNED) ──
+    AnularFacturaRequest:
+      type: object
+      required:
+        - motivo
+      properties:
+        motivo:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Justificación técnica o comercial para la reversión contable.
+          example: 'Cancelación de reserva y compensación LIFO por fallo en tienda externa de alojamientos.'
+
+    # ── ENTITY RESPONSE: FACTURA ENCABEZADO (TYPEORM FACTURA) ──
+    FacturaResponse:
+      type: object
+      required:
+        - id
+        - numero_factura
+        - cliente_id
+        - nombre_cliente
+        - cedula_ruc_cliente
+        - email_cliente
+        - subtotal
+        - iva_porcentaje
+        - iva_valor
+        - total
+        - metodo_pago
+        - estado
+        - idempotency_key
+        - emitida_at
+        - created_at
+        - items
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único del encabezado fiscal en `schema_facturacion`.
+          example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        numero_factura:
+          type: string
+          description: Numeración secuencial del SRI con formato de tres bloques (`001-002-XXXXXXXXX`).
+          example: '001-002-000492817'
+        carrito_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID del carrito de compras originario.
+          example: 'c1234567-89ab-cdef-0123-456789abcdef'
+        cliente_id:
+          type: string
+          format: uuid
+          description: Identificador del cliente propietario (claim `sub` de Supabase).
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        nombre_cliente:
+          type: string
+          description: Razón social o nombres y apellidos del contribuyente.
+          example: 'Juan Sebastián Pérez'
+        cedula_ruc_cliente:
+          type: string
+          description: Número de cédula, RUC o identificación tributaria.
+          example: '1723456789'
+        email_cliente:
+          type: string
+          format: email
+          description: Correo electrónico para notificación de comprobantes electrónicos.
+          example: 'juan.perez@example.com'
+        direccion_cliente:
+          type: string
+          nullable: true
+          description: Dirección domiciliaria o fiscal del cliente.
+          example: 'Av. Amazonas N24-196 y Colón, Quito'
+        subtotal:
+          type: number
+          format: double
+          description: Subtotal sin impuestos gravado con tarifa 15%.
+          example: 100.00
+        iva_porcentaje:
+          type: number
+          format: double
+          description: Porcentaje impositivo vigente en Ecuador.
+          example: 15.00
+        iva_valor:
+          type: number
+          format: double
+          description: Monto liquidado de impuesto al valor agregado.
+          example: 15.00
+        total:
+          type: number
+          format: double
+          description: Importe final facturado (subtotal + iva_valor).
+          example: 115.00
+        metodo_pago:
+          type: string
+          enum: [TARJETA_CREDITO, TARJETA_DEBITO, TRANSFERENCIA, PAYPAL, EFECTIVO]
+          example: 'TARJETA_CREDITO'
+        referencia_pago:
+          type: string
+          nullable: true
+          description: Identificador de pago en la pasarela.
+          example: 'pay_3NxQ1mJZqEvB77a'
+        estado:
+          type: string
+          enum: [EMITIDA, PAGADA, ANULADA_POR_COMPENSACION]
+          description: Estado del comprobante en la máquina de estados fiscal.
+          example: 'EMITIDA'
+        idempotency_key:
+          type: string
+          description: Clave de idempotencia única registrada para prevenir doble facturación.
+          example: '550e8400-e29b-41d4-a716-446655440000'
+        transaccion_pago_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID de la transacción bancaria vinculada en `schema_pagos`.
+          example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        notas:
+          type: string
+          nullable: true
+          example: 'Factura generada tras aprobación de pasarela bancaria.'
+        emitida_at:
+          type: string
+          format: date-time
+          description: Fecha y hora oficial de emisión del comprobante.
+          example: '2026-10-24T22:30:00.000Z'
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp de auditoría de inserción en base de datos.
+          example: '2026-10-24T22:30:00.000Z'
+        items:
+          type: array
+          description: Detalle de líneas de producto facturadas.
+          items:
+            $ref: '#/components/schemas/FacturaItemResponse'
+
+    # ── ENTITY RESPONSE: FACTURA DETALLE (TYPEORM FACTURAITEM) ──
+    FacturaItemResponse:
+      type: object
+      required:
+        - id
+        - vertical
+        - item_id
+        - descripcion
+        - cantidad
+        - precio_unitario
+        - subtotal
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador único de la línea de factura en `schema_facturacion.facturas_detalle`.
+          example: '3fa85f64-5717-4562-b3fc-2c963f66afa6'
+        vertical:
+          type: string
+          enum: [ATRACCIONES, VUELOS, ALOJAMIENTOS, AUTOS]
+          description: Dominio o vertical turística a la que pertenece el servicio.
+          example: 'VUELOS'
+        tipo_producto:
+          type: string
+          nullable: true
+          description: Categoría interna del producto dentro de su vertical.
+          example: 'VUELO_COMERCIAL'
+        item_id:
+          type: string
+          description: Identificador de catálogo o identificador transaccional interno.
+          example: 'vuelo-uio-gye-01'
+        producto_id_externo:
+          type: string
+          nullable: true
+          description: |
+            Identificador del recurso confirmado en el microservicio o tienda origen:
+            - Vuelos: `bookingId`
+            - Alojamientos: `order_id`
+            - Atracciones: `reservation_id`
+            - Autos: `order_id` o PNR de reserva
+          example: 'UIO-GYE-20261025'
+        descripcion:
+          type: string
+          description: Glosa descriptiva que figura en la factura (equivalente a `nombre_producto`).
+          example: 'Vuelo Quito → Guayaquil - Clase Economy'
+        cantidad:
+          type: integer
+          minimum: 1
+          description: Unidades o pasajeros facturados.
+          example: 1
+        precio_unitario:
+          type: number
+          format: double
+          description: Precio unitario sin impuestos.
+          example: 100.00
+        subtotal:
+          type: number
+          format: double
+          description: Total de la línea (cantidad * precio_unitario).
+          example: 100.00
+        fecha_inicio:
+          type: string
+          format: date
+          nullable: true
+          description: Fecha de check-in, despegue o retiro de vehículo.
+          example: '2026-10-25'
+        fecha_fin:
+          type: string
+          format: date
+          nullable: true
+          description: Fecha de check-out, aterrizaje o devolución de vehículo.
+          example: '2026-10-25'
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T22:30:00.000Z'
+
+    # ── SCHEMA: LISTA PAGINADA (PLANNED) ──
+    FacturaListResponse:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacturaResponse'
+        meta:
+          type: object
+          required:
+            - total
+            - limit
+          properties:
+            total:
+              type: integer
+              description: Cantidad total de comprobantes coincidentes con el criterio.
+              example: 15
+            limit:
+              type: integer
+              description: Límite por página aplicado.
+              example: 20
+            nextCursor:
+              type: string
+              nullable: true
+              description: Puntero hacia la página siguiente (nulo si es la última).
+              example: 'eyJpZCI6ImY0N2FjMTBiIn0='
+
+    # ── SCHEMA: BILLING INFO ──
+    BillingInfo:
+      type: object
+      description: Estructura canónica de datos fiscales del adquirente.
+      required:
+        - taxIdType
+        - taxId
+        - legalName
+      properties:
+        taxIdType:
+          type: string
+          enum: [CEDULA, RUC, PASAPORTE, CONSUMIDOR_FINAL]
+          description: Tipo de documento tributario reconocido por el SRI.
+          example: 'CEDULA'
+        taxId:
+          type: string
+          description: Número de identificación (10 dígitos para cédula, 13 para RUC).
+          example: '1723456789'
+        legalName:
+          type: string
+          description: Razón social o nombres completos del titular.
+          example: 'Juan Sebastián Pérez'
+        address:
+          type: string
+          nullable: true
+          description: Dirección física del contribuyente.
+          example: 'Av. Amazonas N24-196 y Colón, Quito'
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: Correo para recepción de comprobantes.
+          example: 'juan.perez@example.com'
+        phone:
+          type: string
+          nullable: true
+          description: Teléfono de contacto.
+          example: '+593987654321'
+
+    # ── SCHEMA: FACTURA ORQUESTADA (ESB & GRAPHQL BFF) ──
+    FacturaOrquestadaResponse:
+      type: object
+      description: |
+        Vista unificada generada por el router interno del ESB y consumida por el GraphQL BFF.
+        Fusiona encabezado, líneas de detalle y perfil de cliente sin `JOINs` entre esquemas.
+      required:
+        - factura
+        - cliente
+        - items
+      properties:
+        factura:
+          type: object
+          required:
+            - id
+            - numero_factura
+            - subtotal
+            - iva_15pct
+            - total
+            - estado
+          properties:
+            id:
+              type: string
+              format: uuid
+              example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+            numero_factura:
+              type: string
+              example: '001-002-000492817'
+            fecha_emision:
+              type: string
+              format: date-time
+              nullable: true
+              example: '2026-10-24T22:30:00.000Z'
+            subtotal:
+              type: number
+              format: double
+              example: 100.00
+            iva_15pct:
+              type: number
+              format: double
+              description: Desglose de IVA 15% calculado en el agregador.
+              example: 15.00
+            total:
+              type: number
+              format: double
+              example: 115.00
+            estado:
+              type: string
+              example: 'EMITIDA'
+            transaccion_pago_id:
+              type: string
+              format: uuid
+              nullable: true
+              example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
+        cliente:
+          type: object
+          required:
+            - nombre
+            - email
+            - cedula_ruc
+          properties:
+            id:
+              type: string
+              format: uuid
+              nullable: true
+              example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+            nombre:
+              type: string
+              example: 'Juan Sebastián Pérez'
+            email:
+              type: string
+              format: email
+              example: 'juan.perez@example.com'
+            cedula_ruc:
+              type: string
+              example: '1723456789'
+            telefono:
+              type: string
+              nullable: true
+              example: '+593987654321'
+            direccion:
+              type: string
+              nullable: true
+              example: 'Av. Amazonas N24-196 y Colón, Quito'
+        items:
+          type: array
+          description: Listado de líneas agregadas de la compra multivertical.
+          items:
+            type: object
+            required:
+              - id
+              - vertical
+              - descripcion
+              - cantidad
+              - precio_unitario
+              - subtotal
+            properties:
+              id:
+                type: string
+                format: uuid
+                example: '3fa85f64-5717-4562-b3fc-2c963f66afa6'
+              vertical:
+                type: string
+                example: 'VUELOS'
+              descripcion:
+                type: string
+                example: 'Vuelo Quito → Guayaquil - Clase Economy'
+              cantidad:
+                type: integer
+                example: 1
+              precio_unitario:
+                type: number
+                format: double
+                example: 100.00
+              subtotal:
+                type: number
+                format: double
+                example: 100.00

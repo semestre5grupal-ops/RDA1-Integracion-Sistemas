@@ -1,0 +1,1910 @@
+openapi: 3.0.3
+info:
+  title: API de Administración Central, Observabilidad y Nodos — Booking Prototipo v2
+  version: 2.0.0
+  description: |
+    # Contrato Oficial del Panel de Administración Central (RDA2)
+
+    > **Microservicio:** Módulo `Admin` / `MS_AUD` / Gestión Central Booking Prototipo  
+    > **Consumidor Principal:** Frontend Web (`AdminDashboard.jsx` y los 8 paneles RDA2)  
+    > **Control de Acceso:** Rol `ADMIN` verificado vía `SupabaseAuthGuard` + `AdminRoleGuard`  
+    > **Estándar:** OpenAPI 3.0.3, RFC 7807 Problem Details, Logging Rotativo JSON Lines (ADR-003)  
+
+    ---
+
+    ## 1. Propósito y Alcance
+
+    El módulo de administración centraliza la observabilidad en tiempo real, el control operativo,
+    la auditoría forense, la moderación de proveedores externos y la conmutación de contingencias
+    (Kill-Switches) para todo el ecosistema Booking Prototipo.
+
+    Provee la interfaz técnica para:
+    1. **Monitoreo de Nodos y Kill-Switches (Panel 1):** Conmutación en caliente de circuitos
+       de tiendas externas (Vuelos, Autos, Atracciones, Alojamientos) para pruebas de resiliencia
+       y simulación de contingencias (Brecha B-03).
+    2. **Observabilidad y KPIs:** Embudo real de conversión (`telemetry_events`), métricas de
+       tráfico por vertical, estado de servicios e ingresos totales.
+    3. **Gestión de Cuentas de Usuario:** Auditoría de `auth.users`, asignación y revocación
+       de roles administrativos, bloqueos de seguridad y reseteo de contraseñas.
+    4. **Gestión Multivertical de Reservas:** Consulta de reservas globales, detalles técnicos
+       con relaciones de entidades, cancelaciones administrativas y reenvío de comprobantes.
+    5. **Finanzas y Payouts:** Historial y aprobación de liquidaciones mensuales a socios proveedores.
+    6. **Auditoría Forense (ADR-003):** Lectura en streaming de logs planos físicos rotativos
+       (`logs/audit-YYYY-MM-DD.log`) sin almacenar trazas técnicas voluminosas en la base de datos.
+    7. **Moderación de Proveedores:** Recepción pública de solicitudes ("Quiero ser proveedor")
+       y aprobación/rechazo administrativo con generación de código institucional.
+    8. **Ajustes Globales y Modo Mantenimiento:** Conmutación de pasarela de pagos, switches
+       de envío de emails y pantalla de mantenimiento global.
+
+    ---
+
+    ## 2. Mapa de Paneles Frontend vs Endpoints de Backend
+
+    | Panel Frontend | Archivo Componente | Endpoints Consumidos | Propósito Operativo |
+    |---|---|---|---|
+    | **Panel 1: Nodos & Kill-Switches** | `Panel1_NodosProveedores.jsx` | `GET /admin/nodes/health`<br>`POST /admin/nodes/{id}/toggle`<br>`POST /admin/nodes/{id}/ping` | Semáforo de latencias, sondeo activo y activación de Circuit Breakers. |
+    | **Panel 2: Flota Autos & Cooldown** | `Panel2_GestionFlotaAutos.jsx` | `GET /autos/flota` | Monitoreo de cooldown 2h y estado de vehículos. |
+    | **Panel 3: Categorías Atracciones** | `Panel3_ArbolCategoriasAtracciones.jsx` | `GET /atracciones/categorias/arbol` | Gestión del árbol jerárquico recursivo de tours. |
+    | **Panel 4: Liquidaciones 10%** | `Panel4_LiquidacionesFinanzas.jsx` | `GET /finanzas/liquidaciones`<br>`POST /finanzas/liquidaciones/{id}/pagar` | Liquidaciones quincenales canónicas (`MS_FIN`). |
+    | **Panel 5: Consola Fiscal** | `Panel5_ConsolaFiscalFacturas.jsx` | `GET /esb/aggregate/facturas/{id}` | Visor de facturas ensambladas sin SQL JOINs cruzados. |
+    | **Panel 6: Simulador Pagos** | `Panel6_SimuladorPagosSOA.jsx` | `POST /pagos/simulador/config` | Inyección de fallas en pasarela bancaria. |
+    | **Panel 7: Stock gRPC** | `Panel7_MonitorStockGrpc.jsx` | Telemetría gRPC (Puerto 50051) | Ingesta de stock de alta velocidad en memoria RAM. |
+    | **Panel 8: Auditoría Sagas** | `Panel8_AuditoriaSagas.jsx` | `GET /esb/sagas`<br>`GET /esb/sagas/{correlationId}` | Visualización de bitácora y compensaciones LIFO. |
+    | **Tab Observabilidad** | `AdminDashboard.jsx` | `GET /admin/stats` | Embudo real de telemetría y KPIs de ventas. |
+    | **Tab Gestión** | `AdminDashboard.jsx` | `GET/POST /admin/users`<br>`PUT /admin/users/{id}/action`<br>`GET /admin/reservas` | Control de usuarios y cancelaciones de reservas. |
+    | **Tab Soporte** | `AdminDashboard.jsx` | `GET /admin/proveedores/solicitudes`<br>`PUT /admin/proveedores/solicitudes/{id}` | Moderación de nuevas solicitudes de afiliación. |
+    | **Tab Auditoría** | `AdminDashboard.jsx` | `GET/POST /admin/auditoria` | Visualización de bitácora administrativa física. |
+    | **Tab Configuración** | `AdminDashboard.jsx` | `GET/PUT /admin/config` | Switches globales (Stripe, SMTP, Mantenimiento). |
+
+    ---
+
+    ## 3. Discrepancias Identificadas en Kill-Switches de Red
+
+    En el código fuente coexisten tres variantes para conmutar el estado de un nodo:
+    1. `POST /admin/nodes/{serviceId}/toggle` (en `AdminController`): Conmuta el switch del conector
+       en memoria (`ConnectorHealthService`), actualiza el semáforo LED y registra auditoría. Es la ruta
+       consumida por el botón principal de `AdminDashboard.jsx`.
+    2. `POST /nodes/{codigoNodo}/toggle` (en `NodesController`): Conmuta el estado de persistencia
+       del nodo en base de datos. Consumida por `Panel1_NodosProveedores.jsx`.
+    3. `POST /admin/nodes/{codigoNodo}/toggle-killswitch` (en `NodesController`): Variante administrativa
+       adicional que sincroniza tanto la base de datos como la memoria.
+    Este contrato formaliza la ruta oficial `POST /admin/nodes/{serviceId}/toggle`.
+
+    ---
+
+    ## 4. Política de Auditoría Forense y Manejo de Errores (ADR-003)
+
+    - **Cero Trazas Técnicas en Base de Datos:** Siguiendo la Decisión Arquitectónica ADR-003
+      y el mandato de la Cátedra RDA2 §2, los eventos de auditoría técnica y administrativa
+      se escriben en archivos físicos rotativos planos (`logs/audit-YYYY-MM-DD.log`).
+    - El endpoint `GET /admin/auditoria` lee directamente de dichos archivos mediante el
+      servicio `WinstonPhysicalLoggerService` y los sirve en streaming al frontend.
+    - **AdminErrorsInterceptor:** Intercepta excepciones internas y las transforma en errores
+      HTTP 500 legibles que preservan el mensaje de diagnóstico para el administrador, sin
+      romper la estructura canónica RFC 7807 (`application/problem+json`).
+  contact:
+    name: Alejandro Sebastián Flores Lugmaña — Integración de Sistemas EPN
+    email: alejandro.floreslu@outlook.com
+  license:
+    name: Uso académico — Integración de Sistemas EPN
+    url: 'https://github.com/semestre5grupal-ops/RDA1-Integracion-Sistemas'
+
+servers:
+  - url: 'http://localhost:3000/api/v2'
+    description: API Gateway Booking — Desarrollo local
+  - url: 'https://rda1-backend-integracion-sistemas.onrender.com/api/v2'
+    description: API Gateway Booking — Producción Render
+  - url: '/api/v2'
+    description: Ruta relativa de la API Gateway v2
+
+security:
+  - SupabaseBearer: []
+  - AdminKey: []
+
+tags:
+  - name: Admin - Nodos y Kill-Switches (Panel 1)
+    description: Semáforo de latencias, sondeo de salud y conmutación de kill-switches de tiendas externas
+  - name: Admin - Observabilidad y KPIs
+    description: Consulta de métricas globales, embudo real de conversión y estado de servicios
+  - name: Admin - Gestión de Usuarios
+    description: Listado, creación, bloqueo y mutación de roles sobre auth.users
+  - name: Admin - Gestión de Reservas Multivertical
+    description: Inspección global de órdenes, detalles técnicos con relaciones y cancelaciones administrativas
+  - name: Admin - Finanzas y Payouts (Dashboard)
+    description: Consolidado financiero de la plataforma y aprobación de payouts a socios comerciales
+  - name: Admin - Auditoría Transaccional y Administrativa
+    description: Registro y lectura en streaming de la bitácora física rotativa (logs/audit-*.log)
+  - name: Admin - Moderación de Proveedores (Soporte)
+    description: Revisión y aprobación/rechazo de solicitudes de nuevas empresas proveedoras
+  - name: Admin - Ajustes y Configuración Global
+    description: Control de parámetros del sistema, comisiones, switches de pasarelas y modo mantenimiento
+  - name: Proveedores - Solicitud Pública
+    description: Formulario público abierto para postulación de nuevos prestadores de servicios
+  - name: Configuración - Consulta Pública
+    description: Endpoint abierto para que el frontend público verifique modo mantenimiento y pasarela
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. NODOS Y KILL-SWITCHES (PANEL 1 RDA2)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/nodes/health:
+    get:
+      tags:
+        - Admin - Nodos y Kill-Switches (Panel 1)
+      summary: Monitoreo en vivo de nodos y semáforo de latencias del ecosistema
+      description: |
+        Retorna el estado operativo de los 4 conectores externos (Vuelos, Autos,
+        Atracciones, Alojamientos). Si se incluye `probe=true`, ejecuta un sondeo
+        HTTP activo en paralelo para refrescar latencias y estado de Circuit Breaker.
+      operationId: getNodesHealth
+      x-source: 'src/modules/admin/admin.controller.ts#getNodesHealth'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: probe
+          in: query
+          required: false
+          description: Si es 'true', sondea activamente los conectores por HTTP antes de responder.
+          schema:
+            type: boolean
+            default: false
+            example: false
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Reporte de salud de los conectores y semáforo del ecosistema.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesHealthResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/nodes/{serviceId}/toggle:
+    post:
+      tags:
+        - Admin - Nodos y Kill-Switches (Panel 1)
+      summary: Conmutar kill-switch para desconectar/conectar una tienda externa en tiempo real
+      description: |
+        Desconecta inmediatamente un microservicio del catálogo central activando
+        su Circuit Breaker en modo `MANUALLY_OPEN`. El Gateway interceptará peticiones
+        hacia dicho nodo y responderá con contingencias locales (mocks de contingencia).
+        Registra el evento en la bitácora física de auditoría.
+      operationId: toggleNode
+      x-source: 'src/modules/admin/admin.controller.ts#toggleNode'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          description: Identificador del conector ('vuelos', 'autos', 'atracciones', 'alojamientos').
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, alojamientos]
+            example: 'autos'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToggleNodeRequest'
+      responses:
+        '200':
+          description: Conector conmutado exitosamente. Retorna el nuevo estado del nodo.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleNodeResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  /admin/nodes/{serviceId}/ping:
+    post:
+      tags:
+        - Admin - Nodos y Kill-Switches (Panel 1)
+      summary: Probar conectividad directa (ping) hacia un conector externo
+      description: |
+        Envía un probe síncrono al endpoint `/health` de la tienda externa especificada,
+        midiendo latencia de ida y vuelta en milisegundos.
+      operationId: pingNode
+      x-source: 'src/modules/admin/admin.controller.ts#pingNode'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: serviceId
+          in: path
+          required: true
+          description: Identificador del conector a sondear.
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, alojamientos]
+            example: 'atracciones'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Resultado del ping con latencia actualizada.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingNodeResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. OBSERVABILIDAD Y KPIS
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/stats:
+    get:
+      tags:
+        - Admin - Observabilidad y KPIs
+      summary: KPIs globales del sistema y embudo de conversión en tiempo real
+      description: |
+        Consolida métricas de reservas por vertical, total de ingresos cobrados,
+        distribución de estados y el embudo real de conversión de clientes
+        leído directamente de la tabla `telemetry_events`.
+      operationId: getAdminStats
+      x-source: 'src/modules/admin/admin.controller.ts#getStats'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Métricas agregadas y estadísticas de observabilidad.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStatsResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 3. GESTIÓN DE USUARIOS
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/users:
+    get:
+      tags:
+        - Admin - Gestión de Usuarios
+      summary: Lista de usuarios registrados en auth.users
+      description: |
+        Consulta la lista completa de usuarios desde `auth.users` vía PostgreSQL
+        o Admin API de Supabase, retornando identificador, rol y estado de cuenta.
+      operationId: adminGetUsers
+      x-source: 'src/modules/admin/admin.controller.ts#getUsers'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista de usuarios registrados.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminUser'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '503':
+          $ref: './common/components-v2.yaml#/components/responses/Problem503'
+
+    post:
+      tags:
+        - Admin - Gestión de Usuarios
+      summary: Crear un usuario (cliente o administrador) desde el panel
+      description: |
+        Crea directamente una cuenta en `auth.users` confirmando el correo
+        y fijando el rol administrativo en `app_metadata.role`.
+      operationId: adminCrearUsuario
+      x-source: 'src/modules/admin/admin.controller.ts#crearUsuario'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateUserRequest'
+      responses:
+        '201':
+          description: Usuario creado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCreateUserResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '409':
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+
+  /admin/users/{id}/action:
+    put:
+      tags:
+        - Admin - Gestión de Usuarios
+      summary: Acción sobre un usuario (bloquear, desbloquear, promover_admin, quitar_admin, cambiar_password)
+      description: |
+        Aplica mutaciones de seguridad sobre una cuenta en `auth.users`.
+        Protege al administrador en sesión contra auto-degradación.
+      operationId: adminUserAction
+      x-source: 'src/modules/admin/admin.controller.ts#userAction'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del usuario en auth.users.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUserActionRequest'
+      responses:
+        '200':
+          description: Acción ejecutada exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminActionResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/users/{id}/historial:
+    get:
+      tags:
+        - Admin - Gestión de Usuarios
+      summary: Ver historial de compras de un usuario
+      description: Recupera el consolidado de reservas en las 4 verticales turísticas.
+      operationId: adminGetUserHistorial
+      x-source: 'src/modules/admin/admin.controller.ts#getUserHistorial'
+      x-status: implemented
+      x-microservice: MS_CLI
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador UUID del usuario.
+          schema:
+            type: string
+            format: uuid
+            example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Historial de compras por vertical.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserHistorialResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 4. GESTIÓN DE RESERVAS MULTIVERTICAL
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/reservas:
+    get:
+      tags:
+        - Admin - Gestión de Reservas Multivertical
+      summary: Todas las reservas del sistema agrupadas por vertical
+      description: |
+        Retorna la relación global de compras registradas en Vuelos, Autos,
+        Atracciones y Alojamientos con sus importes y estados.
+      operationId: getReservasGlobales
+      x-source: 'src/modules/admin/admin.controller.ts#getReservasGlobales'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Reservas globales desglosadas por vertical turística.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReservasGlobalesResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/reservas/{tipo}/{id}/cancelar:
+    put:
+      tags:
+        - Admin - Gestión de Reservas Multivertical
+      summary: Cancelar una reserva administrativa por vertical
+      description: |
+        Conmuta el estado de la reserva a `CANCELLED`. Para `hospedaje`, invoca
+        `alojamientosService.cancelarReserva` respetando la política de cancelación.
+        Para las demás verticales ejecuta la actualización directa y audita el hecho.
+      operationId: cancelarReservaAdmin
+      x-source: 'src/modules/admin/admin.controller.ts#cancelarReserva'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: tipo
+          in: path
+          required: true
+          description: Dominio o vertical turística de la reserva.
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, hospedaje]
+            example: 'vuelos'
+        - name: id
+          in: path
+          required: true
+          description: Identificador de la reserva en la vertical (UUID o PNR).
+          schema:
+            type: string
+            example: 'UIO-GYE-20261025'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Reserva cancelada exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminActionResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  /admin/reservas/{tipo}/{id}/detalles:
+    get:
+      tags:
+        - Admin - Gestión de Reservas Multivertical
+      summary: Obtener detalles técnicos de una reserva
+      description: |
+        Recupera el objeto completo con sus relaciones (itinerarios, boletos,
+        pasajeros, check-in, vehículo o alojamiento asociado).
+      operationId: getReservaDetallesAdmin
+      x-source: 'src/modules/admin/admin.controller.ts#getReservaDetalles'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: tipo
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, hospedaje]
+            example: 'hospedaje'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Detalle técnico de la reserva.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReservaDetalleResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/reservas/{tipo}/{id}/reenviar:
+    put:
+      tags:
+        - Admin - Gestión de Reservas Multivertical
+      summary: Reenviar comprobante al cliente
+      description: Simula y audita el reenvío de la confirmación de reserva al correo del cliente.
+      operationId: reenviarComprobanteAdmin
+      x-source: 'src/modules/admin/admin.controller.ts#reenviarComprobante'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: tipo
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [vuelos, autos, atracciones, hospedaje]
+            example: 'vuelos'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: 'UIO-GYE-20261025'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Comprobante reenviado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminActionResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 5. FINANZAS Y PAYOUTS (DASHBOARD GENERAL)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/finanzas:
+    get:
+      tags:
+        - Admin - Finanzas y Payouts (Dashboard)
+      summary: Finanzas reales del booking (cobrado, comisiones, IVA y payouts)
+      description: |
+        Calcula en tiempo real cruzando reservas cobradas de las 4 verticales
+        las métricas del widget financiero general de `AdminDashboard.jsx`.
+      operationId: getAdminFinanzas
+      x-source: 'src/modules/admin/admin.controller.ts#getFinanzas'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Resumen financiero mensual y balance general.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFinanzasResumenResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/payouts:
+    get:
+      tags:
+        - Admin - Finanzas y Payouts (Dashboard)
+      summary: Historial de payouts aprobados (tabla panel_liquidaciones)
+      description: Lista las liquidaciones mensuales aprobadas desde el panel de administración.
+      operationId: getAdminPayouts
+      x-source: 'src/modules/admin/admin.controller.ts#getPayouts'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Historial de liquidaciones pagadas.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminPayout'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/payouts/aprobar:
+    post:
+      tags:
+        - Admin - Finanzas y Payouts (Dashboard)
+      summary: Aprobar el payout pendiente de una vertical en un periodo (YYYY-MM)
+      description: |
+        Asienta el pago de liquidación en `panel_liquidaciones` registrando el correo
+        del administrador autorizante y emite un registro de auditoría.
+      operationId: aprobarPayoutAdmin
+      x-source: 'src/modules/admin/admin.controller.ts#aprobarPayout'
+      x-status: implemented
+      x-microservice: MS_FIN
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminAprobarPayoutRequest'
+      responses:
+        '200':
+          description: Payout aprobado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAprobarPayoutResponse'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 6. AUDITORÍA FORENSE FÍSICA (ADR-003)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/auditoria:
+    get:
+      tags:
+        - Admin - Auditoría Transaccional y Administrativa
+      summary: Registro de auditoría real (lectura streaming de logs/audit-*.log)
+      description: |
+        Recupera los eventos más recientes directamente de los archivos físicos planos
+        rotativos en disco (`logs/audit-YYYY-MM-DD.log`) sin saturar la base de datos (ADR-003).
+      operationId: getAdminAuditoria
+      x-source: 'src/modules/admin/admin.controller.ts#getAuditoria'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Cantidad máxima de registros de auditoría a leer.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 300
+            example: 300
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Registros de auditoría física y resumen de actividad.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminAuditListResponse'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+    post:
+      tags:
+        - Admin - Auditoría Transaccional y Administrativa
+      summary: Registrar manualmente una acción administrativa desde el panel
+      description: Escribe un registro manual en el archivo físico rotativo de auditoría.
+      operationId: registrarAuditoriaManual
+      x-source: 'src/modules/admin/admin.controller.ts#registrarAuditoria'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminRegistrarAuditoriaRequest'
+      responses:
+        '200':
+          description: Entrada de auditoría registrada exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 7. MODERACIÓN DE PROVEEDORES (SOPORTE)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/proveedores/solicitudes:
+    get:
+      tags:
+        - Admin - Moderación de Proveedores (Soporte)
+      summary: Solicitudes de nuevos proveedores para revisión administrativa
+      description: Lista las solicitudes registradas a través del formulario público.
+      operationId: getSolicitudesProveedor
+      x-source: 'src/modules/admin/admin.controller.ts#getSolicitudesProveedor'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: estado
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDIENTE, APROBADA, RECHAZADA]
+            example: 'PENDIENTE'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Lista de solicitudes de proveedores.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SolicitudProveedor'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  /admin/proveedores/solicitudes/{id}:
+    put:
+      tags:
+        - Admin - Moderación de Proveedores (Soporte)
+      summary: Aprobar o rechazar una solicitud de proveedor
+      description: |
+        Actualiza el estado de la postulación. Si se aprueba, genera el código
+        institucional del proveedor y lo asienta en auditoría.
+      operationId: revisarSolicitudProveedor
+      x-source: 'src/modules/admin/admin.controller.ts#revisarSolicitudProveedor'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Identificador numérico o UUID de la solicitud.
+          schema:
+            type: string
+            example: '1'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevisarSolicitudProveedorRequest'
+      responses:
+        '200':
+          description: Solicitud revisada y actualizada.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudProveedor'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+        '404':
+          $ref: './common/components-v2.yaml#/components/responses/Problem404'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 8. AJUSTES Y CONFIGURACIÓN GLOBAL
+  # ─────────────────────────────────────────────────────────────────────────────
+  /admin/config:
+    get:
+      tags:
+        - Admin - Ajustes y Configuración Global
+      summary: Configuración global de la plataforma (tabla panel_config)
+      description: Retorna los parámetros operativos clave (comisión base, IVA, switches).
+      operationId: getAdminConfig
+      x-source: 'src/modules/admin/admin.controller.ts#getConfig'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Configuración operativa activa.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformConfig'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+    put:
+      tags:
+        - Admin - Ajustes y Configuración Global
+      summary: Actualizar configuración global de la plataforma
+      description: Modifica parámetros operativos y registra el cambio en la bitácora física.
+      operationId: updateAdminConfig
+      x-source: 'src/modules/admin/admin.controller.ts#updateConfig'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security:
+        - SupabaseBearer: []
+        - AdminKey: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlatformConfigRequest'
+      responses:
+        '200':
+          description: Configuración actualizada exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformConfig'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '403':
+          $ref: './common/components-v2.yaml#/components/responses/Problem403'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 9. CONTROLADORES PÚBLICOS (SIN LOGIN)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /proveedores/solicitudes:
+    post:
+      tags:
+        - Proveedores - Solicitud Pública
+      summary: Enviar solicitud pública para ser proveedor ("Quiero ser proveedor")
+      description: |
+        Endpoint público abierto a empresas turísticas para postularse como proveedores.
+        Guarda la solicitud en estado `PENDIENTE` para posterior moderación administrativa.
+      operationId: postularProveedorPublico
+      x-source: 'src/modules/admin/proveedores-public.controller.ts#crear'
+      x-status: implemented
+      x-microservice: MS_PROV
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudProveedorPublicRequest'
+      responses:
+        '201':
+          description: Solicitud registrada exitosamente en estado PENDIENTE.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudProveedor'
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '409':
+          description: Conflicto — Ya existe una postulación pendiente con ese RUC o correo.
+          $ref: './common/components-v2.yaml#/components/responses/Problem409'
+
+  /config/public:
+    get:
+      tags:
+        - Configuración - Consulta Pública
+      summary: Estado público de la plataforma (mantenimiento y pasarela)
+      description: |
+        Endpoint público sin autenticación que expone si el modo mantenimiento está
+        activo o si los pagos en línea se encuentran temporalmente suspendidos.
+      operationId: getPublicConfig
+      x-source: 'src/modules/admin/public-config.controller.ts#getPublic'
+      x-status: implemented
+      x-microservice: MS_AUD
+      security: []
+      parameters:
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Parámetros públicos de disponibilidad del servicio.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicConfigResponse'
+        '429':
+          $ref: './common/components-v2.yaml#/components/responses/Problem429'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    SupabaseBearer:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
+    AdminKey:
+      $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+
+  schemas:
+
+    # ── SCHEMAS DE NODOS Y SALUD ──
+    NodesHealthResponse:
+      type: object
+      required:
+        - nodes
+        - summary
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorNode'
+        summary:
+          type: object
+          properties:
+            total_nodes:
+              type: integer
+              example: 4
+            online_nodes:
+              type: integer
+              example: 4
+            disabled_switches:
+              type: integer
+              example: 0
+            system_health:
+              type: string
+              enum: [HEALTHY, PARTIAL_FALLBACK, DEGRADED]
+              example: 'HEALTHY'
+
+    ConnectorNode:
+      type: object
+      required:
+        - id
+        - nombre
+        - vertical
+        - protocolo
+        - url
+        - enabled
+        - status
+        - latency
+        - lastCheck
+        - circuitBreaker
+      properties:
+        id:
+          type: string
+          example: 'autos'
+        nombre:
+          type: string
+          example: 'Sistema Renta de Autos & Flota'
+        vertical:
+          type: string
+          example: 'Autos'
+        protocolo:
+          type: string
+          example: 'REST / OpenAPI v2 + Cooldown 2h'
+        url:
+          type: string
+          example: 'http://localhost:3000/api/v2/autos'
+        enabled:
+          type: boolean
+          description: Estado del Kill-Switch manual (true = conectado, false = desconectado).
+          example: true
+        status:
+          type: string
+          enum: [ONLINE, DEGRADED, OFFLINE, DISABLED]
+          example: 'ONLINE'
+        latency:
+          type: number
+          description: Latencia medida en milisegundos.
+          example: 24
+        lastCheck:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:30:00.000Z'
+        circuitBreaker:
+          type: string
+          enum: [CLOSED, OPEN, HALF_OPEN, MANUALLY_OPEN]
+          example: 'CLOSED'
+        consecutiveFailures:
+          type: integer
+          example: 0
+        errorRate:
+          type: number
+          example: 0.05
+        description:
+          type: string
+          example: 'Gestión de vehículos, depósitos, máquina de estados y coberturas.'
+        responsable:
+          type: string
+          example: 'Equipo Autos (Compañero Externo)'
+
+    ToggleNodeRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Estado forzado deseado (si se omite, invierte el estado actual).
+          example: false
+
+    ToggleNodeResponse:
+      type: object
+      required:
+        - success
+        - message
+        - node
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Conector 'Sistema Renta de Autos & Flota' desconectado (Kill-Switch ACTIVO)"
+        node:
+          $ref: '#/components/schemas/ConnectorNode'
+
+    PingNodeResponse:
+      type: object
+      required:
+        - success
+        - node
+      properties:
+        success:
+          type: boolean
+          example: true
+        node:
+          $ref: '#/components/schemas/ConnectorNode'
+
+    # ── SCHEMAS DE STATS Y OBSERVABILIDAD ──
+    AdminStatsResponse:
+      type: object
+      required:
+        - generadoEn
+        - kpis
+        - ultimasReservas
+      properties:
+        generadoEn:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:30:00.000Z'
+        kpis:
+          type: object
+          properties:
+            totalReservas:
+              type: integer
+              example: 42
+            reservasVuelos:
+              type: integer
+              example: 18
+            reservasAutos:
+              type: integer
+              example: 10
+            reservasAtracciones:
+              type: integer
+              example: 8
+            reservasHospedaje:
+              type: integer
+              example: 6
+            reservasCobradas:
+              type: integer
+              example: 39
+            ingresosTotal:
+              type: number
+              format: double
+              example: 14250.75
+            ingresosVuelos:
+              type: number
+              format: double
+              example: 7200.00
+            ingresosAutos:
+              type: number
+              format: double
+              example: 3100.50
+            ingresosAtracciones:
+              type: number
+              format: double
+              example: 1450.25
+            ingresosHospedaje:
+              type: number
+              format: double
+              example: 2500.00
+        estadosPorVertical:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: integer
+        ultimasReservas:
+          type: array
+          items:
+            type: object
+        realFunnel:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+                example: 'Búsquedas'
+              count:
+                type: integer
+                example: 1540
+              pct:
+                type: number
+                example: 100.0
+        trafficByVertical:
+          type: object
+          properties:
+            vuelos:
+              type: integer
+              example: 620
+            autos:
+              type: integer
+              example: 310
+            atracciones:
+              type: integer
+              example: 240
+            hospedaje:
+              type: integer
+              example: 370
+        telemetria:
+          type: object
+          properties:
+            eventos:
+              type: integer
+              example: 12540
+            sesiones:
+              type: integer
+              example: 1540
+            ultimoEvento:
+              type: string
+              format: date-time
+              nullable: true
+
+    # ── SCHEMAS DE USUARIOS Y GESTIÓN ──
+    AdminUser:
+      type: object
+      required:
+        - id
+        - email
+        - rol
+        - esAdmin
+        - bloqueado
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        email:
+          type: string
+          format: email
+          example: 'juan.perez@example.com'
+        nombre:
+          type: string
+          nullable: true
+          example: 'Juan Pérez'
+        cedula:
+          type: string
+          nullable: true
+          example: '1723456789'
+        telefono:
+          type: string
+          nullable: true
+          example: '0987654321'
+        rol:
+          type: string
+          enum: [CLIENTE, ADMIN, MANTENIMIENTO]
+          example: 'CLIENTE'
+        esAdmin:
+          type: boolean
+          example: false
+        bloqueado:
+          type: boolean
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+        lastSignInAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-24T22:15:00.000Z'
+
+    AdminCreateUserRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: 'nuevo.admin@booking.com'
+        password:
+          type: string
+          format: password
+          minLength: 6
+          maxLength: 72
+          example: 'AdminBooking2026!'
+        rol:
+          type: string
+          enum: [cliente, admin]
+          default: cliente
+          example: 'admin'
+
+    AdminCreateUserResponse:
+      type: object
+      required:
+        - success
+        - id
+        - email
+        - rol
+      properties:
+        success:
+          type: boolean
+          example: true
+        id:
+          type: string
+          format: uuid
+          example: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d'
+        email:
+          type: string
+          example: 'nuevo.admin@booking.com'
+        rol:
+          type: string
+          example: 'admin'
+
+    AdminUserActionRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [bloquear, desbloquear, promover_admin, quitar_admin, cambiar_password]
+          example: 'bloquear'
+        password:
+          type: string
+          format: password
+          nullable: true
+          description: Requerido únicamente si action es 'cambiar_password'.
+          example: 'NuevaPassword2026!'
+
+    AdminActionResponse:
+      type: object
+      required:
+        - success
+        - message
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: 'Acción bloquear ejecutada'
+        email:
+          type: string
+          nullable: true
+          example: 'usuario@example.com'
+
+    AdminUserHistorialResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            vuelos:
+              type: array
+              items:
+                type: object
+            autos:
+              type: array
+              items:
+                type: object
+            atracciones:
+              type: array
+              items:
+                type: object
+            hospedaje:
+              type: array
+              items:
+                type: object
+
+    # ── SCHEMAS DE RESERVAS ──
+    AdminReservasGlobalesResponse:
+      type: object
+      required:
+        - vuelos
+        - autos
+        - atracciones
+        - hospedaje
+      properties:
+        vuelos:
+          type: array
+          items:
+            type: object
+        autos:
+          type: array
+          items:
+            type: object
+        atracciones:
+          type: array
+          items:
+            type: object
+        hospedaje:
+          type: array
+          items:
+            type: object
+
+    AdminReservaDetalleResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          description: Estructura técnica con relaciones de la reserva según la vertical.
+
+    # ── SCHEMAS DE FINANZAS Y PAYOUTS ──
+    AdminFinanzasResumenResponse:
+      type: object
+      properties:
+        totalCobrado:
+          type: number
+          format: double
+          example: 14250.75
+        comisionPlataforma:
+          type: number
+          format: double
+          example: 1425.07
+        ivaTotal:
+          type: number
+          format: double
+          example: 1858.79
+        netoProveedores:
+          type: number
+          format: double
+          example: 10966.89
+        payoutsPendientes:
+          type: array
+          items:
+            type: object
+
+    AdminPayout:
+      type: object
+      required:
+        - id
+        - vertical
+        - periodo
+        - reservas
+        - monto_bruto
+        - comision_pct
+        - comision
+        - monto_pagado
+        - aprobado_por
+        - aprobado_en
+      properties:
+        id:
+          type: integer
+          example: 12
+        vertical:
+          type: string
+          example: 'autos'
+        periodo:
+          type: string
+          example: '2026-10'
+        reservas:
+          type: integer
+          example: 14
+        monto_bruto:
+          type: number
+          format: double
+          example: 3200.00
+        comision_pct:
+          type: number
+          format: double
+          example: 15.00
+        comision:
+          type: number
+          format: double
+          example: 480.00
+        monto_pagado:
+          type: number
+          format: double
+          example: 2720.00
+        referencia:
+          type: string
+          nullable: true
+          example: 'TRX-PAYOUT-98721'
+        aprobado_por:
+          type: string
+          example: 'admin@booking.com'
+        aprobado_en:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+
+    AdminAprobarPayoutRequest:
+      type: object
+      required:
+        - vertical
+        - periodo
+      properties:
+        vertical:
+          type: string
+          example: 'autos'
+        periodo:
+          type: string
+          example: '2026-10'
+        referencia:
+          type: string
+          nullable: true
+          example: 'TRX-BANK-55442'
+        bruto:
+          type: number
+          format: double
+          example: 3200.00
+        reservas:
+          type: integer
+          example: 14
+
+    AdminAprobarPayoutResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        montoPagado:
+          type: number
+          format: double
+          example: 2720.00
+        referencia:
+          type: string
+          example: 'TRX-BANK-55442'
+
+    # ── SCHEMAS DE AUDITORÍA FORENSE FÍSICA ──
+    AdminAuditListResponse:
+      type: object
+      required:
+        - items
+        - resumen
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAuditItem'
+        resumen:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            acciones_admin: 14
+            cambios_estado: 32
+            errores_sistema: 2
+
+    AdminAuditItem:
+      type: object
+      required:
+        - id
+        - fecha
+        - origen
+        - categoria
+        - actor
+        - accion
+        - entidad
+      properties:
+        id:
+          type: string
+          example: 'phys-1729803600000-0'
+        fecha:
+          type: string
+          format: date-time
+          example: '2026-10-24T20:00:00.000Z'
+        origen:
+          type: string
+          enum: [ADMIN, SISTEMA]
+          example: 'ADMIN'
+        categoria:
+          type: string
+          example: 'nodo_red'
+        actor:
+          type: string
+          example: 'admin@booking.com'
+        accion:
+          type: string
+          example: 'Conmutó kill-switch para conector Sistema Renta de Autos -> DESCONECTADO'
+        entidad:
+          type: string
+          example: 'autos'
+        detalle:
+          type: string
+          example: 'enabled: false · status: OFFLINE'
+        ip:
+          type: string
+          nullable: true
+          example: '190.152.12.84'
+
+    AdminRegistrarAuditoriaRequest:
+      type: object
+      required:
+        - accion
+      properties:
+        accion:
+          type: string
+          maxLength: 80
+          example: 'Revisión manual de conciliación bancaria'
+        entidadTipo:
+          type: string
+          maxLength: 60
+          nullable: true
+          example: 'panel'
+        entidadId:
+          type: string
+          maxLength: 160
+          nullable: true
+          example: 'finanzas-manual'
+        detalle:
+          type: object
+          nullable: true
+
+    # ── SCHEMAS DE PROVEEDORES ──
+    SolicitudProveedor:
+      type: object
+      required:
+        - id
+        - codigo
+        - empresa
+        - ruc
+        - tipo
+        - contactoNombre
+        - email
+        - telefono
+        - estado
+        - fechaSolicitud
+      properties:
+        id:
+          type: integer
+          example: 1
+        codigo:
+          type: string
+          example: 'PRV-HOS-001'
+        empresa:
+          type: string
+          example: 'Hostal La Costa S.A.'
+        ruc:
+          type: string
+          example: '1790012345001'
+        tipo:
+          type: string
+          enum: [vuelos, autos, atracciones, hospedaje]
+          example: 'hospedaje'
+        contactoNombre:
+          type: string
+          example: 'María Pérez'
+        email:
+          type: string
+          format: email
+          example: 'contacto@hostallacosta.ec'
+        telefono:
+          type: string
+          example: '+593 99 123 4567'
+        ciudad:
+          type: string
+          nullable: true
+          example: 'Montañita'
+        sitioWeb:
+          type: string
+          nullable: true
+          example: 'https://hostallacosta.ec'
+        descripcion:
+          type: string
+          nullable: true
+          example: '12 habitaciones frente al mar con servicio de restaurante.'
+        estado:
+          type: string
+          enum: [PENDIENTE, APROBADA, RECHAZADA]
+          example: 'PENDIENTE'
+        ipRegistro:
+          type: string
+          nullable: true
+          example: '190.152.12.84'
+        fechaSolicitud:
+          type: string
+          format: date-time
+          example: '2026-10-24T18:00:00.000Z'
+        revisadoPor:
+          type: string
+          nullable: true
+          example: 'admin@booking.com'
+        revisadoEn:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-24T19:30:00.000Z'
+        notaAdmin:
+          type: string
+          nullable: true
+          example: 'Verificado RUC en el SRI.'
+
+    SolicitudProveedorPublicRequest:
+      type: object
+      required:
+        - empresa
+        - ruc
+        - tipo
+        - contactoNombre
+        - email
+        - telefono
+      properties:
+        empresa:
+          type: string
+          example: 'Hostal La Costa S.A.'
+        ruc:
+          type: string
+          description: RUC ecuatoriano de 13 dígitos.
+          example: '1790012345001'
+        tipo:
+          type: string
+          enum: [vuelos, autos, atracciones, hospedaje]
+          example: 'hospedaje'
+        contactoNombre:
+          type: string
+          example: 'María Pérez'
+        email:
+          type: string
+          format: email
+          example: 'contacto@hostallacosta.ec'
+        telefono:
+          type: string
+          example: '+593 99 123 4567'
+        ciudad:
+          type: string
+          nullable: true
+          example: 'Montañita'
+        sitioWeb:
+          type: string
+          nullable: true
+          example: 'https://hostallacosta.ec'
+        descripcion:
+          type: string
+          nullable: true
+          example: '12 habitaciones frente al mar.'
+
+    RevisarSolicitudProveedorRequest:
+      type: object
+      required:
+        - accion
+      properties:
+        accion:
+          type: string
+          enum: [aprobar, rechazar]
+          example: 'aprobar'
+        nota:
+          type: string
+          maxLength: 300
+          nullable: true
+          example: 'RUC activo y verificado en catastro turístico.'
+
+    # ── SCHEMAS DE CONFIGURACIÓN ──
+    PlatformConfig:
+      type: object
+      required:
+        - comisionBase
+        - tasaImpuestos
+        - stripeEnabled
+        - emailsEnabled
+        - maintenanceMode
+      properties:
+        comisionBase:
+          type: number
+          description: Porcentaje base de comisión retenida por Booking.
+          example: 15
+        tasaImpuestos:
+          type: number
+          description: Tasa vigente de IVA en Ecuador.
+          example: 15
+        stripeEnabled:
+          type: boolean
+          description: Switch global de pasarela de pagos.
+          example: true
+        emailsEnabled:
+          type: boolean
+          description: Switch global de despacho de correos SMTP.
+          example: true
+        maintenanceMode:
+          type: boolean
+          description: Switch global de modo mantenimiento para visitantes.
+          example: false
+
+    UpdatePlatformConfigRequest:
+      type: object
+      properties:
+        comisionBase:
+          type: number
+          example: 15
+        tasaImpuestos:
+          type: number
+          example: 15
+        stripeEnabled:
+          type: boolean
+          example: true
+        emailsEnabled:
+          type: boolean
+          example: true
+        maintenanceMode:
+          type: boolean
+          example: false
+
+    PublicConfigResponse:
+      type: object
+      required:
+        - maintenanceMode
+        - paymentsEnabled
+        - emailsEnabled
+        - tasaImpuestos
+      properties:
+        maintenanceMode:
+          type: boolean
+          example: false
+        paymentsEnabled:
+          type: boolean
+          example: true
+        emailsEnabled:
+          type: boolean
+          example: true
+        tasaImpuestos:
+          type: number
+          example: 15

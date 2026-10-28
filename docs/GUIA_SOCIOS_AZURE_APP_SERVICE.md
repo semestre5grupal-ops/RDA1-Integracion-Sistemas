@@ -79,8 +79,9 @@ Ya tengo la sesión iniciada en Azure CLI con la suscripción "Azure for Student
 4. **Variables de Entorno y Secretos:**
    - NO me pidas contraseñas de bases de datos por el chat. Indícame la lista exacta de variables que mi app necesita (por ejemplo: `DATABASE_URL`, `BOOKING_API_KEY`, `SUPABASE_KEY`) para que yo las cargue en: Portal de Azure → App Service → Configuración → Variables de entorno.
    - Configura en las variables de entorno la conexión con Booking:
-     * `BOOKING_REST_STOCK_URL=https://booking-puce.eastus.cloudapp.azure.com/api/v3/inventory/stock`
-     * `BOOKING_GRPC_URL=booking-puce.eastus.cloudapp.azure.com:50051`
+     * `BOOKING_REST_STOCK_URL=https://booking-core-api.azurewebsites.net/api/v3/inventory/stock`
+     * `BOOKING_BASE_URL=https://booking-core-api.azurewebsites.net/api/v3`
+     * `BOOKING_RABBITMQ_URL=amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku`
 
 5. **Empaquetado y Primer Despliegue (Cuidado con Windows):**
    - En Windows NO uses `Compress-Archive` de PowerShell porque introduce barras invertidas (`\`) que dañan el zip en Linux.
@@ -148,7 +149,7 @@ Booking (Paúl Rosero) se integrará automáticamente con tu URL en Azure. Aseg�
 Cuando se confirme o cancele una reserva en tu tienda, debes notificar el stock a Booking por cualquiera de estos dos canales:
 
 ### Opción A (Recomendada en Azure): HTTP REST Fallback
-- **Método y URL:** `POST https://booking-puce.eastus.cloudapp.azure.com/api/v3/inventory/stock`
+- **Método y URL:** `POST https://booking-core-api.azurewebsites.net/api/v3/inventory/stock`
 - **Headers:**
   - `Content-Type: application/json`
   - `X-API-Key: <TU_API_KEY_REGISTRADA>`
@@ -164,10 +165,19 @@ Cuando se confirme o cancele una reserva en tu tienda, debes notificar el stock 
   ```
 - **Respuesta de Booking:** `200 OK` con `{ "acknowledged": true, "success": true, "source": "HTTP_REST" }`.
 
-### Opción B: Cliente gRPC Saliente
-- **Host y Puerto:** `booking-puce.eastus.cloudapp.azure.com:50051`
-- **Servicio:** `inventory.InventoryService/UpdateStock`
-- **Metadata:** `x-api-key: <TU_API_KEY_REGISTRADA>`
+### Opción B: Event Bus RabbitMQ (CloudAMQP)
+- **URL Broker:** `amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku`
+- **Exchange:** `booking.events` (Tipo `topic`, durable)
+- **Routing Key:** `stock.updated`
+- **Payload CloudEvent / JSON:**
+  ```json
+  {
+    "service_id": "TU_CODIGO_NODO",
+    "item_id": "auto-001",
+    "available_units": 4,
+    "date": "2026-10-28"
+  }
+  ```
 
 ---
 

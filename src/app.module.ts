@@ -23,6 +23,7 @@ import { GraphqlBffModule } from './modules/graphql/graphql-bff.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { TraceContextMiddleware } from './core/tracing/trace-context.middleware';
 import { SecurityModule } from './core/security/security.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
 
 @Module({
   imports: [
@@ -103,6 +104,9 @@ import { SecurityModule } from './core/security/security.module';
 
     // Capa 6: Capa de Agregación GraphQL BFF (/graphql con Apollo Server y DataLoaders)
     GraphqlBffModule,
+
+    // Catálogo formal de contratos por microservicio (RDA2)
+    ContractsModule,
   ],
   controllers: [],
   providers: [TraceContextMiddleware],
