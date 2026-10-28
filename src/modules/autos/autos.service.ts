@@ -767,7 +767,7 @@ export class AutosService implements OnModuleInit {
    */
   async getFlota(): Promise<any[]> {
     const now = new Date().getTime();
-    return this.memoryFleet.map(car => {
+    const locales = this.memoryFleet.map(car => {
       let segundosRestantesCooldown = 0;
       if (car.estado === EstadoVehiculo.EN_LIMPIEZA && car.disponible_desde) {
         const diffMs = new Date(car.disponible_desde).getTime() - now;
@@ -791,9 +791,50 @@ export class AutosService implements OnModuleInit {
         kilometraje_actual: car.kilometraje_actual,
         umbral_mantenimiento_km: car.proximo_mantenimiento_km,
         alerta_mantenimiento: car.kilometraje_actual >= car.proximo_mantenimiento_km,
+        proveedor_nombre: car.proveedor_nombre || 'Flota Local (Booking)',
+        origen: 'LOCAL',
         foto_url: car.foto_url,
       };
     });
+
+    try {
+      const dbAutos = await this.autoRepo.find({ order: { marca: 'ASC', modelo: 'ASC' } });
+      const memoryIds = new Set(this.memoryFleet.map(m => m.id));
+      const partnerCars = dbAutos
+        .filter(da => !memoryIds.has(da.id))
+        .map(da => {
+          const isLimpieza = da.estadoOperativo === 'EN_LIMPIEZA';
+          const km = Number(da.kilometrajeActual || 12000);
+          const umbral = Number(da.umbralMantenimientoKm || 15000);
+          const alerta = Boolean(da.alertaMantenimientoActiva || km >= umbral);
+          const prov = da.proveedorCodigo || 'NODE_AUT_DANIEL';
+          return {
+            id: da.id,
+            marca: da.marca,
+            modelo: da.modelo,
+            categoria: da.categoria,
+            precio_diario: Number(da.precioDiario || 40),
+            estado_operativo: da.estadoOperativo || 'DISPONIBLE',
+            cooldown_activo: isLimpieza,
+            segundos_restantes_cooldown: isLimpieza ? 3600 : 0,
+            disponible_estimado_at: null,
+            kilometraje_actual: km,
+            umbral_mantenimiento_km: umbral,
+            alerta_mantenimiento: alerta,
+            mantenimiento_requerido: alerta,
+            proveedor_nombre: prov === 'NODE_AUT_DANIEL' || prov === 'NODE_AUT_RUTALIBRE'
+              ? 'RutaLibre (Daniel González)'
+              : `Proveedor (${prov})`,
+            origen: 'PARTNER',
+            foto_url: da.fotoUrl,
+          };
+        });
+
+      return [...locales, ...partnerCars];
+    } catch (e: any) {
+      this.logger.warn(`No se pudieron cargar autos de BD: ${e.message}`);
+      return locales;
+    }
   }
 
   /**

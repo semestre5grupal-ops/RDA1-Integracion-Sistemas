@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 
-export function Panel2_GestionFlotaAutos() {
+export function Panel2_GestionFlotaAutos({ refreshKey }) {
   const [flota, setFlota] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [filtroOrigen, setFiltroOrigen] = useState('TODOS');
+  const [busqueda, setBusqueda] = useState('');
   const [selectedAuto, setSelectedAuto] = useState(null);
 
-  const fetchFlota = async () => {
+  const fetchFlota = async (manual = false) => {
     try {
-      setLoading(true);
+      if (manual) setIsRefreshing(true);
+      else setLoading(true);
       const res = await api.get('/autos/flota');
       setFlota(Array.isArray(res) ? res : res.data || []);
+      setLastUpdated(new Date());
     } catch (e) {
       // Mock con demostración del Cooldown de 2 horas y Alerta de kilometraje (Cátedra RDA2 §5)
       setFlota([
@@ -26,6 +32,8 @@ export function Panel2_GestionFlotaAutos() {
           kilometraje_actual: 12450,
           umbral_mantenimiento_km: 15000,
           mantenimiento_requerido: false,
+          origen: 'LOCAL',
+          proveedor_nombre: 'Europcar',
         },
         {
           id: 'auto-chevrolet-02',
@@ -39,6 +47,8 @@ export function Panel2_GestionFlotaAutos() {
           kilometraje_actual: 8900,
           umbral_mantenimiento_km: 15000,
           mantenimiento_requerido: false,
+          origen: 'LOCAL',
+          proveedor_nombre: 'Enterprise',
         },
         {
           id: 'auto-kia-03',
@@ -52,6 +62,8 @@ export function Panel2_GestionFlotaAutos() {
           kilometraje_actual: 15420,
           umbral_mantenimiento_km: 15000,
           mantenimiento_requerido: true, // Alerta disparada
+          origen: 'LOCAL',
+          proveedor_nombre: 'Alamo',
         },
         {
           id: 'auto-audi-04',
@@ -65,16 +77,19 @@ export function Panel2_GestionFlotaAutos() {
           kilometraje_actual: 3400,
           umbral_mantenimiento_km: 15000,
           mantenimiento_requerido: false,
+          origen: 'LOCAL',
+          proveedor_nombre: 'Europcar Prestige',
         },
       ]);
     } finally {
       setLoading(false);
+      if (manual) setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchFlota();
-  }, []);
+    fetchFlota(false);
+  }, [refreshKey]);
 
   // Tick local cada segundo para decrementar el temporizador del Cooldown en vivo
   useEffect(() => {
@@ -117,9 +132,28 @@ export function Panel2_GestionFlotaAutos() {
     }
   };
 
+  const conteoLocal = flota.filter(c => c.origen === 'LOCAL').length;
+  const conteoDaniel = flota.filter(c => c.origen === 'PARTNER' || c.proveedor_nombre?.includes('RutaLibre')).length;
+
+  const flotaFiltrada = flota.filter(c => {
+    const matchFiltro = 
+      filtroOrigen === 'TODOS' ? true :
+      filtroOrigen === 'LOCAL' ? c.origen === 'LOCAL' :
+      filtroOrigen === 'DANIEL' ? (c.origen === 'PARTNER' || c.proveedor_nombre?.includes('RutaLibre')) : true;
+
+    if (!matchFiltro) return false;
+
+    if (!busqueda.trim()) return true;
+    const q = busqueda.toLowerCase().trim();
+    return (c.marca || '').toLowerCase().includes(q)
+      || (c.modelo || '').toLowerCase().includes(q)
+      || (c.categoria || '').toLowerCase().includes(q)
+      || (c.proveedor_nombre || '').toLowerCase().includes(q);
+  });
+
   return (
     <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>🚗</span> Panel 2: Gestión de Flota de Autos y Cooldown de 2 Horas
@@ -128,12 +162,68 @@ export function Panel2_GestionFlotaAutos() {
             Máquina de estados de 6 fases, temporizador de cuarentena de limpieza y alertas por umbral de odómetro (Cátedra RDA2 §5).
           </p>
         </div>
-        <button 
-          onClick={fetchFlota}
-          style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
-        >
-          🔄 Actualizar Flota
-        </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {lastUpdated && (
+            <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600, background: '#dcfce7', padding: '6px 10px', borderRadius: '6px' }}>
+              ✓ Actualizado {lastUpdated.toLocaleTimeString('es-EC')}
+            </span>
+          )}
+          <button 
+            onClick={() => fetchFlota(true)}
+            disabled={isRefreshing}
+            style={{ 
+              background: isRefreshing ? '#e2e8f0' : '#f8fafc', 
+              border: '1px solid #cbd5e1', 
+              padding: '8px 14px', 
+              borderRadius: '8px', 
+              cursor: isRefreshing ? 'wait' : 'pointer', 
+              fontWeight: 600, 
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span style={{ display: 'inline-block', animation: isRefreshing ? 'spin 0.8s linear infinite' : 'none' }}>🔄</span>
+            {isRefreshing ? 'Actualizando flota…' : '🔄 Actualizar Flota'}
+          </button>
+        </div>
+      </div>
+
+      {/* BARRA DE FILTROS Y BÚSQUEDA */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: '20px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {[
+            { id: 'TODOS', label: `Todos (${flota.length})` },
+            { id: 'LOCAL', label: `🏢 Flota Local Booking (${conteoLocal})` },
+            { id: 'DANIEL', label: `🚗 RutaLibre - Daniel (${conteoDaniel})` },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setFiltroOrigen(tab.id)}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: filtroOrigen === tab.id ? '1px solid #2563eb' : '1px solid #e2e8f0',
+                background: filtroOrigen === tab.id ? '#eff6ff' : '#ffffff',
+                color: filtroOrigen === tab.id ? '#1d4ed8' : '#475569',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          placeholder="🔍 Filtrar auto por marca o modelo..."
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.82rem', minWidth: '220px', outline: 'none' }}
+        />
       </div>
 
       {/* ALERTAS ACTIVAS POR KILOMETRAJE */}
@@ -151,9 +241,10 @@ export function Panel2_GestionFlotaAutos() {
 
       {/* GRID DE VEHÍCULOS */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '16px' }}>
-        {flota.map((auto) => {
+        {flotaFiltrada.map((auto) => {
           const badge = getEstadoBadgeStyle(auto.estado_operativo);
           const kmRatio = Math.min(100, (auto.kilometraje_actual / auto.umbral_mantenimiento_km) * 100);
+          const isDaniel = auto.origen === 'PARTNER' || auto.proveedor_nombre?.includes('RutaLibre');
 
           return (
             <div 
@@ -166,11 +257,26 @@ export function Panel2_GestionFlotaAutos() {
                 boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <strong style={{ fontSize: '1.05rem', color: '#0f172a' }}>{auto.marca} {auto.modelo}</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span 
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    background: isDaniel ? '#e0e7ff' : '#f1f5f9',
+                    color: isDaniel ? '#3730a3' : '#475569',
+                  }}
+                >
+                  {isDaniel ? '🚗 RutaLibre (Daniel)' : '🏢 Flota Local'}
+                </span>
                 <span style={{ background: badge.bg, color: badge.text, padding: '3px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
                   {auto.estado_operativo}
                 </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <strong style={{ fontSize: '1.05rem', color: '#0f172a' }}>{auto.marca} {auto.modelo}</strong>
               </div>
 
               <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '12px' }}>

@@ -1,0 +1,179 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type CatalogoItem {
+  id: ID!
+  vertical: String!
+  nombre: String!
+  descripcion: String
+  destino: String
+  precio: Float!
+  disponible: Boolean!
+  imagen_url: String
+  categoria: String
+  rating: Float
+  metadata_json: String
+}
+
+type ReservaUnificada {
+  id: ID!
+  vertical: String!
+  estado: String!
+  total: Float!
+  fecha: String
+  hora: String
+  titular_nombre: String
+  titular_email: String
+  codigo_checkin: String
+  voucher_qr_payload: String
+  habitacion_asignada: String
+  clave_acceso_digital: String
+  asiento_asignado: String
+  km_salida: Float
+  km_retorno: Float
+  created_at: String
+}
+
+type AggregateBookingResponse {
+  cliente_id: String!
+  total_reservas_activas: Int!
+  reservas: [ReservaUnificada!]!
+}
+
+type FacturaItem {
+  id: ID!
+  vertical: String!
+  descripcion: String!
+  cantidad: Int!
+  precio_unitario: Float!
+  subtotal: Float!
+}
+
+type ClienteFactura {
+  nombre: String
+  email: String
+  cedula_ruc: String
+}
+
+type FacturaCompleta {
+  id: ID!
+  numero_factura: String!
+  fecha_emision: String
+  subtotal: Float!
+  iva_15pct: Float!
+  total: Float!
+  estado: String!
+  cliente: ClienteFactura
+  items: [FacturaItem!]!
+}
+
+type PaqueteItemDetalle {
+  id: ID!
+  vertical: String!
+  external_service_id: String!
+  nombre_servicio: String!
+  precio_unitario: Float!
+}
+
+type PaqueteCombo {
+  id: ID!
+  nombre: String!
+  descripcion: String
+  destino: String!
+  precio_total_original: Float!
+  descuento_porcentaje: Float!
+  precio_final_paquete: Float!
+  estado: String!
+  items: [PaqueteItemDetalle!]
+}
+
+type CheckoutResult {
+  success: Boolean!
+  correlationId: String
+  codigoCompensacion: String
+  estado: String!
+  facturaId: String
+  total: Float!
+  mensaje: String!
+}
+
+type CheckInResult {
+  success: Boolean!
+  vertical: String!
+  reservaId: String!
+  mensaje: String!
+  voucherQrBase64: String
+  habitacionAsignada: String
+  claveAccesoDigital: String
+  asientoAsignado: String
+  codigoAcceso: String
+}
+
+type Query {
+  """
+  Catálogo agregado multivertical (Atracciones, Autos, Alojamientos, Vuelos) sin joins cross-schema
+  """
+  catalogoUnificado(destino: String, vertical: String): [CatalogoItem!]!
+
+  """
+  Consulta unificada de reservas del cliente con resolución batch y protección anti-N+1 vía DataLoader
+  """
+  misReservas(clienteId: String!): AggregateBookingResponse!
+
+  """
+  Consulta de factura con encabezado, detalle de líneas y datos fiscales del cliente
+  """
+  obtenerFacturaCompleta(numeroFactura: String!): FacturaCompleta!
+
+  """
+  Consulta de combos multivertical con contratos de descuento B2B respetados
+  """
+  obtenerPaquetesDisponibles: [PaqueteCombo!]!
+}
+
+type Mutation {
+  """
+  Orquestación de compra compuesta mediante Patrón Saga LIFO y compensación automática (Throttling & Sanitización activos)
+  """
+  checkoutOrquestado(input: CheckoutSagaInputGql!): CheckoutResult!
+
+  """
+  Cancelación de reserva con compensación automática y restitución de aforo (Throttling & Sanitización activos)
+  """
+  cancelarReservaConSaga(reservaId: String!, vertical: String!, motivo: String! = "Cancelación solicitada por el usuario en marketplace"): Boolean!
+
+  """
+  Check-in multivertical (QR para atracciones, km para autos, 14:00 para alojamientos, boarding pass para vuelos) (Throttling & Sanitización activos)
+  """
+  realizarCheckInDigital(input: CheckInInputGql!): CheckInResult!
+}
+
+input CheckoutSagaInputGql {
+  clienteId: String
+  clienteEmail: String!
+  clienteNombre: String!
+  metodoPago: String
+  numeroTarjeta: String
+  items: [CheckoutItemInput!]!
+  simularFalloEnPaso: String
+}
+
+input CheckoutItemInput {
+  vertical: String!
+  itemId: String!
+  nombre: String!
+  cantidad: Int!
+  precioUnitario: Float!
+  detallesReservaJson: String
+}
+
+input CheckInInputGql {
+  vertical: String!
+  reservaId: String!
+  qrCode: String
+  licenciaConductor: String
+  kmSalida: Float
+  kmLlegada: Float
+  tipoCheckinAuto: String
+}
