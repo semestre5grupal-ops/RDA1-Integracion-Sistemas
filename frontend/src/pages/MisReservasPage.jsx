@@ -21,6 +21,7 @@ import {
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
+  CHECKED_IN: 'Check-in realizado',
   PENDING: 'Pendiente',
   PENDING_PAYMENT: 'Pendiente de pago',
   TICKET_ISSUING: 'Emitiendo billetes',

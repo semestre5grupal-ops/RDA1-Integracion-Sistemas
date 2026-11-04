@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { RespuestaProxy, VuelosSociosService } from './vuelos-socios.service';
 import { resumenDeReserva, VuelosSociosReservasService } from './vuelos-socios-reservas.service';
 import { ordenDeReserva } from './vuelos-facturacion';
+import { SincronizadorEventosVuelos } from './vuelos-eventos';
 import { PasoVuelo, ResultadoPaso, trazaVuelos } from './vuelos-traza';
 import { VuelosService } from '../vuelos.service';
 import { propietarioDesde } from '../vuelos.controller';
@@ -25,14 +26,28 @@ const RUTA_VUELOS = /^\/api\/v\d+\/vuelos\/(.+)$/;
  *  - Todo lo demás sigue al controlador local.
  */
 @Injectable()
-export class VuelosSociosMiddleware {
+export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VuelosSociosMiddleware.name);
+  readonly eventos: SincronizadorEventosVuelos;
 
   constructor(
     private readonly socios: VuelosSociosService,
     private readonly vuelosLocal: VuelosService,
     private readonly reservas: VuelosSociosReservasService,
-  ) {}
+  ) {
+    this.eventos = new SincronizadorEventosVuelos(socios, reservas);
+  }
+
+  /** Lee el feed de eventos de las aerolíneas (check-in, cancelaciones) en segundo plano. */
+  onModuleInit() {
+    const apagado = String(process.env.VUELOS_EVENTOS_POLL ?? '').toLowerCase() === 'off';
+    if (apagado || process.env.NODE_ENV === 'test' || this.socios.fuente() === 'local') return;
+    this.eventos.iniciar(Math.max(5_000, Number(process.env.VUELOS_EVENTOS_INTERVALO_MS) || 20_000));
+  }
+
+  onModuleDestroy() {
+    this.eventos.detener();
+  }
 
   handler() {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -254,6 +269,16 @@ export class VuelosSociosMiddleware {
       this.logger.error(`[vuelos-socios] No se guardó la copia de ${r.body.bookingId}: ${e?.message}`);
       this.traza(entrantes, 'copia', 'error', `No se guardó la copia: ${e?.message}`, { nodo });
     }
+    // 5b) Cliente cross-platform: el cliente de Booking y con qué id lo conoce la aerolínea.
+    const titular = (req.body?.passengers ?? []).find((p: any) => p?.passengerType !== 'INFANT') ?? req.body?.passengers?.[0] ?? {};
+    void this.reservas.mapearClienteSocio({
+      email: emailDesdeJwt(entrantes['authorization']) || String(titular?.contact?.email ?? ''),
+      nombre: `${titular.firstName ?? ''} ${titular.lastName ?? ''}`.trim() || undefined,
+      documento: titular.documentNumber, telefono: titular?.contact?.phone,
+      codigoNodo: nodo, idExterno: propietario,
+      metadata: { propietario, ultimaReserva: r.body.bookingId, pnr: r.body.pnr ?? null, ordenBooking: partnerOrderId },
+    });
+
     // 6) Factura al cliente + comisión y liquidación de la aerolínea.
     const lp = hold.body?.lockedPrice ?? {};
     const factura = await this.reservas.facturar({
@@ -285,10 +310,19 @@ export class VuelosSociosMiddleware {
   private async despuesDeReserva(metodo: string, segmentos: string[], bookingId: string, copia: any, r: RespuestaProxy, entrantes: Record<string, any>) {
     if (r.status < 200 || r.status >= 300 || !r.body || typeof r.body !== 'object') return;
     try {
+      if (metodo === 'POST' && segmentos[2] === 'check-in') {
+        if (await this.reservas.marcarCheckin(bookingId, new Date(), 'booking')) {
+          this.traza(entrantes, 'checkin', 'ok', `Check-in hecho desde Booking · ${bookingId}`, { nodo: copia.codigoNodo });
+        }
+        return;
+      }
       if (metodo === 'GET' && segmentos.length === 2) {
         await this.reservas.actualizarDesdeSocio(bookingId, r.body);
         const factura = await this.reservas.factura(bookingId);
         if (factura) r.body = { ...r.body, factura };
+        // La aerolínea deja la reserva en CONFIRMED tras el check-in; Booking
+        // muestra que el pasajero ya se presentó.
+        if (copia.status === 'CHECKED_IN') r.body = { ...r.body, status: 'CHECKED_IN' };
       } else if (metodo === 'POST' && segmentos[2] === 'cancel') {
         // Contrato v2: "La aerolínea calcula; Booking ejecuta el reembolso al cliente."
         const monto = parseFloat(String(r.body?.refund?.amount ?? r.body?.refundAmount ?? ''));
@@ -421,4 +455,16 @@ export function normalizarPasajero(p: any): any {
     out.contact = { ...p.contact, phone: tel };
   }
   return out;
+}
+
+/** Email del JWT de Supabase (sin verificar firma: solo para el mapeo de cliente). */
+function emailDesdeJwt(authorization: unknown): string | null {
+  const m = /^Bearer\s+([^.]+)\.([^.]+)\./.exec(String(authorization ?? ''));
+  if (!m) return null;
+  try {
+    const email = JSON.parse(Buffer.from(m[2], 'base64url').toString('utf8'))?.email;
+    return typeof email === 'string' && email.includes('@') ? email.toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }

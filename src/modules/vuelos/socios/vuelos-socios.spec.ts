@@ -181,6 +181,8 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       marcarEstado: jest.fn(async (id: string, status: string) => copias.has(id) && (copias.get(id).status = status)),
       facturar: jest.fn(async (d: any) => ({ numero: 'FAC-20261104-000001', partnerOrderId: d.partnerOrderId, total: d.total.toFixed(2) })),
       factura: jest.fn(async () => null),
+      mapearClienteSocio: jest.fn(async () => undefined),
+      marcarCheckin: jest.fn(async () => true),
       notaCredito: jest.fn(async (d: any) => ({ numero: 'NC-20261104-000001', monto: d.monto.toFixed(2) })),
       listar: jest.fn(async (prop: string) =>
         [...copias.values()].filter((c) => c.propietarioId === prop).map((c) => ({
@@ -364,5 +366,68 @@ describe('facturación de vuelos (cálculos)', () => {
     expect(f.periodoQuincena(new Date('2026-11-16T04:00:00Z'))).toBe('2026-11-Q1'); // 15-nov 23:00 en Ecuador
     expect(f.periodoQuincena(new Date('2026-11-16T06:00:00Z'))).toBe('2026-11-Q2');
     expect(f.ordenDeReserva('abc')).toBe(f.ordenDeReserva('abc'));
+  });
+});
+
+
+describe('SincronizadorEventosVuelos (feed GET /vuelos/eventos)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { SincronizadorEventosVuelos } = require('./vuelos-eventos');
+  const hace = (ms: number) => new Date(Date.now() - ms).toISOString();
+  function armar(eventos: any[], copias: Record<string, any>) {
+    const llamadas: any[] = [];
+    const socios = {
+      nodosActivos: async () => [{ codigoNodo: 'NODE_VUE_X' }],
+      reenviar: jest.fn(async (_n: string, _m: string, _s: string[], q: string) => {
+        llamadas.push(q);
+        return { status: 200, body: { events: q.includes('after=') ? [] : eventos } };
+      }),
+    };
+    let cursor: string | null = null;
+    const reservas = {
+      cursorEventos: jest.fn(async () => cursor),
+      guardarCursor: jest.fn(async (_n: string, c: string) => { cursor = c; }),
+      obtener: jest.fn(async (id: string) => copias[id] ?? null),
+      marcarCheckin: jest.fn(async () => true),
+      reembolsar: jest.fn(async (_t: string, m: number) => m),
+      notaCredito: jest.fn(async () => ({ numero: 'NC-1', monto: '10.00' })),
+      marcarEstado: jest.fn(async () => undefined),
+      idClienteEnSocio: jest.fn(async () => undefined),
+    };
+    return { s: new SincronizadorEventosVuelos(socios as any, reservas as any), reservas, llamadas, cursor: () => cursor };
+  }
+  const copia = { status: 'CONFIRMED', grandTotal: 80.5, reembolsado: 0, transaccionId: 'tx-1', propietarioId: 'u-1', pnr: 'ABC' };
+
+  it('check-in en la aerolínea → CHECKED_IN; ignora reservas que no vendió Booking; guarda el cursor', async () => {
+    const { s, reservas, cursor } = armar([
+      { id: 'e1', type: 'ec.edu.epn.booking.vuelos.booking.checked_in', time: hace(1000), data: { bookingId: 'B1', pnr: 'ABC', passengersCheckedIn: 1 } },
+      { id: 'e2', type: 'ec.edu.epn.booking.vuelos.booking.checked_in', time: hace(1000), data: { bookingId: 'AJENA' } },
+      // así llega por el proxy de Booking: el id ya trae el código de la aerolínea
+      { id: 'e2b', type: 'ec.edu.epn.booking.vuelos.booking.checked_in', time: hace(1000), data: { bookingId: 'NODE_VUE_X~B2' } },
+    ], { 'NODE_VUE_X~B1': copia, 'NODE_VUE_X~B2': copia });
+    expect(await s.sincronizarNodo('NODE_VUE_X')).toBe(2);
+    expect(reservas.marcarCheckin).toHaveBeenCalledWith('NODE_VUE_X~B1', expect.any(Date), 'aerolinea');
+    expect(reservas.marcarCheckin).toHaveBeenCalledWith('NODE_VUE_X~B2', expect.any(Date), 'aerolinea');
+    expect(reservas.marcarCheckin).toHaveBeenCalledTimes(2);
+    expect(cursor()).toBe('e2b');
+  });
+
+  it('cancelación hecha en la aerolínea → reembolsa lo que informa, nota de crédito y CANCELLED', async () => {
+    const { s, reservas } = armar([
+      { id: 'e3', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(5 * 60_000), data: { bookingId: 'B1', reasonCode: 'CUSTOMER_REQUEST', refundAmount: '10.50', refundId: 'R1' } },
+    ], { 'NODE_VUE_X~B1': copia });
+    await s.sincronizarNodo('NODE_VUE_X');
+    expect(reservas.reembolsar).toHaveBeenCalledWith('tx-1', 10.5, expect.any(String));
+    expect(reservas.notaCredito).toHaveBeenCalledWith(expect.objectContaining({ bookingId: 'NODE_VUE_X~B1', monto: 10.5, claveReembolso: 'R1' }));
+    expect(reservas.marcarEstado).toHaveBeenCalledWith('NODE_VUE_X~B1', 'CANCELLED', 10.5);
+  });
+
+  it('una cancelación recién hecha espera (puede ser la que hizo Booking) y no avanza el cursor', async () => {
+    const { s, reservas, cursor } = armar([
+      { id: 'e4', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(5_000), data: { bookingId: 'B1' } },
+    ], { 'NODE_VUE_X~B1': copia });
+    await s.sincronizarNodo('NODE_VUE_X');
+    expect(reservas.marcarEstado).not.toHaveBeenCalled();
+    expect(cursor()).toBeNull();
   });
 });
