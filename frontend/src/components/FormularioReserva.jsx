@@ -11,16 +11,49 @@ import { useTelemetry } from '../hooks/useTelemetry';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
 const COUNTRIES = [
-  { code: 'ECU', name: 'Ecuador' },
-  { code: 'COL', name: 'Colombia' },
-  { code: 'PER', name: 'Perú' },
-  { code: 'ARG', name: 'Argentina' },
-  { code: 'CHL', name: 'Chile' },
-  { code: 'USA', name: 'Estados Unidos' },
-  { code: 'MEX', name: 'México' },
-  { code: 'ESP', name: 'España' },
-  { code: 'BRA', name: 'Brasil' },
+  { code: 'EC', name: 'Ecuador' },
+  { code: 'CO', name: 'Colombia' },
+  { code: 'PE', name: 'Perú' },
+  { code: 'AR', name: 'Argentina' },
+  { code: 'CL', name: 'Chile' },
+  { code: 'US', name: 'Estados Unidos' },
+  { code: 'MX', name: 'México' },
+  { code: 'ES', name: 'España' },
+  { code: 'BR', name: 'Brasil' },
 ];
+
+/** Prefijo telefónico por nacionalidad (para completar números locales). */
+const PREFIJO_PAIS = { EC: '593', CO: '57', PE: '51', AR: '54', CL: '56', US: '1', MX: '52', ES: '34', BR: '55' };
+
+/**
+ * Lleva un teléfono al formato E.164 que exigen las aerolíneas (+593991234567).
+ * Quita espacios y guiones; un número local que empieza con 0 se completa con
+ * el prefijo del país del pasajero (Ecuador por defecto).
+ */
+export function normalizarTelefono(valor, nacionalidad = 'EC') {
+  let t = String(valor ?? '').replace(/[\s().-]/g, '');
+  if (!t) return t;
+  if (t.startsWith('00')) return '+' + t.slice(2);
+  if (t.startsWith('+')) return t;
+  const prefijo = PREFIJO_PAIS[nacionalidad] ?? '593';
+  if (t.startsWith(prefijo) && t.length > prefijo.length + 7) return '+' + t;
+  if (t.startsWith('0')) return '+' + prefijo + t.slice(1);
+  return t;
+}
+
+/** Cédula ecuatoriana: 10 dígitos, provincia 01-24 (o 30) y dígito verificador. */
+export function cedulaValida(c) {
+  if (!/^\d{10}$/.test(c)) return false;
+  const provincia = Number(c.slice(0, 2));
+  if (!((provincia >= 1 && provincia <= 24) || provincia === 30) || Number(c[2]) > 5) return false;
+  let suma = 0;
+  for (let i = 0; i < 9; i++) {
+    let x = Number(c[i]) * (i % 2 === 0 ? 2 : 1);
+    if (x > 9) x -= 9;
+    suma += x;
+  }
+  return (10 - (suma % 10)) % 10 === Number(c[9]);
+}
 
 
 /**
@@ -112,7 +145,7 @@ function pasajeroVacio(tipo, indice, idsAdultos) {
     lastName: '',
     documentType: 'NATIONAL_ID',
     documentNumber: '',
-    nationality: 'ECU',
+    nationality: 'EC',
     birthDate: '',
     gender: '',
     email: '',
@@ -129,12 +162,18 @@ function pasajeroVacio(tipo, indice, idsAdultos) {
 const REGLAS = {
   firstName: (v) => (v && v.trim() ? '' : 'El nombre es obligatorio.'),
   lastName: (v) => (v && v.trim() ? '' : 'El apellido es obligatorio.'),
-  documentNumber: (v) =>
-    v && /^[A-Z0-9][A-Z0-9-]{3,19}$/.test(v.trim())
+  documentNumber: (v, p) => {
+    const doc = (v ?? '').trim();
+    if (p?.documentType === 'NATIONAL_ID' && p?.nationality === 'EC') {
+      if (!/^\d{10}$/.test(doc)) return 'La cédula debe tener 10 dígitos.';
+      return cedulaValida(doc) ? '' : 'Cédula no válida: revisa los dígitos.';
+    }
+    return /^[A-Z0-9][A-Z0-9-]{3,19}$/.test(doc)
       ? ''
-      : 'Debe tener entre 4 y 20 caracteres alfanumericos en mayusculas.',
+      : 'Debe tener entre 4 y 20 caracteres alfanumericos en mayusculas.';
+  },
   nationality: (v) =>
-    v && v.trim() !== ''
+    v && /^[A-Z]{2}$/.test(v.trim())
       ? ''
       : 'Debe seleccionar una nacionalidad.',
   birthDate: (v) => {
@@ -145,10 +184,10 @@ const REGLAS = {
   gender: (v) => (v ? '' : 'Selecciona una opcion.'),
   email: (v) =>
     v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim()) ? '' : 'Correo no valido.',
-  phone: (v) =>
-    v && /^\+?[0-9]{7,20}$/.test(v.trim())
+  phone: (v, p) =>
+    v && /^\+[1-9][0-9]{7,14}$/.test(normalizarTelefono(v.trim(), p?.nationality))
       ? ''
-      : 'Entre 7 y 20 digitos, con + opcional.',
+      : 'Usa el formato internacional con código de país, por ejemplo +593991234567.',
 };
 
 export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada }) {
@@ -221,7 +260,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
 
   /**
    * Normaliza a mayusculas los campos que el DDL exige en mayusculas
-   * (`nacionalidad ^[A-Z]{3}$`, documento alfanumerico). Se hace al escribir y no
+   * (nacionalidad ISO alfa-2, documento alfanumerico). Se hace al escribir y no
    * al enviar para que el usuario vea lo que va a enviarse sin sorpresas.
    */
   const cambiarNormalizado = useCallback(
@@ -330,7 +369,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             nationality: p.nationality.trim(),
             birthDate: p.birthDate,
             gender: p.gender,
-            contact: { email: p.email.trim(), phone: p.phone.trim() },
+            contact: { email: p.email.trim(), phone: normalizarTelefono(p.phone.trim(), p.nationality) },
           })),
           payment: { paymentReference: `pay_${uuidv4().slice(0, 18)}` },
         };
@@ -680,8 +719,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                       id={id('phone')}
                       type="tel"
                       placeholder="+593991234567"
+                      inputMode="tel"
+                      autoComplete="tel"
                       value={p.phone}
                       onChange={(e) => cambiar(i, 'phone', e.target.value)}
+                      onBlur={(e) => {
+                        const t = normalizarTelefono(e.target.value, p.nationality);
+                        if (t !== e.target.value) cambiar(i, 'phone', t);
+                      }}
                       aria-required="true"
                       aria-invalid={err('phone') ? 'true' : 'false'}
                       aria-describedby={enlazado('phone')}
