@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../hooks/useAuth';
 import { useFocusTrap } from '../hooks/useFocusTrap';
-import { crearReserva } from '../services/vuelosApi';
+import { crearReserva, obtenerMapaAsientos } from '../services/vuelosApi';
 import { obtenerHuellaDispositivo, formatearMoneda } from '../services/formato';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
@@ -220,6 +220,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const tipos = useMemo(() => distribuir(pasajeros), [pasajeros]);
   const [lista, setLista] = useState([]);
   const [errores, setErrores] = useState({});
+  // Mapas de asientos reales por tramo: { [segmentId]: { estado, asientos, error } }
+  const [mapas, setMapas] = useState({});
   const [enviando, setEnviando] = useState(false);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
@@ -262,6 +264,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     claveIdempotencia.current = uuidv4();
     setErrorGeneral(null);
     setErrores({});
+    setMapas({}); // hold nuevo: el mapa de asientos se vuelve a pedir
     trackEvent('checkout_started', 'vuelos');
 
     const idsAdultos = [];
@@ -292,6 +295,27 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     },
     [cambiar],
   );
+
+  /** Pide a la aerolínea el mapa de asientos de cada tramo del hold. */
+  const cargarMapas = useCallback(async (forzar = false) => {
+    const tramos = hold?.tramos ?? [];
+    if (!hold?.offerId || !tramos.length) return;
+    await Promise.all(tramos.map(async (t) => {
+      if (!forzar && mapas[t.segmentId]?.estado === 'ok') return;
+      setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'cargando' } }));
+      try {
+        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId);
+        setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'ok', asientos: asientosDeCabina(data, t.cabina) } }));
+      } catch {
+        setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'error' } }));
+      }
+    }));
+  }, [hold, mapas]);
+
+  useEffect(() => {
+    if (pasoActual === 2) cargarMapas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pasoActual, hold?.holdId]);
 
   /** Valida el teléfono del pasajero `i` al momento (al salir del campo o al cambiar el país). */
   const validarTelefonoAhora = useCallback((i, pais, numero) => {
@@ -401,6 +425,9 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             birthDate: p.birthDate,
             gender: p.gender,
             contact: { email: p.email.trim(), phone: telefonoE164(p.phoneCountry ?? 'EC', p.phone) },
+            ...(p.passengerType !== 'INFANT' && Object.keys(p.asientos ?? {}).length
+              ? { assignedSeats: Object.entries(p.asientos).map(([segmentId, seatNumber]) => ({ segmentId, seatNumber })) }
+              : {}),
           })),
           payment: { paymentReference: `pay_${uuidv4().slice(0, 18)}` },
         };
@@ -451,6 +478,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         // "Confirmar pago" es un intento nuevo.
         claveIdempotencia.current = uuidv4();
         const datos = fallo?.response?.data ?? {};
+        // Otro cliente tomó el asiento entre que se vio el mapa y se pagó:
+        // el cobro ya se devolvió; se vuelve a Asientos con el mapa actualizado.
+        if (fallo?.response?.status === 409 && /seat|asiento/i.test(JSON.stringify(datos))) {
+          setPasoActual(2);
+          cargarMapas(true);
+          setErrorGeneral('Ese asiento lo acaba de ocupar otra persona. Elige otro (el cobro ya se devolvió).');
+          return;
+        }
         const campos = (datos.invalidParams ?? [])
           .map((p) => `${String(p.name ?? '').replace(/^passengers[.[]?(\d+)\]?\.?/, (_, i) => `Pasajero ${Number(i) + 1}: `)} ${p.reason ?? ''}`.trim())
           .filter(Boolean);
@@ -464,7 +499,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         setEnviando(false);
       }
     },
-    [enviando, lista, hold, validar, onConfirmada, pasoActual],
+    [enviando, lista, hold, validar, onConfirmada, pasoActual, cargarMapas],
   );
 
   if (!abierto || !hold) return null;
@@ -793,59 +828,37 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           {pasoActual === 2 && (
             <div className="paso-extras" style={{ marginTop: '20px' }}>
               <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Selección de Asientos</h3>
-              <p className="modal-nota-bloque">Selecciona tu asiento para cada pasajero.</p>
-              
-              {lista.map((p, i) => (
-                <fieldset className="bloque-pasajero" key={p.passengerId}>
-                  <legend className="bloque-pasajero-legend">
-                    Pasajero {i + 1} · {p.firstName || ETIQUETA_TIPO[p.passengerType]}
-                  </legend>
-                  <div className="rejilla-campos">
-                    <div className="campo">
-                      <label className="modal-label" htmlFor={`${idBase}-p${i}-asiento`}>
-                        Selección de Asiento
-                      </label>
-                      
-                      <div className="mapa-asientos" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', maxWidth: '200px', marginTop: '10px' }}>
-                        {['1A', '1B', '1C', '2A', '2B', '2C', '3A', '3B', '3C'].map((asiento) => {
-                          const estaOcupado = false; // Aquí se podría conectar al backend
-                          const estaSeleccionado = p.asiento === asiento;
-                          
-                          // Evitar que el mismo asiento lo seleccione otro pasajero
-                          const loTieneOtro = lista.some((pas, idx) => pas.asiento === asiento && idx !== i);
-
-                          return (
-                            <button
-                              key={asiento}
-                              type="button"
-                              className="btn-asiento"
-                              disabled={estaOcupado || loTieneOtro}
-                              onClick={() => cambiar(i, 'asiento', estaSeleccionado ? '' : asiento)}
-                              style={{
-                                padding: '10px 5px',
-                                border: '2px solid',
-                                borderColor: estaSeleccionado ? '#0066cc' : '#ccc',
-                                borderRadius: '8px',
-                                background: estaSeleccionado ? '#e6f0fa' : (loTieneOtro ? '#f1f1f1' : 'white'),
-                                cursor: loTieneOtro ? 'not-allowed' : 'pointer',
-                                color: loTieneOtro ? '#999' : 'inherit',
-                                fontWeight: estaSeleccionado ? 'bold' : 'normal',
-                                transition: 'all 0.2s',
-                              }}
-                              title={loTieneOtro ? 'Seleccionado por otro pasajero' : `Seleccionar asiento ${asiento}`}
-                            >
-                              {asiento}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <small className="modal-nota-bloque" style={{ display: 'block', marginTop: '10px' }}>
-                        {p.asiento ? `Asiento seleccionado: ${p.asiento}` : 'Ningún asiento seleccionado (asignación aleatoria).'}
-                      </small>
-                    </div>
-                  </div>
-                </fieldset>
-              ))}
+              <p className="modal-nota-bloque">
+                Mapa real de la aerolínea: los asientos en gris ya están ocupados. Si no eliges, la aerolínea asigna uno.
+              </p>
+              {lista.map((p, i) =>
+                p.passengerType === 'INFANT' ? null : (
+                  <fieldset className="bloque-pasajero" key={p.passengerId}>
+                    <legend className="bloque-pasajero-legend">
+                      Pasajero {i + 1} · {p.firstName || ETIQUETA_TIPO[p.passengerType]}
+                    </legend>
+                    {(hold?.tramos ?? []).map((t) => (
+                      <MapaAsientos
+                        key={t.segmentId}
+                        tramo={t}
+                        mapa={mapas[t.segmentId]}
+                        elegido={p.asientos?.[t.segmentId] ?? ''}
+                        ocupadosPorOtros={lista
+                          .filter((_, idx) => idx !== i)
+                          .map((o) => o.asientos?.[t.segmentId])
+                          .filter(Boolean)}
+                        onElegir={(asiento) =>
+                          cambiar(i, 'asientos', { ...(p.asientos ?? {}), [t.segmentId]: asiento })
+                        }
+                        onReintentar={() => cargarMapas(true)}
+                      />
+                    ))}
+                    {!(hold?.tramos ?? []).length && (
+                      <small className="modal-nota-bloque">La aerolínea asignará el asiento al emitir el boleto.</small>
+                    )}
+                  </fieldset>
+                ),
+              )}
             </div>
           )}
 
@@ -941,4 +954,83 @@ function formatearRestante(expiresAt) {
   return `${m}:${String(seg % 60).padStart(2, '0')}`;
 }
 
+/**
+ * Asientos de la cabina pagada a partir del seatmap del contrato
+ * (cabins[].rows[].seats[]). Devuelve filas: [{ fila, asientos: [{ numero, libre, extra }] }].
+ */
+function asientosDeCabina(data, cabina) {
+  const cabinas = data?.cabins ?? [];
+  const elegida = cabinas.find((c) => c.cabinClass === cabina) ?? (cabinas.length === 1 ? cabinas[0] : null);
+  return (elegida?.rows ?? []).map((r) => ({
+    fila: r.rowNumber,
+    asientos: (r.seats ?? []).map((a) => ({
+      numero: a.seatNumber,
+      libre: a.isAvailable !== false && String(a.status ?? 'AVAILABLE').toUpperCase() === 'AVAILABLE',
+      extra: (a.characteristics ?? []).includes('EXTRA_LEGROOM'),
+      ventana: (a.characteristics ?? []).includes('WINDOW'),
+    })),
+  }));
+}
 
+/** Mapa de asientos de un tramo para un pasajero. */
+function MapaAsientos({ tramo, mapa, elegido, ocupadosPorOtros, onElegir, onReintentar }) {
+  const titulo = `${tramo.flightNumber ?? ''} ${tramo.origen ?? ''} → ${tramo.destino ?? ''}`.trim();
+  if (!mapa || mapa.estado === 'cargando') {
+    return <div className="mapa-tramo"><div className="mapa-tramo-titulo">{titulo}</div><small className="modal-nota-bloque">Cargando asientos…</small></div>;
+  }
+  if (mapa.estado === 'error' || !mapa.asientos?.length) {
+    return (
+      <div className="mapa-tramo">
+        <div className="mapa-tramo-titulo">{titulo}</div>
+        <small className="modal-nota-bloque">
+          No se pudo cargar el mapa de asientos. Puedes continuar y la aerolínea asignará uno.{' '}
+          <button type="button" className="enlace-boton" onClick={onReintentar}>Reintentar</button>
+        </small>
+      </div>
+    );
+  }
+  // Pasillo: en filas de 6 asientos va después del 3.º; en filas de 4, después del 2.º.
+  const ancho = Math.max(...mapa.asientos.map((f) => f.asientos.length));
+  const pasilloDespues = ancho >= 6 ? 2 : ancho >= 4 ? 1 : -1;
+  return (
+    <div className="mapa-tramo">
+      <div className="mapa-tramo-titulo">
+        {titulo}
+        <span className="mapa-tramo-elegido">{elegido ? `Asiento ${elegido}` : 'Sin elegir'}</span>
+      </div>
+      <div className="mapa-asientos-real" role="group" aria-label={`Asientos ${titulo}`}>
+        {mapa.asientos.map((f) => (
+          <div className="fila-asientos" key={f.fila}>
+            <span className="fila-numero">{f.fila}</span>
+            {f.asientos.map((a, idx) => {
+              const deOtro = ocupadosPorOtros.includes(a.numero);
+              const seleccionado = elegido === a.numero;
+              const bloqueado = !a.libre || deOtro;
+              return (
+                <span key={a.numero} className="asiento-celda">
+                  <button
+                    type="button"
+                    className={`asiento ${seleccionado ? 'asiento-elegido' : ''} ${bloqueado ? 'asiento-ocupado' : ''} ${a.extra ? 'asiento-extra' : ''}`}
+                    disabled={bloqueado}
+                    aria-pressed={seleccionado}
+                    title={!a.libre ? `${a.numero}: ocupado` : deOtro ? `${a.numero}: elegido por otro pasajero` : `${a.numero}${a.ventana ? ' · ventana' : ''}${a.extra ? ' · espacio extra' : ''}`}
+                    onClick={() => onElegir(seleccionado ? '' : a.numero)}
+                  >
+                    {a.numero}
+                  </button>
+                  {idx === pasilloDespues && <span className="asiento-pasillo" aria-hidden="true" />}
+                </span>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="mapa-leyenda">
+        <span><i className="asiento muestra" /> Libre</span>
+        <span><i className="asiento muestra asiento-elegido" /> Tu asiento</span>
+        <span><i className="asiento muestra asiento-ocupado" /> Ocupado</span>
+        <span><i className="asiento muestra asiento-extra" /> Espacio extra</span>
+      </div>
+    </div>
+  );
+}
