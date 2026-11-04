@@ -54,12 +54,19 @@ export function construirFacturaPdf(reserva) {
 
   // ── Datos de la factura ─────────────────────────────────────────────────────
   const pnr = reserva.pnr || '000000';
+  // Si el backend emitió la factura (vuelos con aerolíneas socias), se usan sus
+  // datos: número, cliente, subtotal e impuestos guardados en la base.
+  const fac = reserva.factura || reserva.raw?.factura || null;
   const pasajero = reserva.raw?.passengers?.[0];
-  const nombreCliente = pasajero
-    ? sanear(`${pasajero.firstName} ${pasajero.lastName}`).toUpperCase()
-    : 'CONSUMIDOR FINAL';
-  const identificacion = pasajero?.documentNumber || '9999999999';
-  const fechaCreacion = reserva.raw?.createdAt
+  const nombreCliente = fac?.cliente?.nombre
+    ? sanear(fac.cliente.nombre).toUpperCase()
+    : pasajero
+      ? sanear(`${pasajero.firstName} ${pasajero.lastName}`).toUpperCase()
+      : 'CONSUMIDOR FINAL';
+  const identificacion = fac?.cliente?.documento || pasajero?.documentNumber || '9999999999';
+  const fechaCreacion = fac?.emitidaAt
+    ? new Date(fac.emitidaAt).toLocaleDateString('es-EC')
+    : reserva.raw?.createdAt
     ? new Date(reserva.raw.createdAt).toLocaleDateString('es-EC')
     : new Date().toLocaleDateString('es-EC');
   const cantidadPasajeros = reserva.raw?.passengers?.length || 1;
@@ -67,12 +74,14 @@ export function construirFacturaPdf(reserva) {
   // El total llega como `number` desde los endpoints, pero desde el totalizador
   // local puede venir como texto con símbolo de moneda: `parseFloat` deja el
   // primer grupo de dígitos y descarta el resto, que es justo lo que se quiere.
-  const total = parseFloat(String(reserva.totalRaw).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0;
-  const subtotal = total / 1.15;
-  const iva = total - subtotal;
+  const total = fac ? Number(fac.total) : parseFloat(String(reserva.totalRaw).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0;
+  const subtotal = fac ? Number(fac.subtotal) : total / 1.15;
+  const iva = fac ? Number(fac.impuestos) : total - subtotal;
+  const etiquetaImpuestos = fac ? `IMPUESTOS Y TASAS ${Number(fac.impuestosPorcentaje).toFixed(2)}%` : 'IVA 15%';
 
-  // Número de factura con el formato 001-002-XXXXXXXXX que usa el SRI.
-  const numFactura = Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
+  // Número: el de la factura emitida; si no hay (otras verticales), uno de demo
+  // con el formato 001-002-XXXXXXXXX que usa el SRI.
+  const numFactura = fac?.numero || Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
   const numeroAutorizacion = generarClaveAcceso();
 
   doc.setFont('helvetica', 'bold');
@@ -113,7 +122,7 @@ export function construirFacturaPdf(reserva) {
   doc.text('FACTURA', 115, 32);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.text(`No.\t001-002-${numFactura}`, 115, 40);
+  doc.text(fac ? `No.\t${numFactura}` : `No.\t001-002-${numFactura}`, 115, 40);
 
   doc.text(sanear('NÚMERO DE AUTORIZACIÓN'), 115, 48);
   doc.setFontSize(7);
@@ -163,7 +172,10 @@ export function construirFacturaPdf(reserva) {
   doc.rect(15, 145, 180, 15);
   doc.text(sanear(pnr), 17, 152);
   doc.text(sanear(cantidadPasajeros), 46, 152);
-  doc.text(sanear(reserva.titulo), 60, 152);
+  // Descripción de la factura emitida (vuelos, PNR, pasajeros) en varias líneas
+  // para que no invada las columnas de precio.
+  const descripcion = sanear(fac?.descripcion || reserva.titulo);
+  doc.text(doc.splitTextToSize(descripcion, 62).slice(0, 3), 60, 152);
   doc.text(subtotal.toFixed(2), 140, 152, { align: 'right' });
   doc.text('0.00', 165, 152, { align: 'right' });
   doc.text(subtotal.toFixed(2), 190, 152, { align: 'right' });
@@ -173,13 +185,13 @@ export function construirFacturaPdf(reserva) {
   doc.rect(125, yTotals, 70, 50);
 
   const lineas = [
-    { label: 'SUBTOTAL 15%', val: subtotal.toFixed(2) },
+    { label: fac ? 'SUBTOTAL' : 'SUBTOTAL 15%', val: subtotal.toFixed(2) },
     { label: 'SUBTOTAL 0%', val: '0.00' },
     { label: 'SUBTOTAL NO OBJETO DE IVA', val: '0.00' },
     { label: 'SUBTOTAL SIN IMPUESTOS', val: subtotal.toFixed(2) },
     { label: 'TOTAL DESCUENTO', val: '0.00' },
     { label: 'ICE', val: '0.00' },
-    { label: 'IVA 15%', val: iva.toFixed(2) },
+    { label: etiquetaImpuestos, val: iva.toFixed(2) },
     { label: 'VALOR TOTAL', val: total.toFixed(2) },
   ];
 
@@ -202,6 +214,19 @@ export function construirFacturaPdf(reserva) {
   doc.setFont('helvetica', 'normal');
   doc.text(sanear('01 - SIN UTILIZACION DEL SISTEMA FINANCIERO'), 17, yTotals + 12);
   doc.text(total.toFixed(2), 100, yTotals + 12, { align: 'right' });
+
+  // Orden de Booking (la que recibe la aerolínea en salesChannel.partnerOrderId)
+  // y notas de crédito emitidas por reembolsos.
+  let yExtra = yTotals + 22;
+  doc.setFontSize(8);
+  if (fac?.partnerOrderId) {
+    doc.text(sanear(`Orden Booking: ${fac.partnerOrderId}`), 17, yExtra);
+    yExtra += 5;
+  }
+  for (const nc of fac?.notasCredito ?? []) {
+    doc.text(sanear(`Nota de crédito ${nc.numero}: -${Number(nc.monto).toFixed(2)} USD`), 17, yExtra);
+    yExtra += 5;
+  }
 
   return doc;
 }

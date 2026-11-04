@@ -88,6 +88,15 @@ export class AdminController {
     return this.metricasService.getProcesoVuelos();
   }
 
+  @Get('finanzas/vuelos/conciliacion')
+  @ApiOperation({ summary: 'Conciliación con aerolíneas socias: vendido, devuelto, comisión y neto a pagar por aerolínea y por reserva' })
+  @ApiQuery({ name: 'desde', required: false, example: '2026-11-01' })
+  @ApiQuery({ name: 'hasta', required: false, example: '2026-11-15' })
+  @ApiQuery({ name: 'proveedor', required: false, example: 'NODE_VUE_RAM_ALLI_VHVF' })
+  conciliacionVuelos(@Query('desde') desde?: string, @Query('hasta') hasta?: string, @Query('proveedor') proveedor?: string) {
+    return this.metricasService.getConciliacionVuelos({ desde, hasta, proveedor });
+  }
+
   @Get('procesos/vuelos/en-vivo')
   @ApiOperation({ summary: 'Traza en tiempo real del proceso de vuelos, agrupable por X-Correlation-Id (eventos nuevos desde `desde`)' })
   enVivoVuelos(@Query('desde') desde?: string) {

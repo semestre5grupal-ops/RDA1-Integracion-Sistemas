@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { RespuestaProxy, VuelosSociosService } from './vuelos-socios.service';
-import { VuelosSociosReservasService } from './vuelos-socios-reservas.service';
+import { resumenDeReserva, VuelosSociosReservasService } from './vuelos-socios-reservas.service';
+import { ordenDeReserva } from './vuelos-facturacion';
 import { PasoVuelo, ResultadoPaso, trazaVuelos } from './vuelos-traza';
 import { VuelosService } from '../vuelos.service';
 import { propietarioDesde } from '../vuelos.controller';
@@ -204,7 +205,21 @@ export class VuelosSociosMiddleware {
     }
 
     // 3) Reserva en la aerolínea con la referencia de pago real.
-    const cuerpo = { ...(req.body ?? {}), payment: { ...(req.body?.payment ?? {}), paymentReference: cobro.paymentReference } };
+    // Contrato v2: la aerolínea sabe quién vuela (passengers), quién vendió y con
+    // qué orden (salesChannel) y cuánto cobró Booking (payment.amount, que valida
+    // contra el precio congelado: AMOUNT_MISMATCH). Así puede conciliar.
+    const partnerOrderId = ordenDeReserva(idem);
+    const moneda = String(hold.body?.lockedPrice?.currency ?? 'USD');
+    const cuerpo = {
+      ...(req.body ?? {}),
+      payment: {
+        ...(req.body?.payment ?? {}),
+        paymentReference: cobro.paymentReference,
+        amount: { currency: moneda, total: monto.toFixed(2) },
+        provider: 'BOOKING_PROTOTIPO',
+      },
+      salesChannel: { ...(req.body?.salesChannel ?? {}), partnerId: 'BOOKING_PROTOTIPO', partnerOrderId },
+    };
     const tRes = Date.now();
     // En un reintento (el intento anterior falló y se reembolsó) la aerolínea
     // necesita otra Idempotency-Key: con la misma y otros datos responde 409.
@@ -239,8 +254,31 @@ export class VuelosSociosMiddleware {
       this.logger.error(`[vuelos-socios] No se guardó la copia de ${r.body.bookingId}: ${e?.message}`);
       this.traza(entrantes, 'copia', 'error', `No se guardó la copia: ${e?.message}`, { nodo });
     }
+    // 6) Factura al cliente + comisión y liquidación de la aerolínea.
+    const lp = hold.body?.lockedPrice ?? {};
+    const factura = await this.reservas.facturar({
+      bookingId: r.body.bookingId,
+      codigoNodo: nodo,
+      propietarioId: propietario,
+      reserva: r.body,
+      pasajeros: req.body?.passengers ?? [],
+      total: monto,
+      moneda,
+      base: lp.baseFare != null ? parseFloat(String(lp.baseFare)) : null,
+      impuestos: lp.taxes != null ? parseFloat(String(lp.taxes)) : null,
+      transaccionId: cobro.transaccionId ?? null,
+      partnerOrderId,
+      resumen: resumenDeReserva(r.body),
+    });
+    this.traza(entrantes, 'factura', factura ? 'ok' : 'error',
+      factura ? `Factura ${factura.numero} · orden ${partnerOrderId}` : 'No se pudo emitir la factura (la reserva sigue confirmada)', { nodo, monto });
     this.traza(entrantes, 'confirmada', 'ok', `Reserva confirmada · ${r.body.bookingId}`, { nodo, monto });
-    r.body = { ...r.body, payment: { ...(r.body.payment ?? {}), paymentReference: cobro.paymentReference } };
+    r.body = {
+      ...r.body,
+      payment: { ...(r.body.payment ?? {}), paymentReference: cobro.paymentReference },
+      salesChannel: r.body.salesChannel ?? { partnerId: 'BOOKING_PROTOTIPO', partnerOrderId },
+      ...(factura ? { factura } : {}),
+    };
     this.enviar(res, r);
   }
 
@@ -249,6 +287,8 @@ export class VuelosSociosMiddleware {
     try {
       if (metodo === 'GET' && segmentos.length === 2) {
         await this.reservas.actualizarDesdeSocio(bookingId, r.body);
+        const factura = await this.reservas.factura(bookingId);
+        if (factura) r.body = { ...r.body, factura };
       } else if (metodo === 'POST' && segmentos[2] === 'cancel') {
         // Contrato v2: "La aerolínea calcula; Booking ejecuta el reembolso al cliente."
         const monto = parseFloat(String(r.body?.refund?.amount ?? r.body?.refundAmount ?? ''));
@@ -259,7 +299,18 @@ export class VuelosSociosMiddleware {
         }
         await this.reservas.marcarEstado(bookingId, String(r.body.status || 'CANCELLED'), devuelto);
         this.traza(entrantes, 'cancelacion', 'ok', `Reserva ${String(r.body.status || 'CANCELLED')} · reembolso ${devuelto.toFixed(2)}`, { nodo: copia.codigoNodo, monto: devuelto });
-        if (devuelto > 0) r.body = { ...r.body, refund: { ...(r.body.refund ?? {}), executedByBooking: true, executedAmount: devuelto.toFixed(2) } };
+        if (devuelto > 0) {
+          const nota = await this.reservas.notaCredito({
+            bookingId, monto: devuelto, motivo: `Cancelación ${r.body.reasonCode ?? ''}`.trim(),
+            transaccionId: copia.transaccionId, claveReembolso: String(r.body?.refund?.refundId ?? r.body?.cancelledAt ?? 'cancelacion'),
+          });
+          this.traza(entrantes, 'factura', nota ? 'ok' : 'aviso',
+            nota ? `Nota de crédito ${nota.numero} · ${nota.monto}` : 'Sin nota de crédito (reserva sin factura)', { nodo: copia.codigoNodo, monto: devuelto });
+          r.body = {
+            ...r.body,
+            refund: { ...(r.body.refund ?? {}), executedByBooking: true, executedAmount: devuelto.toFixed(2), ...(nota ? { creditNote: nota } : {}) },
+          };
+        }
       }
     } catch (e: any) {
       this.logger.error(`[vuelos-socios] post-proceso ${metodo} ${bookingId}: ${e?.message}`);

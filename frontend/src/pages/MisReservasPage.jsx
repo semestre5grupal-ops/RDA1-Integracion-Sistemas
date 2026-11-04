@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listarReservas as listarReservasVuelos } from '../services/vuelosApi';
+import { listarReservas as listarReservasVuelos, obtenerReserva as obtenerReservaVuelo } from '../services/vuelosApi';
 import { getOrdersAuto, cancelOrderAuto } from '../services/autosApi';
 import { getReservas as getReservasAtracciones, cancelarReservaAtraccion } from '../services/atraccionesApi';
 import { getReservasAlojamientos } from '../services/alojamientosApi';
@@ -443,9 +443,15 @@ export function MisReservasPage() {
 
   const descargarPDF = (reserva) => {
     setIsDownloading(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        descargarFactura(reserva);
+        // Vuelos con aerolíneas socias: el detalle trae la factura real emitida.
+        let conFactura = reserva;
+        if (reserva.tipo === 'vuelo' && reserva.id) {
+          const det = await obtenerReservaVuelo(reserva.id).catch(() => null);
+          if (det?.factura) conFactura = { ...reserva, factura: det.factura, raw: { ...reserva.raw, passengers: det.passengers ?? reserva.raw?.passengers } };
+        }
+        descargarFactura(conFactura);
       } catch (err) {
         setAvisoDescarga('No se pudo generar el PDF de la factura.');
       } finally {

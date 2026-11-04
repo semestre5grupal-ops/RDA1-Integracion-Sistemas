@@ -7,51 +7,28 @@ export function Panel4_LiquidacionesFinanzas() {
   const [comprobanteUrl, setComprobanteUrl] = useState('');
   const [selectedId, setSelectedId] = useState(null);
 
+  const [error, setError] = useState(null);
+
+  // Datos reales de schema_finanzas.liquidaciones_proveedores (sin ejemplos inventados).
   const fetchLiquidaciones = async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await api.get('/finanzas/liquidaciones');
-      setLiquidaciones(Array.isArray(res) ? res : res.data || []);
+      const filas = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
+      setLiquidaciones(filas.map((l) => ({
+        id: l.id,
+        codigo_liquidacion: l.numero_liquidacion || l.id?.slice(0, 8),
+        proveedor_nombre: `${l.proveedor_codigo} · ${l.vertical} · ${l.periodo}`,
+        total_ventas_bruto: Number(l.total_recaudado ?? 0),
+        comision_booking_10pct: Number(l.comision_booking_10pct ?? 0),
+        monto_neto_proveedor_90pct: Number(l.monto_liquidar_socio_90pct ?? 0),
+        estado: l.estado === 'PAGADO' ? 'PAGADO' : 'PENDIENTE_PAGO',
+        comprobante_url: l.comprobante_transferencia_url,
+      })));
     } catch (e) {
-      // Mock con regla de cátedra (10% Booking / 90% Proveedor)
-      setLiquidaciones([
-        {
-          id: 'liq-1',
-          codigo_liquidacion: 'LIQ-ATR-2026-001',
-          proveedor_nombre: 'Dilan Tours Ecuador (Atracciones)',
-          periodo: 'Quincena 1 - Octubre 2026',
-          total_ventas_bruto: 1450.0,
-          comision_booking_10pct: 145.0, // 10%
-          monto_neto_proveedor_90pct: 1305.0, // 90%
-          estado: 'PAGADO',
-          comprobante_url: 'https://banco.pichincha.com/comprobantes/trans-998822.pdf',
-          fecha_liquidacion: '2026-10-15',
-        },
-        {
-          id: 'liq-2',
-          codigo_liquidacion: 'LIQ-AUT-2026-002',
-          proveedor_nombre: 'Hertz & Alamo Rent a Car (Autos)',
-          periodo: 'Quincena 1 - Octubre 2026',
-          total_ventas_bruto: 2200.0,
-          comision_booking_10pct: 220.0, // 10%
-          monto_neto_proveedor_90pct: 1980.0, // 90%
-          estado: 'PENDIENTE_PAGO',
-          comprobante_url: null,
-          fecha_liquidacion: '2026-10-18',
-        },
-        {
-          id: 'liq-3',
-          codigo_liquidacion: 'LIQ-ALO-2026-003',
-          proveedor_nombre: 'Hotel Dann Carlton Quito (Alojamientos)',
-          periodo: 'Quincena 1 - Octubre 2026',
-          total_ventas_bruto: 3400.0,
-          comision_booking_10pct: 340.0, // 10%
-          monto_neto_proveedor_90pct: 3060.0, // 90%
-          estado: 'PENDIENTE_PAGO',
-          comprobante_url: null,
-          fecha_liquidacion: '2026-10-20',
-        },
-      ]);
+      setLiquidaciones([]);
+      setError(e?.response?.data?.detail || e?.message || 'No se pudieron leer las liquidaciones.');
     } finally {
       setLoading(false);
     }
@@ -72,7 +49,7 @@ export function Panel4_LiquidacionesFinanzas() {
       });
       await fetchLiquidaciones();
     } catch (e) {
-      setLiquidaciones(prev => prev.map(l => l.id === liqId ? { ...l, estado: 'PAGADO', comprobante_url: 'https://banco.pichincha.com/comprobante-demo.pdf' } : l));
+      setError(e?.response?.data?.detail || 'No se pudo marcar como pagada.');
     } finally {
       setSelectedId(null);
       setComprobanteUrl('');
@@ -121,6 +98,15 @@ export function Panel4_LiquidacionesFinanzas() {
           </div>
         </div>
       </div>
+
+      {error && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', padding: '10px 12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.85rem' }}>
+          {error}
+        </div>
+      )}
+      {!loading && !error && liquidaciones.length === 0 && (
+        <p style={{ color: '#64748b', fontSize: '0.85rem' }}>Todavía no hay ventas de proveedores en ninguna quincena.</p>
+      )}
 
       {/* TABLA DE LIQUIDACIONES */}
       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
@@ -180,6 +166,118 @@ export function Panel4_LiquidacionesFinanzas() {
           ))}
         </tbody>
       </table>
+
+      <ConciliacionVuelos />
+    </div>
+  );
+}
+
+/** Inicio de la quincena actual en hora de Ecuador (YYYY-MM-DD). */
+function inicioQuincena() {
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(new Date());
+  return `${hoy.slice(0, 8)}${Number(hoy.slice(8)) <= 15 ? '01' : '16'}`;
+}
+
+/**
+ * Conciliación con las aerolíneas: lo que Booking vendió de cada una, lo
+ * devuelto, su comisión y lo que se le debe. Cada fila lleva la orden de Booking
+ * (salesChannel.partnerOrderId) y el id de la reserva en la aerolínea, para que
+ * ella la compare con su GET /bookings. Se descarga en CSV para enviársela.
+ */
+function ConciliacionVuelos() {
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(new Date());
+  const [desde, setDesde] = useState(inicioQuincena());
+  const [hasta, setHasta] = useState(hoy);
+  const [datos, setDatos] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState(null);
+
+  const cargar = async () => {
+    setCargando(true);
+    setError(null);
+    try {
+      const res = await api.get('/admin/finanzas/vuelos/conciliacion', { params: { desde, hasta } });
+      setDatos(res?.data ?? res);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || 'No se pudo cargar la conciliación.');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => { cargar(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const descargarCsv = (proveedor) => {
+    const filas = (datos?.reservas ?? []).filter((r) => !proveedor || r.proveedor === proveedor);
+    const cab = ['proveedor', 'partnerOrderId', 'pnr', 'bookingIdAerolinea', 'factura', 'estado', 'fecha', 'moneda', 'vendido', 'devuelto', 'comisionBooking', 'aPagarAerolinea'];
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [cab.join(','), ...filas.map((r) => cab.map((c) => esc(r[c])).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conciliacion_${proveedor || 'aerolineas'}_${desde}_${hasta}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const celda = { padding: '10px 8px' };
+  return (
+    <div style={{ marginTop: '32px', borderTop: '1px solid #f1f5f9', paddingTop: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#0f172a' }}>✈️ Conciliación con aerolíneas</h3>
+          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.82rem' }}>
+            Cada reserva va con su orden de Booking (la que recibió la aerolínea en <code>salesChannel.partnerOrderId</code>). Envía el CSV a la aerolínea para que lo compare con sus reservas.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: '0.75rem', color: '#475569' }}>Desde<br />
+            <input type="date" value={desde} max={hasta} onChange={(e) => setDesde(e.target.value)} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: '#475569' }}>Hasta<br />
+            <input type="date" value={hasta} min={desde} onChange={(e) => setHasta(e.target.value)} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
+          </label>
+          <button onClick={cargar} disabled={cargando} style={{ background: '#003580', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
+            {cargando ? 'Cargando…' : 'Consultar'}
+          </button>
+        </div>
+      </div>
+      {error && <p style={{ color: '#991b1b', fontSize: '0.85rem' }}>{error}</p>}
+      {datos && (datos.totales ?? []).length === 0 && !error && (
+        <p style={{ color: '#64748b', fontSize: '0.85rem' }}>Sin ventas facturadas de aerolíneas entre {datos.desde} y {datos.hasta}.</p>
+      )}
+      {datos && (datos.totales ?? []).length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+          <thead>
+            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+              <th style={celda}>Aerolínea</th>
+              <th style={celda}>Reservas</th>
+              <th style={celda}>Vendido</th>
+              <th style={celda}>Devuelto</th>
+              <th style={celda}>Comisión Booking ({datos.comisionPct ?? 10}%)</th>
+              <th style={celda}>A pagar a la aerolínea</th>
+              <th style={celda}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {datos.totales.map((t) => (
+              <tr key={t.proveedor} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ ...celda, fontWeight: 600, color: '#003580' }}>{t.proveedor}</td>
+                <td style={celda}>{t.reservas}</td>
+                <td style={celda}>${Number(t.vendido).toFixed(2)}</td>
+                <td style={{ ...celda, color: '#b91c1c' }}>-${Number(t.devuelto).toFixed(2)}</td>
+                <td style={{ ...celda, color: '#047857', fontWeight: 700 }}>+${Number(t.comisionBooking).toFixed(2)}</td>
+                <td style={{ ...celda, fontWeight: 700 }}>${Number(t.aPagarAerolinea).toFixed(2)}</td>
+                <td style={celda}>
+                  <button onClick={() => descargarCsv(t.proveedor)} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.78rem' }}>
+                    ⬇️ CSV
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

@@ -179,6 +179,9 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       obtener: jest.fn(async (id: string) => copias.get(id) ?? null),
       actualizarDesdeSocio: jest.fn(async () => undefined),
       marcarEstado: jest.fn(async (id: string, status: string) => copias.has(id) && (copias.get(id).status = status)),
+      facturar: jest.fn(async (d: any) => ({ numero: 'FAC-20261104-000001', partnerOrderId: d.partnerOrderId, total: d.total.toFixed(2) })),
+      factura: jest.fn(async () => null),
+      notaCredito: jest.fn(async (d: any) => ({ numero: 'NC-20261104-000001', monto: d.monto.toFixed(2) })),
       listar: jest.fn(async (prop: string) =>
         [...copias.values()].filter((c) => c.propietarioId === prop).map((c) => ({
           bookingId: c.bookingId, codigoNodo: c.codigoNodo, pnr: 'ABC123', status: c.status, origin: 'UIO', destination: 'GYE',
@@ -245,6 +248,10 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(cobros.at(-1)).toEqual({ monto: 150, idem: 'idem-ok', propietario: DUENO });
       const enviada = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST')!;
       expect(enviada.body.payment.paymentReference).toBe('AUTH-777');
+      // Contrato v2: monto cobrado, quién cobró y la orden de Booking para conciliar.
+      expect(enviada.body.payment).toMatchObject({ amount: { currency: 'USD', total: '150.00' }, provider: 'BOOKING_PROTOTIPO' });
+      expect(enviada.body.salesChannel).toMatchObject({ partnerId: 'BOOKING_PROTOTIPO', partnerOrderId: expect.stringMatching(/^ORD-BKP-[0-9A-F]{10}$/) });
+      expect(datos.factura).toMatchObject({ numero: 'FAC-20261104-000001' });
       expect(enviada.headers['x-user-id']).toBe(DUENO); // la aerolínea ve al mismo dueño que Booking
       expect(enviada.body.holdId).toBe('HOLD-key');
       expect(copias.get('NODE_VUE_KEY~BK-1')).toMatchObject({ propietarioId: DUENO, codigoNodo: 'NODE_VUE_KEY' });
@@ -260,7 +267,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       });
       const { eventos, contadores } = trazaVuelos.desde(0);
       const deLaCompra = eventos.filter((e) => e.correlacion === corr).map((e) => `${e.paso}:${e.resultado}`);
-      expect(deLaCompra).toEqual(['busqueda:aviso', 'cobro:ok', 'reserva_aerolinea:ok', 'copia:ok', 'confirmada:ok']);
+      expect(deLaCompra).toEqual(['busqueda:aviso', 'cobro:ok', 'reserva_aerolinea:ok', 'copia:ok', 'factura:ok', 'confirmada:ok']);
       expect(contadores.cobro.ok).toBe(1);
       // La aerolínea recibe el mismo correlation ID que el cliente.
       const enviado = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST')!;
@@ -305,7 +312,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       });
       const datos = await r.json();
       expect(r.status).toBe(200);
-      expect(datos.refund).toMatchObject({ amount: '125.00', executedByBooking: true, executedAmount: '125.00' });
+      expect(datos.refund).toMatchObject({ amount: '125.00', executedByBooking: true, executedAmount: '125.00', creditNote: { numero: 'NC-20261104-000001' } });
       expect(reembolsos.at(-1)).toMatchObject({ tx: 'tx-1', monto: 125 });
       expect(copias.get('NODE_VUE_KEY~BK-1').status).toBe('CANCELLED');
     });
@@ -342,5 +349,20 @@ describe('normalizarPasajero', () => {
     expect(normalizarPasajero({ nationality: 'ECU', contact: { phone: '099 123 4567' } })).toMatchObject({ nationality: 'EC', contact: { phone: '+593991234567' } });
     expect(normalizarPasajero({ nationality: 'col', contact: { phone: '+573001234567' } })).toMatchObject({ nationality: 'CO', contact: { phone: '+573001234567' } });
     expect(normalizarPasajero({ nationality: 'EC', contact: { phone: '593991234567' } }).contact.phone).toBe('+593991234567');
+  });
+});
+
+
+describe('facturación de vuelos (cálculos)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const f = require('./vuelos-facturacion');
+  it('usa el desglose de la aerolínea si cuadra con el total; si no, IVA 15% incluido', () => {
+    expect(f.desglose(79.85, 59, 20.85)).toEqual({ subtotal: 59, impuestos: 20.85, pct: 35.34 });
+    expect(f.desglose(80.5, null, null)).toEqual({ subtotal: 70, impuestos: 10.5, pct: 15 });
+  });
+  it('quincena y orden estables', () => {
+    expect(f.periodoQuincena(new Date('2026-11-16T04:00:00Z'))).toBe('2026-11-Q1'); // 15-nov 23:00 en Ecuador
+    expect(f.periodoQuincena(new Date('2026-11-16T06:00:00Z'))).toBe('2026-11-Q2');
+    expect(f.ordenDeReserva('abc')).toBe(f.ordenDeReserva('abc'));
   });
 });
