@@ -1,0 +1,6607 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://booking.epn.edu.ec/schemas/v2/alojamientos.json",
+  "title": "Catálogo de Esquemas JSON Schema — Vertical de Alojamientos (RDA2 v2.2.0)",
+  "description": "Esquemas JSON Schema canónicos derivados del contrato OpenAPI 3.0.3 de Alojamientos (MS_ALO) para validación de DTOs, peticiones y respuestas.",
+  "type": "object",
+  "$defs": {
+    "ErrorCode": {
+      "type": "string",
+      "description": "Catálogo cerrado de códigos de error (compartido por las 4 verticales).\n**Deprecados (solo lectura, ya no se emiten):** `ROOM_NO_LONGER_AVAILABLE` → usar `OUT_OF_STOCK`; `HOTEL_NOT_FOUND` → usar `NOT_FOUND`.\n",
+      "enum": [
+        "VALIDATION_FAILED",
+        "INVALID_DOCUMENT",
+        "UNAUTHORIZED",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "HOTEL_NOT_FOUND",
+        "CONFLICT",
+        "OUT_OF_STOCK",
+        "ROOM_NO_LONGER_AVAILABLE",
+        "QUOTE_EXPIRED",
+        "PRICE_MISMATCH",
+        "IDEMPOTENCY_KEY_REUSED",
+        "IDEMPOTENCY_IN_PROGRESS",
+        "INVALID_STATE_TRANSITION",
+        "CHECKIN_TIME_NOT_REACHED",
+        "CAPACITY_EXCEEDED",
+        "DISCOUNT_EXCEEDS_CONTRACT",
+        "PROMOTIONS_NOT_ALLOWED",
+        "RATE_LIMITED",
+        "PROVIDER_DISABLED",
+        "GATEWAY_TIMEOUT",
+        "INTERNAL_ERROR",
+        "RESTRICTION_VIOLATED",
+        "UNSUPPORTED_CURRENCY",
+        "INSUFFICIENT_SCOPE"
+      ]
+    },
+    "ProblemDetails": {
+      "type": "object",
+      "required": [
+        "type",
+        "title",
+        "status",
+        "detail",
+        "instance",
+        "code"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 200
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "instance": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "correlation_id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "habilitadoDesde": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Solo en `CHECKIN_TIME_NOT_REACHED`. Instante (con offset) desde el cual se permite el check-in."
+        },
+        "invalid_params": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "reason"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 300
+              }
+            }
+          }
+        },
+        "restriccion": {
+          "type": "string",
+          "enum": [
+            "MIN_STAY",
+            "MAX_STAY",
+            "CLOSED_TO_ARRIVAL",
+            "CLOSED_TO_DEPARTURE",
+            "STOP_SELL",
+            "CUTOFF"
+          ],
+          "description": "Solo en `RESTRICTION_VIOLATED`: qué restricción se violó."
+        },
+        "scopes_requeridos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "description": "Solo en `INSUFFICIENT_SCOPE`."
+        }
+      }
+    },
+    "PaginationMetadata": {
+      "type": "object",
+      "required": [
+        "total_results",
+        "page",
+        "limit",
+        "total_pages",
+        "has_next"
+      ],
+      "properties": {
+        "total_results": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 18
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "example": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "example": 10
+        },
+        "total_pages": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 2
+        },
+        "has_next": {
+          "type": "boolean",
+          "example": true
+        }
+      }
+    },
+    "HateoasLinksV2": {
+      "type": "object",
+      "description": "Enlaces HATEOAS (nivel 3). Las claves son relaciones (`self`, `cancel`, `checkin`, `checkout`, …).",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "href",
+          "method"
+        ],
+        "properties": {
+          "href": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    "AlojamientoId": {
+      "type": "string",
+      "description": "ID de propiedad. Las palabras reservadas de rutas estáticas (`health`, `eventos`, `categorias`, `tipos`, `orders`, `reservations`, `reservas`, `search`, `availability`, `promociones`) NO son IDs válidos: evita que `GET /alojamientos/{id}` capture rutas estáticas.",
+      "pattern": "^(?!(health|eventos|categorias|tipos|orders|reservations|reservas|search|availability|promociones)$)[A-Za-z0-9][A-Za-z0-9._-]{2,63}$",
+      "maxLength": 64,
+      "example": "HTL-QUITO-001"
+    },
+    "OrderRef": {
+      "type": "string",
+      "description": "UUID (`orderId`), `externalOrderId` (`ORD-HTL-…`) o `codigoReserva` (`BK-HOTEL-…`).",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|ORD-HTL-[A-Z0-9]{3,20}|BK-HOTEL-[A-Z0-9]{3,20})$",
+      "example": "ORD-HTL-8842"
+    },
+    "ReservationStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "CONFIRMED",
+        "CANCELLED",
+        "CHECKED_IN",
+        "CHECKED_OUT"
+      ]
+    },
+    "RegimenHospedajeEnum": {
+      "type": "string",
+      "enum": [
+        "SOLO_HABITACION",
+        "DESAYUNO_INCLUIDO",
+        "MEDIA_PENSION",
+        "PENSION_COMPLETA",
+        "TODO_INCLUIDO"
+      ]
+    },
+    "PaymentMethod": {
+      "type": "string",
+      "description": "Vocabulario único de las 4 verticales y de MS_PAG.",
+      "enum": [
+        "TARJETA_CREDITO",
+        "TARJETA_DEBITO",
+        "TRANSFERENCIA",
+        "SIMULADO",
+        "PAGO_EN_SITIO"
+      ]
+    },
+    "Ocupantes": {
+      "type": "object",
+      "required": [
+        "adultos"
+      ],
+      "properties": {
+        "adultos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2
+        },
+        "ninos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0,
+          "example": 0
+        },
+        "edadesNinos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 17
+          }
+        }
+      }
+    },
+    "TelefonoE164OLocal": {
+      "type": "string",
+      "pattern": "^(\\+[0-9]{8,15}|09[0-9]{8})$",
+      "example": "+593991234567"
+    },
+    "AlojamientosHealthResponseV2": {
+      "type": "object",
+      "required": [
+        "status",
+        "semaforo",
+        "service",
+        "latency_ms",
+        "timestamp"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "HEALTHY",
+            "DEGRADED",
+            "DOWN"
+          ],
+          "description": "Equivale a `UP`/`DEGRADED`/`DOWN` de otros nodos (UP ≡ HEALTHY).",
+          "example": "HEALTHY"
+        },
+        "semaforo": {
+          "type": "string",
+          "enum": [
+            "GREEN",
+            "YELLOW",
+            "RED"
+          ],
+          "example": "GREEN"
+        },
+        "service": {
+          "type": "string",
+          "maxLength": 50,
+          "example": "MS_ALOJAMIENTOS"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 20,
+          "example": "2.1.0"
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 38
+        },
+        "uptime_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 86400
+        },
+        "database": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "CONNECTED",
+                "DISCONNECTED"
+              ],
+              "example": "CONNECTED"
+            }
+          }
+        },
+        "circuit_breaker": {
+          "type": "string",
+          "enum": [
+            "CLOSED",
+            "OPEN",
+            "HALF_OPEN",
+            "MANUALLY_OPEN"
+          ],
+          "example": "CLOSED"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "total_propiedades": {
+              "type": "integer",
+              "minimum": 0,
+              "example": 45
+            },
+            "habitaciones_totales": {
+              "type": "integer",
+              "minimum": 0,
+              "example": 320
+            },
+            "habitaciones_ocupadas": {
+              "type": "integer",
+              "minimum": 0,
+              "example": 210
+            },
+            "tasa_ocupacion_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "example": 65.62
+            }
+          }
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:00:00-05:00"
+        }
+      }
+    },
+    "ContratoPromocionesResponseV2": {
+      "type": "object",
+      "required": [
+        "tienda_id",
+        "vertical",
+        "permite_promociones",
+        "porcentaje_descuento_maximo"
+      ],
+      "properties": {
+        "tienda_id": {
+          "type": "string",
+          "maxLength": 60,
+          "example": "proveedor-alojamientos-lizz"
+        },
+        "vertical": {
+          "type": "string",
+          "enum": [
+            "alojamientos"
+          ],
+          "example": "alojamientos"
+        },
+        "permite_promociones": {
+          "type": "boolean",
+          "example": true
+        },
+        "porcentaje_descuento_maximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 15
+        },
+        "destinos_habilitados": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "example": [
+            "Quito",
+            "Galápagos",
+            "Cuenca",
+            "Baños"
+          ]
+        },
+        "vigencia_desde": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-10-01"
+        },
+        "vigencia_hasta": {
+          "type": "string",
+          "format": "date",
+          "example": "2027-12-31"
+        },
+        "condiciones_combo": {
+          "type": "string",
+          "maxLength": 500,
+          "example": "Válido para estancias mínimas de 2 noches combinadas con vuelos o tours."
+        },
+        "contacto_comercial": {
+          "type": "object",
+          "properties": {
+            "nombre": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "maxLength": 120
+            },
+            "telefono": {
+              "$ref": "#/$defs/TelefonoE164OLocal"
+            }
+          },
+          "x-pii": true
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T10:00:00-05:00"
+        }
+      }
+    },
+    "ContratoPromocionesRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "permite_promociones",
+        "porcentaje_descuento_maximo"
+      ],
+      "properties": {
+        "permite_promociones": {
+          "type": "boolean",
+          "example": true
+        },
+        "porcentaje_descuento_maximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 15,
+          "description": "0 si `permite_promociones` es false."
+        },
+        "destinos_habilitados": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "vigencia_hasta": {
+          "type": "string",
+          "format": "date",
+          "description": "Debe ser ≥ hoy (Guayaquil)."
+        },
+        "condiciones_combo": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "contacto_comercial": {
+          "type": "object",
+          "properties": {
+            "nombre": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "maxLength": 120
+            },
+            "telefono": {
+              "$ref": "#/$defs/TelefonoE164OLocal"
+            }
+          },
+          "x-pii": true
+        }
+      }
+    },
+    "PaqueteAplicadoV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paqueteId",
+        "descuentoPorcentaje",
+        "descuentoMonto"
+      ],
+      "description": "Descuento de combo aplicado por el ESB (ORQ_PKG). Se valida contra el acuerdo B2B.",
+      "properties": {
+        "paqueteId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "descuentoPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 10
+        },
+        "descuentoMonto": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "48.00",
+          "description": "DEBE ser igual a `round_half_up(subtotal × descuentoPorcentaje / 100)`; si no → `422 VALIDATION_FAILED`."
+        }
+      }
+    },
+    "EventType": {
+      "type": "string",
+      "enum": [
+        "alojamiento.reserva.confirmada",
+        "alojamiento.reserva.cancelada",
+        "alojamiento.checkin.completado",
+        "alojamiento.checkout.completado",
+        "alojamiento.stock.actualizado"
+      ]
+    },
+    "AlojamientosEventosResponseV2": {
+      "type": "object",
+      "required": [
+        "eventos",
+        "has_more",
+        "next_after"
+      ],
+      "properties": {
+        "eventos": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/CloudEventV2"
+          }
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_after": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Valor a enviar en `after` en la siguiente llamada.",
+          "example": 1045,
+          "maximum": 9223372036854776000,
+          "minimum": 0
+        }
+      }
+    },
+    "CloudEventV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "specversion",
+        "type",
+        "time",
+        "sequence",
+        "subject",
+        "datacontenttype",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "example": "evt-alo-2026-001043"
+        },
+        "source": {
+          "type": "string",
+          "example": "/services/alojamientos",
+          "maxLength": 200
+        },
+        "specversion": {
+          "type": "string",
+          "enum": [
+            "1.0"
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/EventType"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T19:30:00-05:00"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "description": "Orden total del feed (sin saltos).",
+          "example": 1043,
+          "maximum": 9223372036854776000
+        },
+        "subject": {
+          "type": "string",
+          "description": "`orderId` o `<alojamientoId>:<tipoHabitacion>` según el evento.",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "correlationid": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Extensión CloudEvents de trazabilidad (= X-Correlation-ID de la operación origen)."
+        },
+        "datacontenttype": {
+          "type": "string",
+          "enum": [
+            "application/json"
+          ]
+        },
+        "data": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EventDataReservaV2"
+            },
+            {
+              "$ref": "#/$defs/EventDataStockV2"
+            }
+          ]
+        }
+      }
+    },
+    "EventDataReservaV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "external_order_id",
+        "estado"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "external_order_id": {
+          "type": "string",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "saga_id": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "estado": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "total": {
+          "$ref": "#/$defs/Money"
+        }
+      }
+    },
+    "EventDataStockV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "tipoHabitacionCodigo",
+        "fecha",
+        "unidadesDisponibles"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "fecha": {
+          "type": "string",
+          "format": "date"
+        },
+        "unidadesDisponibles": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SearchAccommodationRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destino",
+        "fechaInicio",
+        "fechaFin",
+        "adultos"
+      ],
+      "properties": {
+        "destino": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "example": "Quito"
+        },
+        "fechaInicio": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-in. ≥ hoy (Guayaquil).",
+          "example": "2026-11-01"
+        },
+        "fechaFin": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-out. Estrictamente posterior; estancia ≤ 30 noches.",
+          "example": "2026-11-05"
+        },
+        "adultos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2
+        },
+        "ninos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0,
+          "example": 1
+        },
+        "edadesNinos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 17
+          }
+        },
+        "habitaciones": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "estrellasMinimas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "precioMaximo": {
+          "$ref": "#/$defs/Money"
+        },
+        "amenidadesDeseadas": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "permitePaquete": {
+          "type": "boolean",
+          "description": "Solo propiedades que aceptan combos."
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        }
+      }
+    },
+    "SearchAccommodationResponseV2": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "maxLength": 64,
+          "example": "req-alo-179200"
+        },
+        "metadata": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/PaginationMetadata"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "destino": {
+                  "type": "string",
+                  "example": "Quito",
+                  "maxLength": 200
+                },
+                "noches": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 30,
+                  "example": 4
+                }
+              }
+            }
+          ]
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AlojamientoCardV2"
+          }
+        },
+        "alojamientos": {
+          "type": "array",
+          "deprecated": true,
+          "description": "Alias de `data` (se elimina en v3).",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AlojamientoCardV2"
+          }
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "AlojamientoListResponseV2": {
+      "type": "object",
+      "required": [
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AlojamientoCardV2"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "deprecated": true,
+          "description": "Alias de `metadata.total_results`.",
+          "minimum": 0
+        },
+        "page": {
+          "type": "integer",
+          "deprecated": true,
+          "description": "Alias de `metadata.page` (se elimina en v3).",
+          "minimum": 1
+        },
+        "limit": {
+          "type": "integer",
+          "deprecated": true,
+          "description": "Alias de `metadata.limit` (se elimina en v3).",
+          "minimum": 1
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "AlojamientoCardV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "nombre",
+        "destino",
+        "estrellas",
+        "precioPorNoche",
+        "moneda",
+        "permitePaquete"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 150,
+          "example": "Hotel Plaza Grande"
+        },
+        "tipoPropiedad": {
+          "type": "string",
+          "enum": [
+            "HOTEL",
+            "RESORT",
+            "APARTAMENTO",
+            "HOSTAL",
+            "HOSTERIA"
+          ],
+          "example": "HOTEL"
+        },
+        "destino": {
+          "type": "string",
+          "maxLength": 80,
+          "example": "Quito"
+        },
+        "direccion": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "estrellas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "example": 5
+        },
+        "scoreCalificacion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.4
+        },
+        "totalResenas": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 342
+        },
+        "precioPorNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "120.00"
+        },
+        "precioTotalEstancia": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Solo cuando la consulta incluye fechas.",
+          "example": "480.00"
+        },
+        "moneda": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "permitePaquete": {
+          "type": "boolean",
+          "example": true
+        },
+        "descuentoMaximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 15
+        },
+        "checkInPermitidoDesde": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "14:00"
+        },
+        "checkOutHoraMaxima": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "11:00"
+        },
+        "fotos": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "amenidades": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "actualizadoEn": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T09:00:00-05:00"
+        }
+      }
+    },
+    "DesgloseCalificacionesV2": {
+      "type": "object",
+      "properties": {
+        "limpieza": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.8
+        },
+        "confort": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.5
+        },
+        "ubicacion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.9
+        },
+        "personal": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.6
+        },
+        "relacionCalidadPrecio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.1
+        }
+      }
+    },
+    "PoliticaCancelacionV2": {
+      "type": "object",
+      "required": [
+        "esReembolsable"
+      ],
+      "properties": {
+        "esReembolsable": {
+          "type": "boolean",
+          "example": true
+        },
+        "horasLimiteCancelacion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 720,
+          "example": 48,
+          "description": "Horas antes de las 14:00 del check-in con reembolso del 100 %."
+        },
+        "penalidadFueraDeVentanaPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 100,
+          "description": "% retenido si el CLIENTE cancela fuera de la ventana. No aplica a compensación de Saga."
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 300,
+          "example": "Cancelación gratuita hasta 48 horas antes de las 14:00 del día de llegada."
+        }
+      }
+    },
+    "AlojamientoDetalleV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "nombre",
+        "destino",
+        "estrellas"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "tipoPropiedad": {
+          "type": "string",
+          "example": "HOTEL",
+          "maxLength": 200
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "destino": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "direccion": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "coordenadasGps": {
+          "type": "object",
+          "properties": {
+            "latitud": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90,
+              "example": -0.2201
+            },
+            "longitud": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "example": -78.5123
+            }
+          }
+        },
+        "zonaHoraria": {
+          "type": "string",
+          "enum": [
+            "America/Guayaquil",
+            "Pacific/Galapagos"
+          ],
+          "example": "America/Guayaquil",
+          "description": "Zona usada para las reglas de 14:00 / check-out. Galápagos es UTC-6."
+        },
+        "estrellas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "scoreCalificacion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "desgloseCalificaciones": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "politicaCancelacion": {
+          "$ref": "#/$defs/PoliticaCancelacionV2"
+        },
+        "checkInPermitidoDesde": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "14:00"
+        },
+        "checkOutHoraMaxima": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "11:00"
+        },
+        "amenidades": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "galeriaFotos": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "permitePaquete": {
+          "type": "boolean"
+        },
+        "descuentoMaximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "proveedor": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "example": "proveedor-alojamientos-lizz",
+              "maxLength": 200
+            },
+            "nombre": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        },
+        "actualizadoEn": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "TipoHabitacionV2": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "nombre",
+        "capacidadAdultos",
+        "precioBaseNoche"
+      ],
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,40}$",
+          "example": "SUITE_DELUXE"
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite Deluxe Matrimonial"
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "capacidadAdultos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2
+        },
+        "capacidadNinos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 1
+        },
+        "camas": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "metrosCuadrados": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1000
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "precioBaseNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Precio del plan por defecto (atajo; el detalle está en `planesTarifa`).",
+          "example": "120.00"
+        },
+        "habitacionesTotales": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 10
+        },
+        "habitacionesDisponibles": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 4,
+          "description": "Indicativo (puede estar desactualizado). La verdad está en `POST /availability` y en `/inventario`."
+        },
+        "amenidadesHabitacion": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "fotos": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "planesTarifa": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/RatePlanV2"
+          }
+        }
+      }
+    },
+    "HabitacionesResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "habitaciones"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "alojamientoNombre": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "habitaciones": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/TipoHabitacionV2"
+          }
+        }
+      }
+    },
+    "CategoriaAlojamientoV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "nombre",
+        "slug"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "cat-hotel-boutique",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]{2,60}$",
+          "example": "hoteles-boutique"
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "icono": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "tiene_piscina": {
+          "type": "boolean"
+        },
+        "incluye_desayuno": {
+          "type": "boolean"
+        },
+        "admite_mascotas": {
+          "type": "boolean"
+        },
+        "cancelacion_gratuita": {
+          "type": "boolean"
+        },
+        "orden": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "AvailabilityRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alojamientoId",
+        "fechaInicio",
+        "fechaFin",
+        "tipoHabitacionCodigo"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "$ref": "#/$defs/AlojamientoId"
+        },
+        "fechaInicio": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-01"
+        },
+        "fechaFin": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-05"
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,40}$",
+          "example": "SUITE_DELUXE"
+        },
+        "cantidadHabitaciones": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "ocupantes": {
+          "$ref": "#/$defs/Ocupantes"
+        },
+        "regimenSeleccionado": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB",
+          "description": "Plan de tarifa. Si falta, se usa el plan por defecto de la habitación. Plan inexistente → `404 NOT_FOUND`."
+        }
+      }
+    },
+    "DesglosePrecioV2": {
+      "type": "object",
+      "required": [
+        "precioNoche",
+        "subtotal",
+        "ivaPorcentaje",
+        "ivaValor",
+        "tasaMunicipal",
+        "descuentoCombo",
+        "totalPagar",
+        "nochesDetalle"
+      ],
+      "properties": {
+        "precioNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "120.00"
+        },
+        "subtotal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "480.00"
+        },
+        "ivaPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 15
+        },
+        "ivaValor": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "72.00"
+        },
+        "iva15Pct": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "deprecated": true,
+          "description": "Alias deprecado de `ivaValor` (se elimina en v3).",
+          "example": "72.00"
+        },
+        "tasaMunicipal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "8.00"
+        },
+        "descuentoCombo": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "0.00"
+        },
+        "totalPagar": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "subtotal + ivaValor + tasaMunicipal − descuentoCombo (exacto).",
+          "example": "560.00"
+        },
+        "impuestos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/ImpuestoLineaV2"
+          },
+          "description": "Desglose por impuesto (aditivo). `sum(impuestos[].monto no incluidos)` = `ivaValor + tasaMunicipal`.",
+          "example": [
+            {
+              "codigo": "IVA",
+              "nombre": "IVA 15 %",
+              "porcentaje": 15,
+              "monto": "72.00",
+              "incluidoEnPrecio": false
+            },
+            {
+              "codigo": "TASA_MUNICIPAL",
+              "nombre": "Tasa municipal",
+              "monto": "8.00",
+              "incluidoEnPrecio": false
+            }
+          ]
+        },
+        "nochesDetalle": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/NocheDetalleV2"
+          },
+          "description": "Precio noche por noche (las tarifas pueden variar por fecha). `subtotal` = suma exacta de estas líneas.",
+          "example": [
+            {
+              "fecha": "2026-11-01",
+              "precio": "120.00"
+            },
+            {
+              "fecha": "2026-11-02",
+              "precio": "120.00"
+            },
+            {
+              "fecha": "2026-11-03",
+              "precio": "120.00"
+            },
+            {
+              "fecha": "2026-11-04",
+              "precio": "120.00"
+            }
+          ]
+        }
+      }
+    },
+    "AvailabilityResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "tipoHabitacionCodigo",
+        "estaDisponible",
+        "habitacionesRemanentes",
+        "precioTotalCotizado"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "estaDisponible": {
+          "type": "boolean",
+          "example": true
+        },
+        "habitacionesRemanentes": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 4,
+          "description": "Cupo mínimo remanente en todas las noches del rango."
+        },
+        "nochesEstancia": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "example": 4
+        },
+        "desglosePrecio": {
+          "$ref": "#/$defs/DesglosePrecioV2"
+        },
+        "precioTotalCotizado": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "cotizacionId": {
+          "type": "string",
+          "format": "uuid",
+          "example": "3f2b8a52-6d3e-4a43-9a0e-1f6d7a9b2c11"
+        },
+        "tarifaValidaHasta": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:30:00-05:00",
+          "description": "TTL de 30 min del precio. No retiene inventario."
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "example": "FLEX_BB",
+          "maxLength": 200
+        },
+        "modeloPago": {
+          "$ref": "#/$defs/ModeloPago"
+        },
+        "politicaCancelacion": {
+          "$ref": "#/$defs/PoliticaCancelacionV2"
+        }
+      }
+    },
+    "AvailabilityOptionV2": {
+      "type": "object",
+      "required": [
+        "tipoHabitacionCodigo",
+        "estaDisponible",
+        "habitacionesRemanentes",
+        "precioNoche",
+        "precioTotalEstancia",
+        "planTarifaCodigo"
+      ],
+      "properties": {
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "estaDisponible": {
+          "type": "boolean"
+        },
+        "habitacionesRemanentes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "precioNoche": {
+          "$ref": "#/$defs/Money"
+        },
+        "precioTotalEstancia": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Con impuestos; indicativo, no vinculante.",
+          "example": "560.00"
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "example": "FLEX_BB",
+          "maxLength": 200
+        }
+      }
+    },
+    "AvailabilityListResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "checkin",
+        "checkout",
+        "noches",
+        "opciones"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "checkin": {
+          "type": "string",
+          "format": "date"
+        },
+        "checkout": {
+          "type": "string",
+          "format": "date"
+        },
+        "noches": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "opciones": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AvailabilityOptionV2"
+          }
+        }
+      }
+    },
+    "InventarioNocheV2": {
+      "type": "object",
+      "required": [
+        "fecha",
+        "tipoHabitacionCodigo",
+        "habitacionesTotales",
+        "reservadas",
+        "bloqueadas",
+        "disponibles"
+      ],
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "format": "date"
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "habitacionesTotales": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reservadas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bloqueadas": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mantenimiento/limpieza/bloqueo manual."
+        },
+        "disponibles": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "totales − reservadas − bloqueadas."
+        },
+        "tarifas": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/TarifaPlanNocheV2"
+          },
+          "description": "Tarifa y restricciones por plan esa noche (completa el modelo ARI)."
+        }
+      }
+    },
+    "InventarioResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "desde",
+        "hasta",
+        "generadoEn",
+        "hash",
+        "noches"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "desde": {
+          "type": "string",
+          "format": "date"
+        },
+        "hasta": {
+          "type": "string",
+          "format": "date"
+        },
+        "generadoEn": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "hash": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Huella del contenido; comparable con `last_sync_hash` del stream gRPC."
+        },
+        "noches": {
+          "type": "array",
+          "maxItems": 3000,
+          "items": {
+            "$ref": "#/$defs/InventarioNocheV2"
+          }
+        }
+      }
+    },
+    "HuespedTitularBaseV2": {
+      "type": "object",
+      "required": [
+        "nombreCompleto",
+        "tipoDocumento",
+        "identificacion",
+        "email",
+        "telefono"
+      ],
+      "properties": {
+        "nombreCompleto": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120,
+          "pattern": "^\\S+(\\s+\\S+)+$",
+          "description": "Al menos dos palabras.",
+          "example": "Joselyn Cadena",
+          "x-pii": true
+        },
+        "tipoDocumento": {
+          "type": "string",
+          "enum": [
+            "CEDULA",
+            "PASAPORTE",
+            "RUC"
+          ]
+        },
+        "identificacion": {
+          "type": "string",
+          "maxLength": 13,
+          "x-pii": true
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120,
+          "example": "jlcadenac@puce.edu.ec",
+          "x-pii": true
+        },
+        "telefono": {
+          "$ref": "#/$defs/TelefonoE164OLocal",
+          "x-pii": true
+        },
+        "nacionalidad": {
+          "type": "string",
+          "maxLength": 60,
+          "example": "Ecuatoriana",
+          "x-pii": true
+        }
+      }
+    },
+    "HuespedTitularV2": {
+      "description": "Titular de la reserva. El patrón de `identificacion` depende de `tipoDocumento`\n(discriminador). Para `CEDULA` el servidor además verifica el **módulo 10** → `422 INVALID_DOCUMENT`.\n",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularCedulaV2"
+        },
+        {
+          "$ref": "#/$defs/HuespedTitularPasaporteV2"
+        },
+        {
+          "$ref": "#/$defs/HuespedTitularRucV2"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "tipoDocumento",
+        "mapping": {
+          "CEDULA": "#/components/schemas/HuespedTitularCedulaV2",
+          "PASAPORTE": "#/components/schemas/HuespedTitularPasaporteV2",
+          "RUC": "#/components/schemas/HuespedTitularRucV2"
+        }
+      }
+    },
+    "HuespedTitularCedulaV2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularBaseV2"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tipoDocumento": {
+              "type": "string",
+              "enum": [
+                "CEDULA"
+              ]
+            },
+            "identificacion": {
+              "type": "string",
+              "pattern": "^[0-9]{10}$",
+              "example": "1712345675",
+              "x-pii": true
+            }
+          }
+        }
+      ]
+    },
+    "HuespedTitularPasaporteV2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularBaseV2"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tipoDocumento": {
+              "type": "string",
+              "enum": [
+                "PASAPORTE"
+              ]
+            },
+            "identificacion": {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{6,12}$",
+              "example": "AB1234567",
+              "x-pii": true
+            }
+          }
+        }
+      ]
+    },
+    "HuespedTitularRucV2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularBaseV2"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tipoDocumento": {
+              "type": "string",
+              "enum": [
+                "RUC"
+              ]
+            },
+            "identificacion": {
+              "type": "string",
+              "pattern": "^[0-9]{13}$",
+              "example": "1712345675001",
+              "x-pii": true
+            }
+          }
+        }
+      ]
+    },
+    "CustomerContactDto": {
+      "type": "object",
+      "deprecated": true,
+      "description": "Alias **deprecado** de `huespedTitular`. Ver la regla de exclusión en `OrderCreateRequestV2`.",
+      "required": [
+        "full_name",
+        "email",
+        "phone",
+        "document_type",
+        "document_id"
+      ],
+      "properties": {
+        "full_name": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120,
+          "pattern": "^\\S+(\\s+\\S+)+$",
+          "example": "Joselyn Cadena",
+          "x-pii": true
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120,
+          "x-pii": true
+        },
+        "phone": {
+          "$ref": "#/$defs/TelefonoE164OLocal",
+          "x-pii": true
+        },
+        "document_type": {
+          "type": "string",
+          "enum": [
+            "CEDULA",
+            "PASAPORTE",
+            "RUC"
+          ]
+        },
+        "document_id": {
+          "type": "string",
+          "maxLength": 13,
+          "pattern": "^([0-9]{10}|[A-Z0-9]{6,12}|[0-9]{13})$",
+          "example": "1712345675",
+          "x-pii": true
+        }
+      }
+    },
+    "HuespedAcompananteV2": {
+      "type": "object",
+      "required": [
+        "nombreCompleto"
+      ],
+      "properties": {
+        "nombreCompleto": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "example": "María José Mendoza",
+          "x-pii": true
+        },
+        "tipoDocumento": {
+          "type": "string",
+          "enum": [
+            "CEDULA",
+            "PASAPORTE",
+            "MENOR_SIN_DOC"
+          ],
+          "default": "CEDULA"
+        },
+        "identificacion": {
+          "type": "string",
+          "maxLength": 13,
+          "pattern": "^([0-9]{10}|[A-Z0-9]{6,12}|[0-9]{13})?$",
+          "example": "1719876540",
+          "x-pii": true
+        },
+        "esMenorEdad": {
+          "type": "boolean"
+        },
+        "edad": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "description": "Obligatoria si `esMenorEdad` es true.",
+          "x-pii": true
+        }
+      }
+    },
+    "OrderCreateRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alojamientoId",
+        "tipoHabitacionCodigo",
+        "fechaInicio",
+        "fechaFin",
+        "ocupantes",
+        "totalPagar"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "$ref": "#/$defs/AlojamientoId"
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,40}$",
+          "example": "SUITE_DELUXE"
+        },
+        "fechaInicio": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-in (≥ hoy en Guayaquil).",
+          "example": "2026-11-01"
+        },
+        "fechaFin": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-out (> fechaInicio; ≤ 30 noches).",
+          "example": "2026-11-05"
+        },
+        "cantidadHabitaciones": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "ocupantes": {
+          "$ref": "#/$defs/Ocupantes"
+        },
+        "regimenSeleccionado": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "cotizacionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Cotización de `POST /availability`. Si se envía, fija el precio; si venció → `409 QUOTE_EXPIRED`."
+        },
+        "totalPagar": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Total final con impuestos y descuento de combo. Si no coincide **exactamente** con la tarifa vigente → `409 PRICE_MISMATCH`.",
+          "example": "560.00"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "paquete": {
+          "$ref": "#/$defs/PaqueteAplicadoV2"
+        },
+        "payment_method": {
+          "$ref": "#/$defs/PaymentMethod"
+        },
+        "payment_reference": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Código de autorización de MS_PAG.",
+          "example": "AUTH-VISA-982341"
+        },
+        "saga_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Identificador de la Saga (MS_ORQ). Permite recuperación por `GET /orders?saga_id=`."
+        },
+        "idempotency_key": {
+          "type": "string",
+          "format": "uuid",
+          "deprecated": true,
+          "description": "Duplicado de la cabecera (**deprecado**). Si viene, debe ser igual a `Idempotency-Key`; si no → `422 VALIDATION_FAILED` (el esquema no puede comparar cuerpo y cabecera)."
+        },
+        "huespedTitular": {
+          "$ref": "#/$defs/HuespedTitularV2"
+        },
+        "customer_contact": {
+          "$ref": "#/$defs/CustomerContactDto"
+        },
+        "huespedesAdicionales": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/HuespedAcompananteV2"
+          }
+        },
+        "peticionesEspeciales": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB",
+          "description": "Plan de tarifa. Si falta, se usa el plan por defecto de la habitación. Plan inexistente → `404 NOT_FOUND`."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "huespedTitular"
+          ]
+        },
+        {
+          "required": [
+            "customer_contact"
+          ]
+        }
+      ],
+      "description": "Se exige **al menos uno** de `huespedTitular` o `customer_contact` (formato común de las 4 verticales, deprecado). Si vienen ambos, manda `huespedTitular`. Con solo `customer_contact`, el nodo lo mapea a titular (`document_type`→`tipoDocumento`, `document_id`→`identificacion`, `full_name`→`nombreCompleto`, `phone`→`telefono`) y aplica las mismas validaciones (`422 INVALID_DOCUMENT`)."
+    },
+    "DesgloseFiscalV2": {
+      "type": "object",
+      "required": [
+        "subtotal",
+        "ivaPorcentaje",
+        "ivaValor",
+        "tasaMunicipal",
+        "descuentoCombo",
+        "total"
+      ],
+      "properties": {
+        "subtotal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "480.00"
+        },
+        "ivaPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 15
+        },
+        "ivaValor": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "72.00"
+        },
+        "iva15Pct": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "deprecated": true,
+          "description": "Alias deprecado de `ivaValor` (se elimina en v3).",
+          "example": "72.00"
+        },
+        "tasaMunicipal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "8.00"
+        },
+        "descuentoCombo": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "0.00"
+        },
+        "total": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "subtotal + ivaValor + tasaMunicipal − descuentoCombo (exacto).",
+          "example": "560.00"
+        },
+        "impuestos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/ImpuestoLineaV2"
+          },
+          "description": "Desglose por impuesto (aditivo). `sum(impuestos[].monto no incluidos)` = `ivaValor + tasaMunicipal`.",
+          "example": [
+            {
+              "codigo": "IVA",
+              "nombre": "IVA 15 %",
+              "porcentaje": 15,
+              "monto": "72.00",
+              "incluidoEnPrecio": false
+            },
+            {
+              "codigo": "TASA_MUNICIPAL",
+              "nombre": "Tasa municipal",
+              "monto": "8.00",
+              "incluidoEnPrecio": false
+            }
+          ]
+        }
+      }
+    },
+    "OrderDetailV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "external_order_id",
+        "codigoReserva",
+        "estado",
+        "alojamientoId",
+        "alojamientoNombre",
+        "tipoHabitacion",
+        "checkinFecha",
+        "checkoutFecha",
+        "noches",
+        "desgloseFiscal",
+        "total",
+        "createdAt"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid",
+          "example": "c1a2b3c4-d5e6-7890-1234-567890abcdef"
+        },
+        "external_order_id": {
+          "type": "string",
+          "pattern": "^ORD-HTL-[A-Z0-9]{3,20}$",
+          "example": "ORD-HTL-8842",
+          "description": "Llave de negocio que el ESB persiste en `facturas_detalle`."
+        },
+        "externalOrderId": {
+          "type": "string",
+          "deprecated": true,
+          "description": "Alias camelCase de `external_order_id`.",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "codigoReserva": {
+          "type": "string",
+          "pattern": "^BK-HOTEL-[A-Z0-9]{3,20}$",
+          "example": "BK-HOTEL-9912"
+        },
+        "estado": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "saga_id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "alojamientoId": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "alojamientoNombre": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "tipoHabitacion": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite Deluxe Matrimonial"
+        },
+        "cantidadHabitaciones": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ocupantes": {
+          "$ref": "#/$defs/Ocupantes"
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "checkinFecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-01"
+        },
+        "checkoutFecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-05"
+        },
+        "noches": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "example": 4
+        },
+        "checkinHabilitadoDesde": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-01T14:00:00-05:00",
+          "description": "Instante desde el cual el check-in digital está permitido (considera early check-in)."
+        },
+        "earlyCheckinAutorizado": {
+          "type": "boolean",
+          "default": false
+        },
+        "cotizacionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "huespedTitular": {
+          "$ref": "#/$defs/HuespedTitularV2"
+        },
+        "desgloseFiscal": {
+          "$ref": "#/$defs/DesgloseFiscalV2"
+        },
+        "total": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "politicaCancelacionAplicable": {
+          "type": "object",
+          "properties": {
+            "reembolso100HastaFecha": {
+              "type": "string",
+              "format": "date-time",
+              "example": "2026-10-30T14:00:00-05:00"
+            },
+            "descripcion": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "esReembolsable": {
+              "type": "boolean",
+              "example": true
+            }
+          }
+        },
+        "habitacionAsignada": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 100,
+          "example": null
+        },
+        "claveAccesoDigital": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40,
+          "example": null
+        },
+        "historialEstados": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "estado",
+              "en"
+            ],
+            "properties": {
+              "estado": {
+                "$ref": "#/$defs/ReservationStatus"
+              },
+              "en": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:00:00-05:00"
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "example": "FLEX_BB",
+          "maxLength": 200
+        },
+        "modeloPago": {
+          "$ref": "#/$defs/ModeloPago"
+        }
+      }
+    },
+    "OrderListResponseV2": {
+      "type": "object",
+      "required": [
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/OrderDetailV2"
+          }
+        }
+      }
+    },
+    "ReservationSummaryV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "reservation_code",
+        "external_order_id",
+        "accommodation_id",
+        "accommodation_name",
+        "room_type",
+        "checkin",
+        "checkout",
+        "status",
+        "total_price"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "= `orderId` (UUID).",
+          "example": "c1a2b3c4-d5e6-7890-1234-567890abcdef"
+        },
+        "reservation_code": {
+          "type": "string",
+          "example": "BK-HOTEL-9912",
+          "maxLength": 200
+        },
+        "external_order_id": {
+          "type": "string",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "accommodation_id": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "accommodation_name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "room_type": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "checkin": {
+          "type": "string",
+          "format": "date"
+        },
+        "checkout": {
+          "type": "string",
+          "format": "date"
+        },
+        "number_of_rooms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "guests": {
+          "type": "object",
+          "properties": {
+            "adults": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "children": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "total_price": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "status": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ReservationListResponseV2": {
+      "type": "object",
+      "required": [
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ReservationSummaryV2"
+          }
+        }
+      }
+    },
+    "CancelOrderRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "motivo": {
+          "type": "string",
+          "maxLength": 300,
+          "example": "Compensación de Saga: rechazo en reserva de vuelo"
+        },
+        "solicitadoPor": {
+          "type": "string",
+          "enum": [
+            "SAGA_ORCHESTRATOR",
+            "CLIENTE",
+            "ADMIN",
+            "HOTEL"
+          ],
+          "default": "CLIENTE"
+        }
+      }
+    },
+    "CancelOrderResponseV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "external_order_id",
+        "estado",
+        "refundStatus",
+        "codigoReembolso",
+        "porcentajeReembolso",
+        "montoReembolsado",
+        "cuposRestaurados",
+        "yaCancelada",
+        "timestamp"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "external_order_id": {
+          "type": "string",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "CANCELLED"
+          ]
+        },
+        "refundStatus": {
+          "type": "string",
+          "enum": [
+            "COMPENSATED",
+            "REFUNDED",
+            "NO_REFUND"
+          ]
+        },
+        "codigoReembolso": {
+          "type": "string",
+          "pattern": "^REF-HTL-[0-9]{5,10}$",
+          "example": "REF-HTL-77491",
+          "description": "Estable: un reintento devuelve el mismo código."
+        },
+        "porcentajeReembolso": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 100
+        },
+        "montoReembolsado": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "penalidad": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "0.00"
+        },
+        "cuposRestaurados": {
+          "type": "boolean",
+          "example": true
+        },
+        "yaCancelada": {
+          "type": "boolean",
+          "example": false,
+          "description": "`true` si la reserva ya estaba cancelada (repetición idempotente)."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:05:00-05:00"
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "CheckInRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "titularIdentificacion"
+      ],
+      "properties": {
+        "titularIdentificacion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{6,13}$",
+          "example": "1712345675",
+          "description": "Debe coincidir con el titular de la reserva.",
+          "x-pii": true
+        },
+        "horaLlegadaEstimada": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "15:30"
+        },
+        "peticionesEspeciales": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "CheckInResponseV2": {
+      "type": "object",
+      "required": [
+        "reservaId",
+        "estado",
+        "habitacionAsignada",
+        "claveAccesoDigital",
+        "checkInHora"
+      ],
+      "properties": {
+        "reservaId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "CHECKED_IN"
+          ]
+        },
+        "habitacionAsignada": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite 402 - Torre Ejecutiva"
+        },
+        "claveAccesoDigital": {
+          "type": "string",
+          "maxLength": 40,
+          "example": "PIN-9812#",
+          "description": "Credencial **secreta**: no registrar en logs, no incluir en eventos, no cachear.",
+          "x-secret": true
+        },
+        "checkInHora": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-01T14:15:00-05:00"
+        },
+        "instruccionesAcceso": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "EarlyCheckinRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "autorizado"
+      ],
+      "properties": {
+        "autorizado": {
+          "type": "boolean",
+          "example": true
+        },
+        "habilitadoDesde": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-01T10:00:00-05:00",
+          "description": "Opcional; si falta, el check-in se habilita de inmediato."
+        },
+        "motivo": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "CheckOutRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "consumosMinibar": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "item",
+              "precio"
+            ],
+            "properties": {
+              "item": {
+                "type": "string",
+                "maxLength": 80,
+                "example": "Agua mineral con gas"
+              },
+              "cantidad": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 1
+              },
+              "precio": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/Money"
+                  }
+                ],
+                "description": "Precio unitario.",
+                "example": "3.50"
+              }
+            }
+          }
+        },
+        "metodoPagoConsumos": {
+          "type": "string",
+          "enum": [
+            "TARJETA_REGISTRADA",
+            "EFECTIVO",
+            "CARGO_A_RESERVA"
+          ]
+        }
+      }
+    },
+    "CheckOutResponseV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "estado",
+        "habitacionLiberada",
+        "consumosAdicionales",
+        "claveDigitalRevocada"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "CHECKED_OUT"
+          ]
+        },
+        "habitacionLiberada": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite 402"
+        },
+        "checkOutHora": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-05T10:45:00-05:00"
+        },
+        "consumosAdicionales": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "3.50"
+        },
+        "comprobanteCheckOutUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "claveDigitalRevocada": {
+          "type": "boolean",
+          "example": true
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "ResenaUsuarioV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "autorNombre",
+        "calificacionGlobal",
+        "fecha",
+        "comentario"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "REV-ALO-8912",
+          "maxLength": 200
+        },
+        "autorNombre": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Nombre público (primer nombre + inicial)."
+        },
+        "autorPais": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "calificacionGlobal": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10,
+          "example": 9.6
+        },
+        "desgloseCalificaciones": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "fecha": {
+          "type": "string",
+          "format": "date"
+        },
+        "comentario": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "tipoViaje": {
+          "type": "string",
+          "enum": [
+            "SOLO",
+            "PAREJA",
+            "FAMILIA",
+            "NEGOCIOS",
+            "GRUPO"
+          ]
+        },
+        "estadiaVerificada": {
+          "type": "boolean"
+        },
+        "tipoHabitacionAlojado": {
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "CrearResenaRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservaId",
+        "calificacionGlobal",
+        "comentario"
+      ],
+      "properties": {
+        "reservaId": {
+          "$ref": "#/$defs/OrderRef"
+        },
+        "calificacionGlobal": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10,
+          "example": 9.5
+        },
+        "desgloseCalificaciones": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "comentario": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "tipoViaje": {
+          "type": "string",
+          "enum": [
+            "SOLO",
+            "PAREJA",
+            "FAMILIA",
+            "NEGOCIOS",
+            "GRUPO"
+          ]
+        }
+      }
+    },
+    "ListadoResenasResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "scorePromedio",
+        "totalResenas",
+        "metadata",
+        "resenas"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "scorePromedio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "totalResenas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "desglosePromedio": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "resenas": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ResenaUsuarioV2"
+          }
+        }
+      }
+    },
+    "Money": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.[0-9]{2}$",
+      "maxLength": 12,
+      "example": "560.00",
+      "description": "Importe monetario como **string decimal exacto con 2 decimales** (`\"560.00\"`). Nunca `number`: los flotantes binarios no representan 0.10 ni 0.20 con exactitud y las sumas de líneas dejan de cuadrar. Sin separador de miles, punto decimal, sin signo (los importes son ≥ 0). La moneda va en el campo `currency` (ISO 4217)."
+    },
+    "CurrencyCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "default": "USD",
+      "example": "USD",
+      "description": "Código ISO 4217. El esquema admite cualquier moneda; **este nodo opera solo en `USD`**: otra moneda → `422 UNSUPPORTED_CURRENCY`. Así el contrato no cambia cuando se agreguen monedas."
+    },
+    "ImpuestoLineaV2": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "monto",
+        "incluidoEnPrecio"
+      ],
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "enum": [
+            "IVA",
+            "TASA_MUNICIPAL",
+            "SERVICIO"
+          ],
+          "example": "IVA"
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 80,
+          "example": "IVA 15 %"
+        },
+        "porcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 15,
+          "description": "Solo si el impuesto es porcentual."
+        },
+        "monto": {
+          "$ref": "#/$defs/Money"
+        },
+        "incluidoEnPrecio": {
+          "type": "boolean",
+          "example": false,
+          "description": "`true` si el monto ya está dentro de la tarifa publicada (no se suma de nuevo)."
+        }
+      }
+    },
+    "NocheDetalleV2": {
+      "type": "object",
+      "required": [
+        "fecha",
+        "precio"
+      ],
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-01"
+        },
+        "precio": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Total de la noche para **todas** las habitaciones (incluye suplementos de ocupación).",
+          "example": "120.00"
+        }
+      }
+    },
+    "ModeloPago": {
+      "type": "string",
+      "enum": [
+        "PREPAGO",
+        "PAGO_EN_HOTEL",
+        "GARANTIA_TARJETA"
+      ],
+      "example": "PREPAGO",
+      "description": "`PREPAGO`: se cobra al reservar. `PAGO_EN_HOTEL`: se paga en recepción. `GARANTIA_TARJETA`: tarjeta como garantía, cobro en el hotel."
+    },
+    "PoliticaNinosV2": {
+      "type": "object",
+      "required": [
+        "edadMaximaGratis",
+        "suplementoNino"
+      ],
+      "properties": {
+        "edadMaximaGratis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 17,
+          "example": 5,
+          "description": "Los niños de esta edad o menos no pagan suplemento."
+        },
+        "suplementoNino": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Por niño que paga, por noche.",
+          "example": "10.00"
+        }
+      }
+    },
+    "RatePlanV2": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "nombre",
+        "regimen",
+        "modeloPago",
+        "politicaCancelacion",
+        "ocupacionBase",
+        "precioBaseNoche",
+        "impuestosIncluidos",
+        "esPlanPorDefecto"
+      ],
+      "description": "Plan de tarifa: una misma habitación se vende con distintas condiciones (reembolsable / no reembolsable, con/sin desayuno).",
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB"
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Flexible con desayuno"
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "modeloPago": {
+          "$ref": "#/$defs/ModeloPago"
+        },
+        "politicaCancelacion": {
+          "$ref": "#/$defs/PoliticaCancelacionV2"
+        },
+        "ocupacionBase": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2,
+          "description": "Adultos incluidos en `precioBaseNoche`."
+        },
+        "precioBaseNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Precio por habitación y noche para `ocupacionBase` (tarifa de referencia; puede variar por fecha, ver `/inventario`).",
+          "example": "120.00"
+        },
+        "suplementoAdultoExtra": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Por adulto sobre `ocupacionBase`, por noche.",
+          "example": "25.00"
+        },
+        "politicaNinos": {
+          "$ref": "#/$defs/PoliticaNinosV2"
+        },
+        "impuestosIncluidos": {
+          "type": "boolean",
+          "example": false,
+          "description": "Si `true`, los impuestos ya forman parte de la tarifa. **Este nodo publica siempre `false`.**"
+        },
+        "esPlanPorDefecto": {
+          "type": "boolean",
+          "example": true,
+          "description": "Se usa cuando la petición no envía `planTarifaCodigo`. Exactamente un plan por habitación."
+        }
+      }
+    },
+    "RestriccionesDiaV2": {
+      "type": "object",
+      "required": [
+        "fecha"
+      ],
+      "description": "Restricciones de venta para una noche (modelo estándar ARI: Availability, Rates, Inventory).",
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-12-24"
+        },
+        "estanciaMinima": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 1,
+          "example": 3,
+          "description": "Noches mínimas. Se evalúa con la restricción de la noche de **llegada**."
+        },
+        "estanciaMaxima": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 30,
+          "example": 30,
+          "description": "Noches máximas (noche de llegada)."
+        },
+        "cerradoALlegada": {
+          "type": "boolean",
+          "default": false,
+          "example": false,
+          "description": "No se puede llegar (check-in) esta noche."
+        },
+        "cerradoASalida": {
+          "type": "boolean",
+          "default": false,
+          "example": false,
+          "description": "No se puede salir (check-out) esta fecha. Se evalúa sobre `fechaFin`."
+        },
+        "ventaCerrada": {
+          "type": "boolean",
+          "default": false,
+          "example": false,
+          "description": "*Stop-sell*: la noche no se vende. Si **cualquier** noche del rango está cerrada, la estancia no se vende."
+        },
+        "anticipacionMinimaHoras": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8760,
+          "default": 0,
+          "example": 0,
+          "description": "Horas mínimas entre la reserva y las 14:00 de la llegada (*cut-off*)."
+        }
+      }
+    },
+    "TarifaPlanNocheV2": {
+      "type": "object",
+      "required": [
+        "planTarifaCodigo",
+        "precioNoche"
+      ],
+      "properties": {
+        "planTarifaCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB"
+        },
+        "precioNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Precio por habitación para `ocupacionBase` esa noche.",
+          "example": "120.00"
+        },
+        "restricciones": {
+          "$ref": "#/$defs/RestriccionesDiaV2"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "ErrorCode": {
+      "type": "string",
+      "description": "Catálogo cerrado de códigos de error (compartido por las 4 verticales).\n**Deprecados (solo lectura, ya no se emiten):** `ROOM_NO_LONGER_AVAILABLE` → usar `OUT_OF_STOCK`; `HOTEL_NOT_FOUND` → usar `NOT_FOUND`.\n",
+      "enum": [
+        "VALIDATION_FAILED",
+        "INVALID_DOCUMENT",
+        "UNAUTHORIZED",
+        "FORBIDDEN",
+        "NOT_FOUND",
+        "HOTEL_NOT_FOUND",
+        "CONFLICT",
+        "OUT_OF_STOCK",
+        "ROOM_NO_LONGER_AVAILABLE",
+        "QUOTE_EXPIRED",
+        "PRICE_MISMATCH",
+        "IDEMPOTENCY_KEY_REUSED",
+        "IDEMPOTENCY_IN_PROGRESS",
+        "INVALID_STATE_TRANSITION",
+        "CHECKIN_TIME_NOT_REACHED",
+        "CAPACITY_EXCEEDED",
+        "DISCOUNT_EXCEEDS_CONTRACT",
+        "PROMOTIONS_NOT_ALLOWED",
+        "RATE_LIMITED",
+        "PROVIDER_DISABLED",
+        "GATEWAY_TIMEOUT",
+        "INTERNAL_ERROR",
+        "RESTRICTION_VIOLATED",
+        "UNSUPPORTED_CURRENCY",
+        "INSUFFICIENT_SCOPE"
+      ]
+    },
+    "ProblemDetails": {
+      "type": "object",
+      "required": [
+        "type",
+        "title",
+        "status",
+        "detail",
+        "instance",
+        "code"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 200
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "instance": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "correlation_id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retry_after_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "habilitadoDesde": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Solo en `CHECKIN_TIME_NOT_REACHED`. Instante (con offset) desde el cual se permite el check-in."
+        },
+        "invalid_params": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "reason"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 300
+              }
+            }
+          }
+        },
+        "restriccion": {
+          "type": "string",
+          "enum": [
+            "MIN_STAY",
+            "MAX_STAY",
+            "CLOSED_TO_ARRIVAL",
+            "CLOSED_TO_DEPARTURE",
+            "STOP_SELL",
+            "CUTOFF"
+          ],
+          "description": "Solo en `RESTRICTION_VIOLATED`: qué restricción se violó."
+        },
+        "scopes_requeridos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "description": "Solo en `INSUFFICIENT_SCOPE`."
+        }
+      }
+    },
+    "PaginationMetadata": {
+      "type": "object",
+      "required": [
+        "total_results",
+        "page",
+        "limit",
+        "total_pages",
+        "has_next"
+      ],
+      "properties": {
+        "total_results": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 18
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "example": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "example": 10
+        },
+        "total_pages": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 2
+        },
+        "has_next": {
+          "type": "boolean",
+          "example": true
+        }
+      }
+    },
+    "HateoasLinksV2": {
+      "type": "object",
+      "description": "Enlaces HATEOAS (nivel 3). Las claves son relaciones (`self`, `cancel`, `checkin`, `checkout`, …).",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "href",
+          "method"
+        ],
+        "properties": {
+          "href": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    "AlojamientoId": {
+      "type": "string",
+      "description": "ID de propiedad. Las palabras reservadas de rutas estáticas (`health`, `eventos`, `categorias`, `tipos`, `orders`, `reservations`, `reservas`, `search`, `availability`, `promociones`) NO son IDs válidos: evita que `GET /alojamientos/{id}` capture rutas estáticas.",
+      "pattern": "^(?!(health|eventos|categorias|tipos|orders|reservations|reservas|search|availability|promociones)$)[A-Za-z0-9][A-Za-z0-9._-]{2,63}$",
+      "maxLength": 64,
+      "example": "HTL-QUITO-001"
+    },
+    "OrderRef": {
+      "type": "string",
+      "description": "UUID (`orderId`), `externalOrderId` (`ORD-HTL-…`) o `codigoReserva` (`BK-HOTEL-…`).",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|ORD-HTL-[A-Z0-9]{3,20}|BK-HOTEL-[A-Z0-9]{3,20})$",
+      "example": "ORD-HTL-8842"
+    },
+    "ReservationStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "CONFIRMED",
+        "CANCELLED",
+        "CHECKED_IN",
+        "CHECKED_OUT"
+      ]
+    },
+    "RegimenHospedajeEnum": {
+      "type": "string",
+      "enum": [
+        "SOLO_HABITACION",
+        "DESAYUNO_INCLUIDO",
+        "MEDIA_PENSION",
+        "PENSION_COMPLETA",
+        "TODO_INCLUIDO"
+      ]
+    },
+    "PaymentMethod": {
+      "type": "string",
+      "description": "Vocabulario único de las 4 verticales y de MS_PAG.",
+      "enum": [
+        "TARJETA_CREDITO",
+        "TARJETA_DEBITO",
+        "TRANSFERENCIA",
+        "SIMULADO",
+        "PAGO_EN_SITIO"
+      ]
+    },
+    "Ocupantes": {
+      "type": "object",
+      "required": [
+        "adultos"
+      ],
+      "properties": {
+        "adultos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2
+        },
+        "ninos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0,
+          "example": 0
+        },
+        "edadesNinos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 17
+          }
+        }
+      }
+    },
+    "TelefonoE164OLocal": {
+      "type": "string",
+      "pattern": "^(\\+[0-9]{8,15}|09[0-9]{8})$",
+      "example": "+593991234567"
+    },
+    "AlojamientosHealthResponseV2": {
+      "type": "object",
+      "required": [
+        "status",
+        "semaforo",
+        "service",
+        "latency_ms",
+        "timestamp"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "HEALTHY",
+            "DEGRADED",
+            "DOWN"
+          ],
+          "description": "Equivale a `UP`/`DEGRADED`/`DOWN` de otros nodos (UP ≡ HEALTHY).",
+          "example": "HEALTHY"
+        },
+        "semaforo": {
+          "type": "string",
+          "enum": [
+            "GREEN",
+            "YELLOW",
+            "RED"
+          ],
+          "example": "GREEN"
+        },
+        "service": {
+          "type": "string",
+          "maxLength": 50,
+          "example": "MS_ALOJAMIENTOS"
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 20,
+          "example": "2.1.0"
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 38
+        },
+        "uptime_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 86400
+        },
+        "database": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "CONNECTED",
+                "DISCONNECTED"
+              ],
+              "example": "CONNECTED"
+            }
+          }
+        },
+        "circuit_breaker": {
+          "type": "string",
+          "enum": [
+            "CLOSED",
+            "OPEN",
+            "HALF_OPEN",
+            "MANUALLY_OPEN"
+          ],
+          "example": "CLOSED"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "total_propiedades": {
+              "type": "integer",
+              "minimum": 0,
+              "example": 45
+            },
+            "habitaciones_totales": {
+              "type": "integer",
+              "minimum": 0,
+              "example": 320
+            },
+            "habitaciones_ocupadas": {
+              "type": "integer",
+              "minimum": 0,
+              "example": 210
+            },
+            "tasa_ocupacion_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "example": 65.62
+            }
+          }
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:00:00-05:00"
+        }
+      }
+    },
+    "ContratoPromocionesResponseV2": {
+      "type": "object",
+      "required": [
+        "tienda_id",
+        "vertical",
+        "permite_promociones",
+        "porcentaje_descuento_maximo"
+      ],
+      "properties": {
+        "tienda_id": {
+          "type": "string",
+          "maxLength": 60,
+          "example": "proveedor-alojamientos-lizz"
+        },
+        "vertical": {
+          "type": "string",
+          "enum": [
+            "alojamientos"
+          ],
+          "example": "alojamientos"
+        },
+        "permite_promociones": {
+          "type": "boolean",
+          "example": true
+        },
+        "porcentaje_descuento_maximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 15
+        },
+        "destinos_habilitados": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "example": [
+            "Quito",
+            "Galápagos",
+            "Cuenca",
+            "Baños"
+          ]
+        },
+        "vigencia_desde": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-10-01"
+        },
+        "vigencia_hasta": {
+          "type": "string",
+          "format": "date",
+          "example": "2027-12-31"
+        },
+        "condiciones_combo": {
+          "type": "string",
+          "maxLength": 500,
+          "example": "Válido para estancias mínimas de 2 noches combinadas con vuelos o tours."
+        },
+        "contacto_comercial": {
+          "type": "object",
+          "properties": {
+            "nombre": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "maxLength": 120
+            },
+            "telefono": {
+              "$ref": "#/$defs/TelefonoE164OLocal"
+            }
+          },
+          "x-pii": true
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T10:00:00-05:00"
+        }
+      }
+    },
+    "ContratoPromocionesRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "permite_promociones",
+        "porcentaje_descuento_maximo"
+      ],
+      "properties": {
+        "permite_promociones": {
+          "type": "boolean",
+          "example": true
+        },
+        "porcentaje_descuento_maximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 15,
+          "description": "0 si `permite_promociones` es false."
+        },
+        "destinos_habilitados": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "vigencia_hasta": {
+          "type": "string",
+          "format": "date",
+          "description": "Debe ser ≥ hoy (Guayaquil)."
+        },
+        "condiciones_combo": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "contacto_comercial": {
+          "type": "object",
+          "properties": {
+            "nombre": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "maxLength": 120
+            },
+            "telefono": {
+              "$ref": "#/$defs/TelefonoE164OLocal"
+            }
+          },
+          "x-pii": true
+        }
+      }
+    },
+    "PaqueteAplicadoV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paqueteId",
+        "descuentoPorcentaje",
+        "descuentoMonto"
+      ],
+      "description": "Descuento de combo aplicado por el ESB (ORQ_PKG). Se valida contra el acuerdo B2B.",
+      "properties": {
+        "paqueteId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "descuentoPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 10
+        },
+        "descuentoMonto": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "48.00",
+          "description": "DEBE ser igual a `round_half_up(subtotal × descuentoPorcentaje / 100)`; si no → `422 VALIDATION_FAILED`."
+        }
+      }
+    },
+    "EventType": {
+      "type": "string",
+      "enum": [
+        "alojamiento.reserva.confirmada",
+        "alojamiento.reserva.cancelada",
+        "alojamiento.checkin.completado",
+        "alojamiento.checkout.completado",
+        "alojamiento.stock.actualizado"
+      ]
+    },
+    "AlojamientosEventosResponseV2": {
+      "type": "object",
+      "required": [
+        "eventos",
+        "has_more",
+        "next_after"
+      ],
+      "properties": {
+        "eventos": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/CloudEventV2"
+          }
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_after": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Valor a enviar en `after` en la siguiente llamada.",
+          "example": 1045,
+          "maximum": 9223372036854776000,
+          "minimum": 0
+        }
+      }
+    },
+    "CloudEventV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "specversion",
+        "type",
+        "time",
+        "sequence",
+        "subject",
+        "datacontenttype",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "example": "evt-alo-2026-001043"
+        },
+        "source": {
+          "type": "string",
+          "example": "/services/alojamientos",
+          "maxLength": 200
+        },
+        "specversion": {
+          "type": "string",
+          "enum": [
+            "1.0"
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/EventType"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T19:30:00-05:00"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "description": "Orden total del feed (sin saltos).",
+          "example": 1043,
+          "maximum": 9223372036854776000
+        },
+        "subject": {
+          "type": "string",
+          "description": "`orderId` o `<alojamientoId>:<tipoHabitacion>` según el evento.",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "correlationid": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Extensión CloudEvents de trazabilidad (= X-Correlation-ID de la operación origen)."
+        },
+        "datacontenttype": {
+          "type": "string",
+          "enum": [
+            "application/json"
+          ]
+        },
+        "data": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EventDataReservaV2"
+            },
+            {
+              "$ref": "#/$defs/EventDataStockV2"
+            }
+          ]
+        }
+      }
+    },
+    "EventDataReservaV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "external_order_id",
+        "estado"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "external_order_id": {
+          "type": "string",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "saga_id": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "estado": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "total": {
+          "$ref": "#/$defs/Money"
+        }
+      }
+    },
+    "EventDataStockV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "tipoHabitacionCodigo",
+        "fecha",
+        "unidadesDisponibles"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "fecha": {
+          "type": "string",
+          "format": "date"
+        },
+        "unidadesDisponibles": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SearchAccommodationRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destino",
+        "fechaInicio",
+        "fechaFin",
+        "adultos"
+      ],
+      "properties": {
+        "destino": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "example": "Quito"
+        },
+        "fechaInicio": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-in. ≥ hoy (Guayaquil).",
+          "example": "2026-11-01"
+        },
+        "fechaFin": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-out. Estrictamente posterior; estancia ≤ 30 noches.",
+          "example": "2026-11-05"
+        },
+        "adultos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2
+        },
+        "ninos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0,
+          "example": 1
+        },
+        "edadesNinos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 17
+          }
+        },
+        "habitaciones": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "estrellasMinimas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "precioMaximo": {
+          "$ref": "#/$defs/Money"
+        },
+        "amenidadesDeseadas": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "permitePaquete": {
+          "type": "boolean",
+          "description": "Solo propiedades que aceptan combos."
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        }
+      }
+    },
+    "SearchAccommodationResponseV2": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "maxLength": 64,
+          "example": "req-alo-179200"
+        },
+        "metadata": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/PaginationMetadata"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "destino": {
+                  "type": "string",
+                  "example": "Quito",
+                  "maxLength": 200
+                },
+                "noches": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 30,
+                  "example": 4
+                }
+              }
+            }
+          ]
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AlojamientoCardV2"
+          }
+        },
+        "alojamientos": {
+          "type": "array",
+          "deprecated": true,
+          "description": "Alias de `data` (se elimina en v3).",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AlojamientoCardV2"
+          }
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "AlojamientoListResponseV2": {
+      "type": "object",
+      "required": [
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AlojamientoCardV2"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "deprecated": true,
+          "description": "Alias de `metadata.total_results`.",
+          "minimum": 0
+        },
+        "page": {
+          "type": "integer",
+          "deprecated": true,
+          "description": "Alias de `metadata.page` (se elimina en v3).",
+          "minimum": 1
+        },
+        "limit": {
+          "type": "integer",
+          "deprecated": true,
+          "description": "Alias de `metadata.limit` (se elimina en v3).",
+          "minimum": 1
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "AlojamientoCardV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "nombre",
+        "destino",
+        "estrellas",
+        "precioPorNoche",
+        "moneda",
+        "permitePaquete"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 150,
+          "example": "Hotel Plaza Grande"
+        },
+        "tipoPropiedad": {
+          "type": "string",
+          "enum": [
+            "HOTEL",
+            "RESORT",
+            "APARTAMENTO",
+            "HOSTAL",
+            "HOSTERIA"
+          ],
+          "example": "HOTEL"
+        },
+        "destino": {
+          "type": "string",
+          "maxLength": 80,
+          "example": "Quito"
+        },
+        "direccion": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "estrellas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "example": 5
+        },
+        "scoreCalificacion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.4
+        },
+        "totalResenas": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 342
+        },
+        "precioPorNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "120.00"
+        },
+        "precioTotalEstancia": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Solo cuando la consulta incluye fechas.",
+          "example": "480.00"
+        },
+        "moneda": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "permitePaquete": {
+          "type": "boolean",
+          "example": true
+        },
+        "descuentoMaximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50,
+          "example": 15
+        },
+        "checkInPermitidoDesde": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "14:00"
+        },
+        "checkOutHoraMaxima": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "11:00"
+        },
+        "fotos": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "amenidades": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "actualizadoEn": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T09:00:00-05:00"
+        }
+      }
+    },
+    "DesgloseCalificacionesV2": {
+      "type": "object",
+      "properties": {
+        "limpieza": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.8
+        },
+        "confort": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.5
+        },
+        "ubicacion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.9
+        },
+        "personal": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.6
+        },
+        "relacionCalidadPrecio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 9.1
+        }
+      }
+    },
+    "PoliticaCancelacionV2": {
+      "type": "object",
+      "required": [
+        "esReembolsable"
+      ],
+      "properties": {
+        "esReembolsable": {
+          "type": "boolean",
+          "example": true
+        },
+        "horasLimiteCancelacion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 720,
+          "example": 48,
+          "description": "Horas antes de las 14:00 del check-in con reembolso del 100 %."
+        },
+        "penalidadFueraDeVentanaPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 100,
+          "description": "% retenido si el CLIENTE cancela fuera de la ventana. No aplica a compensación de Saga."
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 300,
+          "example": "Cancelación gratuita hasta 48 horas antes de las 14:00 del día de llegada."
+        }
+      }
+    },
+    "AlojamientoDetalleV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "nombre",
+        "destino",
+        "estrellas"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "tipoPropiedad": {
+          "type": "string",
+          "example": "HOTEL",
+          "maxLength": 200
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "destino": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "direccion": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "coordenadasGps": {
+          "type": "object",
+          "properties": {
+            "latitud": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90,
+              "example": -0.2201
+            },
+            "longitud": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "example": -78.5123
+            }
+          }
+        },
+        "zonaHoraria": {
+          "type": "string",
+          "enum": [
+            "America/Guayaquil",
+            "Pacific/Galapagos"
+          ],
+          "example": "America/Guayaquil",
+          "description": "Zona usada para las reglas de 14:00 / check-out. Galápagos es UTC-6."
+        },
+        "estrellas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "scoreCalificacion": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "desgloseCalificaciones": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "politicaCancelacion": {
+          "$ref": "#/$defs/PoliticaCancelacionV2"
+        },
+        "checkInPermitidoDesde": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "14:00"
+        },
+        "checkOutHoraMaxima": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "11:00"
+        },
+        "amenidades": {
+          "type": "array",
+          "maxItems": 60,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "galeriaFotos": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "permitePaquete": {
+          "type": "boolean"
+        },
+        "descuentoMaximo": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "proveedor": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "example": "proveedor-alojamientos-lizz",
+              "maxLength": 200
+            },
+            "nombre": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        },
+        "actualizadoEn": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "TipoHabitacionV2": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "nombre",
+        "capacidadAdultos",
+        "precioBaseNoche"
+      ],
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,40}$",
+          "example": "SUITE_DELUXE"
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite Deluxe Matrimonial"
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "capacidadAdultos": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2
+        },
+        "capacidadNinos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "example": 1
+        },
+        "camas": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "metrosCuadrados": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1000
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "precioBaseNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Precio del plan por defecto (atajo; el detalle está en `planesTarifa`).",
+          "example": "120.00"
+        },
+        "habitacionesTotales": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 10
+        },
+        "habitacionesDisponibles": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 4,
+          "description": "Indicativo (puede estar desactualizado). La verdad está en `POST /availability` y en `/inventario`."
+        },
+        "amenidadesHabitacion": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        },
+        "fotos": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "planesTarifa": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/RatePlanV2"
+          }
+        }
+      }
+    },
+    "HabitacionesResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "habitaciones"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "alojamientoNombre": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "habitaciones": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/TipoHabitacionV2"
+          }
+        }
+      }
+    },
+    "CategoriaAlojamientoV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "nombre",
+        "slug"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "cat-hotel-boutique",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]{2,60}$",
+          "example": "hoteles-boutique"
+        },
+        "descripcion": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "icono": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "tiene_piscina": {
+          "type": "boolean"
+        },
+        "incluye_desayuno": {
+          "type": "boolean"
+        },
+        "admite_mascotas": {
+          "type": "boolean"
+        },
+        "cancelacion_gratuita": {
+          "type": "boolean"
+        },
+        "orden": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "AvailabilityRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alojamientoId",
+        "fechaInicio",
+        "fechaFin",
+        "tipoHabitacionCodigo"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "$ref": "#/$defs/AlojamientoId"
+        },
+        "fechaInicio": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-01"
+        },
+        "fechaFin": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-05"
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,40}$",
+          "example": "SUITE_DELUXE"
+        },
+        "cantidadHabitaciones": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "ocupantes": {
+          "$ref": "#/$defs/Ocupantes"
+        },
+        "regimenSeleccionado": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB",
+          "description": "Plan de tarifa. Si falta, se usa el plan por defecto de la habitación. Plan inexistente → `404 NOT_FOUND`."
+        }
+      }
+    },
+    "DesglosePrecioV2": {
+      "type": "object",
+      "required": [
+        "precioNoche",
+        "subtotal",
+        "ivaPorcentaje",
+        "ivaValor",
+        "tasaMunicipal",
+        "descuentoCombo",
+        "totalPagar",
+        "nochesDetalle"
+      ],
+      "properties": {
+        "precioNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "120.00"
+        },
+        "subtotal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "480.00"
+        },
+        "ivaPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 15
+        },
+        "ivaValor": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "72.00"
+        },
+        "iva15Pct": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "deprecated": true,
+          "description": "Alias deprecado de `ivaValor` (se elimina en v3).",
+          "example": "72.00"
+        },
+        "tasaMunicipal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "8.00"
+        },
+        "descuentoCombo": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "0.00"
+        },
+        "totalPagar": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "subtotal + ivaValor + tasaMunicipal − descuentoCombo (exacto).",
+          "example": "560.00"
+        },
+        "impuestos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/ImpuestoLineaV2"
+          },
+          "description": "Desglose por impuesto (aditivo). `sum(impuestos[].monto no incluidos)` = `ivaValor + tasaMunicipal`.",
+          "example": [
+            {
+              "codigo": "IVA",
+              "nombre": "IVA 15 %",
+              "porcentaje": 15,
+              "monto": "72.00",
+              "incluidoEnPrecio": false
+            },
+            {
+              "codigo": "TASA_MUNICIPAL",
+              "nombre": "Tasa municipal",
+              "monto": "8.00",
+              "incluidoEnPrecio": false
+            }
+          ]
+        },
+        "nochesDetalle": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/NocheDetalleV2"
+          },
+          "description": "Precio noche por noche (las tarifas pueden variar por fecha). `subtotal` = suma exacta de estas líneas.",
+          "example": [
+            {
+              "fecha": "2026-11-01",
+              "precio": "120.00"
+            },
+            {
+              "fecha": "2026-11-02",
+              "precio": "120.00"
+            },
+            {
+              "fecha": "2026-11-03",
+              "precio": "120.00"
+            },
+            {
+              "fecha": "2026-11-04",
+              "precio": "120.00"
+            }
+          ]
+        }
+      }
+    },
+    "AvailabilityResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "tipoHabitacionCodigo",
+        "estaDisponible",
+        "habitacionesRemanentes",
+        "precioTotalCotizado"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "estaDisponible": {
+          "type": "boolean",
+          "example": true
+        },
+        "habitacionesRemanentes": {
+          "type": "integer",
+          "minimum": 0,
+          "example": 4,
+          "description": "Cupo mínimo remanente en todas las noches del rango."
+        },
+        "nochesEstancia": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "example": 4
+        },
+        "desglosePrecio": {
+          "$ref": "#/$defs/DesglosePrecioV2"
+        },
+        "precioTotalCotizado": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "cotizacionId": {
+          "type": "string",
+          "format": "uuid",
+          "example": "3f2b8a52-6d3e-4a43-9a0e-1f6d7a9b2c11"
+        },
+        "tarifaValidaHasta": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:30:00-05:00",
+          "description": "TTL de 30 min del precio. No retiene inventario."
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "example": "FLEX_BB",
+          "maxLength": 200
+        },
+        "modeloPago": {
+          "$ref": "#/$defs/ModeloPago"
+        },
+        "politicaCancelacion": {
+          "$ref": "#/$defs/PoliticaCancelacionV2"
+        }
+      }
+    },
+    "AvailabilityOptionV2": {
+      "type": "object",
+      "required": [
+        "tipoHabitacionCodigo",
+        "estaDisponible",
+        "habitacionesRemanentes",
+        "precioNoche",
+        "precioTotalEstancia",
+        "planTarifaCodigo"
+      ],
+      "properties": {
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "estaDisponible": {
+          "type": "boolean"
+        },
+        "habitacionesRemanentes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "precioNoche": {
+          "$ref": "#/$defs/Money"
+        },
+        "precioTotalEstancia": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Con impuestos; indicativo, no vinculante.",
+          "example": "560.00"
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "example": "FLEX_BB",
+          "maxLength": 200
+        }
+      }
+    },
+    "AvailabilityListResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "checkin",
+        "checkout",
+        "noches",
+        "opciones"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "checkin": {
+          "type": "string",
+          "format": "date"
+        },
+        "checkout": {
+          "type": "string",
+          "format": "date"
+        },
+        "noches": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "opciones": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/AvailabilityOptionV2"
+          }
+        }
+      }
+    },
+    "InventarioNocheV2": {
+      "type": "object",
+      "required": [
+        "fecha",
+        "tipoHabitacionCodigo",
+        "habitacionesTotales",
+        "reservadas",
+        "bloqueadas",
+        "disponibles"
+      ],
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "format": "date"
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "habitacionesTotales": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reservadas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bloqueadas": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mantenimiento/limpieza/bloqueo manual."
+        },
+        "disponibles": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "totales − reservadas − bloqueadas."
+        },
+        "tarifas": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/TarifaPlanNocheV2"
+          },
+          "description": "Tarifa y restricciones por plan esa noche (completa el modelo ARI)."
+        }
+      }
+    },
+    "InventarioResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "desde",
+        "hasta",
+        "generadoEn",
+        "hash",
+        "noches"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "desde": {
+          "type": "string",
+          "format": "date"
+        },
+        "hasta": {
+          "type": "string",
+          "format": "date"
+        },
+        "generadoEn": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "hash": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Huella del contenido; comparable con `last_sync_hash` del stream gRPC."
+        },
+        "noches": {
+          "type": "array",
+          "maxItems": 3000,
+          "items": {
+            "$ref": "#/$defs/InventarioNocheV2"
+          }
+        }
+      }
+    },
+    "HuespedTitularBaseV2": {
+      "type": "object",
+      "required": [
+        "nombreCompleto",
+        "tipoDocumento",
+        "identificacion",
+        "email",
+        "telefono"
+      ],
+      "properties": {
+        "nombreCompleto": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120,
+          "pattern": "^\\S+(\\s+\\S+)+$",
+          "description": "Al menos dos palabras.",
+          "example": "Joselyn Cadena",
+          "x-pii": true
+        },
+        "tipoDocumento": {
+          "type": "string",
+          "enum": [
+            "CEDULA",
+            "PASAPORTE",
+            "RUC"
+          ]
+        },
+        "identificacion": {
+          "type": "string",
+          "maxLength": 13,
+          "x-pii": true
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120,
+          "example": "jlcadenac@puce.edu.ec",
+          "x-pii": true
+        },
+        "telefono": {
+          "$ref": "#/$defs/TelefonoE164OLocal",
+          "x-pii": true
+        },
+        "nacionalidad": {
+          "type": "string",
+          "maxLength": 60,
+          "example": "Ecuatoriana",
+          "x-pii": true
+        }
+      }
+    },
+    "HuespedTitularV2": {
+      "description": "Titular de la reserva. El patrón de `identificacion` depende de `tipoDocumento`\n(discriminador). Para `CEDULA` el servidor además verifica el **módulo 10** → `422 INVALID_DOCUMENT`.\n",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularCedulaV2"
+        },
+        {
+          "$ref": "#/$defs/HuespedTitularPasaporteV2"
+        },
+        {
+          "$ref": "#/$defs/HuespedTitularRucV2"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "tipoDocumento",
+        "mapping": {
+          "CEDULA": "#/components/schemas/HuespedTitularCedulaV2",
+          "PASAPORTE": "#/components/schemas/HuespedTitularPasaporteV2",
+          "RUC": "#/components/schemas/HuespedTitularRucV2"
+        }
+      }
+    },
+    "HuespedTitularCedulaV2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularBaseV2"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tipoDocumento": {
+              "type": "string",
+              "enum": [
+                "CEDULA"
+              ]
+            },
+            "identificacion": {
+              "type": "string",
+              "pattern": "^[0-9]{10}$",
+              "example": "1712345675",
+              "x-pii": true
+            }
+          }
+        }
+      ]
+    },
+    "HuespedTitularPasaporteV2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularBaseV2"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tipoDocumento": {
+              "type": "string",
+              "enum": [
+                "PASAPORTE"
+              ]
+            },
+            "identificacion": {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{6,12}$",
+              "example": "AB1234567",
+              "x-pii": true
+            }
+          }
+        }
+      ]
+    },
+    "HuespedTitularRucV2": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/HuespedTitularBaseV2"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tipoDocumento": {
+              "type": "string",
+              "enum": [
+                "RUC"
+              ]
+            },
+            "identificacion": {
+              "type": "string",
+              "pattern": "^[0-9]{13}$",
+              "example": "1712345675001",
+              "x-pii": true
+            }
+          }
+        }
+      ]
+    },
+    "CustomerContactDto": {
+      "type": "object",
+      "deprecated": true,
+      "description": "Alias **deprecado** de `huespedTitular`. Ver la regla de exclusión en `OrderCreateRequestV2`.",
+      "required": [
+        "full_name",
+        "email",
+        "phone",
+        "document_type",
+        "document_id"
+      ],
+      "properties": {
+        "full_name": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120,
+          "pattern": "^\\S+(\\s+\\S+)+$",
+          "example": "Joselyn Cadena",
+          "x-pii": true
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120,
+          "x-pii": true
+        },
+        "phone": {
+          "$ref": "#/$defs/TelefonoE164OLocal",
+          "x-pii": true
+        },
+        "document_type": {
+          "type": "string",
+          "enum": [
+            "CEDULA",
+            "PASAPORTE",
+            "RUC"
+          ]
+        },
+        "document_id": {
+          "type": "string",
+          "maxLength": 13,
+          "pattern": "^([0-9]{10}|[A-Z0-9]{6,12}|[0-9]{13})$",
+          "example": "1712345675",
+          "x-pii": true
+        }
+      }
+    },
+    "HuespedAcompananteV2": {
+      "type": "object",
+      "required": [
+        "nombreCompleto"
+      ],
+      "properties": {
+        "nombreCompleto": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "example": "María José Mendoza",
+          "x-pii": true
+        },
+        "tipoDocumento": {
+          "type": "string",
+          "enum": [
+            "CEDULA",
+            "PASAPORTE",
+            "MENOR_SIN_DOC"
+          ],
+          "default": "CEDULA"
+        },
+        "identificacion": {
+          "type": "string",
+          "maxLength": 13,
+          "pattern": "^([0-9]{10}|[A-Z0-9]{6,12}|[0-9]{13})?$",
+          "example": "1719876540",
+          "x-pii": true
+        },
+        "esMenorEdad": {
+          "type": "boolean"
+        },
+        "edad": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "description": "Obligatoria si `esMenorEdad` es true.",
+          "x-pii": true
+        }
+      }
+    },
+    "OrderCreateRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alojamientoId",
+        "tipoHabitacionCodigo",
+        "fechaInicio",
+        "fechaFin",
+        "ocupantes",
+        "totalPagar"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "$ref": "#/$defs/AlojamientoId"
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,40}$",
+          "example": "SUITE_DELUXE"
+        },
+        "fechaInicio": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-in (≥ hoy en Guayaquil).",
+          "example": "2026-11-01"
+        },
+        "fechaFin": {
+          "type": "string",
+          "format": "date",
+          "description": "Check-out (> fechaInicio; ≤ 30 noches).",
+          "example": "2026-11-05"
+        },
+        "cantidadHabitaciones": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 1
+        },
+        "ocupantes": {
+          "$ref": "#/$defs/Ocupantes"
+        },
+        "regimenSeleccionado": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "cotizacionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Cotización de `POST /availability`. Si se envía, fija el precio; si venció → `409 QUOTE_EXPIRED`."
+        },
+        "totalPagar": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Total final con impuestos y descuento de combo. Si no coincide **exactamente** con la tarifa vigente → `409 PRICE_MISMATCH`.",
+          "example": "560.00"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "paquete": {
+          "$ref": "#/$defs/PaqueteAplicadoV2"
+        },
+        "payment_method": {
+          "$ref": "#/$defs/PaymentMethod"
+        },
+        "payment_reference": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Código de autorización de MS_PAG.",
+          "example": "AUTH-VISA-982341"
+        },
+        "saga_id": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Identificador de la Saga (MS_ORQ). Permite recuperación por `GET /orders?saga_id=`."
+        },
+        "idempotency_key": {
+          "type": "string",
+          "format": "uuid",
+          "deprecated": true,
+          "description": "Duplicado de la cabecera (**deprecado**). Si viene, debe ser igual a `Idempotency-Key`; si no → `422 VALIDATION_FAILED` (el esquema no puede comparar cuerpo y cabecera)."
+        },
+        "huespedTitular": {
+          "$ref": "#/$defs/HuespedTitularV2"
+        },
+        "customer_contact": {
+          "$ref": "#/$defs/CustomerContactDto"
+        },
+        "huespedesAdicionales": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/HuespedAcompananteV2"
+          }
+        },
+        "peticionesEspeciales": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB",
+          "description": "Plan de tarifa. Si falta, se usa el plan por defecto de la habitación. Plan inexistente → `404 NOT_FOUND`."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "huespedTitular"
+          ]
+        },
+        {
+          "required": [
+            "customer_contact"
+          ]
+        }
+      ],
+      "description": "Se exige **al menos uno** de `huespedTitular` o `customer_contact` (formato común de las 4 verticales, deprecado). Si vienen ambos, manda `huespedTitular`. Con solo `customer_contact`, el nodo lo mapea a titular (`document_type`→`tipoDocumento`, `document_id`→`identificacion`, `full_name`→`nombreCompleto`, `phone`→`telefono`) y aplica las mismas validaciones (`422 INVALID_DOCUMENT`)."
+    },
+    "DesgloseFiscalV2": {
+      "type": "object",
+      "required": [
+        "subtotal",
+        "ivaPorcentaje",
+        "ivaValor",
+        "tasaMunicipal",
+        "descuentoCombo",
+        "total"
+      ],
+      "properties": {
+        "subtotal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "480.00"
+        },
+        "ivaPorcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 15
+        },
+        "ivaValor": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "72.00"
+        },
+        "iva15Pct": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "deprecated": true,
+          "description": "Alias deprecado de `ivaValor` (se elimina en v3).",
+          "example": "72.00"
+        },
+        "tasaMunicipal": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "8.00"
+        },
+        "descuentoCombo": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "0.00"
+        },
+        "total": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "subtotal + ivaValor + tasaMunicipal − descuentoCombo (exacto).",
+          "example": "560.00"
+        },
+        "impuestos": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/ImpuestoLineaV2"
+          },
+          "description": "Desglose por impuesto (aditivo). `sum(impuestos[].monto no incluidos)` = `ivaValor + tasaMunicipal`.",
+          "example": [
+            {
+              "codigo": "IVA",
+              "nombre": "IVA 15 %",
+              "porcentaje": 15,
+              "monto": "72.00",
+              "incluidoEnPrecio": false
+            },
+            {
+              "codigo": "TASA_MUNICIPAL",
+              "nombre": "Tasa municipal",
+              "monto": "8.00",
+              "incluidoEnPrecio": false
+            }
+          ]
+        }
+      }
+    },
+    "OrderDetailV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "external_order_id",
+        "codigoReserva",
+        "estado",
+        "alojamientoId",
+        "alojamientoNombre",
+        "tipoHabitacion",
+        "checkinFecha",
+        "checkoutFecha",
+        "noches",
+        "desgloseFiscal",
+        "total",
+        "createdAt"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid",
+          "example": "c1a2b3c4-d5e6-7890-1234-567890abcdef"
+        },
+        "external_order_id": {
+          "type": "string",
+          "pattern": "^ORD-HTL-[A-Z0-9]{3,20}$",
+          "example": "ORD-HTL-8842",
+          "description": "Llave de negocio que el ESB persiste en `facturas_detalle`."
+        },
+        "externalOrderId": {
+          "type": "string",
+          "deprecated": true,
+          "description": "Alias camelCase de `external_order_id`.",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "codigoReserva": {
+          "type": "string",
+          "pattern": "^BK-HOTEL-[A-Z0-9]{3,20}$",
+          "example": "BK-HOTEL-9912"
+        },
+        "estado": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "saga_id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "alojamientoId": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "alojamientoNombre": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "tipoHabitacionCodigo": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "tipoHabitacion": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite Deluxe Matrimonial"
+        },
+        "cantidadHabitaciones": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ocupantes": {
+          "$ref": "#/$defs/Ocupantes"
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "checkinFecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-01"
+        },
+        "checkoutFecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-05"
+        },
+        "noches": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "example": 4
+        },
+        "checkinHabilitadoDesde": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-01T14:00:00-05:00",
+          "description": "Instante desde el cual el check-in digital está permitido (considera early check-in)."
+        },
+        "earlyCheckinAutorizado": {
+          "type": "boolean",
+          "default": false
+        },
+        "cotizacionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "huespedTitular": {
+          "$ref": "#/$defs/HuespedTitularV2"
+        },
+        "desgloseFiscal": {
+          "$ref": "#/$defs/DesgloseFiscalV2"
+        },
+        "total": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "politicaCancelacionAplicable": {
+          "type": "object",
+          "properties": {
+            "reembolso100HastaFecha": {
+              "type": "string",
+              "format": "date-time",
+              "example": "2026-10-30T14:00:00-05:00"
+            },
+            "descripcion": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "esReembolsable": {
+              "type": "boolean",
+              "example": true
+            }
+          }
+        },
+        "habitacionAsignada": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 100,
+          "example": null
+        },
+        "claveAccesoDigital": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40,
+          "example": null
+        },
+        "historialEstados": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "estado",
+              "en"
+            ],
+            "properties": {
+              "estado": {
+                "$ref": "#/$defs/ReservationStatus"
+              },
+              "en": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:00:00-05:00"
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        },
+        "planTarifaCodigo": {
+          "type": "string",
+          "example": "FLEX_BB",
+          "maxLength": 200
+        },
+        "modeloPago": {
+          "$ref": "#/$defs/ModeloPago"
+        }
+      }
+    },
+    "OrderListResponseV2": {
+      "type": "object",
+      "required": [
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/OrderDetailV2"
+          }
+        }
+      }
+    },
+    "ReservationSummaryV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "reservation_code",
+        "external_order_id",
+        "accommodation_id",
+        "accommodation_name",
+        "room_type",
+        "checkin",
+        "checkout",
+        "status",
+        "total_price"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "= `orderId` (UUID).",
+          "example": "c1a2b3c4-d5e6-7890-1234-567890abcdef"
+        },
+        "reservation_code": {
+          "type": "string",
+          "example": "BK-HOTEL-9912",
+          "maxLength": 200
+        },
+        "external_order_id": {
+          "type": "string",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "accommodation_id": {
+          "type": "string",
+          "example": "HTL-QUITO-001",
+          "maxLength": 200
+        },
+        "accommodation_name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "room_type": {
+          "type": "string",
+          "example": "SUITE_DELUXE",
+          "maxLength": 200
+        },
+        "checkin": {
+          "type": "string",
+          "format": "date"
+        },
+        "checkout": {
+          "type": "string",
+          "format": "date"
+        },
+        "number_of_rooms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "guests": {
+          "type": "object",
+          "properties": {
+            "adults": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "children": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "total_price": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "currency": {
+          "$ref": "#/$defs/CurrencyCode"
+        },
+        "status": {
+          "$ref": "#/$defs/ReservationStatus"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ReservationListResponseV2": {
+      "type": "object",
+      "required": [
+        "metadata",
+        "data"
+      ],
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "data": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ReservationSummaryV2"
+          }
+        }
+      }
+    },
+    "CancelOrderRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "motivo": {
+          "type": "string",
+          "maxLength": 300,
+          "example": "Compensación de Saga: rechazo en reserva de vuelo"
+        },
+        "solicitadoPor": {
+          "type": "string",
+          "enum": [
+            "SAGA_ORCHESTRATOR",
+            "CLIENTE",
+            "ADMIN",
+            "HOTEL"
+          ],
+          "default": "CLIENTE"
+        }
+      }
+    },
+    "CancelOrderResponseV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "external_order_id",
+        "estado",
+        "refundStatus",
+        "codigoReembolso",
+        "porcentajeReembolso",
+        "montoReembolsado",
+        "cuposRestaurados",
+        "yaCancelada",
+        "timestamp"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "external_order_id": {
+          "type": "string",
+          "example": "ORD-HTL-8842",
+          "maxLength": 200
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "CANCELLED"
+          ]
+        },
+        "refundStatus": {
+          "type": "string",
+          "enum": [
+            "COMPENSATED",
+            "REFUNDED",
+            "NO_REFUND"
+          ]
+        },
+        "codigoReembolso": {
+          "type": "string",
+          "pattern": "^REF-HTL-[0-9]{5,10}$",
+          "example": "REF-HTL-77491",
+          "description": "Estable: un reintento devuelve el mismo código."
+        },
+        "porcentajeReembolso": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 100
+        },
+        "montoReembolsado": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "560.00"
+        },
+        "penalidad": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "0.00"
+        },
+        "cuposRestaurados": {
+          "type": "boolean",
+          "example": true
+        },
+        "yaCancelada": {
+          "type": "boolean",
+          "example": false,
+          "description": "`true` si la reserva ya estaba cancelada (repetición idempotente)."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-10-22T20:05:00-05:00"
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "CheckInRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "titularIdentificacion"
+      ],
+      "properties": {
+        "titularIdentificacion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{6,13}$",
+          "example": "1712345675",
+          "description": "Debe coincidir con el titular de la reserva.",
+          "x-pii": true
+        },
+        "horaLlegadaEstimada": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "example": "15:30"
+        },
+        "peticionesEspeciales": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "CheckInResponseV2": {
+      "type": "object",
+      "required": [
+        "reservaId",
+        "estado",
+        "habitacionAsignada",
+        "claveAccesoDigital",
+        "checkInHora"
+      ],
+      "properties": {
+        "reservaId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "CHECKED_IN"
+          ]
+        },
+        "habitacionAsignada": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite 402 - Torre Ejecutiva"
+        },
+        "claveAccesoDigital": {
+          "type": "string",
+          "maxLength": 40,
+          "example": "PIN-9812#",
+          "description": "Credencial **secreta**: no registrar en logs, no incluir en eventos, no cachear.",
+          "x-secret": true
+        },
+        "checkInHora": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-01T14:15:00-05:00"
+        },
+        "instruccionesAcceso": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "EarlyCheckinRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "autorizado"
+      ],
+      "properties": {
+        "autorizado": {
+          "type": "boolean",
+          "example": true
+        },
+        "habilitadoDesde": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-01T10:00:00-05:00",
+          "description": "Opcional; si falta, el check-in se habilita de inmediato."
+        },
+        "motivo": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "CheckOutRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "consumosMinibar": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "item",
+              "precio"
+            ],
+            "properties": {
+              "item": {
+                "type": "string",
+                "maxLength": 80,
+                "example": "Agua mineral con gas"
+              },
+              "cantidad": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 1
+              },
+              "precio": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/Money"
+                  }
+                ],
+                "description": "Precio unitario.",
+                "example": "3.50"
+              }
+            }
+          }
+        },
+        "metodoPagoConsumos": {
+          "type": "string",
+          "enum": [
+            "TARJETA_REGISTRADA",
+            "EFECTIVO",
+            "CARGO_A_RESERVA"
+          ]
+        }
+      }
+    },
+    "CheckOutResponseV2": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "estado",
+        "habitacionLiberada",
+        "consumosAdicionales",
+        "claveDigitalRevocada"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "CHECKED_OUT"
+          ]
+        },
+        "habitacionLiberada": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Suite 402"
+        },
+        "checkOutHora": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-11-05T10:45:00-05:00"
+        },
+        "consumosAdicionales": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "example": "3.50"
+        },
+        "comprobanteCheckOutUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "claveDigitalRevocada": {
+          "type": "boolean",
+          "example": true
+        },
+        "_links": {
+          "$ref": "#/$defs/HateoasLinksV2"
+        }
+      }
+    },
+    "ResenaUsuarioV2": {
+      "type": "object",
+      "required": [
+        "id",
+        "autorNombre",
+        "calificacionGlobal",
+        "fecha",
+        "comentario"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "example": "REV-ALO-8912",
+          "maxLength": 200
+        },
+        "autorNombre": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Nombre público (primer nombre + inicial)."
+        },
+        "autorPais": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "calificacionGlobal": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10,
+          "example": 9.6
+        },
+        "desgloseCalificaciones": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "fecha": {
+          "type": "string",
+          "format": "date"
+        },
+        "comentario": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "tipoViaje": {
+          "type": "string",
+          "enum": [
+            "SOLO",
+            "PAREJA",
+            "FAMILIA",
+            "NEGOCIOS",
+            "GRUPO"
+          ]
+        },
+        "estadiaVerificada": {
+          "type": "boolean"
+        },
+        "tipoHabitacionAlojado": {
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "CrearResenaRequestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservaId",
+        "calificacionGlobal",
+        "comentario"
+      ],
+      "properties": {
+        "reservaId": {
+          "$ref": "#/$defs/OrderRef"
+        },
+        "calificacionGlobal": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10,
+          "example": 9.5
+        },
+        "desgloseCalificaciones": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "comentario": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "tipoViaje": {
+          "type": "string",
+          "enum": [
+            "SOLO",
+            "PAREJA",
+            "FAMILIA",
+            "NEGOCIOS",
+            "GRUPO"
+          ]
+        }
+      }
+    },
+    "ListadoResenasResponseV2": {
+      "type": "object",
+      "required": [
+        "alojamientoId",
+        "scorePromedio",
+        "totalResenas",
+        "metadata",
+        "resenas"
+      ],
+      "properties": {
+        "alojamientoId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "scorePromedio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "totalResenas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "desglosePromedio": {
+          "$ref": "#/$defs/DesgloseCalificacionesV2"
+        },
+        "metadata": {
+          "$ref": "#/$defs/PaginationMetadata"
+        },
+        "resenas": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ResenaUsuarioV2"
+          }
+        }
+      }
+    },
+    "Money": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.[0-9]{2}$",
+      "maxLength": 12,
+      "example": "560.00",
+      "description": "Importe monetario como **string decimal exacto con 2 decimales** (`\"560.00\"`). Nunca `number`: los flotantes binarios no representan 0.10 ni 0.20 con exactitud y las sumas de líneas dejan de cuadrar. Sin separador de miles, punto decimal, sin signo (los importes son ≥ 0). La moneda va en el campo `currency` (ISO 4217)."
+    },
+    "CurrencyCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "default": "USD",
+      "example": "USD",
+      "description": "Código ISO 4217. El esquema admite cualquier moneda; **este nodo opera solo en `USD`**: otra moneda → `422 UNSUPPORTED_CURRENCY`. Así el contrato no cambia cuando se agreguen monedas."
+    },
+    "ImpuestoLineaV2": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "monto",
+        "incluidoEnPrecio"
+      ],
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "enum": [
+            "IVA",
+            "TASA_MUNICIPAL",
+            "SERVICIO"
+          ],
+          "example": "IVA"
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 80,
+          "example": "IVA 15 %"
+        },
+        "porcentaje": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "example": 15,
+          "description": "Solo si el impuesto es porcentual."
+        },
+        "monto": {
+          "$ref": "#/$defs/Money"
+        },
+        "incluidoEnPrecio": {
+          "type": "boolean",
+          "example": false,
+          "description": "`true` si el monto ya está dentro de la tarifa publicada (no se suma de nuevo)."
+        }
+      }
+    },
+    "NocheDetalleV2": {
+      "type": "object",
+      "required": [
+        "fecha",
+        "precio"
+      ],
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-11-01"
+        },
+        "precio": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Total de la noche para **todas** las habitaciones (incluye suplementos de ocupación).",
+          "example": "120.00"
+        }
+      }
+    },
+    "ModeloPago": {
+      "type": "string",
+      "enum": [
+        "PREPAGO",
+        "PAGO_EN_HOTEL",
+        "GARANTIA_TARJETA"
+      ],
+      "example": "PREPAGO",
+      "description": "`PREPAGO`: se cobra al reservar. `PAGO_EN_HOTEL`: se paga en recepción. `GARANTIA_TARJETA`: tarjeta como garantía, cobro en el hotel."
+    },
+    "PoliticaNinosV2": {
+      "type": "object",
+      "required": [
+        "edadMaximaGratis",
+        "suplementoNino"
+      ],
+      "properties": {
+        "edadMaximaGratis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 17,
+          "example": 5,
+          "description": "Los niños de esta edad o menos no pagan suplemento."
+        },
+        "suplementoNino": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Por niño que paga, por noche.",
+          "example": "10.00"
+        }
+      }
+    },
+    "RatePlanV2": {
+      "type": "object",
+      "required": [
+        "codigo",
+        "nombre",
+        "regimen",
+        "modeloPago",
+        "politicaCancelacion",
+        "ocupacionBase",
+        "precioBaseNoche",
+        "impuestosIncluidos",
+        "esPlanPorDefecto"
+      ],
+      "description": "Plan de tarifa: una misma habitación se vende con distintas condiciones (reembolsable / no reembolsable, con/sin desayuno).",
+      "properties": {
+        "codigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB"
+        },
+        "nombre": {
+          "type": "string",
+          "maxLength": 100,
+          "example": "Flexible con desayuno"
+        },
+        "regimen": {
+          "$ref": "#/$defs/RegimenHospedajeEnum"
+        },
+        "modeloPago": {
+          "$ref": "#/$defs/ModeloPago"
+        },
+        "politicaCancelacion": {
+          "$ref": "#/$defs/PoliticaCancelacionV2"
+        },
+        "ocupacionBase": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "example": 2,
+          "description": "Adultos incluidos en `precioBaseNoche`."
+        },
+        "precioBaseNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Precio por habitación y noche para `ocupacionBase` (tarifa de referencia; puede variar por fecha, ver `/inventario`).",
+          "example": "120.00"
+        },
+        "suplementoAdultoExtra": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Por adulto sobre `ocupacionBase`, por noche.",
+          "example": "25.00"
+        },
+        "politicaNinos": {
+          "$ref": "#/$defs/PoliticaNinosV2"
+        },
+        "impuestosIncluidos": {
+          "type": "boolean",
+          "example": false,
+          "description": "Si `true`, los impuestos ya forman parte de la tarifa. **Este nodo publica siempre `false`.**"
+        },
+        "esPlanPorDefecto": {
+          "type": "boolean",
+          "example": true,
+          "description": "Se usa cuando la petición no envía `planTarifaCodigo`. Exactamente un plan por habitación."
+        }
+      }
+    },
+    "RestriccionesDiaV2": {
+      "type": "object",
+      "required": [
+        "fecha"
+      ],
+      "description": "Restricciones de venta para una noche (modelo estándar ARI: Availability, Rates, Inventory).",
+      "properties": {
+        "fecha": {
+          "type": "string",
+          "format": "date",
+          "example": "2026-12-24"
+        },
+        "estanciaMinima": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 1,
+          "example": 3,
+          "description": "Noches mínimas. Se evalúa con la restricción de la noche de **llegada**."
+        },
+        "estanciaMaxima": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 30,
+          "example": 30,
+          "description": "Noches máximas (noche de llegada)."
+        },
+        "cerradoALlegada": {
+          "type": "boolean",
+          "default": false,
+          "example": false,
+          "description": "No se puede llegar (check-in) esta noche."
+        },
+        "cerradoASalida": {
+          "type": "boolean",
+          "default": false,
+          "example": false,
+          "description": "No se puede salir (check-out) esta fecha. Se evalúa sobre `fechaFin`."
+        },
+        "ventaCerrada": {
+          "type": "boolean",
+          "default": false,
+          "example": false,
+          "description": "*Stop-sell*: la noche no se vende. Si **cualquier** noche del rango está cerrada, la estancia no se vende."
+        },
+        "anticipacionMinimaHoras": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8760,
+          "default": 0,
+          "example": 0,
+          "description": "Horas mínimas entre la reserva y las 14:00 de la llegada (*cut-off*)."
+        }
+      }
+    },
+    "TarifaPlanNocheV2": {
+      "type": "object",
+      "required": [
+        "planTarifaCodigo",
+        "precioNoche"
+      ],
+      "properties": {
+        "planTarifaCodigo": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]{2,30}$",
+          "example": "FLEX_BB"
+        },
+        "precioNoche": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Money"
+            }
+          ],
+          "description": "Precio por habitación para `ocupacionBase` esa noche.",
+          "example": "120.00"
+        },
+        "restricciones": {
+          "$ref": "#/$defs/RestriccionesDiaV2"
+        }
+      }
+    }
+  }
+}

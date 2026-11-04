@@ -64,6 +64,15 @@ export class ContractsController {
       url_descarga: '/api/v3/contracts/vuelos-openapi-v2.yaml',
     },
     {
+      microservicio: 'MS_ALO (Alojamientos y Hospedaje Hotelero v2)',
+      vertical: 'ALOJAMIENTOS',
+      version: '2.2.0 (Canónica RDA2)',
+      archivo: 'alojamientos-openapi-v2.yaml',
+      formato: 'OpenAPI 3.0.3 (YAML)',
+      descripcion: 'Contrato canónico B2B de hospedaje: catálogo, disponibilidad, órdenes, check-in 14:00 y feed Outbox',
+      url_descarga: '/api/v3/contracts/alojamientos-openapi-v2.yaml',
+    },
+    {
       microservicio: 'MS_ALO (Alojamientos y Hoteles)',
       vertical: 'ALOJAMIENTOS',
       version: '1.0.0 (GDS Alojamientos Core)',

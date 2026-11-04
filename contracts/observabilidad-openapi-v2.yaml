@@ -374,18 +374,19 @@ paths:
 
   /nodes/{codigoNodo}/toggle:
     post:
+      deprecated: true
       tags:
         - Nodos y Proveedores - Consulta Pública y Conexión
-      summary: Alternar kill-switch de un nodo socio desde el Panel 1 de Administración
+      summary: Alternar kill-switch de un nodo socio desde el Panel 1 de Administración (DEPRECATED)
       description: |
+        [DEPRECATED: La ruta canónica oficial es POST /admin/nodes/{codigoNodo}/toggle-killswitch].
         Invierte o fuerza el estado del Kill-Switch de un conector externo.
         - Si se activa: Marca `kill_switch_activo = true`, `health_status = 'DOWN'` y `circuit_breaker_estado = 'OPEN'`.
           Sincroniza en memoria con `ConnectorHealthService` para interceptar llamadas y activar contingencias.
         - Si se desactiva: Restablece el tráfico normal hacia el microservicio socio.
 
         Requiere sesión Supabase válida y rol `ADMIN` o `MANTENIMIENTO`. La ruta se conserva
-        para compatibilidad y el frontend administrativo usa la ruta canónica protegida
-        `/admin/nodes/{codigoNodo}/toggle-killswitch`.
+        para compatibilidad y retorna encabezados `Deprecation: true` y `Link: </api/v2/admin/nodes/{codigoNodo}/toggle-killswitch>; rel="successor-version"`.
       operationId: toggleNodePublic
       x-source: 'src/modules/nodes/nodes.controller.ts#toggleNodePublic'
       x-status: implemented
@@ -833,6 +834,89 @@ paths:
         '500':
           $ref: './common/components-v2.yaml#/components/responses/Problem500'
 
+  /inventory/stock:
+    post:
+      tags:
+        - Inventario Sincronizado gRPC Inbound
+      summary: Ruta alterna REST para actualizar stock (Inbound para tiendas sin gRPC)
+      description: |
+        Ruta alterna REST para socios que no pueden establecer conexión HTTP/2 gRPC en el puerto 50051.
+        Invoca la misma lógica de negocio en `InventoryService` y exige autenticación con `X-Api-Key`.
+      operationId: pushStockUpdateRest
+      x-source: 'src/modules/inventory/inventory-grpc.controller.ts#pushStockUpdateRest'
+      x-status: implemented
+      x-microservice: MS_STK
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: X-Api-Key
+          in: header
+          required: true
+          description: Clave de API del socio o proveedor
+          schema:
+            type: string
+            example: 'test-inventory-secret-key-12345'
+        - $ref: './common/components-v2.yaml#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - service_id
+                - item_id
+                - date
+                - available_units
+              properties:
+                service_id:
+                  type: string
+                  example: 'atracciones-dilan'
+                item_id:
+                  type: string
+                  example: 'PRhu4UBTWPBC'
+                date:
+                  type: string
+                  format: date
+                  example: '2026-10-26'
+                time_slot:
+                  type: string
+                  example: '10:00'
+                available_units:
+                  type: integer
+                  minimum: 0
+                  example: 15
+      responses:
+        '200':
+          description: Stock sincronizado exitosamente.
+          headers:
+            X-Correlation-Id:
+              $ref: './common/components-v2.yaml#/components/headers/X-Correlation-Id'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                  - processed_at
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: 'Stock sincronizado exitosamente en Booking Prototipo para PRhu4UBTWPBC'
+                  processed_at:
+                    type: integer
+                    example: 1729900800000
+        '400':
+          $ref: './common/components-v2.yaml#/components/responses/Problem400'
+        '401':
+          $ref: './common/components-v2.yaml#/components/responses/Problem401'
+        '500':
+          $ref: './common/components-v2.yaml#/components/responses/Problem500'
+
   # ─────────────────────────────────────────────────────────────────────────────
   # 5. TRAZABILIDAD Y OBSERVABILIDAD DISTRIBUIDA (PLANIFICADO - CÁTEDRA SEMANA 8)
   # ─────────────────────────────────────────────────────────────────────────────
@@ -853,8 +937,8 @@ paths:
         Permite renderizar en el frontend un monitor tipo grafo donde los microservicios activos
         se colorean en **verde** y los servicios fallidos o compensados en **rojo**.
       operationId: getTrazaGrafo
-      x-source: 'n/a'
-      x-status: planned
+      x-source: 'src/modules/observabilidad/observabilidad.controller.ts'
+      x-status: implemented
       x-microservice: MS_AUD
       security:
         - SupabaseBearer: []
@@ -896,6 +980,11 @@ components:
       $ref: './common/components-v2.yaml#/components/securitySchemes/SupabaseBearer'
     AdminKey:
       $ref: './common/components-v2.yaml#/components/securitySchemes/AdminKey'
+    ApiKeyAuth:
+      type: apiKey
+      name: X-Api-Key
+      in: header
+      description: Clave de API de socio o proveedor externo
 
   schemas:
 

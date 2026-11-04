@@ -1,0 +1,186 @@
+# ==============================================================================
+# docker-compose.demo.yml
+# Entorno de Demostración Local Completo — Booking Prototipo (RDA2)
+# Incluye: API Gateway NestJS, PostgreSQL 16, RabbitMQ 3 Management, Kafka KRaft,
+# y Mock Tienda Satélite. Cero contraseñas reales ni secretos en producción.
+# ==============================================================================
+
+name: booking-demo
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Base de Datos Transaccional (PostgreSQL 16)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: booking_demo_postgres
+    restart: unless-stopped
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: booking_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_demo_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d booking_db']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - booking_demo_net
+
+  # ----------------------------------------------------------------------------
+  # 2. Broker de Mensajería Transaccional (RabbitMQ 3 con UI de Administración)
+  # ----------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: booking_demo_rabbitmq
+    restart: unless-stopped
+    ports:
+      - '5672:5672'      # Protocolo AMQP 0-9-1
+      - '15672:15672'    # Consola Web (usuario: guest, clave: guest)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_demo_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - booking_demo_net
+
+  # ----------------------------------------------------------------------------
+  # 3. Broker de Streaming de Eventos y Telemetría (Apache Kafka en Modo KRaft)
+  # Nota: No requiere Zookeeper; opera con un único broker y quórum integrado.
+  # ----------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: booking_demo_kafka
+    restart: unless-stopped
+    ports:
+      - '9092:9092'      # Puerto de clientes Kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka_demo_data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ['CMD', '/opt/kafka/bin/kafka-topics.sh', '--bootstrap-server', 'localhost:9092', '--list']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - booking_demo_net
+
+  # ----------------------------------------------------------------------------
+  # 4. Mock de Tiendas Satélites (Atracciones Dilan, Autos, Vuelos, Hoteles)
+  # Provee respuestas inmediatas y aisladas para demostración local sin internet.
+  # ----------------------------------------------------------------------------
+  mock-tienda:
+    image: node:22-alpine
+    container_name: booking_demo_mock_tienda
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./scripts/demo:/app/scripts/demo:ro
+    command: ['node', 'scripts/demo/mock-tienda.js']
+    ports:
+      - '4000:4000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:4000/health || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - booking_demo_net
+
+  # ----------------------------------------------------------------------------
+  # 5. Backend Central: NestJS API Gateway, ESB y Orquestador de Sagas
+  # Expone HTTP REST (:3000) y Servidor gRPC Inbound (:50051)
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: booking_demo_backend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'      # REST API / Swagger (/api/docs) / ReDoc (/api/redoc)
+      - '50051:50051'    # Servidor gRPC Inbound (InventoryStockService)
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - NODE_ID=booking-demo-node
+      - GRPC_ENABLED=true
+      - GRPC_PORT=50051
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/booking_db?schema=public
+      - EVENT_BUS_MODE=dual
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - KAFKA_BROKERS=kafka:9092
+      - TELEMETRY_SINK=log
+      - SAGA_STORE=memory
+      - PAGOS_SIMULADOR_HABILITADO=true
+      - PAGOS_SIMULADOR_MODO=NORMAL
+      - SECURITY_RATE_LIMIT_ENABLED=true
+      - SECURITY_ALLOW_TEST_AUTH=true
+      - LOG_SERVICE_NAME=booking-demo-gateway
+      - LOG_TO_STDOUT=true
+      - LOG_RETENTION_DAYS=14
+      - TIENDA_ATRACCIONES_URL=http://mock-tienda:4000/api/v2
+      - TIENDA_AUTOS_URL=http://mock-tienda:4000/api/v2/autos
+      - TIENDA_ALOJAMIENTOS_URL=http://mock-tienda:4000/api/v2/alojamientos
+      - TIENDA_VUELOS_URL=http://mock-tienda:4000/api/v2/vuelos
+      - WEBHOOK_SECRET_VUELOS=demo-webhook-secret-vuelos-12345
+      - WEBHOOK_SECRET_AUTOS=demo-webhook-secret-autos-12345
+      - WEBHOOK_SECRET_ATRACCIONES=demo-webhook-secret-atracciones-12345
+      - WEBHOOK_SECRET_ALOJAMIENTOS=demo-webhook-secret-alojamientos-12345
+      - WEBHOOK_RATE_LIMIT_MAX=60
+      - INVENTORY_API_KEYS=key-demo-alojamientos-67890,key-demo-dilan-12345
+      - ALOJAMIENTOS_API_KEYS=key-demo-alojamientos-67890
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mock-tienda:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:3000/api/v2/nodes/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - booking_demo_net
+
+networks:
+  booking_demo_net:
+    driver: bridge
+
+volumes:
+  postgres_demo_data:
+  rabbitmq_demo_data:
+  kafka_demo_data:

@@ -5,6 +5,7 @@ import { NodesService } from './nodes.service';
 import { ConfigProveedor } from './entities';
 import { Atraccion } from '../atracciones/entities/atraccion.entity';
 import { Auto } from '../autos/entities/auto.entity';
+import { Alojamiento } from '../alojamientos/entities/alojamiento.entity';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { SupabaseAuthGuard } from '../../core/guards/supabase-auth.guard';
 import { RolesGuard } from '../../core/guards/roles.guard';
@@ -13,7 +14,7 @@ import { CoreModule } from '../../core/core.module';
 @Module({
   imports: [
     CoreModule,
-    TypeOrmModule.forFeature([ConfigProveedor, Atraccion, Auto]),
+    TypeOrmModule.forFeature([ConfigProveedor, Atraccion, Auto, Alojamiento]),
   ],
   controllers: [NodesController],
   providers: [NodesService, WinstonPhysicalLoggerService, SupabaseAuthGuard, RolesGuard],

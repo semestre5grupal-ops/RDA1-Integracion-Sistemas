@@ -18,6 +18,7 @@
 | 5 | **Michael Molina** | Atracciones | TourGirls | `NODE_ATR_MOLINA` | **Azure App Service** | 🟢 **100% EXITOSA** | Ninguna. 18 tours sincronizados, health UP, disponibilidad (?fecha= y ?date=), creación de reserva (`DEC-D2QJSF`) y cancelación Saga (`REF-ATR-7YGADV`) probadas. Conectado a CloudAMQP (8 colas). |
 | 6 | **Gloria Chushig** | Atracciones | Vívelo Ecuador | `NODE_ATR_GLORIA` | **Azure Container Apps** | 🟢 **100% EXITOSA** | Ninguna. 11 tours sincronizados, `/health` 200 UP, disponibilidad por turnos, reservas con UUID (`db8c56dc`) y cancelaciones Saga probadas. |
 | 7 | **Alisson Basantes**| Atracciones | Atracciones Turísticas del Ecuador | `NODE_ATR_ALISSON` | **Azure App Service** | 🟢 **100% EXITOSA** | Ninguna. 16 microservicios (3 gRPC + 13 REST), 5 tours sincronizados, reservas y cancelaciones probadas. |
+| 8 | **Samantha Nuñez** | Alojamientos | Posada EC | `NODE_ALO_PEC` | **Azure Container Apps** (North Central US) | 🟢 **100% EXITOSA** | Ninguna. 30 hoteles sincronizados, OpenAPI v2.2.0, disponibilidad en vivo, reservas (`BK-HOTEL-5322A64F`) y compensación Saga probadas. |
 
 ---
 
@@ -159,11 +160,31 @@
 
 ---
 
+### 🟢 2.8. Samantha Nuñez — Posada EC (NODE_ALO_PEC)
+* **Estado:** Totalmente Operativo y Certificado (100% superado).
+* **URL Base Azure:** https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2
+* **Health / Telemetría:** GET /api/v2/alojamientos/health (Status: HEALTHY, semáforo: GREEN, versión: 2.2.0, latencia: ~63 ms, Database: CONNECTED, Circuit Breaker: CLOSED, propiedades: 30, habitaciones: 196).
+* **X-API-Key:** e23885f4efaa59cd1915d024fa724ab6baf2edb08bab7f4c
+* **Catálogo Sincronizado en Booking:** 30 hoteles y alojamientos boutique en Ecuador (Quito, Cuenca, Guayaquil, Baños, etc.), con fotos en alta resolución (otos[]), amenidades, políticas de cancelación y tipos de habitación (lojamientos_tipos_habitacion).
+* **Pruebas Validadas:**
+  - GET /api/v2/alojamientos/health -> HTTP 200 (HEALTHY, 30 propiedades registradas, métricas en vivo)
+  - GET /api/v2/alojamientos?limit=10 -> HTTP 200 (Catálogo v2.2.0 con fotos reales, precios y calificaciones)
+  - GET /api/v2/alojamientos/promociones/contrato -> HTTP 200 (Acuerdo contractual y políticas comerciales)
+  - GET /api/v2/alojamientos/HTL-1001/disponibilidad?checkin=2026-11-20&checkout=2026-11-22&adultos=2 -> HTTP 200 (Opciones HABITACION_ESTANDAR y SUITE_FAMILIAR, desglose fiscal e impuestos)
+  - POST /api/v2/alojamientos/orders/create -> HTTP 201 Created (Generó reserva formal BK-HOTEL-5322A64F con Idempotency-Key UUID, titular con cédula validada y desglose fiscal completo)
+  - POST /api/v2/alojamientos/orders/:id/cancel -> HTTP 200 (Saga compensatoria LIFO ejecutada con éxito: estado CANCELLED, reembolso REF-HTL-010010 100% por .50 USD y cupos restaurados en inventario)
+* **Particularidad Técnica para Integración:**
+  - Cumple estrictamente el contrato OpenAPI v2.2.0 (lojamientos-openapi-v2.yaml) diseñado por Joselyn Cadena.
+  - La propiedad de imágenes se denomina otos en la raíz del objeto, con URIs válidas.
+  - El endpoint de cancelación exige el parámetro motivo en el cuerpo y la cabecera Idempotency-Key.
+
+---
+
 ## 3. Resumen Cuantitativo del Ecosistema Booking
 
 ```
-Total Nodos Evaluados: 7 / 7 (100% de la clase migró a Azure)
-  ├── 🟢 Integraciones 100% Certificadas: 7 / 7 (100%) -> ¡PLENO TOTAL DE LA CLASE! (Dilan, Ariel, Daniel, Mateo, Michael, Gloria, Alisson)
+Total Nodos Evaluados: 8 / 8 (100% de los socios migró a Azure)
+  ├── 🟢 Integraciones 100% Certificadas: 7 / 7 (100%) -> ¡PLENO TOTAL DE LA CLASE! (Dilan, Ariel, Daniel, Mateo, Michael, Gloria, Alisson, Samantha)
   ├── 🟡 Desplegados en Azure con ajustes menores: 0 (0%)
   └── 🔴 Pendientes de Migración a Azure: 0 (0%)
 
@@ -178,4 +199,7 @@ Total Catálogo Externo Sincronizado en Booking en la Nube (PostgreSQL Supabase)
   ├── Autos RutaLibre (Daniel): 34 autos
   ├── Autos MANEJA DE UNA (Mateo): 10 autos
   └── Total Flota de Autos Activa: 44 vehículos en vivo en PostgreSQL Supabase
+  │
+  ├── Alojamientos Posada EC (Samantha): 30 hoteles / 196 habitaciones
+  └── Total Alojamientos Activos: 30 hoteles en vivo en PostgreSQL Supabase
 ```

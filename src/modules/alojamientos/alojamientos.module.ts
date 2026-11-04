@@ -10,11 +10,15 @@ import { ResenaAlojamiento } from './entities/resena.entity';
 import { TipoHabitacion } from './entities/tipo-habitacion.entity';
 import { HuespedReserva } from './entities/huesped-reserva.entity';
 import { ProveedorAlojamiento } from './entities/proveedor-alojamiento.entity';
+import { EventoOutboxAlojamiento } from './entities/evento-outbox.entity';
 import { TiposHabitacionService } from './tipos-habitacion.service';
 import { ProveedoresAlojamientoService } from './proveedores.service';
 import { TelemetryModule } from '../telemetry/telemetry.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { SesionSupabaseService } from '../../core/auth/sesion-supabase.service';
 import { CoreModule } from '../../core/core.module';
+import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
+import { AlojamientosCircuitBreakerAdapter } from './acl/alojamientos-circuit-breaker.adapter';
 import {
   GestionAlojamientosGuard,
   ClienteAutenticadoGuard,
@@ -26,6 +30,7 @@ import {
   imports: [
     CoreModule,
     HttpModule,
+    InventoryModule,
     CacheModule.register({ ttl: 60000 }),
     TypeOrmModule.forFeature([
       Alojamiento,
@@ -34,6 +39,7 @@ import {
       TipoHabitacion,
       HuespedReserva,
       ProveedorAlojamiento,
+      EventoOutboxAlojamiento,
     ]),
     TelemetryModule,
   ],
@@ -43,11 +49,17 @@ import {
     TiposHabitacionService,
     ProveedoresAlojamientoService,
     SesionSupabaseService,
+    WinstonPhysicalLoggerService,
+    AlojamientosCircuitBreakerAdapter,
     GestionAlojamientosGuard,
     ClienteAutenticadoGuard,
     SesionOpcionalGuard,
     SoloAdministradorGuard,
   ],
-  exports: [AlojamientosService],
+  exports: [
+    AlojamientosService,
+    AlojamientosCircuitBreakerAdapter,
+    WinstonPhysicalLoggerService,
+  ],
 })
 export class AlojamientosModule {}

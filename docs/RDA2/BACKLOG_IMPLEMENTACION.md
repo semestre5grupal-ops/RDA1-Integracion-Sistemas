@@ -118,6 +118,14 @@ El backlog se compone de **56 ítems de trabajo (`BL-001` a `BL-056`)** organiza
 | BL-043 | Resuelto en I07 | Pruebas HTTP y de servicio para firma, CloudEvent, idempotencia, tamaño de cuerpo y vertical. |
 | BL-048 | Resuelto en I07 | Respuesta duplicada 200 incluye `Idempotent-Replayed: true`. |
 
+### Estado de implementación I10
+
+| ID | Estado | Nota |
+|---|---|---|
+| BL-018 | Resuelto en I10 | Unificación de Kill-Switches en la ruta canónica `POST /admin/nodes/:codigoNodo/toggle-killswitch`; rutas obsoletas marcadas con `Deprecation: true` y `Link` sucesor. |
+| BL-019 | Resuelto en I10 | Consolidación del motor financiero y liquidaciones quincenales en `FinanzasService`, con pagos idempotentes y registro de auditoría. |
+| BL-053 | Resuelto en I10 | Idempotencia en liquidaciones pagadas; devuelve comprobante existente sin alterar histórico. |
+
 ## 3. Matriz de Trazabilidad y Verificación de Cobertura
 
 ### 3.1 Cobertura de Hallazgos Alta y Media (`docs/RDA2/HALLAZGOS_CONTRATOS.md`)
