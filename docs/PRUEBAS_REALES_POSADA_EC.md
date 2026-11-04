@@ -17,7 +17,7 @@ que pasa cuando hay **dos canales vendiendo el mismo inventario** ni lo que hace
 reales cuando se equivocan, se impacientan o hacen trampa.
 
 El caso que reportó un compañero lo resume: reservó en la página de Posada, intentó reservar lo
-mismo desde Booking y **no debería funcionar**. Esta suite convierte ese caso, y 56 más, en
+mismo desde Booking y **no debería funcionar**. Esta suite convierte ese caso, y 57 más, en
 pruebas automáticas que se ejecutan contra lo **desplegado** (no contra mocks).
 
 ## 2. Hallazgo previo por revisión de código (antes de ejecutar)
@@ -55,6 +55,7 @@ no como dice el contrato) · ⛔ **BLOQUEADO** (no se pudo evaluar: falta una pr
 | S02 | Nuestro sistema está arriba | `GET /alojamientos` 200 |
 | S03 | Un viajero busca en Booking un hotel que Posada ofrece | Todo hotel activo de Posada existe en Booking (por `id_externo`) |
 | S04 | Posada retira un hotel y Booking lo sigue vendiendo | Ningún hotel retirado o inexistente a la venta en Booking |
+| S05 | Un viajero elige un hotel de Posada en Booking y pulsa «Reservar» | 201 (o 409 sin cupo). Nunca 500 |
 
 ### A · Doble canal Booking ⇄ Posada (el núcleo)
 | ID | Situación real | Esperado |
@@ -203,19 +204,69 @@ El proceso termina con código 1 si alguna prueba FALLA.
   `opciones` frente a `tipos`) porque evalúa el comportamiento de negocio, no el nombre de un campo.
 - Booking y Posada se emparejan por `id_externo` (hotel) y por código de tipo de habitación normalizado.
 
-## 5. Estado de la ejecución
+## 5. Resultados de la ejecución real (2026-11-04)
 
-| Fecha | Modo | Resultado |
-|---|---|---|
-| 2026-11-04 | — | **No ejecutada contra lo desplegado.** El entorno donde se preparó la suite tiene la salida a Internet restringida y bloqueó los dos hosts (`…azurecontainerapps.io` de Posada y `booking-core-api.azurewebsites.net`). |
+| Corrida | Modo | Resultado | Reporte |
+|---|---|---|---|
+| 16:29 UTC | sólo lectura | 10 ✅ · 1 ❌ (A05) · 46 ⏭️ | `resultados/2026-11-04T16-29-20-395Z.md` |
+| 16:30 UTC | completa (57 pruebas) | 50 ✅ · 2 ❌ · 1 ⚠️ · 4 ⛔ | `resultados/2026-11-04T16-30-06-331Z.md` |
+| 16:33 UTC | `--solo=S05,A01–A04` (con S05 nuevo y el criterio de A02 corregido) | S05 ❌ · A02 ❌ · A04 ❌ · A01 ⛔ · A03 ⛔ | `resultados/2026-11-04T16-33-46-503Z.md` |
 
-Para comprobar que el script funciona, se corrió contra un **simulador local descartable**,
-que no se versiona. Esa corrida sólo sirvió para depurar el código de la suite y **no es un
-resultado de Posada**. Corrigió dos errores del propio script: una variable sombreada en B01 y
-una interferencia de fechas entre C04 y la orden base.
+Limpieza verificada al final: en Posada no queda ninguna reserva de prueba activa
+(`GET /orders`: 21 `CANCELLED` de estas corridas y 3 `CHECKED_OUT` que ya existían). En Booking
+no se llegó a crear ninguna reserva, por el error 500 descrito abajo.
 
-Cuando se ejecute contra lo desplegado, el reporte se guarda en `test/live/posada-ec/resultados/`
-y se resume en esta tabla.
+### 5.1 Lo que está mal (en orden de gravedad)
+
+1. **❌ S05 · En Booking no se puede reservar ningún hotel de Posada: HTTP 500.**
+   `POST /api/v1/alojamientos/pec-htl-XXXX/reservations` responde `500 Error interno del servidor`
+   en todos los intentos, con o sin tipo de habitación y con o sin teléfono. Las validaciones previas
+   sí funcionan (fechas invertidas → 400, hotel inexistente → 404), así que el fallo ocurre al
+   **guardar** la reserva. Hoy los 30 hoteles de Booking son todos de Posada, así que **ningún
+   cliente puede reservar alojamiento en Booking**. Hay que revisar el log del backend en Azure
+   (buscar `POST /api/v1/alojamientos/*/reservations` el 2026-11-04 entre 16:30 y 16:34 UTC). Un
+   candidato a revisar es que la base de datos de producción no tenga aplicadas las migraciones de
+   `database/migraciones/2026-10-1*_alojamientos_*.sql`, aunque esto no se pudo confirmar sin los logs.
+2. **❌ A02 · El caso del compañero.** Se agotaron en Posada las 8 «Habitación Estándar» de HTL-1001
+   (24 → 26 dic). Posada pasó a 0, pero Booking **seguía mostrando 5 libres**. Booking no llegó a
+   vender la habitación sólo porque la reserva falló con 500, no porque supiera que estaba agotada.
+   En cuanto se corrija el 500, esto será una sobreventa (como predice la sección 2).
+3. **❌ A04 · Booking no se entera de nada de lo que pasa en Posada.** Se reservó y se canceló en
+   Posada y Booking mostró siempre el mismo cupo.
+4. **❌ A05 · El catálogo de Booking no coincide con el de Posada.** En Booking cada hotel de Posada
+   tiene un único tipo genérico («Habitación Estándar», código `estandar`) y otro cupo. Ejemplo:
+   HTL-1001 tiene en Posada Estándar ×8 + Suite Familiar ×3; en Booking, sólo Estándar ×5. La
+   mayoría de los tipos reales de Posada (`SUITE_FAMILIAR`, `DEPARTAMENTO_COMPLETO`,
+   `HABITACION_DOBLE`, `CABANA_PAREJA`, …) **no existen en Booking**. El precio por noche de los
+   tipos que sí coinciden es igual (A06 ✅).
+5. **⛔ A01 y A03** (reserva de Booking que llega al hotel; agotar en Booking y reservar en Posada)
+   no se pudieron evaluar, porque requieren reservar en Booking (S05). Por el código se espera que fallen.
+6. **⛔ H02 y H05** (check-in): Posada exige token de usuario (BearerAuth) y la API key de Booking
+   no basta. Es lo que dice el contrato; no es un defecto.
+
+### 5.2 Lo que está bien: el sistema de Sam
+
+Posada EC cumple el contrato v2.2.0 en todas las pruebas que dependen sólo de ella:
+
+- **Concurrencia:** dos clientes por la última habitación → una 201 y otra 409 (B01). El doble clic
+  crea una sola reserva (B02). El reintento devuelve la misma orden con `Idempotent-Replayed: true`
+  (B03). La misma clave con otro cuerpo → 422 `IDEMPOTENCY_KEY_REUSED` (B04).
+- **Precio:** pagar $1.00 → 409 `PRICE_MISMATCH` («la tarifa vigente es 257.00»). La cotización
+  se respeta y el desglose cuadra exacto (P03). EUR → 422.
+- **Validaciones:** fechas pasadas, invertidas, 31 noches, 30 de febrero, 20 adultos, cédula con
+  módulo 10 incorrecto, correo inválido, campos desconocidos y reserva sin huésped: todo rechazado
+  con el código del contrato. El pasaporte de un turista sí se acepta.
+- **Ciclo de vida y seguridad:** los tres identificadores resuelven la reserva; cancelar libera el
+  cupo; cancelar dos veces es idempotente (mismo `REF-HTL-…`); la compensación de Saga reembolsa
+  el 100 %; sin clave → 401; el health no filtra secretos; los errores son `problem+json`.
+- **Rendimiento:** todas las reservas tardaron menos de 3000 ms y 10 consultas simultáneas no dieron errores.
+
+**Conclusión:** el problema del caso del compañero **no está en el sistema de Sam, sino en el
+Booking**. Posada controla bien su inventario, pero el Booking vende con un inventario propio,
+desactualizado y con otros tipos de habitación, y ahora mismo ni siquiera puede guardar reservas.
+
+> Antes de la corrida válida se depuró el script contra un simulador local descartable (no versionado),
+> que no forma parte de estos resultados.
 
 ## 6. Qué haría falta para que A01–A04 pasen
 

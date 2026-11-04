@@ -238,6 +238,24 @@ const ESCENARIOS = [
     },
   },
 
+  {
+    id: 'S05', grupo: 'S · Salud y catálogo', requiere: ['booking', 'escritura'],
+    titulo: 'Un cliente puede reservar en Booking un hotel de Posada',
+    historia: 'Un viajero elige un hotel de Posada en Booking y pulsa «Reservar».',
+    esperado: 'POST /alojamientos/{id}/reservations → 201 (o 409 si no hay cupo). Nunca 500.',
+    async run(t) {
+      const m = ctx.mapeados[0];
+      if (!m) return t.bloqueado('Depende de S03.');
+      const { checkin, checkout } = ventana(13);
+      const tb = C.tiposBooking(await booking.disponibilidad(m.booking.id, checkin, checkout))[0];
+      const rb = await booking.reservar(m.booking.id, { checkin, checkout, tipo: tb?.id, etiqueta: 's05' });
+      t.evidencia(`Booking reserva ${m.booking.id} ${checkin} → ${checkout}`, rb);
+      if (registrarBooking(rb, 'S05')) return t.pasa(`Reserva ${rb.body?.codigo_reserva} creada.`);
+      if (rb.status === 0 || rb.status >= 500) return t.falla(`El cliente NO puede reservar: ${resumen(rb)} (correlation_id ${rb.body?.correlation_id ?? '—'}).`);
+      return t.aviso(`No se pudo reservar: ${resumen(rb)}.`);
+    },
+  },
+
   // ── A · Doble canal (el caso del compañero y sus variantes) ─────────────────────
   {
     id: 'A01', grupo: 'A · Doble canal Booking ⇄ Posada', requiere: ['posada', 'booking', 'escritura'],
@@ -283,7 +301,10 @@ const ESCENARIOS = [
       if (registrarBooking(rb, 'A02 (sobreventa)')) {
         return t.falla(`SOBREVENTA: Posada ya no tiene habitaciones (${dp.valor} libres) y Booking aceptó la reserva ${rb.body?.codigo_reserva} y le mostraba ${db.valor} libres al cliente.`);
       }
-      if (rb.status === 409) return t.pasa(`Booking rechazó la reserva (${resumen(rb)}).`);
+      const muestra = Number.isFinite(db.valor) && db.valor > 0 ? ` y le sigue mostrando al cliente ${db.valor} habitación(es) libre(s) que no existen` : '';
+      if (rb.status === 0 || rb.status >= 500) return t.falla(`Booking no vendió la habitación, pero sólo porque falló con ${resumen(rb)}, no porque supiera que estaba agotada${muestra}.`);
+      if (muestra) return t.falla(`Booking rechazó la reserva (${resumen(rb)})${muestra}.`);
+      if (rb.status === 409) return t.pasa(`Booking muestra 0 libres y rechazó la reserva (${resumen(rb)}).`);
       return t.aviso(`Booking no la aceptó, pero respondió ${resumen(rb)} en vez de 409.`);
     },
   },
