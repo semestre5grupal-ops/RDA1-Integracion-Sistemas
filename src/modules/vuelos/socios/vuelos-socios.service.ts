@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
+import { propietarioDesde } from '../vuelos.controller';
 
 /**
  * Agregador de aerolíneas socias (RDA2).
@@ -227,18 +228,32 @@ export class VuelosSociosService {
     const cache = this.tokens.get(nodo.codigoNodo);
     if (cache && cache.expira > Date.now() + 15_000) return { Authorization: `Bearer ${cache.token}` };
 
-    const res = await fetch(urlToken, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
-      },
-      body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
-      signal: AbortSignal.timeout(this.timeoutMs()),
-    });
-    const datos: any = await res.json().catch(() => ({}));
+    // RFC 6749 §2.3: el cliente se autentica de UNA sola forma. Mandar Basic y
+    // además client_id/client_secret en el cuerpo hace que servidores estrictos
+    // respondan 400 invalid_request. Se intenta Basic y, si no, el cuerpo.
+    const pedir = (modo: 'basic' | 'cuerpo') =>
+      fetch(urlToken, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+          ...(modo === 'basic' ? { Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64') } : {}),
+        },
+        body: new URLSearchParams(
+          modo === 'basic'
+            ? { grant_type: 'client_credentials' }
+            : { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
+        ),
+        signal: AbortSignal.timeout(this.timeoutMs()),
+      });
+    let res = await pedir('basic');
+    let datos: any = await res.json().catch(() => ({}));
     if (!res.ok || !datos.access_token) {
-      throw new Error(`OAuth2 rechazado por ${nodo.codigoNodo} (HTTP ${res.status})`);
+      res = await pedir('cuerpo');
+      datos = await res.json().catch(() => ({}));
+    }
+    if (!res.ok || !datos.access_token) {
+      throw new Error(`OAuth2 rechazado por ${nodo.codigoNodo} (HTTP ${res.status}${datos?.error ? `: ${datos.error}` : ''})`);
     }
     const segundos = Number(datos.expires_in) || 300;
     this.tokens.set(nodo.codigoNodo, { token: datos.access_token, expira: Date.now() + segundos * 1000 });
@@ -252,6 +267,10 @@ export class VuelosSociosService {
       'X-Device-Fingerprint': String(entrantes['x-device-fingerprint'] || 'booking-gateway'),
       'X-Correlation-Id': String(entrantes['x-correlation-id'] || `corr-${randomUUID()}`),
       'X-Booking-Node': nodo.codigoNodo,
+      // Dueño de la reserva para la aerolínea (contrato v2): el mismo usuario que
+      // Booking usa para Mis Reservas. Sin él, la aerolínea rechaza cancelar o
+      // consultar la reserva (400) o no la encuentra (404).
+      'X-User-Id': propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']),
     };
     for (const nombre of ['idempotency-key', 'accept-language', 'if-match']) {
       if (entrantes[nombre]) h[nombre.replace(/(^|-)([a-z])/g, (m) => m.toUpperCase())] = String(entrantes[nombre]);

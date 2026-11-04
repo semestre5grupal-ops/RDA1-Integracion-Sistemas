@@ -30,7 +30,12 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
           res.writeHead(s, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(b));
         };
-        if (ruta === '/api/v2/oauth2/token') return json(200, { access_token: 'tok-123', expires_in: 3600 });
+        if (ruta === '/api/v2/oauth2/token') {
+          // Como un servidor estricto: credenciales en cabecera Y cuerpo -> 400.
+          const enCuerpo = typeof body === 'string' && body.includes('client_secret');
+          if (req.headers.authorization && enCuerpo) return json(400, { error: 'invalid_request' });
+          return json(200, { access_token: 'tok-123', expires_in: 3600 });
+        }
         if (nodo === 'lenta') return; // nunca responde
         if (nodo === 'oauth' && req.headers.authorization !== 'Bearer tok-123') return json(401, { title: 'sin token' });
         if (nodo === 'key' && req.headers['x-api-key'] !== 'clave-key') return json(401, { title: 'sin key' });
@@ -121,6 +126,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
     expect(r.body).toEqual({ holdId: 'NODE_VUE_KEY~HOLD-key', offerId: 'NODE_VUE_KEY~OF-key' });
     const hold = llamadas.find((c) => c.url === '/api/v2/vuelos/offers/hold')!;
     expect(hold.body.offerId).toBe('OF-key');
+    expect(hold.headers['x-user-id']).toMatch(/^[0-9a-f-]{36}$/);
     expect(hold.headers['idempotency-key']).toBe('idem-1');
   });
 
@@ -239,6 +245,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(cobros.at(-1)).toEqual({ monto: 150, idem: 'idem-ok', propietario: DUENO });
       const enviada = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST')!;
       expect(enviada.body.payment.paymentReference).toBe('AUTH-777');
+      expect(enviada.headers['x-user-id']).toBe(DUENO); // la aerolínea ve al mismo dueño que Booking
       expect(enviada.body.holdId).toBe('HOLD-key');
       expect(copias.get('NODE_VUE_KEY~BK-1')).toMatchObject({ propietarioId: DUENO, codigoNodo: 'NODE_VUE_KEY' });
     });
