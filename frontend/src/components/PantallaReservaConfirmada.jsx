@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { formatearFecha, formatearMoneda } from '../services/formato';
+import { formatearFecha, formatearMoneda, extraerHora } from '../services/formato';
 
-/** `HH:mm` de un date-time ISO sin romper la pantalla si viene vacío o raro. */
+/** `HH:mm` en hora de Ecuador, sin romper la pantalla si viene vacío o raro. */
 function horaDe(valor) {
-  const m = /T(\d{2}:\d{2})/.exec(String(valor ?? ''));
-  return m ? m[1] : '--:--';
+  const h = extraerHora(valor);
+  return h === '--' ? '--:--' : h;
 }
 import { listarTickets } from '../services/vuelosApi';
 

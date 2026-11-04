@@ -77,20 +77,41 @@ export function formatearFecha(fecha) {
 }
 
 /**
- * Extrae la hora HH:MM de un instante `date-time` (RFC 3339) sin pasar por Date.
- * Se toma el tramo textual, de modo que no hay conversion ni desfases de zona.
+ * Hora y fecha se muestran SIEMPRE en hora de Ecuador (America/Guayaquil).
+ *
+ * Si el instante ya viene con -05:00 (o sin zona), se toma el texto tal cual,
+ * sin pasar por Date. Si viene en otra zona (por ejemplo `...Z`, como devuelven
+ * algunas aerolíneas socias), se convierte: antes se mostraba la hora UTC y un
+ * vuelo de las 07:00 aparecía a las 12:00.
  */
-export function extraerHora(iso) {
-  if (!iso) return '--';
-  const coincidencia = String(iso).match(/T(\d{2}):(\d{2})/);
-  return coincidencia ? `${coincidencia[1]}:${coincidencia[2]}` : '--';
+const ZONA_BOOKING = 'America/Guayaquil';
+const RE_INSTANTE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
+
+function partesEnEcuador(iso) {
+  const m = RE_INSTANTE.exec(String(iso ?? '').trim());
+  if (!m) return null;
+  const [, fecha, hh, mm, zona] = m;
+  if (!zona || zona === '-05:00' || zona === '-0500') return { fecha, hora: `${hh}:${mm}` };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { fecha, hora: `${hh}:${mm}` };
+  const f = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONA_BOOKING, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(d);
+  const v = (t) => f.find((p) => p.type === t)?.value;
+  return { fecha: `${v('year')}-${v('month')}-${v('day')}`, hora: `${v('hour')}:${v('minute')}` };
 }
 
-/**
- * Extrae la parte de fecha (YYYY-MM-DD) de un instante `date-time`.
- */
+/** HH:MM de un instante `date-time` (RFC 3339), en hora de Ecuador. */
+export function extraerHora(iso) {
+  if (!iso) return '--';
+  return partesEnEcuador(iso)?.hora ?? '--';
+}
+
+/** YYYY-MM-DD de un instante `date-time` (o de una fecha simple), en hora de Ecuador. */
 export function extraerFecha(iso) {
   if (!iso) return '--';
+  const p = partesEnEcuador(iso);
+  if (p) return p.fecha;
   const coincidencia = String(iso).match(/^(\d{4}-\d{2}-\d{2})/);
   return coincidencia ? coincidencia[1] : '--';
 }
