@@ -465,6 +465,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             ...datosFactura,
             pnr: reserva?.pnr || datosFactura.pnr,
             creadaEn: reserva?.createdAt,
+            titulo: reserva?.factura?.descripcion || datosFactura.titulo,
+            factura: reserva?.factura ?? null,
           });
         }
 

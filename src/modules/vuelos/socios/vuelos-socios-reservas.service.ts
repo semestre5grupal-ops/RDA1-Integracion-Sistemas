@@ -3,6 +3,14 @@ import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { PagosService } from '../../pagos/pagos.service';
 import { SEPARADOR_ID } from './vuelos-socios.service';
+import {
+  conciliacionVuelos,
+  emitirFacturaVuelo,
+  emitirNotaCredito,
+  facturaDeReserva,
+  FacturaVuelo,
+  SQL_FACTURACION_VUELOS,
+} from './vuelos-facturacion';
 
 /**
  * Copia en Booking de las reservas hechas en aerolíneas socias (RDA2).
@@ -120,6 +128,53 @@ export class VuelosSociosReservasService implements OnModuleInit {
       this.logger.error(`[vuelos-socios] No se pudo crear vuelos_reservas_socio: ${e?.message}`);
     }
     return this.tablaLista;
+  }
+
+  // ─────────────────────────── Facturación ───────────────────────────
+  private facturacionLista = false;
+
+  /** Tablas de facturación aparte: si fallan, Mis Reservas sigue funcionando. */
+  private async asegurarFacturacion(): Promise<boolean> {
+    if (this.facturacionLista) return true;
+    if (!(await this.asegurarTabla())) return false;
+    try {
+      await this.dataSource.query(SQL_FACTURACION_VUELOS);
+      this.facturacionLista = true;
+    } catch (e: any) {
+      this.logger.error(`[vuelos-socios] Facturación no disponible: ${e?.message}`);
+    }
+    return this.facturacionLista;
+  }
+
+  /** Factura + comisión + liquidación de una reserva confirmada. Nunca rompe la reserva. */
+  async facturar(datos: Parameters<typeof emitirFacturaVuelo>[1]): Promise<FacturaVuelo | null> {
+    if (!(await this.asegurarFacturacion())) return null;
+    try {
+      return await emitirFacturaVuelo(this.dataSource, datos);
+    } catch (e: any) {
+      this.logger.error(`[vuelos-socios] No se emitió la factura de ${datos.bookingId}: ${e?.message}`);
+      return null;
+    }
+  }
+
+  async notaCredito(datos: Parameters<typeof emitirNotaCredito>[1]) {
+    if (!(await this.asegurarFacturacion())) return null;
+    try {
+      return await emitirNotaCredito(this.dataSource, datos);
+    } catch (e: any) {
+      this.logger.error(`[vuelos-socios] No se emitió la nota de crédito de ${datos.bookingId}: ${e?.message}`);
+      return null;
+    }
+  }
+
+  async factura(bookingId: string): Promise<FacturaVuelo | null> {
+    if (!(await this.asegurarFacturacion())) return null;
+    return facturaDeReserva(this.dataSource, bookingId).catch(() => null);
+  }
+
+  async conciliacion(filtros: { proveedor?: string; desde: string; hasta: string }) {
+    if (!(await this.asegurarFacturacion())) return { desde: filtros.desde, hasta: filtros.hasta, totales: [], reservas: [] };
+    return conciliacionVuelos(this.dataSource, filtros);
   }
 
   // ───────────────────────────── Pagos ─────────────────────────────

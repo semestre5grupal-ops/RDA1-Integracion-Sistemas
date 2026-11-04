@@ -1,10 +1,28 @@
-import { Column, Entity, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
+import { BeforeInsert, Column, Entity, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
+import { randomBytes } from 'crypto';
 import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
 
+/**
+ * Columnas = las de la tabla real (01_master_migration_12_schemas.sql). Antes la
+ * entidad usaba total_recaudado / monto_liquidar_socio_90pct / fecha_pago, que no
+ * existen en la base, y el Panel 4 fallaba. Los nombres de las propiedades se
+ * mantienen para no cambiar el resto del código.
+ */
 @Entity({ name: 'liquidaciones_proveedores', schema: 'schema_finanzas' })
 export class LiquidacionProveedor {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({ name: 'numero_liquidacion', type: 'varchar', length: 50, unique: true })
+  numeroLiquidacion: string; // LIQ-YYYYMM-XXXX
+
+  @BeforeInsert()
+  asignarNumero() {
+    if (!this.numeroLiquidacion) {
+      const d = new Date();
+      this.numeroLiquidacion = `LIQ-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${randomBytes(3).toString('hex').toUpperCase()}`;
+    }
+  }
 
   @Column({ name: 'proveedor_codigo', type: 'varchar', length: 50 })
   proveedorCodigo: string; // ej. 'NODE_ATR_DILAN', 'NODE_AUT_LOCAL', etc.
@@ -16,7 +34,7 @@ export class LiquidacionProveedor {
   periodo: string; // ej. '2026-10-Q1'
 
   @Column('numeric', {
-    name: 'total_recaudado',
+    name: 'monto_bruto_ventas',
     precision: 10,
     scale: 2,
     default: 0.00,
@@ -25,7 +43,7 @@ export class LiquidacionProveedor {
   totalRecaudado: number;
 
   @Column('numeric', {
-    name: 'comision_booking_10pct',
+    name: 'comision_retenida_booking',
     precision: 10,
     scale: 2,
     default: 0.00,
@@ -34,7 +52,7 @@ export class LiquidacionProveedor {
   comisionBooking10pct: number;
 
   @Column('numeric', {
-    name: 'monto_liquidar_socio_90pct',
+    name: 'monto_neto_a_pagar',
     precision: 10,
     scale: 2,
     default: 0.00,
@@ -42,13 +60,22 @@ export class LiquidacionProveedor {
   })
   montoLiquidarSocio90pct: number;
 
-  @Column({ type: 'varchar', length: 20, default: 'PENDIENTE' })
+  @Column('numeric', {
+    name: 'porcentaje_comision_booking',
+    precision: 5,
+    scale: 2,
+    default: 10.0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  porcentajeComision: number;
+
+  @Column({ type: 'varchar', length: 30, default: 'PENDIENTE' })
   estado: string; // 'PENDIENTE', 'PAGADO', 'CONCILIADO'
 
-  @Column({ name: 'comprobante_transferencia_url', type: 'text', nullable: true })
+  @Column({ name: 'comprobante_pago_url', type: 'text', nullable: true })
   comprobanteTransferenciaUrl: string;
 
-  @Column({ name: 'fecha_pago', type: 'timestamptz', nullable: true })
+  @Column({ name: 'pagado_at', type: 'timestamptz', nullable: true })
   fechaPago: Date;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

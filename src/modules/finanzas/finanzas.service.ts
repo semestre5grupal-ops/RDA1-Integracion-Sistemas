@@ -107,6 +107,8 @@ export class FinanzasService {
 
     return list.map(l => ({
       id: l.id,
+      numero_liquidacion: l.numeroLiquidacion,
+      porcentaje_comision: Number(l.porcentajeComision ?? 10),
       proveedor_codigo: l.proveedorCodigo,
       vertical: l.vertical,
       periodo: l.periodo,

@@ -22,6 +22,7 @@ const PASOS = [
   { id: 'cobro', label: 'Cobro', sub: 'MS_PAG', icon: '💳' },
   { id: 'reserva_aerolinea', label: 'Reserva', sub: 'en la aerolínea', icon: '✈️' },
   { id: 'copia', label: 'Copia', sub: 'Mis Reservas', icon: '🗂️' },
+  { id: 'factura', label: 'Factura', sub: 'Factura · NC · comisión', icon: '🧾' },
   { id: 'confirmada', label: 'Confirmada', sub: 'fin feliz', icon: '✅' },
 ];
 const RAMAS = [
