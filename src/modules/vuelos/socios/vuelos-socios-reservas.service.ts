@@ -64,6 +64,8 @@ export interface Cobro {
   estado?: string;
   status?: number;
   detalle?: string;
+  /** true si el cobro es un reintento tras un intento ya reembolsado. */
+  reintento?: boolean;
 }
 
 /** Extrae datos de resumen de una reserva del contrato v2 (BookingDetail). */
@@ -129,18 +131,27 @@ export class VuelosSociosReservasService implements OnModuleInit {
   async cobrar(monto: number, idempotencyKey: string, propietarioId: string): Promise<Cobro> {
     if (!this.pagos) return { ok: true, paymentReference: `pay_${idempotencyKey.slice(0, 18)}`, estado: 'SIN_MS_PAG' };
     try {
-      const r: any = await this.pagos.procesarPago(
+      const pedir = (clave: string) => this.pagos!.procesarPago(
         {
           monto: Math.round(monto * 100) / 100,
           metodo_pago: 'TARJETA_CREDITO',
           ...(/^[0-9a-f-]{36}$/i.test(propietarioId) ? { cliente_id: propietarioId } : {}),
         } as any,
-        `vuelo-socio-${idempotencyKey}`,
+        clave,
       );
+      let r: any = await pedir(`vuelo-socio-${idempotencyKey}`);
+      // Misma clave que un intento anterior que la aerolínea rechazó y ya se
+      // reembolsó: ese intento terminó, así que el reintento es un cobro nuevo.
+      // (Sin esto MS_PAG devuelve la transacción REEMBOLSADA y se respondía 402.)
+      let reintento = false;
+      if (r?.estado === 'REEMBOLSADO' || r?.estado === 'REEMBOLSO_PARCIAL') {
+        reintento = true;
+        r = await pedir(`vs-${idempotencyKey.slice(0, 40)}-r${Date.now().toString(36)}`); // <= 64 caracteres
+      }
       if (r?.estado !== 'APROBADO') {
         return { ok: false, status: 402, estado: r?.estado, detalle: r?.mensaje || 'Pago rechazado.' };
       }
-      return { ok: true, transaccionId: r.transaccion_id, paymentReference: referenciaPagoBooking(r.transaccion_id || idempotencyKey), estado: r.estado };
+      return { ok: true, transaccionId: r.transaccion_id, paymentReference: referenciaPagoBooking(r.transaccion_id || idempotencyKey), estado: r.estado, reintento };
     } catch (e: any) {
       const status = e?.getStatus?.() ?? 502;
       const resp = e?.getResponse?.();

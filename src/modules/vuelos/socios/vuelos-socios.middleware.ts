@@ -200,7 +200,10 @@ export class VuelosSociosMiddleware {
     // 3) Reserva en la aerolínea con la referencia de pago real.
     const cuerpo = { ...(req.body ?? {}), payment: { ...(req.body?.payment ?? {}), paymentReference: cobro.paymentReference } };
     const tRes = Date.now();
-    const r = await this.socios.reenviar(nodo, 'POST', ['bookings'], '', cuerpo, entrantes);
+    // En un reintento (el intento anterior falló y se reembolsó) la aerolínea
+    // necesita otra Idempotency-Key: con la misma y otros datos responde 409.
+    const cabecerasReserva = cobro.reintento ? { ...entrantes, 'idempotency-key': randomUUID() } : entrantes;
+    const r = await this.socios.reenviar(nodo, 'POST', ['bookings'], '', cuerpo, cabecerasReserva);
     const confirmo = r.status >= 200 && r.status < 300 && !!r.body?.bookingId;
     this.traza(entrantes, 'reserva_aerolinea', confirmo ? 'ok' : 'error',
       confirmo ? `Aerolínea confirmó · PNR ${r.body?.pnr ?? '?'}` : `Aerolínea rechazó (HTTP ${r.status}): ${r.body?.detail || r.body?.title || ''}`,
