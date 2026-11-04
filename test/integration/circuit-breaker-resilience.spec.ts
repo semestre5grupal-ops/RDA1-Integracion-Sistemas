@@ -25,6 +25,7 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
   // Repositorio simulado en memoria para ConfigProveedor
   const mockConfigRepoData: any[] = [];
   const mockConfigRepo = {
+    count: jest.fn().mockImplementation(() => Promise.resolve(mockConfigRepoData.length)),
     find: jest.fn().mockImplementation(() => Promise.resolve([...mockConfigRepoData])),
     findOne: jest.fn().mockImplementation((query) => {
       const codeOrId = query.where?.[0]?.codigoNodo || query.where?.codigoNodo;
@@ -87,7 +88,9 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
   describe('1. Parametrización en Vivo de URLs Oficiales (NodesService & Controller)', () => {
     it('debe sembrar nodos por defecto con variables .env si la tabla está vacía y calcular semáforos LED para Panel 1', async () => {
       const nodos = await nodesService.listarNodos();
-      expect(nodos.length).toBeGreaterThanOrEqual(20);
+      // Solo se siembran socios reales: los de ejemplo con localhost ya no.
+      expect(nodos.length).toBeGreaterThanOrEqual(5);
+      expect(nodos.some((n) => String(n.url || '').includes('localhost'))).toBe(false);
 
       const dilanNode = nodos.find((n) => n.codigo_nodo === 'NODE_ATR_DILAN');
       expect(dilanNode).toBeDefined();
@@ -99,7 +102,7 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
 
       // Compatibilidad con campos de Panel 1
       expect(dilanNode.codigo).toBe('NODE_ATR_DILAN');
-      expect(dilanNode.estado).toBe('OPERATIVO');
+      expect(dilanNode.estado).toBe('UNKNOWN'); // sin ping real todavía
       expect(dilanNode.failCount).toBe(0);
     });
 
