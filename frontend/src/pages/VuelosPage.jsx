@@ -139,20 +139,26 @@ export function VuelosPage() {
     try {
       // El UUID lo creamos inline para idempotencia de esta transaccion
       const clave = crypto.randomUUID();
-      const cabina = tarifa?.cabinClass || oferta.itineraries[0]?.pricingOptions[0]?.cabinClass || 'ECONOMY';
-        const marca = tarifa?.fareBrand || 'STANDARD';
-      const itinerarioId = oferta.itineraries[0]?.itineraryId;
+      // El contrato exige UNA tarifa por cada itinerario de la oferta (ida y
+      // vuelta = 2). Antes solo se enviaba la de la ida y la aerolínea respondía
+      // 422 "itinerarySelections must choose a fare for every itinerary".
+      // Para cada tramo se usa la misma cabina y marca elegidas si existen ahí;
+      // si no, la misma cabina, y si tampoco, la primera tarifa del tramo.
+      const cabina = tarifa?.cabinClass || oferta.itineraries[0]?.pricingOptions?.[0]?.cabinClass || 'ECONOMY';
+      const marca = tarifa?.fareBrand || oferta.itineraries[0]?.pricingOptions?.[0]?.fareBrand || 'STANDARD';
+      const selecciones = (oferta.itineraries ?? []).map((it) => {
+        const opciones = it.pricingOptions ?? [];
+        const elegida =
+          opciones.find((p) => p.cabinClass === cabina && p.fareBrand === marca) ||
+          opciones.find((p) => p.cabinClass === cabina) ||
+          opciones[0] || { cabinClass: cabina, fareBrand: marca };
+        return { itineraryId: it.itineraryId, cabinClass: elegida.cabinClass, fareBrand: elegida.fareBrand };
+      });
 
       const respuesta = await crearHold(
         {
           offerId: oferta.offerId,
-          itinerarySelections: [
-            {
-              itineraryId: itinerarioId,
-              cabinClass: cabina,
-              fareBrand: marca,
-            },
-          ],
+          itinerarySelections: selecciones,
           passengersBreakdown: busquedaActiva?.passengers,
         },
         clave,
