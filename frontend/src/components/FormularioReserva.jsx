@@ -377,9 +377,18 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         onConfirmada?.(reserva, lista);
       } catch (fallo) {
         trackEvent('payment_failed', 'vuelos', { error: fallo?.message });
+        // Un intento fallido no se repite con la misma clave: el siguiente
+        // "Confirmar pago" es un intento nuevo.
+        claveIdempotencia.current = uuidv4();
+        const datos = fallo?.response?.data ?? {};
+        const campos = (datos.invalidParams ?? [])
+          .map((p) => `${String(p.name ?? '').replace(/^passengers[.[]?(\d+)\]?\.?/, (_, i) => `Pasajero ${Number(i) + 1}: `)} ${p.reason ?? ''}`.trim())
+          .filter(Boolean);
+        const titulo = datos.title && !/request failed validation|bad request/i.test(datos.title) ? datos.title : null;
         setErrorGeneral(
-          fallo?.response?.data?.detail ??
-            'No se pudo completar la reserva. Intentalo de nuevo.',
+          [titulo, campos.length ? campos.join(' · ') : null, datos.detail]
+            .filter(Boolean)
+            .join(' — ') || 'No se pudo completar la reserva. Intentalo de nuevo.',
         );
       } finally {
         setEnviando(false);
