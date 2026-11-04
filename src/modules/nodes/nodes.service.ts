@@ -60,8 +60,12 @@ export class NodesService {
 
   async listarNodos(): Promise<any[]> {
     this.logger.log('Consultando estado de salud de nodos de proveedores en schema_proveedores');
-    // Sembrar y asegurar los 20 nodos oficiales estandarizados (5 por vertical)
-    await this.sembrarNodosPorDefecto();
+    // Solo se siembran ejemplos cuando la tabla está VACÍA (instalación nueva).
+    // Antes se re-sembraban en cada consulta: los proveedores de ejemplo borrados
+    // volvían a aparecer y la URL de Dilan se pisaba con la de Tailscale.
+    if ((await this.configRepo.count()) === 0) {
+      await this.sembrarNodosPorDefecto();
+    }
     let nodos = await this.configRepo.find({ order: { vertical: 'ASC', codigoNodo: 'ASC' } });
 
     return nodos.map(n => {
@@ -1085,7 +1089,10 @@ export class NodesService {
       },
     ];
 
-    for (const s of semillas) {
+    // Nunca se siembran proveedores que apuntan a Booking mismo (localhost):
+    // no existen y en el panel parecían socios reales.
+    const reales = semillas.filter((s) => !/\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)[:/]/i.test(String(s.baseUrlRest || '')));
+    for (const s of reales) {
       try {
         const existente = await this.configRepo.findOne({ where: { codigoNodo: s.codigoNodo } });
         if (!existente) {
