@@ -269,6 +269,25 @@ export class ReservasService {
       } catch (_) {}
     }
 
+    // 3b. Vuelos con aerolíneas socias (reservas hechas desde Booking): la
+    // aerolínea manda su bookingId o el PNR; en Booking es booking_id_socio.
+    if (!verticalActualizada) {
+      try {
+        const socioUpdate = await this.dataSource.query(
+          `UPDATE public.vuelos_reservas_socio
+              SET status = 'CHECKED_IN', checkin_at = COALESCE(checkin_at, now()),
+                  checkin_origen = COALESCE(checkin_origen, 'aerolinea'), updated_at = now()
+            WHERE (booking_id_socio = $1 OR booking_id = $1 OR pnr = upper($1)) AND status <> 'CANCELLED'
+            RETURNING booking_id, codigo_nodo, pnr, status`,
+          [targetId],
+        );
+        if (socioUpdate && socioUpdate.length > 0) {
+          verticalActualizada = 'VUELOS_SOCIO';
+          reservaActualizada = socioUpdate[0];
+        }
+      } catch (_) {}
+    }
+
     // 4. Si no, en Alojamientos
     if (!verticalActualizada) {
       try {

@@ -20,6 +20,7 @@ export type PasoVuelo =
   | 'confirmada'
   | 'reembolso'
   | 'cancelacion'
+  | 'checkin'
   | 'estado_vuelo'
   | 'consulta';
 

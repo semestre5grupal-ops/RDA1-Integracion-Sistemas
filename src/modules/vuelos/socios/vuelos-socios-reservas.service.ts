@@ -46,6 +46,15 @@ CREATE TABLE IF NOT EXISTS public.vuelos_reservas_socio (
 );
 CREATE INDEX IF NOT EXISTS ix_vuelos_reservas_socio_propietario
   ON public.vuelos_reservas_socio (propietario_id, created_at DESC);
+ALTER TABLE public.vuelos_reservas_socio
+  ADD COLUMN IF NOT EXISTS checkin_at     timestamptz,
+  ADD COLUMN IF NOT EXISTS checkin_origen varchar(30);
+CREATE TABLE IF NOT EXISTS public.vuelos_eventos_cursor (
+  codigo_nodo   varchar(50) PRIMARY KEY,
+  ultimo_evento varchar(120),
+  leidos        bigint      NOT NULL DEFAULT 0,
+  actualizado   timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 export interface ReservaSocio {
@@ -279,7 +288,8 @@ export class VuelosSociosReservasService implements OnModuleInit {
     const r = resumenDeReserva(reserva);
     await this.dataSource.query(
       `UPDATE public.vuelos_reservas_socio
-          SET status = $2, pnr = COALESCE($3, pnr), detalle = $4, updated_at = now()
+          SET status = CASE WHEN status = 'CHECKED_IN' AND $2 IN ('CONFIRMED', 'TICKETED', 'TICKET_ISSUING') THEN status ELSE $2 END,
+              pnr = COALESCE($3, pnr), detalle = $4, updated_at = now()
         WHERE booking_id = $1`,
       [bookingId, r.status, r.pnr, JSON.stringify(reserva ?? {})],
     );
@@ -293,6 +303,80 @@ export class VuelosSociosReservasService implements OnModuleInit {
         WHERE booking_id = $1`,
       [bookingId, status, reembolsado],
     );
+  }
+
+  /** Check-in hecho (en la aerolínea o desde Booking). true si la reserva cambió. */
+  async marcarCheckin(bookingId: string, fecha: Date, origen: string): Promise<boolean> {
+    if (!(await this.asegurarTabla())) return false;
+    const filas = await this.dataSource.query(
+      `UPDATE public.vuelos_reservas_socio
+          SET status = 'CHECKED_IN', checkin_at = COALESCE(checkin_at, $2), checkin_origen = COALESCE(checkin_origen, $3), updated_at = now()
+        WHERE booking_id = $1 AND status NOT IN ('CANCELLED', 'CHECKED_IN')
+        RETURNING booking_id`,
+      [bookingId, fecha, origen],
+    );
+    return filas.length > 0;
+  }
+
+  /** Último evento leído del feed de una aerolínea. */
+  async cursorEventos(codigoNodo: string): Promise<string | null> {
+    if (!(await this.asegurarTabla())) return null;
+    const f = await this.dataSource.query(`SELECT ultimo_evento FROM public.vuelos_eventos_cursor WHERE codigo_nodo = $1`, [codigoNodo]);
+    return f[0]?.ultimo_evento ?? null;
+  }
+
+  async guardarCursor(codigoNodo: string, ultimo: string, leidos: number): Promise<void> {
+    if (!(await this.asegurarTabla())) return;
+    await this.dataSource.query(
+      `INSERT INTO public.vuelos_eventos_cursor (codigo_nodo, ultimo_evento, leidos) VALUES ($1, $2, $3)
+       ON CONFLICT (codigo_nodo) DO UPDATE SET ultimo_evento = EXCLUDED.ultimo_evento,
+         leidos = vuelos_eventos_cursor.leidos + EXCLUDED.leidos, actualizado = now()`,
+      [codigoNodo, ultimo, leidos],
+    );
+  }
+
+  /**
+   * Cliente cross-platform: el cliente de Booking (schema_clientes.clientes, por
+   * email) y con qué id lo conoce la aerolínea (clientes_socios_mapeo). Sin
+   * duplicados: un registro por email y uno por (cliente, aerolínea).
+   */
+  async mapearClienteSocio(d: {
+    email: string; nombre?: string; documento?: string; telefono?: string;
+    codigoNodo: string; idExterno: string; metadata?: Record<string, any>;
+  }): Promise<void> {
+    if (!d.email || !(await this.asegurarTabla())) return;
+    try {
+      const [cli] = await this.dataSource.query(
+        `INSERT INTO schema_clientes.clientes (email, nombre, cedula_ruc, telefono)
+         VALUES (lower($1), $2, $3, $4)
+         ON CONFLICT (email) DO UPDATE SET
+           nombre = COALESCE(schema_clientes.clientes.nombre, EXCLUDED.nombre),
+           cedula_ruc = COALESCE(schema_clientes.clientes.cedula_ruc, EXCLUDED.cedula_ruc),
+           telefono = COALESCE(schema_clientes.clientes.telefono, EXCLUDED.telefono),
+           updated_at = now()
+         RETURNING id`,
+        [d.email.slice(0, 150), d.nombre?.slice(0, 150) ?? null, d.documento?.slice(0, 20) ?? null, d.telefono?.slice(0, 20) ?? null],
+      );
+      await this.dataSource.query(
+        `INSERT INTO schema_clientes.clientes_socios_mapeo (cliente_id, codigo_nodo, external_client_id, metadata)
+         VALUES ($1, $2, $3, $4::jsonb)
+         ON CONFLICT (cliente_id, codigo_nodo) DO UPDATE SET
+           metadata = COALESCE(schema_clientes.clientes_socios_mapeo.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+           updated_at = now()`,
+        [cli.id, d.codigoNodo, d.idExterno.slice(0, 120), JSON.stringify({ origen: 'VUELOS_BOOKING', ...(d.metadata ?? {}) })],
+      );
+    } catch (e: any) {
+      this.logger.warn(`[vuelos-socios] No se guardó el mapeo de cliente con ${d.codigoNodo}: ${e?.message}`);
+    }
+  }
+
+  /** La aerolínea informó (evento) con qué id identifica a nuestro cliente. */
+  async idClienteEnSocio(codigoNodo: string, propietarioId: string, idExterno: string): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE schema_clientes.clientes_socios_mapeo SET external_client_id = $3, updated_at = now()
+        WHERE codigo_nodo = $1 AND metadata->>'propietario' = $2 AND external_client_id <> $3`,
+      [codigoNodo, propietarioId, idExterno.slice(0, 120)],
+    ).catch(() => undefined);
   }
 
   async obtener(bookingId: string): Promise<ReservaSocio | null> {
