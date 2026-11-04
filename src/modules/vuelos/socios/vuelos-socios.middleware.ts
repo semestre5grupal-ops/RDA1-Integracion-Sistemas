@@ -186,6 +186,12 @@ export class VuelosSociosMiddleware {
       return;
     }
 
+    // 1b) Datos de pasajeros en el formato del contrato (antes de cobrar):
+    //     nacionalidad ISO alfa-2 (EC, no ECU) y teléfono E.164 (+593...).
+    if (Array.isArray(req.body?.passengers)) {
+      req.body = { ...req.body, passengers: req.body.passengers.map(normalizarPasajero) };
+    }
+
     // 2) Cobro en MS_PAG (idempotente con la misma clave del cliente).
     const tCobro = Date.now();
     const cobro = await this.reservas.cobrar(monto, idem, propietario);
@@ -341,4 +347,27 @@ function withDetalle(r: RespuestaProxy, extra: string): RespuestaProxy {
     return { ...r, body: { ...r.body, detail: [r.body.detail, extra].filter(Boolean).join(' ') } };
   }
   return r;
+}
+
+const ALFA3_A_ALFA2: Record<string, string> = {
+  ECU: 'EC', COL: 'CO', PER: 'PE', ARG: 'AR', CHL: 'CL', USA: 'US', MEX: 'MX', ESP: 'ES', BRA: 'BR',
+  BOL: 'BO', VEN: 'VE', URY: 'UY', PRY: 'PY', PAN: 'PA', CRI: 'CR', CAN: 'CA', FRA: 'FR', DEU: 'DE',
+  ITA: 'IT', GBR: 'GB', PRT: 'PT', CHN: 'CN', JPN: 'JP',
+};
+
+/** Nacionalidad a ISO alfa-2 y teléfono a E.164 (Ecuador por defecto). */
+export function normalizarPasajero(p: any): any {
+  if (!p || typeof p !== 'object') return p;
+  const out = { ...p };
+  const nac = String(p.nationality ?? '').trim().toUpperCase();
+  if (nac.length === 3 && ALFA3_A_ALFA2[nac]) out.nationality = ALFA3_A_ALFA2[nac];
+  else if (nac) out.nationality = nac;
+  if (p.contact && typeof p.contact === 'object' && p.contact.phone != null) {
+    let tel = String(p.contact.phone).replace(/[\s().-]/g, '');
+    if (tel.startsWith('00')) tel = '+' + tel.slice(2);
+    else if (/^0\d{8,9}$/.test(tel)) tel = '+593' + tel.slice(1); // 0991234567 → +593991234567
+    else if (/^593\d{8,9}$/.test(tel)) tel = '+' + tel;
+    out.contact = { ...p.contact, phone: tel };
+  }
+  return out;
 }

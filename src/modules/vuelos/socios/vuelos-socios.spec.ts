@@ -334,3 +334,13 @@ describe('referenciaPagoBooking', () => {
     expect(referenciaPagoBooking('7d1a7ccd-d58e-497b-aa8a-c3a521bb577a', new Date('2026-11-05T03:00:00Z'))).toBe(a);
   });
 });
+
+describe('normalizarPasajero', () => {
+  it('pasa la nacionalidad a alfa-2 y el teléfono a E.164', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { normalizarPasajero } = require('./vuelos-socios.middleware');
+    expect(normalizarPasajero({ nationality: 'ECU', contact: { phone: '099 123 4567' } })).toMatchObject({ nationality: 'EC', contact: { phone: '+593991234567' } });
+    expect(normalizarPasajero({ nationality: 'col', contact: { phone: '+573001234567' } })).toMatchObject({ nationality: 'CO', contact: { phone: '+573001234567' } });
+    expect(normalizarPasajero({ nationality: 'EC', contact: { phone: '593991234567' } }).contact.phone).toBe('+593991234567');
+  });
+});
