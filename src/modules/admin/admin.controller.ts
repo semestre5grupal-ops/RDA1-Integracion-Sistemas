@@ -1,4 +1,6 @@
 import { BadRequestException, UseInterceptors, Controller, Get, Put, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { AdminMetricasService } from './admin-metricas.service';
+import { trazaVuelos } from '../vuelos/socios/vuelos-traza';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { AdminErrorsInterceptor } from './admin-errors.interceptor';
@@ -25,6 +27,7 @@ export class AdminController {
     private readonly auditService: AdminAuditService,
     private readonly proveedoresService: AdminProveedoresService,
     private readonly connectorHealthService: ConnectorHealthService,
+    private readonly metricasService: AdminMetricasService,
   ) {}
 
   // ── Monitor de Nodos del Ecosistema y Kill-Switches (RDA2 Brecha B-03) ───
@@ -70,6 +73,25 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Estadísticas globales.' })
   async getStats() {
     return this.adminService.getStats();
+  }
+
+  @Get('metricas')
+  @ApiOperation({ summary: 'Tablero Resumen: KPIs con comparación, serie diaria, verticales, destinos y proveedores (datos reales)' })
+  @ApiResponse({ status: 200, description: 'Métricas del período (7, 30, 90 o 365 días).' })
+  async getMetricas(@Query('dias') dias?: string) {
+    return this.metricasService.getMetricas(Number(dias));
+  }
+
+  @Get('procesos/vuelos')
+  @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de vuelos (estados, dinero, aerolíneas)' })
+  async getProcesoVuelos() {
+    return this.metricasService.getProcesoVuelos();
+  }
+
+  @Get('procesos/vuelos/en-vivo')
+  @ApiOperation({ summary: 'Traza en tiempo real del proceso de vuelos, agrupable por X-Correlation-Id (eventos nuevos desde `desde`)' })
+  enVivoVuelos(@Query('desde') desde?: string) {
+    return trazaVuelos.desde(Number(desde) || 0);
   }
 
   // ── Usuarios ──────────────────────────────────────────────────────────────

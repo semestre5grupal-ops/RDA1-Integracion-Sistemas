@@ -117,17 +117,22 @@ export class AdminService {
   async getStats() {
     this.logger.log('Admin: consultando estadísticas globales...');
 
-    const [vuelos, autos, atracciones, hospedaje, tel] = await Promise.all([
+    const [vuelos, autos, atracciones, hospedaje, tel, vuelosSocios] = await Promise.all([
       this.reservaRepo.find().catch((e) => { this.logger.error('Error vuelos:', e); return [] as Reserva[]; }),
       this.orderAutoRepo.find().catch((e) => { this.logger.error('Error autos:', e); return [] as OrderAuto[]; }),
       this.reservaAtraccionRepo.find().catch((e) => { this.logger.error('Error atracciones:', e); return [] as ReservaAtraccion[]; }),
       this.reservasHospedaje(),
       this.telemetria(),
+      // Reservas hechas en aerolíneas socias (RDA2): viven en la aerolínea, Booking guarda la copia.
+      this.dataSource
+        .query(`SELECT booking_id, pnr, status, grand_total, currency, created_at FROM public.vuelos_reservas_socio`)
+        .catch(() => [] as any[]),
     ]);
 
     // Todas las reservas normalizadas (misma forma para las 4 verticales)
     const todas = [
       ...vuelos.map((r) => ({ tipo: 'vuelo', vertical: 'vuelos', id: r.idReserva, pnr: r.pnr, estado: r.estado, total: Number(r.total || 0), moneda: r.moneda || 'USD', createdAt: r.fechaCreacion })),
+      ...vuelosSocios.map((r: any) => ({ tipo: 'vuelo', vertical: 'vuelos', id: r.booking_id, pnr: r.pnr, estado: r.status, total: Number(r.grand_total || 0), moneda: r.currency || 'USD', createdAt: r.created_at })),
       ...autos.map((o) => ({ tipo: 'auto', vertical: 'autos', id: o.id, pnr: o.id.substring(0, 6).toUpperCase(), estado: o.status, total: Number(o.totalPrice?.total || 0), moneda: o.totalPrice?.currency || 'USD', createdAt: o.createdAt })),
       ...atracciones.map((a) => ({ tipo: 'atraccion', vertical: 'atracciones', id: a.id, pnr: a.id.substring(0, 6).toUpperCase(), estado: a.status, total: Number(a.totalPrice?.total || 0), moneda: a.totalPrice?.currency || 'USD', createdAt: a.createdAt })),
       ...hospedaje.map((h) => ({ ...this.mapHospedaje(h), vertical: 'hospedaje' })),
@@ -157,7 +162,7 @@ export class AdminService {
       generadoEn: new Date().toISOString(),
       kpis: {
         totalReservas: todas.length,
-        reservasVuelos: vuelos.length,
+        reservasVuelos: vuelos.length + vuelosSocios.length,
         reservasAutos: autos.length,
         reservasAtracciones: atracciones.length,
         reservasHospedaje: hospedaje.length,

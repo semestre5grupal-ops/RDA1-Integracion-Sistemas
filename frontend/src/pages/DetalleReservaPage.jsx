@@ -7,7 +7,7 @@ import {
   listarTickets,
   obtenerReserva,
 } from '../services/vuelosApi';
-import { formatearFecha, formatearMoneda } from '../services/formato';
+import { formatearFecha, formatearMoneda, extraerHora } from '../services/formato';
 import { BoardingPass } from '../components/BoardingPass';
 import { ModalPostventa } from '../components/ModalPostventa';
 import { ModalCambioFecha } from '../components/ModalCambioFecha';
@@ -364,14 +364,14 @@ export function DetalleReservaPage({ bookingId }) {
               {itinerario.segments.map((seg) => (
                 <div className="detalle-segmento" key={seg.segmentId}>
                   <span className="detalle-hora boarding-mono">
-                    {String(seg.departureAt).slice(11, 16)}
+                    {extraerHora(seg.departureAt ?? seg.departure?.at)}
                   </span>
                   <span className="detalle-iata">{seg.departureIataCode}</span>
                   <span className="vuelo-linea" aria-hidden="true">
                     ─────────
                   </span>
                   <span className="detalle-hora boarding-mono">
-                    {String(seg.arrivalAt).slice(11, 16)}
+                    {extraerHora(seg.arrivalAt ?? seg.arrival?.at)}
                   </span>
                   <span className="detalle-iata">{seg.arrivalIataCode}</span>
                   <span className="vuelo-numero">· {seg.flightNumber}</span>

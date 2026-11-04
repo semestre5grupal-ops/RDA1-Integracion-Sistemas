@@ -97,7 +97,7 @@ function exigirIdempotencyKey(valor: string | undefined): string {
  * desde otra pestana, y el propio contrato no expone una forma de hacerlo sin
  * credenciales.
  */
-function propietarioDesde(huella: string | undefined, authHeader?: string): string {
+export function propietarioDesde(huella: string | undefined, authHeader?: string): string {
   if (authHeader && authHeader.startsWith('Bearer ')) {
     try {
       const token = authHeader.split(' ')[1];

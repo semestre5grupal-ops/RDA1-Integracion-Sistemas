@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ResumenTab } from '../components/admin/ResumenTab';
+import { ProcesosTab } from '../components/admin/ProcesosTab';
 import { api } from '../services/api';
 import { supabase } from '../services/supabase';
 import { GestionAlojamientos } from '../components/admin/GestionAlojamientos';
@@ -21,9 +23,11 @@ const C = {
 };
 
 const TABS = [
+  { id: 'resumen', label: '📈 Resumen', sub: 'Ventas y métricas' },
+  { id: 'procesos', label: '🧭 Procesos', sub: 'Grafos de vuelos' },
   { id: 'paneles_rda2', label: '🚀 8 Paneles RDA2', sub: 'Arquitectura Distribuida' },
   { id: 'observabilidad', label: '📊 Observabilidad & Finanzas', sub: 'Estado en vivo y dinero' },
-  { id: 'microservicios', label: '🔬 Servicios & Prov.', sub: 'RDA2 Simulado' },
+  { id: 'microservicios', label: '🔬 Servicios & Prov.', sub: 'Socios conectados' },
   { id: 'gestion', label: '🗂️ Gestión', sub: 'Usuarios & Reservas' },
   { id: 'soporte', label: '🎧 Soporte', sub: 'Ticketing & QC' },
   { id: 'auditoria', label: '🛡️ Auditoría', sub: 'Logs de Seguridad' },
@@ -224,17 +228,9 @@ function MicroserviciosTab() {
       const { data } = await api.get('/admin/nodes/health', { params: { probe } });
       setNodesData(data);
     } catch (err) {
-      // Fallback resiliente a nodos preconfigurados si el backend no responde
-      setNodesData(prev => ({
-        summary: { total_nodes: 5, online: 5, disabled_switches: 0, offline: 0, system_health: 'HEALTHY' },
-        nodes: [
-          { id: 'atracciones', nombre: 'Sistema Atracciones & Tours', vertical: 'Atracciones', protocolo: 'REST / OpenAPI v2 + Circuit Breaker', url: 'http://localhost:3000/api/v2/atracciones', enabled: true, status: 'ONLINE', latency: 18, circuitBreaker: 'CLOSED', responsable: 'Dilan' },
-          { id: 'autos', nombre: 'Sistema Renta de Autos & Flota', vertical: 'Autos', protocolo: 'REST / OpenAPI v2 + Cooldown 2h', url: 'http://localhost:3000/api/v2/autos/orders', enabled: true, status: 'ONLINE', latency: 24, circuitBreaker: 'CLOSED', responsable: 'Equipo Autos' },
-          { id: 'alojamientos', nombre: 'Sistema Alojamientos & Hospedaje', vertical: 'Alojamientos', protocolo: 'REST / API Key Sync (X-Api-Key)', url: 'http://localhost:3000/api/v2/alojamientos', enabled: true, status: 'ONLINE', latency: 15, circuitBreaker: 'CLOSED', responsable: 'Equipo Alojamientos' },
-          { id: 'vuelos', nombre: 'Sistema Vuelos & Aerolíneas', vertical: 'Vuelos', protocolo: 'REST / SOAP Translation Gateway', url: 'http://localhost:3000/api/v2/vuelos/search', enabled: true, status: 'ONLINE', latency: 38, circuitBreaker: 'CLOSED', responsable: 'Equipo Vuelos' },
-          { id: 'grpc_inventory', nombre: 'Servidor Inbound de Inventario gRPC', vertical: 'Infraestructura Core', protocolo: 'gRPC / HTTP/2 Multiplexed (Port 50051)', url: '0.0.0.0:50051', enabled: true, status: 'ONLINE', latency: 4, circuitBreaker: 'CLOSED', responsable: 'Booking Gateway' },
-        ]
-      }));
+      // Sin respuesta del backend NO se muestran nodos inventados en verde:
+      // se avisa del error y se conserva lo último que sí llegó.
+      setAviso({ tipo: 'error', texto: `No se pudo consultar el estado de los nodos: ${err?.response?.data?.message || err?.message || 'error de red'}` });
     } finally {
       setLoading(false);
       setProbing(false);
@@ -367,7 +363,7 @@ function MicroserviciosTab() {
         <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', borderTop: `4px solid ${s.system_health === 'HEALTHY' ? C.green : C.orange}` }}>
           <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.gray }}>ESTADO DEL ECOSISTEMA</div>
           <div style={{ fontSize: '1.3rem', fontWeight: 800, color: s.system_health === 'HEALTHY' ? C.green : C.orange, marginTop: 6 }}>
-            {s.system_health === 'HEALTHY' ? '🟢 OPERACIONAL' : s.system_health === 'PARTIAL_FALLBACK' ? '🟡 CONTINGENCIA' : '🔴 DEGRADADO'}
+            {s.system_health === 'HEALTHY' ? '🟢 OPERACIONAL' : s.system_health === 'PARTIAL_FALLBACK' ? '🟡 CONTINGENCIA' : s.system_health === 'UNVERIFIED' ? '⚪ SIN VERIFICAR' : '🔴 DEGRADADO'}
           </div>
           <div style={{ fontSize: '0.72rem', color: C.gray, marginTop: 2 }}>Circuit Breakers listos</div>
         </div>
@@ -382,16 +378,19 @@ function MicroserviciosTab() {
           const isOnline = isEnabled && node.status === 'ONLINE';
           const isDegraded = isEnabled && node.status === 'DEGRADED';
           const isOffline = isEnabled && node.status === 'OFFLINE';
+          const isUnknown = isEnabled && node.status === 'UNKNOWN';
 
           const ledColor = !isEnabled
             ? '#757575'
-            : isOnline
+            : isUnknown
+              ? '#c3c2b7'
+              : isOnline
               ? '#00e676'
               : isDegraded
                 ? '#ffd600'
                 : '#ff1744';
 
-          const ledGlow = !isEnabled
+          const ledGlow = !isEnabled || isUnknown
             ? 'none'
             : isOnline
               ? '0 0 10px #00e676, 0 0 4px #00e676'
@@ -437,8 +436,8 @@ function MicroserviciosTab() {
                       flexShrink: 0,
                     }}
                   />
-                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: ledColor }}>
-                    {!isEnabled ? 'DESCONECTADO' : node.status}
+                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: isUnknown ? C.gray : ledColor }}>
+                    {!isEnabled ? 'DESCONECTADO' : isUnknown ? 'SIN VERIFICAR' : node.status}
                   </span>
                 </div>
               </div>
@@ -454,7 +453,7 @@ function MicroserviciosTab() {
                   {node.protocolo}
                 </span>
                 <span style={{ background: '#f0f0f0', color: C.text, padding: '3px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
-                  {node.latency} ms
+                  {isUnknown || !node.latency ? '—' : `${node.latency} ms`}
                 </span>
                 <span style={{
                   background: node.circuitBreaker === 'CLOSED' ? '#e8f5e9' : '#ffebee',
@@ -549,75 +548,8 @@ function MicroserviciosTab() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PANEL DE PROVEEDORES — simula la red de sitios integrados para RDA2
+// PANEL DE PROVEEDORES — socios registrados en schema_proveedores (estado por ping real)
 // ─────────────────────────────────────────────────────────────────────────────
-const PROVEEDORES_INICIALES = [
-  {
-    id: 'prov-1',
-    nombre: 'TravelEcuador Pro',
-    equipo: 'Grupo 1 – Atracciones',
-    url: 'https://travel-ecuador-pro.vercel.app',
-    apiBase: 'https://travel-ecuador-pro.vercel.app/api/v1',
-    tipo: 'Atracciones',
-    emoji: '🎡',
-    activo: true,
-    fechaRegistro: '2026-09-15',
-    descripcion: 'Catálogo de atracciones turísticas del Ecuador, con reservas en tiempo real.',
-    contacto: 'grupo1@universidad.edu.ec',
-  },
-  {
-    id: 'prov-2',
-    nombre: 'AeroLink Ecuador',
-    equipo: 'Grupo 2 – Vuelos',
-    url: 'https://aerolink-ec.netlify.app',
-    apiBase: 'https://aerolink-ec.netlify.app/api/v1',
-    tipo: 'Vuelos',
-    emoji: '✈️',
-    activo: true,
-    fechaRegistro: '2026-09-18',
-    descripcion: 'Motor de búsqueda y reserva de vuelos domésticos e internacionales.',
-    contacto: 'grupo2@universidad.edu.ec',
-  },
-  {
-    id: 'prov-3',
-    nombre: 'HotelHub EC',
-    equipo: 'Grupo 3 – Alojamientos',
-    url: 'https://hotelhub-ec.vercel.app',
-    apiBase: 'https://hotelhub-ec.vercel.app/api/v1',
-    tipo: 'Alojamientos',
-    emoji: '🏨',
-    activo: true,
-    fechaRegistro: '2026-09-20',
-    descripcion: 'Plataforma de hospedaje con hoteles, hostales y cabañas.',
-    contacto: 'grupo3@universidad.edu.ec',
-  },
-  {
-    id: 'prov-4',
-    nombre: 'RentAuto Ecuador',
-    equipo: 'Grupo 4 – Autos',
-    url: 'https://rentauto-ec.netlify.app',
-    apiBase: 'https://rentauto-ec.netlify.app/api/v1',
-    tipo: 'Autos',
-    emoji: '🚗',
-    activo: false,
-    fechaRegistro: '2026-09-22',
-    descripcion: 'Renta de vehículos con cobertura nacional. Mantenimiento programado.',
-    contacto: 'grupo4@universidad.edu.ec',
-  },
-  {
-    id: 'prov-5',
-    nombre: 'GalapagosXplorer',
-    equipo: 'Grupo 5 – Tours',
-    url: 'https://galapagos-xplorer.vercel.app',
-    apiBase: 'https://galapagos-xplorer.vercel.app/api/v1',
-    tipo: 'Tours',
-    emoji: '🐢',
-    activo: true,
-    fechaRegistro: '2026-09-25',
-    descripcion: 'Tours especializados a Galápagos con guías certificados.',
-    contacto: 'grupo5@universidad.edu.ec',
-  },
-];
 
 const TIPO_COLORES = {
   Atracciones: { bg: '#e8f5e9', color: '#2e7d32' },
@@ -637,14 +569,36 @@ function TipoBadge({ tipo }) {
   );
 }
 
-function EstadoBadge({ online, checking }) {
+function EstadoBadge({ online, checking, desconocido }) {
   if (checking) return <span style={{ color: C.gray, fontSize: '0.8rem' }}>⏳ Comprobando...</span>;
+  if (desconocido) {
+    return (
+      <span title="Nunca se ha verificado con un ping real (pulsa 🔄)" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem', fontWeight: 700, color: C.gray }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#c3c2b7', display: 'inline-block' }} />
+        Sin verificar
+      </span>
+    );
+  }
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem', fontWeight: 700, color: online ? C.green : C.red }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: online ? C.green : C.red, display: 'inline-block', boxShadow: online ? `0 0 6px ${C.green}` : 'none' }} />
       {online ? 'En línea' : 'Sin conexión'}
     </span>
   );
+}
+
+/** Estado de un socio según el último ping REAL guardado en la base. */
+function saludDesdeNodo(p) {
+  const estado = String(p.health_status || p.semaforo_led?.estado || '').toUpperCase();
+  const apagado = p.kill_switch_activo || p.activo === false;
+  const desconocido = !apagado && (estado === 'UNKNOWN' || !estado);
+  return {
+    online: !apagado && (estado === 'HEALTHY' || estado === 'DEGRADED'),
+    desconocido,
+    latency: desconocido ? null : (p.latencia_ms ?? null),
+    checking: false,
+    lastCheck: p.ultimo_ping_at && !desconocido ? new Date(p.ultimo_ping_at) : null,
+  };
 }
 
 function ProveedoresTab() {
@@ -671,25 +625,21 @@ function ProveedoresTab() {
     setLoading(true);
     try {
       const { data } = await api.get('/nodes');
-      const lista = Array.isArray(data) ? data : (data?.nodes || PROVEEDORES_INICIALES);
+      const lista = Array.isArray(data) ? data : (data?.nodes || []);
       setProveedores(lista);
 
-      // Mapear salud inicial desde la base de datos
+      // Salud según el ÚLTIMO PING REAL guardado en la base. Un nodo nunca
+      // verificado sale "Sin verificar", no "En línea".
       const healthInit = {};
       lista.forEach(p => {
         const id = p.codigo_nodo || p.id;
-        const isOnline = p.activo !== false && p.health_status !== 'DOWN' && !p.kill_switch_activo;
-        healthInit[id] = {
-          online: isOnline,
-          latency: p.latencia_ms || 25,
-          checking: false,
-          lastCheck: p.ultimo_ping_at ? new Date(p.ultimo_ping_at) : new Date(),
-        };
+        healthInit[id] = saludDesdeNodo(p);
       });
       setHealth(healthInit);
     } catch (err) {
-      console.warn('Fallback a proveedores locales:', err.message);
-      setProveedores(PROVEEDORES_INICIALES);
+      // Sin datos del backend no se inventan proveedores: se muestra el error.
+      setProveedores([]);
+      setAviso({ tipo: 'error', texto: apiErrorMsg(err, 'No se pudo cargar la lista de proveedores') });
     } finally {
       setLoading(false);
     }
@@ -705,11 +655,13 @@ function ProveedoresTab() {
     setHealth(h => ({ ...h, [id]: { ...h[id], checking: true } }));
     try {
       const { data } = await api.post(`/nodes/${id}/ping`);
+      const desconocido = data.verificado === false || data.health_status === 'UNKNOWN';
       setHealth(h => ({
         ...h,
         [id]: {
-          online: data.online ?? (data.health_status === 'HEALTHY' || data.health_status === 'DEGRADED'),
-          latency: data.latencia_ms || data.latenciaMs,
+          online: !desconocido && (data.online ?? (data.health_status === 'HEALTHY' || data.health_status === 'DEGRADED')),
+          desconocido,
+          latency: desconocido ? null : (data.latencia_ms ?? data.latenciaMs ?? null),
           checking: false,
           lastCheck: new Date(),
         },
@@ -723,7 +675,19 @@ function ProveedoresTab() {
   };
 
   const onlineCount = Object.values(health).filter(h => h?.online && !h?.checking).length;
-  const offlineCount = Object.values(health).filter(h => !h?.online && !h?.checking).length;
+  const sinVerificarCount = Object.values(health).filter(h => h?.desconocido && !h?.checking).length;
+  const offlineCount = Object.values(health).filter(h => !h?.online && !h?.desconocido && !h?.checking).length;
+
+  // Verifica TODOS los socios con un ping real en paralelo.
+  const [verificandoTodos, setVerificandoTodos] = useState(false);
+  const verificarTodos = async () => {
+    setVerificandoTodos(true);
+    try {
+      await Promise.allSettled(proveedores.map(p => checkHealth(p)));
+    } finally {
+      setVerificandoTodos(false);
+    }
+  };
 
   const tiposFiltro = ['Todos', ...Array.from(new Set(proveedores.map(p => p.tipo || p.vertical || 'Otro')))];
 
@@ -734,7 +698,7 @@ function ProveedoresTab() {
     const h = health[id];
     const okEstado = filtroEstado === 'Todos'
       || (filtroEstado === 'Online' && h?.online)
-      || (filtroEstado === 'Offline' && h && !h.online && !h.checking);
+      || (filtroEstado === 'Offline' && h && !h.online && !h.desconocido && !h.checking);
     const q = busqueda.toLowerCase().trim();
     const okBusqueda = !q
       || (p.nombre_proveedor || p.nombre || '').toLowerCase().includes(q)
@@ -763,7 +727,10 @@ function ProveedoresTab() {
       url: prov.url || prov.base_url_rest || '',
       apiBase: prov.base_url_rest || prov.apiBase || prov.url || '',
       endpointGrpc: prov.endpoint_grpc || prov.endpointGrpc || '',
-      apiKey: prov.api_key || prov.apiKey || '',
+      // La API solo devuelve la clave enmascarada: el campo empieza vacío y,
+      // si se deja vacío, el backend conserva la clave actual.
+      apiKey: '',
+      apiKeyActual: prov.api_key_configurada || prov.api_key ? (prov.api_key || 'configurada') : '',
       tipo: prov.tipo || prov.vertical || 'Atracciones',
       descripcion: prov.descripcion || '',
       contacto: prov.contacto || '',
@@ -799,8 +766,10 @@ function ProveedoresTab() {
         baseUrlRest: (form.apiBase || form.url).trim(),
         url: (form.url || form.apiBase).trim(),
         endpointGrpc: form.endpointGrpc ? form.endpointGrpc.trim() : null,
-        apiKey: form.apiKey ? form.apiKey.trim() : null,
-        api_key: form.apiKey ? form.apiKey.trim() : null,
+        // En edición, un campo vacío significa "no cambiar la clave".
+        ...(form.apiKey?.trim()
+          ? { apiKey: form.apiKey.trim(), api_key: form.apiKey.trim() }
+          : modal === 'nuevo' ? { apiKey: null, api_key: null } : {}),
         equipo: form.equipo,
         contacto: form.contacto,
         emoji: form.emoji || '🔗',
@@ -877,12 +846,17 @@ function ProveedoresTab() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: '1.4rem' }}>🌐</span>
           <span style={{ fontSize: '0.85rem', color: '#1b5e20' }}>
-            <strong>Panel de Proveedores & Alianzas (RDA2 — 100% Funcional).</strong> Conecta aquí los microservicios externos de tus compañeros (Atracciones, Autos, Alojamientos, Vuelos). Guarda en la base de datos central PostgreSQL (schema_proveedores), monitorea su estado con semáforo LED en vivo y sincroniza sus catálogos con OpenAPI v2.
+            <strong>Proveedores y aliados.</strong> Registra aquí los sistemas de tus socios (Atracciones, Autos, Alojamientos, Vuelos). El estado de cada uno sale de un <strong>ping real</strong>: "Sin verificar" significa que todavía nadie lo ha comprobado.
           </span>
         </div>
-        <button onClick={cargarProveedores} disabled={loading} style={{ background: C.blue, color: 'white', border: 'none', borderRadius: 6, padding: '7px 14px', cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
-          {loading ? '⏳ Cargando...' : '↻ Recargar Nodos'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={cargarProveedores} disabled={loading} style={{ background: 'white', color: C.blue, border: `1px solid ${C.blue}`, borderRadius: 6, padding: '7px 14px', cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+            {loading ? '⏳ Cargando...' : '↻ Recargar lista'}
+          </button>
+          <button onClick={verificarTodos} disabled={verificandoTodos || loading || proveedores.length === 0} style={{ background: C.blue, color: 'white', border: 'none', borderRadius: 6, padding: '7px 14px', cursor: verificandoTodos ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+            {verificandoTodos ? '⏳ Verificando...' : '📡 Verificar todos (ping real)'}
+          </button>
+        </div>
       </div>
 
       {aviso && <Alerta tipo={aviso.tipo} onClose={() => setAviso(null)}>{aviso.texto}</Alerta>}
@@ -892,6 +866,7 @@ function ProveedoresTab() {
         <KpiCard icon="🌐" label="Total Proveedores" value={proveedores.length} color={C.blue} />
         <KpiCard icon="✅" label="En Línea" value={onlineCount} color={C.green} />
         <KpiCard icon="❌" label="Sin Conexión / Apagados" value={offlineCount} color={C.red} />
+        <KpiCard icon="⚪" label="Sin verificar" value={sinVerificarCount} color={C.gray} />
         <KpiCard icon="📦" label="Tipos de Servicio" value={Math.max(1, tiposFiltro.length - 1)} color={C.cyan} />
       </div>
 
@@ -966,7 +941,7 @@ function ProveedoresTab() {
                     </div>
                   </td>
                   <td style={{ padding: '12px 14px' }}><TipoBadge tipo={prov.tipo || prov.vertical} /></td>
-                  <td style={{ padding: '12px 14px' }}><EstadoBadge online={h.online} checking={h.checking} /></td>
+                  <td style={{ padding: '12px 14px' }}><EstadoBadge online={h.online} checking={h.checking} desconocido={h.desconocido} /></td>
                   <td style={{ padding: '12px 14px', fontWeight: 600, color: h.online ? (h.latency > 300 ? C.orange : C.green) : C.gray }}>
                     {h.checking ? '...' : h.latency ? `${h.latency} ms` : '—'}
                   </td>
@@ -1050,7 +1025,7 @@ function ProveedoresTab() {
               {[
                 ['🌐 URL Base REST (OpenAPI v2)', detalle.base_url_rest || detalle.url],
                 ['⚡ Socket Inventario gRPC', detalle.endpoint_grpc || detalle.endpointGrpc || 'grpc://100.93.143.85:50051'],
-                ['🔑 API Key (X-API-Key M2M)', detalle.api_key || detalle.apiKey ? '••••••••' + (detalle.api_key || detalle.apiKey).slice(-6) : 'No configurada (usa .env fallback)'],
+                ['🔑 API Key (X-API-Key M2M)', detalle.api_key || detalle.apiKey || 'No configurada (usa .env fallback)'],
                 ['📧 Correo de Contacto', detalle.contacto || 'No especificado'],
                 ['🚦 Circuit Breaker', detalle.circuit_breaker_estado || 'CLOSED'],
                 ['🛡️ Kill-Switch Activo', detalle.kill_switch_activo ? 'SÍ (Bloqueado)' : 'NO (Operativo)'],
@@ -1131,7 +1106,7 @@ function ProveedoresTab() {
               ].map(([field, label, placeholder]) => (
                 <div key={field} style={{ marginBottom: 14 }}>
                   <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 4, color: C.text }}>{label}</label>
-                  <input value={form[field] || ''} onChange={e => { setForm(f => ({ ...f, [field]: e.target.value })); setFormErr(er => { const n = { ...er }; delete n[field]; return n; }); }} placeholder={placeholder} style={inputStyle(field)} />
+                  <input value={form[field] || ''} onChange={e => { setForm(f => ({ ...f, [field]: e.target.value })); setFormErr(er => { const n = { ...er }; delete n[field]; return n; }); }} placeholder={field === 'apiKey' && modal === 'editar' && form.apiKeyActual ? `Clave actual ${form.apiKeyActual} · déjalo vacío para conservarla` : placeholder} style={inputStyle(field)} />
                   {formErr[field] && <div style={{ color: C.red, fontSize: '0.75rem', marginTop: 2 }}>{formErr[field]}</div>}
                 </div>
               ))}
@@ -2894,7 +2869,7 @@ function ConfiguracionTab() {
 }
 
 export function AdminDashboard() {
-  const [activeTab,setActiveTab]=useState('paneles_rda2');
+  const [activeTab,setActiveTab]=useState('resumen');
   const [subPanelRda2, setSubPanelRda2] = useState('panel1');
   const [stats,setStats]=useState(null);
   const [users,setUsers]=useState([]);
@@ -3110,6 +3085,8 @@ export function AdminDashboard() {
             {subPanelRda2 === 'panel8' && <Panel8_AuditoriaSagas refreshKey={refreshKey} />}
           </div>
         )}
+        {activeTab==='resumen'&&<ResumenTab refreshKey={refreshKey} onIrA={setActiveTab}/>}
+        {activeTab==='procesos'&&<ProcesosTab refreshKey={refreshKey}/>}
         {activeTab==='observabilidad'&&<ObservabilidadTab stats={stats} loadingStats={loadingStats} serviceHealth={serviceHealth} refreshKey={refreshKey}/>}
         {activeTab==='microservicios'&&(
           <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>

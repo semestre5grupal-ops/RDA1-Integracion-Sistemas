@@ -21,6 +21,55 @@ import { api } from './api';
 import { obtenerHuellaDispositivo } from './formato';
 
 // ===========================================================================
+// Un solo X-Correlation-Id por compra (trazabilidad RDA2)
+// ===========================================================================
+// Nace en la búsqueda y viaja en el mapa de asientos, el hold, el pago y la
+// reserva: así Booking, MS_PAG y la aerolínea registran la MISMA compra con el
+// mismo código, y el admin la sigue paso a paso en "Procesos → En vivo".
+// Después de reservar se recuerda por bookingId (sessionStorage), para que la
+// cancelación o los boletos de esa reserva sigan usando el mismo código.
+
+let correlacionCompra: string | null = null;
+const CLAVE_CORRELACIONES = 'booking.vuelos.correlaciones';
+
+function nuevaCorrelacionCompra(): string {
+  const aleatorio =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  correlacionCompra = `corr-vuelo-${aleatorio}`;
+  return correlacionCompra;
+}
+
+function leerCorrelaciones(): Record<string, string> {
+  try {
+    return JSON.parse(sessionStorage.getItem(CLAVE_CORRELACIONES) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function recordarCorrelacion(bookingId: string, correlacion: string) {
+  try {
+    const mapa = leerCorrelaciones();
+    mapa[bookingId] = correlacion;
+    sessionStorage.setItem(CLAVE_CORRELACIONES, JSON.stringify(mapa));
+  } catch {
+    /* sin sessionStorage: la siguiente acción usará un código nuevo */
+  }
+}
+
+function cabeceraCorrelacion(bookingId?: string): Record<string, string> {
+  const id = (bookingId && leerCorrelaciones()[bookingId]) || correlacionCompra;
+  return id ? { 'X-Correlation-Id': id } : {};
+}
+
+/** Correlation ID de la compra en curso (para mostrarlo al cliente o en soporte). */
+export function correlacionDeCompraActual(): string | null {
+  return correlacionCompra;
+}
+
+// ===========================================================================
 // Tipos minimos del contrato
 // ===========================================================================
 
@@ -114,8 +163,10 @@ export interface SearchResponse {
  *                     `formato.js` -> `obtenerHuellaDispositivo`)
  */
 export async function buscarVuelos(cuerpo: SearchRequest, fingerprint: string) {
+  // Cada búsqueda nueva empieza una compra nueva.
+  const correlacion = nuevaCorrelacionCompra();
   const { data } = await api.post<SearchResponse>('/vuelos/search', cuerpo, {
-    headers: { 'X-Device-Fingerprint': fingerprint },
+    headers: { 'X-Device-Fingerprint': fingerprint, 'X-Correlation-Id': correlacion },
   });
   return data;
 }
@@ -133,6 +184,7 @@ export async function buscarVuelos(cuerpo: SearchRequest, fingerprint: string) {
 export async function obtenerMapaAsientos(offerId: string, segmentId: string) {
   const { data } = await api.get(`/vuelos/offers/${encodeURIComponent(offerId)}/seatmap`, {
     params: { segmentId },
+    headers: cabeceraCorrelacion(),
   });
   return data;
 }
@@ -174,7 +226,7 @@ export async function crearHold(
   fingerprint: string,
 ) {
   const { data } = await api.post<HoldResponse>('/vuelos/offers/hold', cuerpo, {
-    headers: { 'Idempotency-Key': idempotencyKey, 'X-Device-Fingerprint': fingerprint },
+    headers: { 'Idempotency-Key': idempotencyKey, 'X-Device-Fingerprint': fingerprint, ...cabeceraCorrelacion() },
   });
   return data;
 }
@@ -214,12 +266,17 @@ export async function crearReserva(
   idempotencyKey: string,
   fingerprint: string,
 ) {
+  const correlacion = cabeceraCorrelacion();
   const { data } = await api.post('/vuelos/bookings', cuerpo, {
     headers: {
       'Idempotency-Key': idempotencyKey,
       'X-Device-Fingerprint': fingerprint,
+      ...correlacion,
     },
   });
+  if (data?.bookingId && correlacion['X-Correlation-Id']) {
+    recordarCorrelacion(data.bookingId, correlacion['X-Correlation-Id']);
+  }
   return data;
 }
 
@@ -401,8 +458,8 @@ export interface BaggageOption {
  * en la version anterior a esta linea no la recordaban: el listado salia vacio
  * mientras la reserva existia en la base.
  */
-function cabecerasPropietario(): Record<string, string> {
-  return { 'X-Device-Fingerprint': obtenerHuellaDispositivo() };
+function cabecerasPropietario(bookingId?: string): Record<string, string> {
+  return { 'X-Device-Fingerprint': obtenerHuellaDispositivo(), ...cabeceraCorrelacion(bookingId) };
 }
 
 /**
@@ -446,7 +503,7 @@ export async function listarReservas(params?: {
 export async function listarTickets(bookingId: string) {
   const { data } = await api.get(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/tickets`,
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as { bookingId: string; tickets: Ticket[] };
 }
@@ -460,7 +517,7 @@ export async function listarTickets(bookingId: string) {
 export async function listarOpcionesEquipaje(bookingId: string) {
   const { data } = await api.get(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/baggage-options`,
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as BaggageOption[];
 }
@@ -469,7 +526,7 @@ export async function listarOpcionesEquipaje(bookingId: string) {
 export async function obtenerReserva(bookingId: string) {
   const { data } = await api.get(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}`,
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as {
     bookingId: string;
@@ -553,7 +610,7 @@ export interface BaggageAdded {
 export async function cotizarCancelacion(bookingId: string) {
   const { data } = await api.get(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/cancellation-quote`,
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as CancellationQuote;
 }
@@ -576,7 +633,7 @@ export async function cancelarReserva(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/cancel`,
     cuerpo,
     {
-      headers: { ...cabecerasPropietario(), 'Idempotency-Key': idempotencyKey },
+      headers: { ...cabecerasPropietario(bookingId), 'Idempotency-Key': idempotencyKey },
     },
   );
   return data as CancelBookingResult;
@@ -593,7 +650,7 @@ export async function hacerCheckIn(bookingId: string) {
   const { data } = await api.post(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/check-in`,
     {},
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as CheckInResult;
 }
@@ -613,7 +670,7 @@ export async function agregarEquipaje(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/baggage`,
     cuerpo,
     {
-      headers: { ...cabecerasPropietario(), 'Idempotency-Key': idempotencyKey },
+      headers: { ...cabecerasPropietario(bookingId), 'Idempotency-Key': idempotencyKey },
     },
   );
   return data as BaggageAdded;
@@ -642,7 +699,7 @@ export async function emitirTickets(bookingId: string) {
   const { data } = await api.post(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/tickets`,
     {},
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as TicketIssuance;
 }
@@ -657,7 +714,7 @@ export async function emitirTickets(bookingId: string) {
 export async function obtenerTicket(bookingId: string, ticketId: string) {
   const { data } = await api.get(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/tickets/${encodeURIComponent(ticketId)}`,
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as Ticket;
 }
@@ -672,7 +729,7 @@ export async function obtenerTicket(bookingId: string, ticketId: string) {
 export async function listarPases(bookingId: string) {
   const { data } = await api.get(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/boarding-passes`,
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as BoardingPassList;
 }
@@ -692,7 +749,7 @@ export async function buscarCambioFecha(
   const { data } = await api.post(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/date-change/search`,
     { changes: cambios },
-    { headers: cabecerasPropietario() },
+    { headers: cabecerasPropietario(bookingId) },
   );
   return data as DateChangeOffer[];
 }
@@ -721,7 +778,7 @@ export async function confirmarCambioFecha(
     `/vuelos/bookings/${encodeURIComponent(bookingId)}/date-change`,
     cuerpo,
     {
-      headers: { ...cabecerasPropietario(), 'Idempotency-Key': idempotencyKey },
+      headers: { ...cabecerasPropietario(bookingId), 'Idempotency-Key': idempotencyKey },
     },
   );
   return data as {

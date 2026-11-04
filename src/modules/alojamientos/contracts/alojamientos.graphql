@@ -1,0 +1,35 @@
+# Esquema federado GraphQL para Alojamientos (MS_ALO - Apollo Federation / BFF)
+
+type TipoHabitacionGql {
+  id: ID!
+  codigo: String!
+  nombre: String!
+  precioNoche: Float!
+  capacidadAdultos: Int!
+  capacidadNinos: Int!
+  totalUnidades: Int!
+  regimen: String!
+  cancelacionGratuitaHoras: Int
+}
+
+type Alojamiento @key(fields: "id") {
+  id: ID!
+  nombre: String!
+  descripcion: String!
+  destino: String!
+  tipoPropiedad: String!
+  precioPorNoche: Float!
+  moneda: String!
+  capacidadAdultos: Int!
+  capacidadNinos: Int!
+  habitaciones: Int!
+  tienePiscina: Boolean!
+  estaActivo: Boolean!
+  tiposHabitacion: [TipoHabitacionGql!]!
+}
+
+extend type Query {
+  alojamiento(id: ID!): Alojamiento
+  alojamientos(destino: String, checkin: String, checkout: String): [Alojamiento!]!
+}
+

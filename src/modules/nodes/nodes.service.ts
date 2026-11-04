@@ -4,9 +4,24 @@ import { Repository } from 'typeorm';
 import { ConfigProveedor } from './entities';
 import { Atraccion } from '../atracciones/entities/atraccion.entity';
 import { Auto } from '../autos/entities/auto.entity';
+import { Alojamiento } from '../alojamientos/entities/alojamiento.entity';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { ConnectorHealthService } from '../admin/connector-health.service';
 import { TraceContextService } from '../../core/tracing/trace-context.service';
+
+/**
+ * Las claves de los socios NUNCA salen completas por la API: `GET /nodes` es
+ * público (lo usa el panel de proveedores) y antes devolvía cada X-API-Key tal
+ * cual. Se muestran solo los 4 últimos caracteres.
+ */
+export const MASCARA_CLAVE = '••••';
+export function enmascararClave(clave?: string | null): string | null {
+  if (!clave) return null;
+  return `${MASCARA_CLAVE}${clave.slice(-4)}`;
+}
+export function esClaveEnmascarada(valor: unknown): boolean {
+  return typeof valor === 'string' && valor.trim().startsWith(MASCARA_CLAVE);
+}
 
 @Injectable()
 export class NodesService {
@@ -20,12 +35,15 @@ export class NodesService {
     @Optional()
     @InjectRepository(Auto)
     private readonly autoRepo?: Repository<Auto>,
+    @Optional()
+    @InjectRepository(Alojamiento)
+    private readonly alojamientoRepo?: Repository<Alojamiento>,
     private readonly winstonLogger?: WinstonPhysicalLoggerService,
     @Optional()
     private readonly connectorHealthService?: ConnectorHealthService,
     @Optional()
     private readonly traceContext?: TraceContextService,
-  ) {}
+  ) { }
 
   private fetchWithTrace(input: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
@@ -46,8 +64,12 @@ export class NodesService {
 
   async listarNodos(): Promise<any[]> {
     this.logger.log('Consultando estado de salud de nodos de proveedores en schema_proveedores');
-    // Sembrar y asegurar los 20 nodos oficiales estandarizados (5 por vertical)
-    await this.sembrarNodosPorDefecto();
+    // Solo se siembran ejemplos cuando la tabla está VACÍA (instalación nueva).
+    // Antes se re-sembraban en cada consulta: los proveedores de ejemplo borrados
+    // volvían a aparecer y la URL de Dilan se pisaba con la de Tailscale.
+    if ((await this.configRepo.count()) === 0) {
+      await this.sembrarNodosPorDefecto();
+    }
     let nodos = await this.configRepo.find({ order: { vertical: 'ASC', codigoNodo: 'ASC' } });
 
     return nodos.map(n => {
@@ -60,6 +82,10 @@ export class NodesService {
       } else if (n.healthStatus === 'DOWN' || n.tasaFallosPct >= 50) {
         ledColor = '🔴';
         ledStatus = 'DOWN';
+      } else if (n.healthStatus === 'UNKNOWN') {
+        // Nunca verificado con un ping real (o sin URL http): no se pinta verde.
+        ledColor = '⚪';
+        ledStatus = 'UNKNOWN';
       } else if (n.healthStatus === 'DEGRADED' || n.latenciaMs > 800 || n.tasaFallosPct > 5) {
         ledColor = '🟡';
         ledStatus = 'DEGRADED';
@@ -83,11 +109,12 @@ export class NodesService {
         apiBase: n.baseUrlRest,
         endpoint_grpc: n.endpointGrpc,
         endpointGrpc: n.endpointGrpc,
-        api_key: n.apiKey,
-        apiKey: n.apiKey,
+        api_key: enmascararClave(n.apiKey),
+        apiKey: enmascararClave(n.apiKey),
+        api_key_configurada: !!n.apiKey,
         health_status: n.healthStatus,
         activo: !n.killSwitchActivo,
-        estado: n.killSwitchActivo ? 'APAGADO' : (n.healthStatus === 'HEALTHY' ? 'OPERATIVO' : n.healthStatus),
+        estado: n.killSwitchActivo ? 'APAGADO' : 'OPERATIVO',
         latencia_ms: n.latenciaMs,
         latenciaMs: n.latenciaMs,
         ultimo_ping_at: n.ultimoPingAt,
@@ -139,8 +166,9 @@ export class NodesService {
       baseUrlRest: url.trim(),
       endpointGrpc: dto.endpointGrpc || dto.endpoint_grpc || null,
       apiKey: (dto.apiKey || dto.api_key || '').trim() || null,
-      healthStatus: 'HEALTHY',
-      latenciaMs: 25,
+      // Un nodo recién registrado NO está "en línea" hasta que un ping real lo confirme.
+      healthStatus: 'UNKNOWN',
+      latenciaMs: 0,
       killSwitchActivo: false,
       circuitBreakerEstado: 'CLOSED',
       tasaFallosPct: 0.00,
@@ -174,8 +202,9 @@ export class NodesService {
         url: guardado.baseUrlRest,
         endpoint_grpc: guardado.endpointGrpc,
         endpointGrpc: guardado.endpointGrpc,
-        api_key: guardado.apiKey,
-        apiKey: guardado.apiKey,
+        api_key: enmascararClave(guardado.apiKey),
+        apiKey: enmascararClave(guardado.apiKey),
+        api_key_configurada: !!guardado.apiKey,
         health_status: guardado.healthStatus,
         kill_switch_activo: guardado.killSwitchActivo,
         circuit_breaker_estado: guardado.circuitBreakerEstado,
@@ -239,7 +268,10 @@ export class NodesService {
     }
     if (dto.apiKey !== undefined || dto.api_key !== undefined) {
       const rawKey = dto.apiKey !== undefined ? dto.apiKey : dto.api_key;
-      nodo.apiKey = (rawKey || '').trim() || null;
+      // Un valor enmascarado (el que devuelve el listado) nunca reemplaza la clave real.
+      if (!esClaveEnmascarada(rawKey)) {
+        nodo.apiKey = (rawKey || '').trim() || null;
+      }
     }
     if (dto.equipo !== undefined) nodo.equipo = dto.equipo;
     if (dto.contacto !== undefined) nodo.contacto = dto.contacto;
@@ -284,8 +316,9 @@ export class NodesService {
         url: guardado.baseUrlRest,
         endpoint_grpc: guardado.endpointGrpc,
         endpointGrpc: guardado.endpointGrpc,
-        api_key: guardado.apiKey,
-        apiKey: guardado.apiKey,
+        api_key: enmascararClave(guardado.apiKey),
+        apiKey: enmascararClave(guardado.apiKey),
+        api_key_configurada: !!guardado.apiKey,
         health_status: guardado.healthStatus,
         kill_switch_activo: guardado.killSwitchActivo,
         circuit_breaker_estado: guardado.circuitBreakerEstado,
@@ -309,7 +342,8 @@ export class NodesService {
       nodo.healthStatus = 'DOWN';
       nodo.circuitBreakerEstado = 'OPEN';
     } else {
-      nodo.healthStatus = 'HEALTHY';
+      // Al reactivar no se sabe si responde: queda "sin verificar" hasta el próximo ping.
+      nodo.healthStatus = 'UNKNOWN';
       nodo.circuitBreakerEstado = 'CLOSED';
     }
     const guardado = await this.configRepo.save(nodo);
@@ -356,21 +390,35 @@ export class NodesService {
     }
 
     const t0 = Date.now();
-    let latencia = 25;
-    let online = true;
+    let latencia = 0;
+    let online = false;
+    let verificable = false;
 
     if (nodo.baseUrlRest && (nodo.baseUrlRest.startsWith('http://') || nodo.baseUrlRest.startsWith('https://'))) {
+      verificable = true;
       try {
         const cleanBase = nodo.baseUrlRest.replace(/\/+$/, '');
-        const verticalHealth = nodo.vertical === 'ATRACCIONES' ? `${cleanBase}/atracciones/health` : (nodo.vertical === 'AUTOS' ? `${cleanBase}/autos/health` : `${cleanBase}/health`);
+        const verticalHealth = nodo.vertical === 'ATRACCIONES'
+          ? `${cleanBase}/atracciones/health`
+          : nodo.vertical === 'AUTOS'
+            ? `${cleanBase}/autos/health`
+            : nodo.vertical === 'ALOJAMIENTOS'
+              ? `${cleanBase}/alojamientos/health`
+              : `${cleanBase}/health`;
         const genericHealth = `${cleanBase}/health`;
-        const verticalCatalog = nodo.vertical === 'ATRACCIONES' ? `${cleanBase}/atracciones` : (nodo.vertical === 'AUTOS' ? `${cleanBase}/autos` : cleanBase);
+        const verticalCatalog = nodo.vertical === 'ATRACCIONES'
+          ? `${cleanBase}/atracciones`
+          : nodo.vertical === 'AUTOS'
+            ? `${cleanBase}/autos`
+            : nodo.vertical === 'ALOJAMIENTOS'
+              ? `${cleanBase}/alojamientos`
+              : cleanBase;
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 12000);
 
         const pingHeaders: Record<string, string> = {};
-        const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
+        const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : (nodo.vertical === 'ALOJAMIENTOS' ? process.env.TIENDA_ALOJAMIENTOS_API_KEY : '')));
         if (partnerKey) {
           pingHeaders['X-API-Key'] = partnerKey;
         }
@@ -389,15 +437,17 @@ export class NodesService {
         latencia = Date.now() - t0;
         online = false;
       }
-    } else {
-      latencia = Math.floor(Math.random() * 40) + 15;
     }
+    // Sin URL http(s) no hay nada que medir: antes se inventaba una latencia
+    // aleatoria y el nodo salía "en línea". Ahora queda "sin verificar".
 
     nodo.latenciaMs = latencia;
     nodo.ultimoPingAt = new Date();
     if (!nodo.killSwitchActivo) {
       const umbralDegradado = nodo.baseUrlRest?.startsWith('https://') ? 3000 : 1200;
-      nodo.healthStatus = online ? (latencia > umbralDegradado ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
+      nodo.healthStatus = !verificable
+        ? 'UNKNOWN'
+        : online ? (latencia > umbralDegradado ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
     }
     await this.configRepo.save(nodo);
 
@@ -408,6 +458,7 @@ export class NodesService {
       latenciaMs: latencia,
       health_status: nodo.healthStatus,
       online: nodo.healthStatus === 'HEALTHY' || nodo.healthStatus === 'DEGRADED',
+      verificado: verificable,
       timestamp: nodo.ultimoPingAt,
     };
   }
@@ -435,6 +486,8 @@ export class NodesService {
       targetUrl += '/atracciones';
     } else if (nodo.vertical === 'AUTOS' && !targetUrl.includes('/autos')) {
       targetUrl += '/autos';
+    } else if (nodo.vertical === 'ALOJAMIENTOS' && !targetUrl.includes('/alojamientos')) {
+      targetUrl += '/alojamientos';
     }
 
     // Fase 3: Parámetro ?limit=50 para traer la totalidad del catálogo del socio sin truncamiento
@@ -448,15 +501,30 @@ export class NodesService {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000);
       const syncHeaders: Record<string, string> = { Accept: 'application/json' };
-      const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : ''));
+      const partnerKey = nodo.apiKey || (nodo.vertical === 'ATRACCIONES' ? process.env.TIENDA_ATRACCIONES_API_KEY : (nodo.vertical === 'AUTOS' ? process.env.TIENDA_AUTOS_API_KEY : (nodo.vertical === 'ALOJAMIENTOS' ? process.env.TIENDA_ALOJAMIENTOS_API_KEY : '')));
       if (partnerKey) {
         syncHeaders['X-API-Key'] = partnerKey;
       }
 
-      const resp = await this.fetchWithTrace(targetUrl, {
+      let resp = await this.fetchWithTrace(targetUrl, {
         headers: syncHeaders,
         signal: controller.signal,
       });
+
+      if (!resp.ok && nodo.vertical === 'ALOJAMIENTOS') {
+        const searchUrl = targetUrl.split('?')[0].replace(/\/+$/, '') + '/search';
+        resp = await this.fetchWithTrace(searchUrl, {
+          method: 'POST',
+          headers: { ...syncHeaders, 'Content-Type': 'application/json', 'X-Device-Fingerprint': 'booking-sync-node' },
+          body: JSON.stringify({
+            booker: { country: 'ec', platform: 'desktop' },
+            checkin: '2026-11-15',
+            checkout: '2026-11-17',
+            guests: { number_of_adults: 2, number_of_rooms: 1 },
+          }),
+          signal: controller.signal,
+        });
+      }
       clearTimeout(timeout);
 
       if (!resp.ok) {
@@ -470,6 +538,10 @@ export class NodesService {
         itemsExternos = body.items;
       } else if (Array.isArray(body?.data)) {
         itemsExternos = body.data;
+      } else if (Array.isArray(body?.alojamientos)) {
+        itemsExternos = body.alojamientos;
+      } else if (Array.isArray(body?.results)) {
+        itemsExternos = body.results;
       } else {
         itemsExternos = [];
       }
@@ -589,13 +661,95 @@ export class NodesService {
       };
     }
 
+    if (nodo.vertical === 'ALOJAMIENTOS') {
+      let sincronizados = 0;
+      for (const raw of itemsExternos) {
+        try {
+          const extId = String(raw.idExterno || raw.id || raw.accommodation_id || raw.item_id || `alo-${Date.now()}-${sincronizados}`);
+          const id = extId.startsWith(nodo.codigoNodo) ? extId : `${nodo.codigoNodo.toLowerCase()}-${extId}`.slice(0, 50);
+          const nombre = String(raw.nombre || raw.name || raw.title || raw.accommodation_name || 'Hotel Socio');
+          const destino = String(raw.destino || raw.ubicacion?.city || raw.ciudad || raw.city || 'Quito');
+          const precio = Number(raw.precioPorNoche || raw.precio_noche || raw.price_per_night || raw.price?.total || raw.price || 65);
+          const fotosRaw = Array.isArray(raw.photos) ? raw.photos : (Array.isArray(raw.fotos) ? raw.fotos : []);
+          const photos = fotosRaw.map((f: any) => typeof f === 'string' ? { url: f } : { url: f?.url || 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800', caption: f?.caption });
+          if (photos.length === 0) {
+            photos.push({ url: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800', caption: nombre });
+          }
+
+          if (this.alojamientoRepo) {
+            const provSlug = nodo.codigoNodo.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 60);
+            await this.alojamientoRepo.query(
+              `INSERT INTO schema_alojamientos.proveedores_alojamiento (id, nombre, api_key_hash, activo)
+               VALUES ($1, $2, $3, true)
+               ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre, activo = true`,
+              [provSlug, nodo.nombreProveedor, `sync_${provSlug}`.padEnd(64, '0').slice(0, 64)],
+            ).catch(() => { });
+
+            let entity = await this.alojamientoRepo.findOne({ where: { id } });
+            if (!entity) {
+              entity = this.alojamientoRepo.create({
+                id,
+                nombre,
+                descripcion: String(raw.descripcion || raw.description || `Alojamiento sincronizado desde ${nodo.nombreProveedor}`),
+                tipoPropiedad: String(raw.tipoPropiedad || raw.property_type || 'Hotel / Resort'),
+                tipoAlojamiento: String(raw.tipoAlojamiento || 'Habitación privada'),
+                destino,
+                precioPorNoche: isNaN(precio) || precio <= 0 ? 65 : precio,
+                moneda: String(raw.moneda || raw.currency || 'USD'),
+                capacidadAdultos: Number(raw.capacidadAdultos || raw.capacidadMaxima || raw.capacidad_adultos || 2),
+                capacidadNinos: Number(raw.capacidadNinos || raw.capacidad_ninos || 1),
+                habitaciones: Number(raw.habitaciones || raw.rooms || 3),
+                camas: Number(raw.camas || raw.beds || 2),
+                banos: Number(raw.banos || raw.bathrooms || 1),
+                tienePiscina: Boolean(raw.tienePiscina ?? raw.tiene_piscina ?? false),
+                photos,
+                amenidades: Array.isArray(raw.amenidades) ? raw.amenidades : ['WiFi gratis', 'Recepción 24h'],
+                ubicacion: raw.ubicacion || { city: destino, country: 'EC' },
+                ratings: raw.ratings || { score: Number(raw.scoreCalificacion || 9.0), number_of_reviews: Number(raw.totalResenas || 12) },
+                proveedorId: provSlug,
+                idExterno: extId,
+                estado: 'ACTIVO',
+              });
+            } else {
+              entity.nombre = nombre;
+              entity.destino = destino;
+              entity.precioPorNoche = isNaN(precio) || precio <= 0 ? entity.precioPorNoche : precio;
+              entity.photos = photos;
+              entity.proveedorId = provSlug;
+              entity.idExterno = extId;
+              entity.estado = 'ACTIVO';
+            }
+            await this.alojamientoRepo.save(entity);
+          }
+          sincronizados++;
+        } catch (itemErr: any) {
+          this.logger.warn(`No se pudo procesar item de alojamiento: ${itemErr.message}`);
+        }
+      }
+
+      this.winstonLogger?.logAudit('CATALOGO_ALOJAMIENTOS_SINCRONIZADO', {
+        codigo_nodo: nodo.codigoNodo,
+        nombre_proveedor: nodo.nombreProveedor,
+        items_recibidos: itemsExternos.length,
+        items_sincronizados: sincronizados,
+        timestamp: new Date().toISOString(),
+      });
+
+      return {
+        success: true,
+        count: sincronizados,
+        total_recibidos: itemsExternos.length,
+        mensaje: `¡Catálogo de alojamientos de '${nodo.nombreProveedor}' sincronizado con éxito! (${sincronizados} alojamientos integrados a Booking)`,
+      };
+    }
+
     let sincronizados = 0;
     for (const raw of itemsExternos) {
       try {
         const rawId = String(raw.id || raw.item_id || raw.slug || `atrac-${Date.now()}-${sincronizados}`);
         const slug = String(raw.slug || rawId.toLowerCase().replace(/[^a-z0-9]/g, '-'));
         const nombre = raw.nombre || raw.name || raw.title || 'Atracción Turística';
-        
+
         let precio = 55.0;
         if (typeof raw.precio_unitario_adulto === 'number') {
           precio = raw.precio_unitario_adulto;
@@ -709,8 +863,8 @@ export class NodesService {
         baseUrlRest: 'http://100.88.114.108:8080/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568',
-        healthStatus: 'HEALTHY',
-        latenciaMs: 35,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -726,8 +880,8 @@ export class NodesService {
         baseUrlRest: 'http://100.74.154.34:3001/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 25,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -743,8 +897,8 @@ export class NodesService {
         baseUrlRest: 'http://100.126.104.108:3000/api/v2',
         endpointGrpc: bookingGrpc,
         apiKey: 'atr_PMaHffqZE4ao_bk1bMuqzA0xXzeAbr5nZ6qOcnV7gsAu_Vh7B65zWOYM',
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -760,8 +914,8 @@ export class NodesService {
         baseUrlRest: 'http://100.67.28.33:3000/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078',
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -777,8 +931,8 @@ export class NodesService {
         baseUrlRest: 'http://100.64.117.64:3000/api/v2',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 30,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -796,8 +950,8 @@ export class NodesService {
         baseUrlRest: 'http://100.124.9.75:3000/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: 'KdAHH2_mzMP3feumO8jrQk1TTwwJ7DHInvvB94Hp7os',
-        healthStatus: 'HEALTHY',
-        latenciaMs: 8,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -813,8 +967,8 @@ export class NodesService {
         baseUrlRest: 'https://maneja-de-una-v3-api.onrender.com/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
-        healthStatus: 'HEALTHY',
-        latenciaMs: 15,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -830,8 +984,8 @@ export class NodesService {
         baseUrlRest: 'https://maneja-de-una-v3-api.onrender.com/api/v3',
         endpointGrpc: bookingGrpc,
         apiKey: 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
-        healthStatus: 'HEALTHY',
-        latenciaMs: 15,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -847,8 +1001,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/autos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 26,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -863,8 +1017,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/autos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 29,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -879,8 +1033,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/autos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 27,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -897,8 +1051,8 @@ export class NodesService {
         baseUrlRest: process.env.TIENDA_VUELOS_URL || 'http://localhost:3000/api/v2/vuelos',
         endpointGrpc: bookingGrpc,
         apiKey: process.env.TIENDA_VUELOS_API_KEY || null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 42,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -913,8 +1067,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 40,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -929,8 +1083,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 44,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -945,8 +1099,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 41,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -961,8 +1115,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/vuelos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 43,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -979,8 +1133,8 @@ export class NodesService {
         baseUrlRest: process.env.TIENDA_ALOJAMIENTOS_URL || 'http://localhost:3000/api/v2/alojamientos',
         endpointGrpc: bookingGrpc,
         apiKey: process.env.TIENDA_ALOJAMIENTOS_API_KEY || null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 20,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -995,8 +1149,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 22,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -1011,8 +1165,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 21,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -1027,8 +1181,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 23,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -1043,8 +1197,8 @@ export class NodesService {
         baseUrlRest: 'http://localhost:3000/api/v2/alojamientos',
         endpointGrpc: bookingGrpc,
         apiKey: null,
-        healthStatus: 'HEALTHY',
-        latenciaMs: 24,
+        healthStatus: 'UNKNOWN',
+        latenciaMs: 0,
         killSwitchActivo: false,
         circuitBreakerEstado: 'CLOSED',
         tasaFallosPct: 0.00,
@@ -1054,7 +1208,10 @@ export class NodesService {
       },
     ];
 
-    for (const s of semillas) {
+    // Nunca se siembran proveedores que apuntan a Booking mismo (localhost):
+    // no existen y en el panel parecían socios reales.
+    const reales = semillas.filter((s) => !/\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)[:/]/i.test(String(s.baseUrlRest || '')));
+    for (const s of reales) {
       try {
         const existente = await this.configRepo.findOne({ where: { codigoNodo: s.codigoNodo } });
         if (!existente) {

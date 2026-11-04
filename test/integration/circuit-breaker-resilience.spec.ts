@@ -25,6 +25,7 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
   // Repositorio simulado en memoria para ConfigProveedor
   const mockConfigRepoData: any[] = [];
   const mockConfigRepo = {
+    count: jest.fn().mockImplementation(() => Promise.resolve(mockConfigRepoData.length)),
     find: jest.fn().mockImplementation(() => Promise.resolve([...mockConfigRepoData])),
     findOne: jest.fn().mockImplementation((query) => {
       const codeOrId = query.where?.[0]?.codigoNodo || query.where?.codigoNodo;
@@ -87,18 +88,21 @@ describe('Paso 3: Orquestación de Conectores Externos y Resiliencia Circuit Bre
   describe('1. Parametrización en Vivo de URLs Oficiales (NodesService & Controller)', () => {
     it('debe sembrar nodos por defecto con variables .env si la tabla está vacía y calcular semáforos LED para Panel 1', async () => {
       const nodos = await nodesService.listarNodos();
-      expect(nodos.length).toBeGreaterThanOrEqual(20);
+      // Solo se siembran socios reales: los de ejemplo con localhost ya no.
+      expect(nodos.length).toBeGreaterThanOrEqual(5);
+      expect(nodos.some((n) => String(n.url || '').includes('localhost'))).toBe(false);
 
       const dilanNode = nodos.find((n) => n.codigo_nodo === 'NODE_ATR_DILAN');
       expect(dilanNode).toBeDefined();
       expect(dilanNode.vertical).toBe('ATRACCIONES');
-      expect(dilanNode.semaforo_led.icono).toBe('🟢');
-      expect(dilanNode.semaforo_led.estado).toBe('HEALTHY');
+      // Recién sembrado nadie lo ha verificado con un ping real: no puede salir en verde.
+      expect(dilanNode.semaforo_led.icono).toBe('⚪');
+      expect(dilanNode.semaforo_led.estado).toBe('UNKNOWN');
       expect(dilanNode.url).toBe(process.env.TIENDA_ATRACCIONES_URL || 'http://100.88.114.108:8080/api/v3');
 
       // Compatibilidad con campos de Panel 1
       expect(dilanNode.codigo).toBe('NODE_ATR_DILAN');
-      expect(dilanNode.estado).toBe('OPERATIVO');
+      expect(dilanNode.estado).toBe('UNKNOWN'); // sin ping real todavía
       expect(dilanNode.failCount).toBe(0);
     });
 

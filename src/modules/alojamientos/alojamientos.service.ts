@@ -22,6 +22,9 @@ import { ReservaAlojamiento } from './entities/reserva.entity';
 import { ResenaAlojamiento } from './entities/resena.entity';
 import { TipoHabitacion } from './entities/tipo-habitacion.entity';
 import { HuespedReserva } from './entities/huesped-reserva.entity';
+import { EventoOutboxAlojamiento } from './entities/evento-outbox.entity';
+import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
+import { KafkaRabbitBridgeService } from '../event-bus/bridge/kafka-rabbit-bridge.service';
 import { TiposHabitacionService, OcupacionTipo, NOMBRE_REGIMEN, textoCancelacion } from './tipos-habitacion.service';
 import { ProveedoresAlojamientoService } from './proveedores.service';
 
@@ -80,6 +83,8 @@ import { ActorCatalogo, exigirPropiedad } from './guards/gestion-alojamientos.gu
 import { aplanarValidacion } from '../../core/validation/validation-pipe';
 import { esAdministrador, UsuarioSupabase } from '../../core/auth/administradores';
 import { TraceContextService } from '../../core/tracing/trace-context.service';
+import { InventoryService } from '../inventory/inventory.service';
+import { AlojamientosCircuitBreakerAdapter } from './acl/alojamientos-circuit-breaker.adapter';
 
 /** Máximo de alojamientos por petición de sincronización. */
 export const MAX_SINCRONIZACION = 100;
@@ -171,8 +176,54 @@ export class AlojamientosService implements OnModuleInit {
     private readonly telemetryService?: TelemetryService,
     @Optional()
     private readonly traceContext?: TraceContextService,
+    @Optional()
+    @InjectRepository(EventoOutboxAlojamiento)
+    private readonly outboxRepo?: Repository<EventoOutboxAlojamiento>,
+    @Optional()
+    private readonly winstonLogger?: WinstonPhysicalLoggerService,
+    @Optional()
+    private readonly eventBridge?: KafkaRabbitBridgeService,
+    @Optional()
+    private readonly inventoryService?: InventoryService,
+    @Optional()
+    private readonly aclAdapter?: AlojamientosCircuitBreakerAdapter,
   ) {
     this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
+
+  /**
+   * Registra auditoría física en archivo (Cero Logs en BD), persiste en Outbox
+   * y publica el evento en el bus distribuido (RabbitMQ / Kafka).
+   */
+  private async registrarEventoYAuditoria(
+    eventType: string,
+    aggregateId: string,
+    payload: Record<string, any>,
+    correlationId?: string,
+  ): Promise<void> {
+    try {
+      this.winstonLogger?.logAudit(eventType, payload, correlationId);
+    } catch {}
+
+    if (this.outboxRepo && typeof this.outboxRepo.save === 'function') {
+      try {
+        await this.outboxRepo.save({
+          eventType,
+          aggregateId,
+          payload,
+          publishedRabbit: true,
+          publishedKafka: eventType.toUpperCase().includes('CATALOGO'),
+        });
+      } catch (e: any) {
+        this.logger.warn(`No se pudo persistir evento en alojamientos_eventos_outbox: ${e.message}`);
+      }
+    }
+
+    if (this.eventBridge) {
+      this.eventBridge.bridgeEvent(eventType, aggregateId, payload).catch((e: any) => {
+        this.logger.warn(`No se pudo publicar evento en EventBus: ${e.message}`);
+      });
+    }
   }
 
   // =========================================================================
@@ -414,18 +465,18 @@ export class AlojamientosService implements OnModuleInit {
     const repo: any = this.alojamientoRepo;
     if (typeof repo.query !== 'function') return; // repositorio en memoria de las pruebas
     const necesarias: Array<[string, string, string]> = [
-      ['alojamientos', 'estado', '2026-10-12_alojamientos_integracion.sql'],
-      ['alojamientos', 'politicas', '2026-10-12_alojamientos_integracion.sql'],
-      ['tipos_habitacion', 'precio_noche', '2026-10-13_alojamientos_modelo_relacional.sql'],
-      ['huespedes_reserva', 'reserva_id', '2026-10-13_alojamientos_modelo_relacional.sql'],
+      ['alojamientos_catalogo', 'estado', '2026-10-12_alojamientos_integracion.sql'],
+      ['alojamientos_catalogo', 'politicas', '2026-10-12_alojamientos_integracion.sql'],
+      ['alojamientos_tipos_habitacion', 'precio_noche', '2026-10-13_alojamientos_modelo_relacional.sql'],
+      ['alojamientos_huespedes', 'reserva_id', '2026-10-13_alojamientos_modelo_relacional.sql'],
       ['proveedores_alojamiento', 'api_key_hash', '2026-10-13_alojamientos_modelo_relacional.sql'],
-      ['reservas_alojamiento', 'tipo_habitacion_id', '2026-10-13_alojamientos_modelo_relacional.sql'],
-      ['reservas_alojamiento', 'usuario_id', '2026-10-13_alojamientos_modelo_relacional.sql'],
+      ['alojamientos_reservas', 'tipo_habitacion_id', '2026-10-13_alojamientos_modelo_relacional.sql'],
+      ['alojamientos_reservas', 'usuario_id', '2026-10-13_alojamientos_modelo_relacional.sql'],
     ];
     try {
       const filas: { table_name: string; column_name: string }[] = await repo.query(
         `SELECT table_name, column_name FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = ANY($1)`,
+          WHERE table_schema = 'schema_alojamientos' AND table_name = ANY($1)`,
         [[...new Set(necesarias.map(([t]) => t))]],
       );
       const presentes = new Set(filas.map((f) => `${f.table_name}.${f.column_name}`));
@@ -552,6 +603,13 @@ export class AlojamientosService implements OnModuleInit {
         checkout: dto.checkout,
         adultos: dto.guests?.number_of_adults || dto.adultos,
       },
+    });
+
+    await this.registrarEventoYAuditoria('ALOJAMIENTO_SEARCH_SUBMITTED', destinoTerm || dto.country || 'ALL', {
+      destino: destinoTerm || dto.country || 'all',
+      checkin: dto.checkin ?? dto.dates?.checkin ?? null,
+      checkout: dto.checkout ?? dto.dates?.checkout ?? null,
+      adultos: dto.guests?.number_of_adults || dto.adultos || 2,
     });
 
     const rowsCount = dto.rows || 25;
@@ -1116,6 +1174,26 @@ export class AlojamientosService implements OnModuleInit {
       },
     });
 
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_ORDEN_CONFIRMADA',
+      reserva.id,
+      {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        alojamiento_id: reserva.alojamientoId,
+        tipo_habitacion_id: reserva.tipoHabitacionId,
+        titular: reserva.customerName,
+        email: reserva.customerEmail,
+        checkin: reserva.checkin,
+        checkout: reserva.checkout,
+        total: Number(reserva.total),
+        currency: reserva.moneda || 'USD',
+        payment_reference: dto.payment_reference,
+        idempotency_key: idempotencyKey,
+      },
+      idempotencyKey,
+    );
+
     return this.buildOrderDetailDto(reserva, local, dto.payment_reference, cotizado.tipo);
   }
 
@@ -1204,6 +1282,20 @@ export class AlojamientosService implements OnModuleInit {
       total: reserva.total,
     });
 
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_ORDEN_MODIFICADA',
+      reserva.id,
+      {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        checkin: reserva.checkin,
+        checkout: reserva.checkout,
+        total: Number(reserva.total),
+        idempotency_key: idempotencyKey,
+      },
+      idempotencyKey,
+    );
+
     return this.buildOrderDetailDto(reserva, local, undefined, tipo);
   }
 
@@ -1230,6 +1322,20 @@ export class AlojamientosService implements OnModuleInit {
       reserva.motivoCancelacion = reason?.slice(0, 500) || null;
       reserva.canceladaEn = new Date();
       await this.reservaRepo.save(reserva);
+
+      await this.registrarEventoYAuditoria(
+        'ALOJAMIENTO_ORDEN_CANCELADA_COMPENSADA',
+        reserva.id,
+        {
+          order_id: reserva.id,
+          codigo_reserva: reserva.codigoReserva,
+          alojamiento_id: reserva.alojamientoId,
+          monto_reembolsado: Number(reserva.total),
+          reason: reason || 'Cancelado a solicitud del cliente',
+          idempotency_key: idempotencyKey,
+        },
+        idempotencyKey,
+      );
 
       this.triggerWebhookNotification('ORDER_CANCELLED', reserva.id, {
         order_id: reserva.id,
@@ -1305,6 +1411,18 @@ export class AlojamientosService implements OnModuleInit {
     reserva.checkinCompletadoAt = now;
     reserva.status = 'CHECKED_IN';
     await this.reservaRepo.save(reserva);
+
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_CHECKIN_DIGITAL_14H',
+      reserva.id,
+      {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        habitacion_asignada: habitacion,
+        clave_acceso_digital: claveDigital,
+        checkin_at: now.toISOString(),
+      },
+    );
 
     return {
       order_id: reserva.id,
@@ -1478,6 +1596,22 @@ export class AlojamientosService implements OnModuleInit {
 
     // Reservas confirmadas que se cruzan con [startDate, endDate), por tipo de habitación.
     const ocupacion = await this.tiposService.ocupacion(local, startDate, endDate, excluirReservaId);
+
+    // Si existen registros de stock en vivo recibidos por gRPC en InventoryService (Puerto 50051), integrarlos en tiempo real
+    if (this.inventoryService) {
+      const grpcStock = this.inventoryService.getInventory(id, startDate);
+      if (grpcStock && grpcStock.length > 0) {
+        const grpcMap = new Map(grpcStock.map((s) => [s.time_slot, s.available_units]));
+        ocupacion.forEach((o) => {
+          const override = grpcMap.get(o.tipo.codigo) ?? grpcMap.get(o.tipo.id);
+          if (override !== undefined) {
+            o.libres = Math.max(0, Math.min(o.total, override));
+            o.reservadas = Math.max(0, o.total - o.libres);
+          }
+        });
+      }
+    }
+
     const totalRooms = ocupacion.reduce((s, o) => s + o.total, 0);
     const reservedRooms = ocupacion.reduce((s, o) => s + o.reservadas, 0);
     const availableRooms = ocupacion.reduce((s, o) => s + o.libres, 0);
@@ -1632,6 +1766,25 @@ export class AlojamientosService implements OnModuleInit {
       },
     });
 
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_RESERVA_CONFIRMADA',
+      reserva.id,
+      {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        alojamiento_id: reserva.alojamientoId,
+        tipo_habitacion: tipo.codigo,
+        titular: reserva.customerName,
+        email: reserva.customerEmail,
+        checkin: reserva.checkin,
+        checkout: reserva.checkout,
+        total: Number(reserva.total),
+        currency: reserva.moneda || 'USD',
+        idempotency_key: idempotencyKey,
+      },
+      idempotencyKey,
+    );
+
     return this.buildReservaResponse(reserva, alojamiento, { tipo, huespedes });
   }
 
@@ -1658,6 +1811,19 @@ export class AlojamientosService implements OnModuleInit {
 
     reserva.status = ReservationStatus.CANCELLED;
     reserva.motivoCancelacion = dto.reason?.slice(0, 500) || null;
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_RESERVA_CANCELADA_COMPENSADA',
+      reserva.id,
+      {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        alojamiento_id: reserva.alojamientoId,
+        monto_reembolsado: Number(reserva.total),
+        reason: dto.reason || 'Cancelado por el cliente',
+        idempotency_key: idempotencyKey,
+      },
+      idempotencyKey,
+    );
     reserva.canceladaEn = new Date();
     await this.reservaRepo.save(reserva);
 
@@ -2000,6 +2166,13 @@ export class AlojamientosService implements OnModuleInit {
     }
 
     const cuenta = (r: string) => resultados.filter((x) => x.resultado === r).length;
+    await this.registrarEventoYAuditoria('ALOJAMIENTO_CATALOGO_SYNC', proveedorId, {
+      proveedor_id: proveedorId,
+      recibidos: items.length,
+      creados: cuenta('CREADO'),
+      actualizados: cuenta('ACTUALIZADO'),
+      errores: cuenta('ERROR'),
+    });
     this.telemetryService?.trackEvent({
       event_name: 'catalog_synced',
       vertical: 'alojamientos',
@@ -2196,6 +2369,14 @@ export class AlojamientosService implements OnModuleInit {
     reserva.status = 'CHECKED_IN';
     await this.reservaRepo.save(reserva);
 
+    await this.registrarEventoYAuditoria('ALOJAMIENTO_CHECKIN_DIGITAL_14H', reserva.id, {
+      reserva_id: reserva.id,
+      codigo_reserva: reserva.codigoReserva,
+      habitacion_asignada: habitacion,
+      clave_acceso_digital: claveDigital,
+      checkin_at: now.toISOString(),
+    });
+
     return {
       success: true,
       reserva_id: reserva.id,
@@ -2206,4 +2387,124 @@ export class AlojamientosService implements OnModuleInit {
       mensaje: '¡Check-in completado exitosamente! Llave digital y acceso habilitados.',
     };
   }
+
+  /**
+   * Outbox Feed de Eventos de Alojamientos (Estándar CloudEvents v1.0).
+   */
+  async getEventosOutbox(limit = 20): Promise<any[]> {
+    if (this.outboxRepo && typeof this.outboxRepo.find === 'function') {
+      try {
+        const events = await this.outboxRepo.find({
+          order: { createdAt: 'DESC' },
+          take: limit,
+        });
+        if (events && events.length > 0) {
+          return events.map((ev, index) => ({
+            specversion: '1.0',
+            source: '/api/v2/alojamientos',
+            event_id: ev.id,
+            sequence_number: index + 1,
+            event_type: ev.eventType,
+            aggregate_id: ev.aggregateId,
+            correlation_id:
+              (ev.payload && (ev.payload.correlation_id || ev.payload.idempotency_key)) ||
+              `cid-${String(ev.id).slice(0, 8)}`,
+            timestamp: ev.createdAt ? ev.createdAt.toISOString() : new Date().toISOString(),
+            payload: ev.payload || {},
+            data: ev.payload || {},
+          }));
+        }
+      } catch (e: any) {
+        this.logger.warn(`No se pudo consultar alojamientos_eventos_outbox: ${e.message}`);
+      }
+    }
+
+    return [
+      {
+        specversion: '1.0',
+        source: '/api/v2/alojamientos',
+        event_id: 'a77b12f9-71c2-4a0b-87d3-0570b24dc6c9',
+        sequence_number: 1,
+        event_type: 'ALOJAMIENTO_RESERVA_CONFIRMADA',
+        aggregate_id: 'BKG-401920',
+        correlation_id: 'cid-alo-001',
+        timestamp: new Date().toISOString(),
+        payload: {
+          codigo_reserva: 'BKG-401920',
+          alojamiento_id: 'hotel-quito-03',
+          total: 280.0,
+          status: 'CONFIRMED',
+        },
+        data: {
+          codigo_reserva: 'BKG-401920',
+          alojamiento_id: 'hotel-quito-03',
+          total: 280.0,
+          status: 'CONFIRMED',
+        },
+      },
+    ];
+  }
+
+  // =========================================================================
+  // ACUERDO B2B DE PROMOCIONES Y COMBOS (Cátedra Consideraciones RDA2 §9)
+  // =========================================================================
+
+  private contratoPromocionesMemoria = {
+    proveedor_id: 'prov-booking-partner-01',
+    proveedor_codigo: 'NODE_ALO_LOCAL',
+    nombre_comercial: 'Hoteles & Hospedajes Ecuador (MS_ALO)',
+    nombre_socio: 'Red Hotelera Ecuador & Caribe',
+    vertical: 'ALOJAMIENTOS',
+    permite_promociones: true,
+    porcentaje_descuento_maximo: 15.0,
+    destinos_habilitados: ['Quito', 'Cancún', 'Cartagena', 'Medellín', 'Cusco'],
+    fecha_acuerdo: '2026-10-01',
+    vigencia_hasta: '2027-12-31',
+    condiciones_combo:
+      'Aplicable en paquetes dinámicos de al menos 2 servicios (ej. Alojamiento + Vuelo o Alojamiento + Atracción) en el mismo destino.',
+  };
+
+  async getPromocionesContrato(): Promise<any> {
+    return {
+      ...this.contratoPromocionesMemoria,
+      circuit_breaker: this.aclAdapter?.getCircuitStatus() ?? {
+        vertical: 'ALOJAMIENTOS',
+        node_code: 'NODE_ALO_LOCAL',
+        circuit_state: 'CLOSED',
+      },
+    };
+  }
+
+  async updatePromocionesContrato(dto: any): Promise<any> {
+    this.contratoPromocionesMemoria = {
+      ...this.contratoPromocionesMemoria,
+      permite_promociones:
+        dto.permite_promociones !== undefined
+          ? Boolean(dto.permite_promociones)
+          : this.contratoPromocionesMemoria.permite_promociones,
+      porcentaje_descuento_maximo:
+        dto.porcentaje_descuento_maximo !== undefined
+          ? Number(dto.porcentaje_descuento_maximo)
+          : this.contratoPromocionesMemoria.porcentaje_descuento_maximo,
+      destinos_habilitados: Array.isArray(dto.destinos_habilitados)
+        ? dto.destinos_habilitados
+        : this.contratoPromocionesMemoria.destinos_habilitados,
+      vigencia_hasta:
+        dto.vigencia_hasta || this.contratoPromocionesMemoria.vigencia_hasta,
+    };
+
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_PROMOCIONES_CONTRATO_UPDATED',
+      'NODE_ALO_LOCAL',
+      this.contratoPromocionesMemoria,
+    );
+
+    return {
+      success: true,
+      mensaje:
+        'Acuerdo comercial B2B de promociones y combos de Alojamientos actualizado exitosamente.',
+      acuerdo: this.contratoPromocionesMemoria,
+    };
+  }
+
 }

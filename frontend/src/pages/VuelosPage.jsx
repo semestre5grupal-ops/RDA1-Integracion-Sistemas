@@ -111,12 +111,16 @@ export function VuelosPage() {
   }
 
   const ofertas = resultados?.offers ?? [];
+  // RDA2: Booking agrega a las aerolíneas socias; `sources` dice cuál respondió.
+  const fuentes = resultados?.sources ?? [];
+  const fuentesCaidas = fuentes.filter(f => !f.ok);
 
   // Agrupar ofertas por número de vuelo para el diseño de acordeón moderno
   const ofertasAgrupadas = Object.values(
     ofertas.reduce((acc, oferta) => {
       // Usamos los números de vuelo de todos los segmentos como clave de agrupación
-      const key = oferta.itineraries?.[0]?.segments?.map(s => s.flightNumber).join('-');
+      // Se incluye la aerolínea socia para no mezclar vuelos de dos e-commerce distintos.
+      const key = `${oferta.provider?.nodeCode ?? ''}|${oferta.itineraries?.[0]?.segments?.map(s => s.flightNumber).join('-')}`;
       if (!acc[key]) acc[key] = [];
       acc[key].push(oferta);
       return acc;
@@ -135,26 +139,43 @@ export function VuelosPage() {
     try {
       // El UUID lo creamos inline para idempotencia de esta transaccion
       const clave = crypto.randomUUID();
-      const cabina = tarifa?.cabinClass || oferta.itineraries[0]?.pricingOptions[0]?.cabinClass || 'ECONOMY';
-        const marca = tarifa?.fareBrand || 'STANDARD';
-      const itinerarioId = oferta.itineraries[0]?.itineraryId;
+      // El contrato exige UNA tarifa por cada itinerario de la oferta (ida y
+      // vuelta = 2). Antes solo se enviaba la de la ida y la aerolínea respondía
+      // 422 "itinerarySelections must choose a fare for every itinerary".
+      // Para cada tramo se usa la misma cabina y marca elegidas si existen ahí;
+      // si no, la misma cabina, y si tampoco, la primera tarifa del tramo.
+      const cabina = tarifa?.cabinClass || oferta.itineraries[0]?.pricingOptions?.[0]?.cabinClass || 'ECONOMY';
+      const marca = tarifa?.fareBrand || oferta.itineraries[0]?.pricingOptions?.[0]?.fareBrand || 'STANDARD';
+      const selecciones = (oferta.itineraries ?? []).map((it) => {
+        const opciones = it.pricingOptions ?? [];
+        const elegida =
+          opciones.find((p) => p.cabinClass === cabina && p.fareBrand === marca) ||
+          opciones.find((p) => p.cabinClass === cabina) ||
+          opciones[0] || { cabinClass: cabina, fareBrand: marca };
+        return { itineraryId: it.itineraryId, cabinClass: elegida.cabinClass, fareBrand: elegida.fareBrand };
+      });
 
       const respuesta = await crearHold(
         {
           offerId: oferta.offerId,
-          itinerarySelections: [
-            {
-              itineraryId: itinerarioId,
-              cabinClass: cabina,
-              fareBrand: marca,
-            },
-          ],
+          itinerarySelections: selecciones,
           passengersBreakdown: busquedaActiva?.passengers,
         },
         clave,
         obtenerHuellaDispositivo(),
       );
-      setHoldActivo(respuesta);
+      // El formulario necesita los vuelos del hold y la cabina pagada para
+      // mostrar el mapa de asientos real de cada tramo.
+      const tramos = (oferta.itineraries ?? []).flatMap((it, idx) =>
+        (it.segments ?? []).map((seg) => ({
+          segmentId: seg.segmentId,
+          flightNumber: seg.flightNumber,
+          origen: seg.departure?.iataCode ?? seg.departureIataCode,
+          destino: seg.arrival?.iataCode ?? seg.arrivalIataCode,
+          cabina: selecciones[idx]?.cabinClass ?? cabina,
+        })),
+      );
+      setHoldActivo({ ...respuesta, offerId: oferta.offerId, tramos });
     } catch (error) {
       const detalle = error?.response?.data?.detail ?? 'No se pudo procesar tu selección. Inténtalo de nuevo.';
       setError({ title: 'Error al continuar', detail: detalle });
@@ -280,6 +301,16 @@ export function VuelosPage() {
           <div className="state-container">
             <div className="error-icon" aria-hidden="true">🔎</div>
             <h3 className="state-title">No encontramos vuelos</h3>
+            {resultados?.meta?.fuente && fuentes.length === 0 && (
+              <p className="state-subtitle">
+                Aún no hay aerolíneas socias conectadas. Regístralas en Admin → Servicios &amp; Prov. (tipo Vuelos).
+              </p>
+            )}
+            {fuentesCaidas.length > 0 && (
+              <p className="state-subtitle">
+                No respondieron: {fuentesCaidas.map(f => `${f.nombre} (${f.error || 'sin respuesta'})`).join(', ')}.
+              </p>
+            )}
             <p className="state-subtitle">
               No encontramos vuelos para esta ruta en la fecha seleccionada.<br /><br />
               <b>💡 Consejo:</b> Intenta mover tu fecha de salida un día antes o un día después.
@@ -303,6 +334,12 @@ export function VuelosPage() {
               )}
               .
             </p>
+            {fuentes.length > 0 && (
+              <p className="section-subtitle" style={{ marginTop: '-8px', marginBottom: '16px', fontSize: '0.9rem' }}>
+                ✈️ {fuentes.length - fuentesCaidas.length} de {fuentes.length} aerolíneas respondieron
+                {fuentesCaidas.length > 0 && <> · sin respuesta: {fuentesCaidas.map(f => f.nombre).join(', ')}</>}
+              </p>
+            )}
 
             <div className="atracciones-grid vuelo-grid">
               {ofertasAgrupadas.map((grupoOfertas, indice) => (

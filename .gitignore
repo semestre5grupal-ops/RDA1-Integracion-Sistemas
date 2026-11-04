@@ -49,3 +49,7 @@ src/modules/*/pruebas/
 seed-ecuador.cjs
 
 alejo/
+
+*.zip
+supabase/.temp/
+supabase/.branches/

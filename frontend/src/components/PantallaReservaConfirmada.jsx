@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { formatearFecha, formatearMoneda } from '../services/formato';
+import { formatearFecha, formatearMoneda, extraerHora } from '../services/formato';
+
+/** `HH:mm` en hora de Ecuador, sin romper la pantalla si viene vacío o raro. */
+function horaDe(valor) {
+  const h = extraerHora(valor);
+  return h === '--' ? '--:--' : h;
+}
 import { listarTickets } from '../services/vuelosApi';
 
 /**
@@ -120,16 +126,16 @@ export function PantallaReservaConfirmada({ reserva, onVolver }) {
                   {(itin.segments ?? []).map((seg) => (
                     <li className="vuelo-segmento" key={seg.segmentId}>
                       <span className="vuelo-hora">
-                        {new Date(seg.departureAt).toISOString().slice(11, 16)}
+                        {horaDe(seg.departureAt ?? seg.departure?.at)}
                       </span>
-                      <span className="vuelo-aeropuerto">{seg.departureIataCode}</span>
+                      <span className="vuelo-aeropuerto">{seg.departureIataCode ?? seg.departure?.iataCode}</span>
                       <span className="vuelo-linea" aria-hidden="true">
                         ─────────
                       </span>
                       <span className="vuelo-hora">
-                        {new Date(seg.arrivalAt).toISOString().slice(11, 16)}
+                        {horaDe(seg.arrivalAt ?? seg.arrival?.at)}
                       </span>
-                      <span className="vuelo-aeropuerto">{seg.arrivalIataCode}</span>
+                      <span className="vuelo-aeropuerto">{seg.arrivalIataCode ?? seg.arrival?.iataCode}</span>
                       <span className="vuelo-numero">· {seg.flightNumber}</span>
                     </li>
                   ))}

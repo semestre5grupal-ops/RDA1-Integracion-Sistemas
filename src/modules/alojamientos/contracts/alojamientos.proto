@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package alojamientos;
+
+// Contrato gRPC para el Microservicio de Alojamientos (MS_ALO - Reto 2 RDA2)
+// Soporta consultas unarias de catálogo/disponibilidad y streaming de inventario en tiempo real.
+
+service AlojamientosService {
+  rpc GetAlojamiento (GetAlojamientoRequest) returns (AlojamientoResponse);
+  rpc CheckAvailability (CheckAvailabilityRequest) returns (AvailabilityResponse);
+  rpc StreamRoomStock (stream RoomStockEvent) returns (RoomStockSummary);
+}
+
+message GetAlojamientoRequest {
+  string id = 1;
+}
+
+message AlojamientoResponse {
+  string id = 1;
+  string nombre = 2;
+  string destino = 3;
+  string tipoPropiedad = 4;
+  double precioPorNoche = 5;
+  string moneda = 6;
+  int32 habitacionesDisponibles = 7;
+  bool estaActivo = 8;
+}
+
+message CheckAvailabilityRequest {
+  string alojamientoId = 1;
+  string checkin = 2;
+  string checkout = 3;
+  int32 habitaciones = 4;
+}
+
+message AvailabilityResponse {
+  string alojamientoId = 1;
+  bool isAvailable = 2;
+  int32 totalRooms = 3;
+  int32 availableRooms = 4;
+  double pricePerNight = 5;
+}
+
+message RoomStockEvent {
+  string alojamientoId = 1;
+  string tipoHabitacionCodigo = 2;
+  string fecha = 3;
+  int32 habitacionesLibres = 4;
+  int64 timestampMs = 5;
+}
+
+message RoomStockSummary {
+  int32 processedEvents = 1;
+  string status = 2;
+}
+

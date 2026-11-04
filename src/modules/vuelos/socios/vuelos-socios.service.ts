@@ -1,0 +1,458 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { randomUUID } from 'node:crypto';
+import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
+import { propietarioDesde } from '../vuelos.controller';
+
+/**
+ * Agregador de aerolíneas socias (RDA2).
+ *
+ * Booking deja de leer los vuelos de su propia base (seed) y actúa como
+ * AGREGADOR: cada búsqueda se reparte en paralelo entre las aerolíneas
+ * registradas en "Servicios & Prov." (vertical VUELOS), y las operaciones
+ * posteriores (seatmap, hold, reserva, boletos, cancelación...) se reenvían a
+ * la aerolínea dueña de la oferta.
+ *
+ * ── Cómo sabe Booking a qué aerolínea pertenece un id ───────────────────────
+ * Los ids que devuelve un socio (offerId, holdId, bookingId) se devuelven al
+ * frontend con el prefijo `<codigoNodo>~`, por ejemplo
+ * `NODE_VUE_RAM~OF-123`. Al recibir ese id en una ruta o en el cuerpo, Booking
+ * quita el prefijo y reenvía la petición a ese nodo. Es stateless: sobrevive a
+ * reinicios de Azure sin guardar nada.
+ *
+ * ── Autenticación hacia el socio (campo "X-API-Key" del nodo) ──────────────
+ *  - `clave`                               → cabecera `X-API-Key: clave`
+ *  - `oauth2:<client_id>:<client_secret>`  → OAuth2 client_credentials contra
+ *    `<origen>/api/v2/oauth2/token`, y `Authorization: Bearer <token>`
+ *  - `oauth2:<client_id>:<client_secret>:<url_token>` → igual, con URL propia
+ *
+ * ── Variables de entorno ────────────────────────────────────────────────────
+ *  - VUELOS_FUENTE = socios (defecto) | mixto | local
+ *      socios: solo aerolíneas socias (sin datos de prueba).
+ *      mixto:  socios + base local.
+ *      local:  comportamiento anterior (solo base local).
+ *  - VUELOS_SOCIOS_TIMEOUT_MS (defecto 8000) por aerolínea.
+ */
+
+export const SEPARADOR_ID = '~';
+const CAMPOS_ID = ['offerId', 'holdId', 'bookingId'];
+
+type Fuente = 'socios' | 'mixto' | 'local';
+
+export interface ResultadoSocio {
+  codigoNodo: string;
+  nombre: string;
+  ok: boolean;
+  status?: number;
+  ms: number;
+  ofertas: number;
+  error?: string;
+}
+
+export interface RespuestaProxy {
+  status: number;
+  body: any;
+  headers: Record<string, string>;
+}
+
+@Injectable()
+export class VuelosSociosService {
+  private readonly logger = new Logger(VuelosSociosService.name);
+  private readonly tokens = new Map<string, { token: string; expira: number }>();
+
+  constructor(
+    @InjectRepository(ConfigProveedor)
+    private readonly nodos: Repository<ConfigProveedor>,
+  ) {}
+
+  fuente(): Fuente {
+    const v = (process.env.VUELOS_FUENTE || 'socios').trim().toLowerCase();
+    return v === 'local' || v === 'mixto' ? v : 'socios';
+  }
+
+  private timeoutMs(): number {
+    const n = Number(process.env.VUELOS_SOCIOS_TIMEOUT_MS);
+    return Number.isFinite(n) && n > 0 ? n : 8000;
+  }
+
+  // ───────────────────────────── Nodos ─────────────────────────────
+
+  /** URL base `.../vuelos` del nodo, o null si no es una URL usable. */
+  static baseVuelos(baseUrlRest?: string | null): string | null {
+    if (!baseUrlRest) return null;
+    const limpia = baseUrlRest.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(limpia)) return null;
+    return /\/vuelos$/i.test(limpia) ? limpia : `${limpia}/vuelos`;
+  }
+
+  /** Un nodo que apunta a Booking mismo (seeds `localhost:3000`) causaría un bucle. */
+  static esAutoReferencia(url: string, hostPropio?: string): boolean {
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      if (['localhost', '127.0.0.1', '0.0.0.0', '::1'].includes(host)) return true;
+      if (hostPropio && u.host.toLowerCase() === hostPropio.toLowerCase()) return true;
+      const publico = (process.env.WEBSITE_HOSTNAME || process.env.PUBLIC_HOSTNAME || '').toLowerCase();
+      return !!publico && host === publico;
+    } catch {
+      return true;
+    }
+  }
+
+  async nodosActivos(hostPropio?: string): Promise<ConfigProveedor[]> {
+    const todos = await this.nodos.find({ where: { vertical: 'VUELOS' } });
+    return todos.filter((n) => {
+      if (n.killSwitchActivo) return false;
+      const base = VuelosSociosService.baseVuelos(n.baseUrlRest);
+      return !!base && !VuelosSociosService.esAutoReferencia(base, hostPropio);
+    });
+  }
+
+  async nodoPorCodigo(codigo: string): Promise<ConfigProveedor | null> {
+    return this.nodos.findOne({ where: { codigoNodo: codigo } });
+  }
+
+  // ───────────────────────────── Ids ─────────────────────────────
+
+  static separarId(valor: unknown): { nodo: string; id: string } | null {
+    if (typeof valor !== 'string') return null;
+    const i = valor.indexOf(SEPARADOR_ID);
+    if (i <= 0) return null;
+    const nodo = valor.slice(0, i);
+    if (!/^NODE_[A-Z0-9_]+$/i.test(nodo)) return null;
+    return { nodo, id: valor.slice(i + 1) };
+  }
+
+  /** Añade `<nodo>~` a offerId/holdId/bookingId en toda la respuesta del socio. */
+  static prefijarIds(valor: any, nodo: string): any {
+    if (Array.isArray(valor)) return valor.map((v) => VuelosSociosService.prefijarIds(v, nodo));
+    if (!valor || typeof valor !== 'object') return valor;
+    const out: any = {};
+    for (const [k, v] of Object.entries(valor)) {
+      if (CAMPOS_ID.includes(k) && typeof v === 'string' && v && !VuelosSociosService.separarId(v)) {
+        out[k] = `${nodo}${SEPARADOR_ID}${v}`;
+      } else {
+        out[k] = VuelosSociosService.prefijarIds(v, nodo);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * El contrato usa dos formas de segmento: en búsqueda `departure: {iataCode, at}`
+   * y en reservas `departureIataCode` / `departureAt`. Algunas aerolíneas mandan
+   * la de búsqueda también en la reserva; se completan ambas formas para que el
+   * frontend (y Mis Reservas) funcionen con cualquiera.
+   */
+  static normalizarSegmentos(valor: any): any {
+    if (Array.isArray(valor)) return valor.map((v) => VuelosSociosService.normalizarSegmentos(v));
+    if (!valor || typeof valor !== 'object') return valor;
+    const out: any = {};
+    for (const [k, v] of Object.entries(valor)) out[k] = VuelosSociosService.normalizarSegmentos(v);
+    if (Array.isArray(out.segments)) {
+      out.segments = out.segments.map((seg: any) => {
+        if (!seg || typeof seg !== 'object') return seg;
+        const n = { ...seg };
+        n.departureIataCode ??= seg.departure?.iataCode;
+        n.departureAt ??= seg.departure?.at;
+        n.arrivalIataCode ??= seg.arrival?.iataCode;
+        n.arrivalAt ??= seg.arrival?.at;
+        if (!n.departure && (seg.departureIataCode || seg.departureAt)) {
+          n.departure = { iataCode: seg.departureIataCode, at: seg.departureAt, terminal: seg.departureTerminal ?? null };
+        }
+        if (!n.arrival && (seg.arrivalIataCode || seg.arrivalAt)) {
+          n.arrival = { iataCode: seg.arrivalIataCode, at: seg.arrivalAt, terminal: seg.arrivalTerminal ?? null };
+        }
+        return n;
+      });
+    }
+    return out;
+  }
+
+  /** Quita `<nodo>~` antes de enviar el cuerpo al socio. */
+  static quitarPrefijos(valor: any): any {
+    if (Array.isArray(valor)) return valor.map((v) => VuelosSociosService.quitarPrefijos(v));
+    if (!valor || typeof valor !== 'object') return valor;
+    const out: any = {};
+    for (const [k, v] of Object.entries(valor)) {
+      const sep = CAMPOS_ID.includes(k) ? VuelosSociosService.separarId(v) : null;
+      out[k] = sep ? sep.id : VuelosSociosService.quitarPrefijos(v);
+    }
+    return out;
+  }
+
+  /** Busca el nodo dueño en la ruta (segmentos) o en el cuerpo (offerId/holdId/bookingId). */
+  static detectarNodo(segmentos: string[], body: any): string | null {
+    for (const s of segmentos) {
+      const sep = VuelosSociosService.separarId(decodeURIComponent(s));
+      if (sep) return sep.nodo;
+    }
+    const buscar = (v: any): string | null => {
+      if (Array.isArray(v)) {
+        for (const x of v) {
+          const r = buscar(x);
+          if (r) return r;
+        }
+        return null;
+      }
+      if (!v || typeof v !== 'object') return null;
+      for (const [k, x] of Object.entries(v)) {
+        if (CAMPOS_ID.includes(k)) {
+          const sep = VuelosSociosService.separarId(x);
+          if (sep) return sep.nodo;
+        }
+        const r = buscar(x);
+        if (r) return r;
+      }
+      return null;
+    };
+    return buscar(body);
+  }
+
+  // ───────────────────────────── Auth ─────────────────────────────
+
+  private async cabecerasAuth(nodo: ConfigProveedor): Promise<Record<string, string>> {
+    const clave = (nodo.apiKey || '').trim();
+    if (!clave) return {};
+    if (!/^oauth2:/i.test(clave)) return { 'X-API-Key': clave };
+
+    const partes = clave.split(':');
+    const clientId = partes[1];
+    const clientSecret = partes[2];
+    const urlToken =
+      partes.length > 3
+        ? partes.slice(3).join(':')
+        : `${new URL(VuelosSociosService.baseVuelos(nodo.baseUrlRest)!).origin}/api/v2/oauth2/token`;
+
+    const cache = this.tokens.get(nodo.codigoNodo);
+    if (cache && cache.expira > Date.now() + 15_000) return { Authorization: `Bearer ${cache.token}` };
+
+    // RFC 6749 §2.3: el cliente se autentica de UNA sola forma. Mandar Basic y
+    // además client_id/client_secret en el cuerpo hace que servidores estrictos
+    // respondan 400 invalid_request. Se intenta Basic y, si no, el cuerpo.
+    const pedir = (modo: 'basic' | 'cuerpo') =>
+      fetch(urlToken, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+          ...(modo === 'basic' ? { Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64') } : {}),
+        },
+        body: new URLSearchParams(
+          modo === 'basic'
+            ? { grant_type: 'client_credentials' }
+            : { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
+        ),
+        signal: AbortSignal.timeout(this.timeoutMs()),
+      });
+    let res = await pedir('basic');
+    let datos: any = await res.json().catch(() => ({}));
+    if (!res.ok || !datos.access_token) {
+      res = await pedir('cuerpo');
+      datos = await res.json().catch(() => ({}));
+    }
+    if (!res.ok || !datos.access_token) {
+      throw new Error(`OAuth2 rechazado por ${nodo.codigoNodo} (HTTP ${res.status}${datos?.error ? `: ${datos.error}` : ''})`);
+    }
+    const segundos = Number(datos.expires_in) || 300;
+    this.tokens.set(nodo.codigoNodo, { token: datos.access_token, expira: Date.now() + segundos * 1000 });
+    return { Authorization: `Bearer ${datos.access_token}` };
+  }
+
+  private async cabecerasSocio(nodo: ConfigProveedor, entrantes: Record<string, any>): Promise<Record<string, string>> {
+    const h: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'X-Device-Fingerprint': String(entrantes['x-device-fingerprint'] || 'booking-gateway'),
+      'X-Correlation-Id': String(entrantes['x-correlation-id'] || `corr-${randomUUID()}`),
+      'X-Booking-Node': nodo.codigoNodo,
+      // Dueño de la reserva para la aerolínea (contrato v2): el mismo usuario que
+      // Booking usa para Mis Reservas. Sin él, la aerolínea rechaza cancelar o
+      // consultar la reserva (400) o no la encuentra (404).
+      'X-User-Id': propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']),
+    };
+    for (const nombre of ['idempotency-key', 'accept-language', 'if-match']) {
+      if (entrantes[nombre]) h[nombre.replace(/(^|-)([a-z])/g, (m) => m.toUpperCase())] = String(entrantes[nombre]);
+    }
+    return { ...h, ...(await this.cabecerasAuth(nodo)) };
+  }
+
+  // ───────────────────────────── Búsqueda ─────────────────────────────
+
+  async buscar(
+    body: any,
+    entrantes: Record<string, any>,
+    hostPropio?: string,
+  ): Promise<{ offers: any[]; sources: ResultadoSocio[] }> {
+    const nodos = await this.nodosActivos(hostPropio);
+    const resultados = await Promise.all(nodos.map((n) => this.buscarEnNodo(n, body, entrantes)));
+    const offers = resultados.flatMap((r) => r.ofertas);
+    offers.sort((a, b) => precioTotal(a) - precioTotal(b));
+    return { offers, sources: resultados.map((r) => r.resumen) };
+  }
+
+  private async buscarEnNodo(
+    nodo: ConfigProveedor,
+    body: any,
+    entrantes: Record<string, any>,
+  ): Promise<{ ofertas: any[]; resumen: ResultadoSocio }> {
+    const t0 = Date.now();
+    const base = VuelosSociosService.baseVuelos(nodo.baseUrlRest)!;
+    const resumen: ResultadoSocio = { codigoNodo: nodo.codigoNodo, nombre: nodo.nombreProveedor, ok: false, ms: 0, ofertas: 0 };
+    try {
+      const res = await fetch(`${base}/search`, {
+        method: 'POST',
+        headers: await this.cabecerasSocio(nodo, entrantes),
+        body: JSON.stringify(body ?? {}),
+        signal: AbortSignal.timeout(this.timeoutMs()),
+      });
+      resumen.status = res.status;
+      const datos: any = await res.json().catch(() => null);
+      if (!res.ok) {
+        resumen.error = datos?.detail || datos?.title || `HTTP ${res.status}`;
+        return { ofertas: [], resumen };
+      }
+      const lista: any[] = Array.isArray(datos?.offers) ? datos.offers : Array.isArray(datos) ? datos : [];
+      const ofertas = lista.map((o) => ({
+        ...VuelosSociosService.normalizarSegmentos(VuelosSociosService.prefijarIds(o, nodo.codigoNodo)),
+        provider: { nodeCode: nodo.codigoNodo, name: nodo.nombreProveedor, emoji: nodo.emoji || '✈️' },
+      }));
+      resumen.ok = true;
+      resumen.ofertas = ofertas.length;
+      return { ofertas, resumen };
+    } catch (e: any) {
+      resumen.error =
+        e?.name === 'TimeoutError'
+          ? `Sin respuesta en ${this.timeoutMs()} ms`
+          : e?.message === 'fetch failed'
+            ? `No se pudo conectar (${e?.cause?.code || 'red'})`
+            : e?.message || String(e);
+      return { ofertas: [], resumen };
+    } finally {
+      resumen.ms = Date.now() - t0;
+      this.logger.log(
+        `[vuelos-socios] search ${nodo.codigoNodo} -> ${resumen.ok ? 'OK' : 'FALLO'} ` +
+          `(${resumen.status ?? '-'}, ${resumen.ms} ms, ${resumen.ofertas} ofertas)${resumen.error ? ' ' + resumen.error : ''}`,
+      );
+    }
+  }
+
+  // ───────────────────────────── Reenvío ─────────────────────────────
+
+  /** Reenvía `<método> /vuelos/<resto>` al nodo dueño, con ids sin prefijo. */
+  async reenviar(
+    codigoNodo: string,
+    metodo: string,
+    segmentos: string[],
+    query: string,
+    body: any,
+    entrantes: Record<string, any>,
+  ): Promise<RespuestaProxy> {
+    const nodo = await this.nodoPorCodigo(codigoNodo);
+    const base = nodo ? VuelosSociosService.baseVuelos(nodo.baseUrlRest) : null;
+    if (!nodo || !base || nodo.vertical !== 'VUELOS') {
+      return problema(404, 'Aerolínea no registrada', `El nodo ${codigoNodo} no está registrado como socio de Vuelos en Booking.`);
+    }
+    if (nodo.killSwitchActivo) {
+      return problema(503, 'Aerolínea desactivada', `El nodo ${codigoNodo} tiene el Kill-Switch activo.`);
+    }
+
+    const ruta = segmentos
+      .map((s) => {
+        const sep = VuelosSociosService.separarId(decodeURIComponent(s));
+        return encodeURIComponent(sep ? sep.id : decodeURIComponent(s));
+      })
+      .join('/');
+    const url = `${base}/${ruta}${query ? `?${query}` : ''}`;
+    const conCuerpo = !['GET', 'HEAD', 'DELETE'].includes(metodo.toUpperCase());
+
+    try {
+      const res = await fetch(url, {
+        method: metodo,
+        headers: await this.cabecerasSocio(nodo, entrantes),
+        body: conCuerpo ? JSON.stringify(VuelosSociosService.quitarPrefijos(body ?? {})) : undefined,
+        signal: AbortSignal.timeout(this.timeoutMs() * 2),
+      });
+      const texto = await res.text();
+      let datos: any = texto;
+      try {
+        datos = texto ? JSON.parse(texto) : null;
+      } catch {
+        /* respuesta no JSON: se devuelve tal cual */
+      }
+      const headers: Record<string, string> = {};
+      const tipo = res.headers.get('content-type');
+      if (tipo) headers['Content-Type'] = tipo;
+      for (const h of ['etag', 'retry-after']) {
+        const v = res.headers.get(h);
+        if (v) headers[h] = v;
+      }
+      headers['X-Booking-Node'] = nodo.codigoNodo;
+      this.logger.log(`[vuelos-socios] ${metodo} ${url} -> ${res.status}`);
+      return {
+        status: res.status,
+        body:
+          datos && typeof datos === 'object'
+            ? VuelosSociosService.normalizarSegmentos(VuelosSociosService.prefijarIds(datos, nodo.codigoNodo))
+            : datos,
+        headers,
+      };
+    } catch (e: any) {
+      this.logger.warn(`[vuelos-socios] ${metodo} ${url} -> ERROR ${e?.message}`);
+      return problema(
+        e?.name === 'TimeoutError' ? 504 : 502,
+        'La aerolínea no respondió',
+        `${nodo.nombreProveedor} (${nodo.codigoNodo}) no respondió: ${e?.message || e}`,
+      );
+    }
+  }
+
+  /**
+   * Para rutas sin id de socio (p. ej. `GET /flights/{n}/status`): pregunta a
+   * todas las aerolíneas activas y devuelve la primera respuesta 2xx.
+   */
+  async primeraRespuesta(
+    metodo: string,
+    segmentos: string[],
+    query: string,
+    entrantes: Record<string, any>,
+    hostPropio?: string,
+  ): Promise<RespuestaProxy> {
+    const nodos = await this.nodosActivos(hostPropio);
+    if (nodos.length === 0) {
+      return problema(404, 'Sin aerolíneas', 'No hay aerolíneas socias registradas en Booking.');
+    }
+    const respuestas = await Promise.all(
+      nodos.map((n) => this.reenviar(n.codigoNodo, metodo, segmentos, query, null, entrantes)),
+    );
+    return (
+      respuestas.find((r) => r.status >= 200 && r.status < 300) ??
+      respuestas.find((r) => r.status === 404) ??
+      respuestas[0]
+    );
+  }
+}
+
+export function precioTotal(oferta: any): number {
+  const candidatos = [
+    oferta?.grandTotal?.total,
+    oferta?.price?.total,
+    oferta?.totalPrice?.total,
+    oferta?.itineraries?.[0]?.pricingOptions?.[0]?.price?.total,
+    oferta?.itineraries?.[0]?.pricingOptions?.[0]?.totalPrice?.total,
+  ];
+  for (const c of candidatos) {
+    const n = parseFloat(String(c ?? ''));
+    if (Number.isFinite(n)) return n;
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function problema(status: number, title: string, detail: string): RespuestaProxy {
+  return {
+    status,
+    body: { type: `https://httpstatuses.com/${status}`, title, status, detail },
+    headers: { 'Content-Type': 'application/problem+json' },
+  };
+}

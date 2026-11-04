@@ -5,6 +5,7 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminConfigService } from './admin-config.service';
 import { AdminFinanzasService } from './admin-finanzas.service';
+import { AdminMetricasService } from './admin-metricas.service';
 import { AdminAuditService } from './admin-audit.service';
 import { PublicConfigController } from './public-config.controller';
 import { AdminProveedoresService } from './admin-proveedores.service';
@@ -37,6 +38,7 @@ import { AlojamientosModule } from '../alojamientos/alojamientos.module';
     AdminService,
     AdminConfigService,
     AdminFinanzasService,
+    AdminMetricasService,
     AdminAuditService,
     AdminProveedoresService,
     ConnectorHealthService,

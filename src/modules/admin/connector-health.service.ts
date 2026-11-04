@@ -11,7 +11,8 @@ export interface ConnectorNode {
   protocolo: string;
   url: string;
   enabled: boolean;
-  status: 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'DISABLED';
+  // UNKNOWN = todavía no se ha sondeado: nunca se presenta como ONLINE sin un ping real.
+  status: 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'DISABLED' | 'UNKNOWN';
   latency: number;
   lastCheck: string;
   circuitBreaker: 'CLOSED' | 'OPEN' | 'HALF_OPEN' | 'MANUALLY_OPEN';
@@ -46,8 +47,8 @@ export class ConnectorHealthService {
         protocolo: 'REST / OpenAPI v2 + Circuit Breaker',
         url: process.env.TIENDA_ATRACCIONES_URL || 'https://descubreec.com/api/v2',
         enabled: true,
-        status: 'ONLINE',
-        latency: 18,
+        status: 'UNKNOWN',
+        latency: 0,
         lastCheck: new Date().toISOString(),
         circuitBreaker: 'CLOSED',
         consecutiveFailures: 0,
@@ -62,8 +63,8 @@ export class ConnectorHealthService {
         protocolo: 'REST / OpenAPI v2 + Cooldown 2h',
         url: process.env.TIENDA_AUTOS_URL || 'http://localhost:3000/api/v2/autos',
         enabled: true,
-        status: 'ONLINE',
-        latency: 24,
+        status: 'UNKNOWN',
+        latency: 0,
         lastCheck: new Date().toISOString(),
         circuitBreaker: 'CLOSED',
         consecutiveFailures: 0,
@@ -78,8 +79,8 @@ export class ConnectorHealthService {
         protocolo: 'REST / API Key Sync (X-Api-Key)',
         url: process.env.TIENDA_ALOJAMIENTOS_URL || 'http://localhost:3000/api/v2/alojamientos',
         enabled: true,
-        status: 'ONLINE',
-        latency: 15,
+        status: 'UNKNOWN',
+        latency: 0,
         lastCheck: new Date().toISOString(),
         circuitBreaker: 'CLOSED',
         consecutiveFailures: 0,
@@ -94,8 +95,8 @@ export class ConnectorHealthService {
         protocolo: 'REST / SOAP Translation Gateway',
         url: process.env.TIENDA_VUELOS_URL || 'http://localhost:3000/api/v2/vuelos',
         enabled: true,
-        status: 'ONLINE',
-        latency: 42,
+        status: 'UNKNOWN',
+        latency: 0,
         lastCheck: new Date().toISOString(),
         circuitBreaker: 'CLOSED',
         consecutiveFailures: 0,
@@ -110,8 +111,8 @@ export class ConnectorHealthService {
         protocolo: 'gRPC / HTTP/2 Multiplexed (Port 50051)',
         url: '0.0.0.0:50051',
         enabled: true,
-        status: 'ONLINE',
-        latency: 4,
+        status: 'UNKNOWN',
+        latency: 0,
         lastCheck: new Date().toISOString(),
         circuitBreaker: 'CLOSED',
         consecutiveFailures: 0,
@@ -138,6 +139,7 @@ export class ConnectorHealthService {
     const onlineCount = nodesList.filter((n) => n.enabled && n.status === 'ONLINE').length;
     const disabledCount = nodesList.filter((n) => !n.enabled).length;
     const offlineCount = nodesList.filter((n) => n.enabled && n.status === 'OFFLINE').length;
+    const unknownCount = nodesList.filter((n) => n.enabled && n.status === 'UNKNOWN').length;
 
     return {
       summary: {
@@ -145,7 +147,9 @@ export class ConnectorHealthService {
         online: onlineCount,
         disabled_switches: disabledCount,
         offline: offlineCount,
-        system_health: offlineCount > 0 ? 'DEGRADED' : disabledCount > 0 ? 'PARTIAL_FALLBACK' : 'HEALTHY',
+        unknown: unknownCount,
+        system_health:
+          offlineCount > 0 ? 'DEGRADED' : disabledCount > 0 ? 'PARTIAL_FALLBACK' : unknownCount > 0 ? 'UNVERIFIED' : 'HEALTHY',
         timestamp: new Date().toISOString(),
       },
       nodes: nodesList,
@@ -214,7 +218,8 @@ export class ConnectorHealthService {
       node.circuitBreaker = 'MANUALLY_OPEN';
       this.logger.warn(`[KILL-SWITCH ACTIVADO] Conector '${serviceId}' DESCONECTADO manualmente por el Administrador.`);
     } else {
-      node.status = 'ONLINE';
+      // Reactivado: no se sabe si responde hasta el próximo ping.
+      node.status = 'UNKNOWN';
       node.circuitBreaker = 'CLOSED';
       node.consecutiveFailures = 0;
       this.logger.log(`[KILL-SWITCH RESTABLECIDO] Conector '${serviceId}' HABILITADO por el Administrador.`);

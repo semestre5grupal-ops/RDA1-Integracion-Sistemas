@@ -395,6 +395,28 @@ export class AlojamientosController {
   // ENDPOINTS DE GESTIÓN Y MARKETPLACE FRONTEND (Preservados y Optimizados)
   // =========================================================================
 
+  @Get('promociones/contrato')
+  @ApiOperation({ summary: 'Consultar el acuerdo B2B de promociones y combos pactado con el socio hotelero (Cátedra RDA2 §9)' })
+  @ApiResponse({ status: 200, description: 'Términos del acuerdo comercial de promociones y combos de Alojamientos.' })
+  async getPromocionesContrato() {
+    return this.alojamientosService.getPromocionesContrato();
+  }
+
+  @Put('promociones/contrato')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Formalizar o actualizar acuerdo comercial B2B para combos y descuentos máximos de Alojamientos (Cátedra RDA2 §9)' })
+  @ApiResponse({ status: 200, description: 'Acuerdo comercial de Alojamientos actualizado exitosamente.' })
+  async updatePromocionesContrato(@Body() dto: any) {
+    return this.alojamientosService.updatePromocionesContrato(dto);
+  }
+
+  @Get('eventos')
+  @ApiOperation({ summary: 'Feed de eventos de Alojamientos en formato CloudEvents v1.0 (Transactional Outbox / RabbitMQ)' })
+  @ApiResponse({ status: 200, description: 'Listado de eventos emitidos por el microservicio MS_ALO.' })
+  async getEventos(@Query('limit') limit?: string) {
+    return this.alojamientosService.getEventosOutbox(limit ? Number(limit) : 20);
+  }
+
   @Get('health')
   @ApiOperation({ summary: 'Healthcheck del microservicio de Alojamientos' })
   @ApiResponse({ status: 200, description: 'Servicio operativo' })

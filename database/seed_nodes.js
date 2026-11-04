@@ -1,22 +1,28 @@
+/**
+ * Ya no siembra proveedores de ejemplo.
+ *
+ * Antes insertaba NODE_AUT_LOCAL, NODE_ALO_LOCAL, NODE_VUE_LOCAL y NODE_STK_GRPC
+ * apuntando a http://localhost:3000: no existen y en el panel parecían socios
+ * reales. Los socios se registran desde Admin → Servicios & Prov.
+ *
+ * La cadena de conexión ya no va escrita aquí: se lee de DATABASE_URL.
+ * Uso: DATABASE_URL=... node database/seed_nodes.js   (solo muestra el conteo)
+ */
 const { Client } = require('pg');
-const client = new Client({
-  connectionString: 'postgresql://postgres.owseuntgcgvflqpnmwcc:Semestre%402026@aws-0-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true',
-  ssl: { rejectUnauthorized: false }
-});
 
-async function seed() {
+async function main() {
+  if (!process.env.DATABASE_URL) {
+    console.log('Define DATABASE_URL para consultar los proveedores registrados.');
+    return;
+  }
+  const client = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
   await client.connect();
-  const sql = `
-    INSERT INTO schema_proveedores.config_proveedor (
-      codigo_nodo, nombre_proveedor, vertical, base_url_rest, endpoint_grpc, health_status, latencia_ms, kill_switch_activo, circuit_breaker_estado, tasa_fallos_pct, ultimo_ping_at
-    ) VALUES
-    ('NODE_AUT_LOCAL', 'Renta Autos Ecuador (Flota Partner)', 'AUTOS', 'http://localhost:3000/api/v2/autos', 'grpc://localhost:50051', 'HEALTHY', 25, false, 'CLOSED', 0.00, NOW()),
-    ('NODE_ALO_LOCAL', 'Hoteles & Hospedajes Ecuador', 'ALOJAMIENTOS', 'http://localhost:3000/api/v2/alojamientos', 'grpc://localhost:50051', 'HEALTHY', 20, false, 'CLOSED', 0.00, NOW()),
-    ('NODE_VUE_LOCAL', 'AeroEcuador Gateway (Vuelos Partner)', 'VUELOS', 'http://localhost:3000/api/v2/vuelos', 'grpc://localhost:50051', 'HEALTHY', 45, false, 'CLOSED', 0.00, NOW()),
-    ('NODE_STK_GRPC', 'Servidor Inbound de Inventario gRPC', 'INVENTARIO_CORE', 'http://localhost:3000/api/v2/inventory', 'localhost:50051', 'HEALTHY', 12, false, 'CLOSED', 0.00, NOW())
-    ON CONFLICT (codigo_nodo) DO NOTHING;
-  `;
-  await client.query(sql);
-  console.log('Seeded remaining nodes in config_proveedor successfully');
+  try {
+    const { rows } = await client.query('SELECT COUNT(*)::int AS n FROM schema_proveedores.config_proveedor');
+    console.log(`Proveedores registrados: ${rows[0].n}. No se siembran proveedores de ejemplo.`);
+  } finally {
+    await client.end();
+  }
 }
-seed().catch(console.error).finally(() => client.end());
+
+main().catch(console.error);

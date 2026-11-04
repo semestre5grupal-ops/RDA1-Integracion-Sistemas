@@ -2,12 +2,11 @@ name: Deploy backend a Google Cloud (VM e2-micro)
 
 # Cada push a main: compila la imagen en GitHub (la VM no tiene RAM para compilar),
 # la publica en GitHub Container Registry y la VM la descarga y reinicia.
+# DESACTIVADO en push: el backend se despliega en Azure App Service
+# (scripts/create_azure_zip.py + az webapp deploy), no en Google Cloud.
+# Sin la VM ni los secretos GCP_VM_*, este flujo fallaba en cada push a main.
+# Se deja solo manual por si algún día se vuelve a usar la VM.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'frontend/**'
-      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
