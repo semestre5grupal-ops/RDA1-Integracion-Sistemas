@@ -1091,6 +1091,10 @@
 }
 .modal-input:focus-visible { outline: 2px solid var(--booking-blue); outline-offset: 1px; border-color: var(--booking-blue); }
 .modal-input.es-error { border-color: #dc2626; background: #fef2f2; }
+/* Teléfono: país (prefijo) + número, en una sola fila. */
+.telefono-pais { display: flex; gap: 6px; min-width: 0; }
+.telefono-pais .modal-input { flex: 1 1 auto; min-width: 0; }
+.telefono-pais .telefono-pais-select { flex: 0 0 auto; width: auto; padding-right: 4px; }
 /* Error de un campo concreto: sin fondo, porque va pegado al input. */
 .modal-error-campo {
   display: block;
