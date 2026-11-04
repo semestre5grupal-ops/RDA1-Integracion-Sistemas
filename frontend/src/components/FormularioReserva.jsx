@@ -22,23 +22,43 @@ const COUNTRIES = [
   { code: 'BR', name: 'Brasil' },
 ];
 
-/** Prefijo telefónico por nacionalidad (para completar números locales). */
-const PREFIJO_PAIS = { EC: '593', CO: '57', PE: '51', AR: '54', CL: '56', US: '1', MX: '52', ES: '34', BR: '55' };
-
 /**
- * Lleva un teléfono al formato E.164 que exigen las aerolíneas (+593991234567).
- * Quita espacios y guiones; un número local que empieza con 0 se completa con
- * el prefijo del país del pasajero (Ecuador por defecto).
+ * Países para el teléfono: prefijo y qué número nacional es válido (sin el 0
+ * inicial). El usuario elige el país y escribe solo su número; se valida ahí
+ * mismo y se envía en E.164 (+593991234567), que es lo que exigen las aerolíneas.
  */
-export function normalizarTelefono(valor, nacionalidad = 'EC') {
-  let t = String(valor ?? '').replace(/[\s().-]/g, '');
-  if (!t) return t;
-  if (t.startsWith('00')) return '+' + t.slice(2);
-  if (t.startsWith('+')) return t;
-  const prefijo = PREFIJO_PAIS[nacionalidad] ?? '593';
-  if (t.startsWith(prefijo) && t.length > prefijo.length + 7) return '+' + t;
-  if (t.startsWith('0')) return '+' + prefijo + t.slice(1);
-  return t;
+const PAISES_TELEFONO = [
+  { pais: 'EC', bandera: '🇪🇨', prefijo: '593', regla: /^(9\d{8}|[2-7]\d{7})$/, ejemplo: '991234567', ayuda: 'celular de 9 dígitos que empieza con 9, u 8 dígitos fijo' },
+  { pais: 'CO', bandera: '🇨🇴', prefijo: '57', regla: /^(3\d{9}|60\d{8})$/, ejemplo: '3001234567', ayuda: '10 dígitos (celular empieza con 3)' },
+  { pais: 'PE', bandera: '🇵🇪', prefijo: '51', regla: /^(9\d{8}|[1-8]\d{7})$/, ejemplo: '912345678', ayuda: 'celular de 9 dígitos que empieza con 9' },
+  { pais: 'AR', bandera: '🇦🇷', prefijo: '54', regla: /^9?\d{10}$/, ejemplo: '91123456789', ayuda: '10 dígitos con código de área (celular: 9 + 10)' },
+  { pais: 'CL', bandera: '🇨🇱', prefijo: '56', regla: /^\d{9}$/, ejemplo: '912345678', ayuda: '9 dígitos' },
+  { pais: 'UY', bandera: '🇺🇾', prefijo: '598', regla: /^[249]\d{7}$/, ejemplo: '94123456', ayuda: '8 dígitos (celular empieza con 9)' },
+  { pais: 'US', bandera: '🇺🇸', prefijo: '1', regla: /^[2-9]\d{2}[2-9]\d{6}$/, ejemplo: '2025550123', ayuda: '10 dígitos' },
+  { pais: 'MX', bandera: '🇲🇽', prefijo: '52', regla: /^\d{10}$/, ejemplo: '5512345678', ayuda: '10 dígitos' },
+  { pais: 'ES', bandera: '🇪🇸', prefijo: '34', regla: /^[6-9]\d{8}$/, ejemplo: '612345678', ayuda: '9 dígitos' },
+  { pais: 'BR', bandera: '🇧🇷', prefijo: '55', regla: /^[1-9]{2}9?\d{8}$/, ejemplo: '11912345678', ayuda: 'DDD + número (10 u 11 dígitos)' },
+];
+const PAIS_TELEFONO = Object.fromEntries(PAISES_TELEFONO.map((p) => [p.pais, p]));
+
+/** Solo dígitos y sin el 0 inicial de marcación nacional (099… → 99…). */
+export function numeroNacional(valor) {
+  return String(valor ?? '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/** '' si el número es válido para el país; si no, el mensaje a mostrar. */
+export function errorTelefono(pais, local) {
+  const def = PAIS_TELEFONO[pais];
+  if (!def) return 'Elige el país del teléfono.';
+  const n = numeroNacional(local);
+  if (!n) return 'El teléfono es obligatorio.';
+  return def.regla.test(n) ? '' : `Número no válido para ${def.bandera} +${def.prefijo}: ${def.ayuda}.`;
+}
+
+/** Teléfono en E.164 (+593991234567) a partir del país y el número local. */
+export function telefonoE164(pais, local) {
+  const def = PAIS_TELEFONO[pais] ?? PAIS_TELEFONO.EC;
+  return `+${def.prefijo}${numeroNacional(local)}`;
 }
 
 /** Cédula ecuatoriana: 10 dígitos, provincia 01-24 (o 30) y dígito verificador. */
@@ -150,6 +170,8 @@ function pasajeroVacio(tipo, indice, idsAdultos) {
     gender: '',
     email: '',
     phone: '',
+    // Teléfono: país (prefijo) + número local. `phone` se arma en E.164 al enviar.
+    phoneCountry: 'EC',
   };
 }
 
@@ -184,10 +206,7 @@ const REGLAS = {
   gender: (v) => (v ? '' : 'Selecciona una opcion.'),
   email: (v) =>
     v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim()) ? '' : 'Correo no valido.',
-  phone: (v, p) =>
-    v && /^\+[1-9][0-9]{7,14}$/.test(normalizarTelefono(v.trim(), p?.nationality))
-      ? ''
-      : 'Usa el formato internacional con código de país, por ejemplo +593991234567.',
+  phone: (v, p) => errorTelefono(p?.phoneCountry ?? 'EC', v),
 };
 
 export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada }) {
@@ -273,6 +292,18 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     },
     [cambiar],
   );
+
+  /** Valida el teléfono del pasajero `i` al momento (al salir del campo o al cambiar el país). */
+  const validarTelefonoAhora = useCallback((i, pais, numero) => {
+    const mensaje = numero ? errorTelefono(pais, numero) : '';
+    setErrores((e) => {
+      const clave = `p${i}.phone`;
+      if (!mensaje && !e[clave]) return e;
+      const copia = { ...e };
+      if (mensaje) copia[clave] = mensaje; else delete copia[clave];
+      return copia;
+    });
+  }, []);
 
   const validar = useCallback(() => {
     const nuevos = {};
@@ -369,7 +400,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             nationality: p.nationality.trim(),
             birthDate: p.birthDate,
             gender: p.gender,
-            contact: { email: p.email.trim(), phone: normalizarTelefono(p.phone.trim(), p.nationality) },
+            contact: { email: p.email.trim(), phone: telefonoE164(p.phoneCountry ?? 'EC', p.phone) },
           })),
           payment: { paymentReference: `pay_${uuidv4().slice(0, 18)}` },
         };
@@ -714,23 +745,40 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                     <label className="modal-label" htmlFor={id('phone')}>
                       Teléfono <span aria-hidden="true">*</span>
                     </label>
-                    <input
-                      className={`modal-input ${err('phone') ? 'es-error' : ''}`}
-                      id={id('phone')}
-                      type="tel"
-                      placeholder="+593991234567"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={p.phone}
-                      onChange={(e) => cambiar(i, 'phone', e.target.value)}
-                      onBlur={(e) => {
-                        const t = normalizarTelefono(e.target.value, p.nationality);
-                        if (t !== e.target.value) cambiar(i, 'phone', t);
-                      }}
-                      aria-required="true"
-                      aria-invalid={err('phone') ? 'true' : 'false'}
-                      aria-describedby={enlazado('phone')}
-                    />
+                    <div className="telefono-pais">
+                      <select
+                        className={`modal-input telefono-pais-select ${err('phone') ? 'es-error' : ''}`}
+                        aria-label="País del teléfono"
+                        value={p.phoneCountry ?? 'EC'}
+                        onChange={(e) => {
+                          cambiar(i, 'phoneCountry', e.target.value);
+                          validarTelefonoAhora(i, e.target.value, p.phone);
+                        }}
+                      >
+                        {PAISES_TELEFONO.map((t) => (
+                          <option key={t.pais} value={t.pais}>{t.bandera} +{t.prefijo}</option>
+                        ))}
+                      </select>
+                      <input
+                        className={`modal-input ${err('phone') ? 'es-error' : ''}`}
+                        id={id('phone')}
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel-national"
+                        placeholder={PAIS_TELEFONO[p.phoneCountry ?? 'EC']?.ejemplo}
+                        value={p.phone}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d\s]/g, '');
+                          cambiar(i, 'phone', v);
+                          // Si ya había error, se quita en cuanto el número es válido.
+                          if (err('phone')) validarTelefonoAhora(i, p.phoneCountry ?? 'EC', v);
+                        }}
+                        onBlur={(e) => validarTelefonoAhora(i, p.phoneCountry ?? 'EC', e.target.value)}
+                        aria-required="true"
+                        aria-invalid={err('phone') ? 'true' : 'false'}
+                        aria-describedby={enlazado('phone')}
+                      />
+                    </div>
                     {err('phone') && (
                       <span className="modal-error-campo" role="alert">
                         {err('phone')}
