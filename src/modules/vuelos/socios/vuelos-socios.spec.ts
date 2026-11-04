@@ -324,3 +324,13 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
     });
   });
 });
+
+describe('referenciaPagoBooking', () => {
+  it('tiene el formato PAY-BKP-AAAAMMDD-NNNNNN, usa la fecha de Ecuador y es estable', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { referenciaPagoBooking } = require('./vuelos-socios-reservas.service');
+    const a = referenciaPagoBooking('7d1a7ccd-d58e-497b-aa8a-c3a521bb577a', new Date('2026-11-05T03:00:00Z'));
+    expect(a).toMatch(/^PAY-BKP-20261104-\d{6}$/);
+    expect(referenciaPagoBooking('7d1a7ccd-d58e-497b-aa8a-c3a521bb577a', new Date('2026-11-05T03:00:00Z'))).toBe(a);
+  });
+});
