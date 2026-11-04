@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { getAtracciones } from '../services/atraccionesApi';
 import { api } from '../services/api';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import { formatearMoneda } from '../services/formato';
 
 export function AtraccionesSearchPage() {
@@ -14,9 +12,7 @@ export function AtraccionesSearchPage() {
   const [atracciones, setAtracciones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [dateRange, setDateRange] = useState([null, null]);
-  const [startDate, endDate] = dateRange;
-  
+    
   // Paginación
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -49,20 +45,23 @@ export function AtraccionesSearchPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await getAtracciones({ page: currentPage, limit });
+      const result = await getAtracciones({ page: 1, limit: 50 });
       let items = result.data || result;
       if (!Array.isArray(items)) items = [];
       
-      if (query) {
-        items = items.filter(a => (a.name || '').toLowerCase().includes(query.toLowerCase()));
+      if (query && query.trim()) {
+        const q = query.toLowerCase().trim();
+        items = items.filter(a => {
+          const nombre = (a.nombre || a.name || a.title || '').toLowerCase();
+          const ciudad = (a.ciudad || a.city || a.ubicacion || '').toLowerCase();
+          const desc = (a.descripcion_corta || a.descripcion || a.description || a.long_description || '').toLowerCase();
+          const inclusiones = Array.isArray(a.inclusiones) ? a.inclusiones.join(' ').toLowerCase() : '';
+          return nombre.includes(q) || ciudad.includes(q) || desc.includes(q) || inclusiones.includes(q);
+        });
       }
       
       setAtracciones(items);
-      if (result.meta?.total) {
-        setTotalPages(Math.ceil(result.meta.total / limit));
-      } else {
-        setTotalPages(3);
-      }
+      setTotalPages(Math.max(1, Math.ceil(items.length / limit)));
     } catch (err) {
       setError('Error al cargar atracciones.');
     } finally {
@@ -84,7 +83,7 @@ export function AtraccionesSearchPage() {
       {/* HEADER BUSCADOR REDUCIDO */}
       <div className="search-header-compact">
         <div className="search-box compact-box">
-          <div className="search-input-group">
+          <div className="search-input-group" style={{ flex: 1 }}>
             <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
             </svg>
@@ -97,27 +96,7 @@ export function AtraccionesSearchPage() {
               />
             </div>
           </div>
-          <div className="search-input-group date-group">
-            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="2" x2="16" y2="6"></line>
-              <line x1="8" y1="2" x2="8" y2="6"></line>
-              <line x1="3" y1="10" x2="21" y2="10"></line>
-            </svg>
-            <div className="input-text-wrapper date-picker-wrapper" style={{display: 'flex', flex: 1}}>
-              <DatePicker
-                selectsRange={true}
-                startDate={startDate}
-                endDate={endDate}
-                onChange={(update) => setDateRange(update)}
-                monthsShown={2}
-                placeholderText="Fechas"
-                dateFormat="dd/MM/yyyy"
-                className="custom-date-picker-input"
-                minDate={new Date()}
-              />
-            </div>
-          </div>
+          
           <button className="search-btn" onClick={handleSearch}>Buscar</button>
         </div>
       </div>
