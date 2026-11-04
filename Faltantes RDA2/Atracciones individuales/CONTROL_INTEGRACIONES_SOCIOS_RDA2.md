@@ -62,15 +62,31 @@
 ---
 
 ### 🟢 2.3. Daniel González — RutaLibre Renta de Autos (`NODE_AUT_RUTALIBRE`)
-* **Estado:** Totalmente Operativo y Certificado.
+* **Estado:** Totalmente Operativo, Homologado y Certificado al 100%.
 * **URL Base Azure:** `https://rutalibre-autos-api.azurewebsites.net/api/v3`
-* **Health / Telemetría:** `https://rutalibre-autos-api.azurewebsites.net/api/v3/health` (Latencia: ~25 ms, Circuit Breaker: CLOSED)
-* **X-API-Key:** `LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA`
-* **Flota:** 34 vehículos distribuidos en Quito y Guayaquil.
+* **Health / Telemetría:** `https://rutalibre-autos-api.azurewebsites.net/api/v3/health` y `/autos/health` (Status: `HEALTHY`, 37 vehículos activos, latencia: ~21 ms, Circuit Breaker: `CLOSED`).
+* **X-API-Key Registrada en Booking:** `LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA` (Confirmada y vinculada en `config_proveedor`).
+* **Catálogo & Búsqueda:** `GET /api/v3/autos` y `POST /api/v3/autos/search` (Catálogo de 37 vehículos con filtrado por categoría SUV, compacto, transmisión y ubicación).
 * **Pruebas Validadas:**
-  - Health check HTTP 200 con telemetría en tiempo real.
-  - Regla de Cooldown obligatorio de 2h entre alquileres cumplida.
-  - Sincronización de stock probada contra `https://booking-core-api.azurewebsites.net/api/v3/inventory/stock`.
+  - `GET /health` y `/autos/health` -> HTTP 200 OK (`HEALTHY`).
+  - `POST /autos/orders/create` (Contrato v3 con Idempotency-Key UUID v4) -> HTTP 201 Created (Generó órdenes `CARPA2MZ` y `CARV5PKW` con voucher QR).
+  - `POST /autos/orders/:id/cancel` -> HTTP 200 OK (Compensación Saga LIFO ejecutada: emitió reembolso total `REF-AUTO-PA2MZ` y liberó vehículo a `DISPONIBLE`).
+  - **Regla Cooldown 2 Horas (ADR-004):** Si un auto se devuelve a las 13:00, reservas antes de las 15:00 son rechazadas con HTTP 409 (`VEHICLE_IN_CLEANING_COOLDOWN`).
+  - **Sincronización de Stock HTTP Inbound:** `POST https://booking-core-api.azurewebsites.net/api/v3/inventory/stock` probado exitosamente con HTTP 200 (`acknowledged: true`).
+* **Especificación para Avisos de Stock hacia Booking Central:**
+  - **URL:** `POST https://booking-core-api.azurewebsites.net/api/v3/inventory/stock`
+  - **Headers:** `Content-Type: application/json` y `X-API-Key: LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA`
+  - **Body Canónico:**
+    ```json
+    {
+      "service_id": "NODE_AUT_RUTALIBRE",
+      "item_id": "auto-pdb-1517",
+      "available_units": 1,
+      "date": "2026-11-25",
+      "time_slot": "DEFAULT"
+    }
+    ```
+    *(Nota de Resiliencia: Booking también tolera alias como `vehicle_id`, `auto_id`, `stock` y `cantidad`)*.
 
 ---
 

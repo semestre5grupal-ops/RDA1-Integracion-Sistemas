@@ -24,7 +24,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { TraceContextMiddleware } from './core/tracing/trace-context.middleware';
 import { SecurityModule } from './core/security/security.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
-import { ObservabilidadModule } from './modules/observabilidad/observabilidad.module';
+import { ReservasModule } from './modules/reservas/reservas.module';
 
 @Module({
   imports: [
@@ -108,7 +108,7 @@ import { ObservabilidadModule } from './modules/observabilidad/observabilidad.mo
 
     // Catálogo formal de contratos por microservicio (RDA2)
     ContractsModule,
-    ObservabilidadModule,
+    ReservasModule,
   ],
   controllers: [],
   providers: [TraceContextMiddleware],

@@ -193,8 +193,8 @@ export class InventoryGrpcController {
     const apiKey = typeof rawKey === 'string' ? rawKey.replace(/^Bearer\s+/i, '').trim() : undefined;
 
     let serviceId = body?.service_id || body?.serviceId;
-    const itemId = body?.item_id || body?.itemId || body?.vehicle_id || body?.auto_id;
-    const rawUnits = body?.available_units !== undefined ? body.available_units : (body?.availableUnits !== undefined ? body.availableUnits : body?.units);
+    const itemId = body?.item_id || body?.itemId || body?.vehicle_id || body?.auto_id || body?.vehiculo_id || body?.id;
+    const rawUnits = body?.available_units !== undefined ? body.available_units : (body?.availableUnits !== undefined ? body.availableUnits : (body?.units !== undefined ? body.units : (body?.stock !== undefined ? body.stock : (body?.cantidad !== undefined ? body.cantidad : body?.disponibilidad))));
     const units = Number(rawUnits);
     const date = body?.date || new Date().toISOString().slice(0, 10);
     const timeSlot = body?.time_slot || body?.timeSlot || 'DEFAULT';
