@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { PagosService } from '../../pagos/pagos.service';
@@ -120,6 +121,9 @@ export class VuelosSociosReservasService implements OnModuleInit {
   }
 
   // ───────────────────────────── Pagos ─────────────────────────────
+  // La referencia que viaja a la aerolínea usa el formato del contrato v2
+  // (PAY-BKP-AAAAMMDD-NNNNNN): EcoAirlines la valida con ese patrón y RAM acepta
+  // cualquier texto. El reembolso se hace con transaccion_id, no con este texto.
 
   /** Cobra en MS_PAG antes de confirmar en la aerolínea. Idempotente por clave. */
   async cobrar(monto: number, idempotencyKey: string, propietarioId: string): Promise<Cobro> {
@@ -136,7 +140,7 @@ export class VuelosSociosReservasService implements OnModuleInit {
       if (r?.estado !== 'APROBADO') {
         return { ok: false, status: 402, estado: r?.estado, detalle: r?.mensaje || 'Pago rechazado.' };
       }
-      return { ok: true, transaccionId: r.transaccion_id, paymentReference: r.codigo_autorizacion || r.transaccion_id, estado: r.estado };
+      return { ok: true, transaccionId: r.transaccion_id, paymentReference: referenciaPagoBooking(r.transaccion_id || idempotencyKey), estado: r.estado };
     } catch (e: any) {
       const status = e?.getStatus?.() ?? 502;
       const resp = e?.getResponse?.();
@@ -273,4 +277,17 @@ function mapear(f: any): ReservaSocio {
     reembolsado: Number(f.reembolsado),
     createdAt: new Date(f.created_at).toISOString(),
   };
+}
+
+/**
+ * Referencia de pago para la aerolínea: PAY-BKP-AAAAMMDD-NNNNNN (fecha de Ecuador).
+ * Se deriva de la transacción de MS_PAG, así un reintento con la misma clave de
+ * idempotencia produce la misma referencia.
+ */
+export function referenciaPagoBooking(semilla: string, ahora = new Date()): string {
+  const fecha = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(ahora)
+    .replace(/-/g, '');
+  const numero = parseInt(createHash('sha256').update(String(semilla)).digest('hex').slice(0, 12), 16) % 1_000_000;
+  return `PAY-BKP-${fecha}-${String(numero).padStart(6, '0')}`;
 }

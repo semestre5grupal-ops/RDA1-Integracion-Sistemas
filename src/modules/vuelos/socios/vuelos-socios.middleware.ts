@@ -176,6 +176,15 @@ export class VuelosSociosMiddleware {
       );
       return;
     }
+    // Un hold liberado o vencido no se cobra (algunas aerolíneas siguen
+    // devolviendo su precio aunque ya no esté activo).
+    const estadoHold = String(hold.body?.status ?? 'HELD').toUpperCase();
+    const restante = Number(hold.body?.remainingSeconds);
+    if (estadoHold !== 'HELD' || (Number.isFinite(restante) && restante <= 0)) {
+      this.traza(entrantes, 'hold', 'error', `Hold ${estadoHold}${Number.isFinite(restante) ? ` (${restante}s)` : ''}: no se cobra`, { nodo });
+      this.enviar(res, problema(410, 'Hold no activo', `El hold está ${estadoHold === 'HELD' ? 'vencido' : estadoHold}. Vuelve a seleccionar la tarifa. No se realizó ningún cobro.`));
+      return;
+    }
 
     // 2) Cobro en MS_PAG (idempotente con la misma clave del cliente).
     const tCobro = Date.now();
@@ -199,12 +208,17 @@ export class VuelosSociosMiddleware {
 
     // 4) SAGA: si la aerolínea no confirmó, se devuelve el dinero.
     if (r.status < 200 || r.status >= 300 || !r.body?.bookingId) {
+      let devuelto = 0;
       if (cobro.transaccionId) {
-        const devuelto = await this.reservas.reembolsar(cobro.transaccionId, monto, `Aerolínea ${nodo} rechazó la reserva (HTTP ${r.status})`);
+        devuelto = await this.reservas.reembolsar(cobro.transaccionId, monto, `Aerolínea ${nodo} rechazó la reserva (HTTP ${r.status})`);
         this.traza(entrantes, 'reembolso', devuelto > 0 ? 'ok' : 'error',
           devuelto > 0 ? `SAGA: se devolvieron ${devuelto.toFixed(2)}` : 'SAGA: el reembolso FALLÓ, el cliente quedó cobrado sin reserva', { nodo, monto });
       }
-      this.enviar(res, r.status >= 400 ? withDetalle(r, 'Se reembolsó el cobro.') : problema(502, 'Reserva no confirmada', 'La aerolínea no devolvió bookingId. Se reembolsó el cobro.'));
+      // Solo se dice "se reembolsó" si el reembolso de verdad se hizo.
+      const aviso = devuelto > 0 || !cobro.transaccionId
+        ? 'Se reembolsó el cobro.'
+        : 'El reembolso automático falló: el cobro quedó pendiente de devolución.';
+      this.enviar(res, r.status >= 400 ? withDetalle(r, aviso) : problema(502, 'Reserva no confirmada', `La aerolínea no devolvió bookingId. ${aviso}`));
       return;
     }
 
