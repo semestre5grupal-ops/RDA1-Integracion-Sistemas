@@ -1,0 +1,3233 @@
+{
+    "openapi": "3.0.0",
+    "paths": {
+      "/api/v1/health": {
+        "get": {
+          "operationId": "HealthController_getHealth",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HealthResponse"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Disponibilidad de la API, sin comprobar base de datos",
+          "tags": [
+            "Health"
+          ]
+        }
+      },
+      "/api/v2/autos/health": {
+        "get": {
+          "operationId": "AutosV2Controller_health",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "summary": "Salud y telemetría del nodo de autos",
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/promociones/contrato": {
+        "get": {
+          "operationId": "AutosV2Controller_promotion",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        },
+        "put": {
+          "operationId": "AutosV2Controller_updatePromotion",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionAgreementV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/eventos": {
+        "get": {
+          "operationId": "AutosV2Controller_events",
+          "parameters": [
+            {
+              "name": "limit",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "number"
+              }
+            },
+            {
+              "name": "after",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos": {
+        "get": {
+          "operationId": "AutosV2Controller_catalog",
+          "parameters": [
+            {
+              "name": "category",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "transmission",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "limit",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "number"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/search": {
+        "post": {
+          "operationId": "AutosV2Controller_search",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchAutosV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/flota": {
+        "get": {
+          "operationId": "AutosV2Controller_fleet",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/orders": {
+        "get": {
+          "operationId": "AutosV2Controller_orders",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/orders/create": {
+        "post": {
+          "operationId": "AutosV2Controller_create",
+          "parameters": [
+            {
+              "name": "idempotency-key",
+              "required": true,
+              "in": "header",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "Idempotency-Key",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAutoOrderV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/reservas": {
+        "post": {
+          "operationId": "AutosV2Controller_reserve",
+          "parameters": [
+            {
+              "name": "idempotency-key",
+              "required": true,
+              "in": "header",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "Idempotency-Key",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAutoOrderV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/reservas/{id}/checkin": {
+        "post": {
+          "operationId": "AutosV2Controller_digitalCheckin",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigitalCheckinV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/orders/{id}/checkin-entrega": {
+        "post": {
+          "operationId": "AutosV2Controller_delivery",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryCheckinV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/orders/{id}/checkin-devolucion": {
+        "post": {
+          "operationId": "AutosV2Controller_returnOrder",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnCheckinV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/orders/{orderId}": {
+        "get": {
+          "operationId": "AutosV2Controller_order",
+          "parameters": [
+            {
+              "name": "orderId",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/orders/{orderId}/cancel": {
+        "post": {
+          "operationId": "AutosV2Controller_cancel",
+          "parameters": [
+            {
+              "name": "orderId",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOrderV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/{id}/coberturas": {
+        "get": {
+          "operationId": "AutosV2Controller_coverages",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/{id}": {
+        "get": {
+          "operationId": "AutosV2Controller_vehicle",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/{id}/devolucion": {
+        "post": {
+          "operationId": "AutosV2Controller_returnByVehicle",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v2/autos/{id}/mantenimiento/registro": {
+        "post": {
+          "operationId": "AutosV2Controller_maintenance",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v2"
+          ]
+        }
+      },
+      "/api/v3/autos/health": {
+        "get": {
+          "operationId": "AutosV3Controller_health",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "summary": "Salud del nodo de Autos V3",
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos": {
+        "get": {
+          "operationId": "AutosV3Controller_catalog",
+          "parameters": [
+            {
+              "name": "category",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "transmission",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "limit",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "number"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/search": {
+        "post": {
+          "operationId": "AutosV3Controller_search",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchAutosV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/flota": {
+        "get": {
+          "operationId": "AutosV3Controller_fleet",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/promociones/contrato": {
+        "get": {
+          "operationId": "AutosV3Controller_promotion",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        },
+        "put": {
+          "operationId": "AutosV3Controller_updatePromotion",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionAgreementV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/eventos": {
+        "get": {
+          "operationId": "AutosV3Controller_events",
+          "parameters": [
+            {
+              "name": "limit",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "number"
+              }
+            },
+            {
+              "name": "after",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/orders": {
+        "get": {
+          "operationId": "AutosV3Controller_orders",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/orders/create": {
+        "post": {
+          "operationId": "AutosV3Controller_create",
+          "parameters": [
+            {
+              "name": "idempotency-key",
+              "required": true,
+              "in": "header",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "Idempotency-Key",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAutoOrderV3Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/reservas": {
+        "post": {
+          "operationId": "AutosV3Controller_reserve",
+          "parameters": [
+            {
+              "name": "idempotency-key",
+              "required": true,
+              "in": "header",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "Idempotency-Key",
+              "in": "header",
+              "required": true,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAutoOrderV3Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/orders/{orderId}": {
+        "get": {
+          "operationId": "AutosV3Controller_order",
+          "parameters": [
+            {
+              "name": "orderId",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/orders/{orderId}/cancel": {
+        "post": {
+          "operationId": "AutosV3Controller_cancel",
+          "parameters": [
+            {
+              "name": "orderId",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOrderV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/reservas/{id}/checkin": {
+        "post": {
+          "operationId": "AutosV3Controller_digital",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DigitalCheckinV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/orders/{id}/checkin-entrega": {
+        "post": {
+          "operationId": "AutosV3Controller_delivery",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryCheckinV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/orders/{id}/checkin-devolucion": {
+        "post": {
+          "operationId": "AutosV3Controller_returnOrder",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnCheckinV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/{id}/coberturas": {
+        "get": {
+          "operationId": "AutosV3Controller_coverages",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/{id}": {
+        "get": {
+          "operationId": "AutosV3Controller_vehicle",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/{id}/devolucion": {
+        "post": {
+          "operationId": "AutosV3Controller_returnByVehicle",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v3/autos/{id}/mantenimiento/registro": {
+        "post": {
+          "operationId": "AutosV3Controller_maintenance",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Autos RDA2 v3"
+          ]
+        }
+      },
+      "/api/v2/auth/register": {
+        "post": {
+          "operationId": "AuthV2Controller_register",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Auth"
+          ]
+        }
+      },
+      "/api/v2/auth/login": {
+        "post": {
+          "operationId": "AuthV2Controller_login",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginV2Dto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Auth"
+          ]
+        }
+      },
+      "/api/v2/auth/me": {
+        "get": {
+          "operationId": "AuthV2Controller_me",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Auth"
+          ]
+        }
+      },
+      "/api/v2/users": {
+        "get": {
+          "operationId": "UsersV2Controller_list",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        },
+        "post": {
+          "operationId": "UsersV2Controller_create",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCreateDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        }
+      },
+      "/api/v2/users/me": {
+        "get": {
+          "operationId": "UsersV2Controller_me",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        },
+        "patch": {
+          "operationId": "UsersV2Controller_patchMe",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfUpdateDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        }
+      },
+      "/api/v2/users/{id}": {
+        "get": {
+          "operationId": "UsersV2Controller_get",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        },
+        "put": {
+          "operationId": "UsersV2Controller_put",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCreateDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        },
+        "patch": {
+          "operationId": "UsersV2Controller_patch",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserUpdateDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        },
+        "delete": {
+          "operationId": "UsersV2Controller_remove",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "204": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        }
+      },
+      "/api/v2/users/{id}/status": {
+        "patch": {
+          "operationId": "UsersV2Controller_status",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStatusDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Users"
+          ]
+        }
+      },
+      "/api/v2/vehicles": {
+        "get": {
+          "operationId": "VehiclesV2Controller_list",
+          "parameters": [
+            {
+              "name": "sort",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "enum": [
+                  "price_asc",
+                  "price_desc"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "name": "maxPrice",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "number"
+              }
+            },
+            {
+              "name": "minPrice",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "number"
+              }
+            },
+            {
+              "name": "endDate",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "startDate",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "supplier",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "location",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "fuelType",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "transmission",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "category",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "model",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "brand",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            },
+            {
+              "name": "search",
+              "required": false,
+              "in": "query",
+              "schema": {}
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "properties": {
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/VehicleStockDto"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Catalogo paginado con filtros",
+          "tags": [
+            "Vehicles"
+          ]
+        },
+        "post": {
+          "operationId": "VehiclesV2Controller_create",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/VehicleStockDto"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Vehicles"
+          ]
+        }
+      },
+      "/api/v2/vehicles/{id}": {
+        "get": {
+          "operationId": "VehiclesV2Controller_get",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "endDate",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "startDate",
+              "required": false,
+              "in": "query",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/VehicleStockDto"
+                  }
+                }
+              }
+            }
+          },
+          "tags": [
+            "Vehicles"
+          ]
+        },
+        "put": {
+          "operationId": "VehiclesV2Controller_put",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/VehicleStockDto"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Vehicles"
+          ]
+        },
+        "patch": {
+          "operationId": "VehiclesV2Controller_patch",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehiclePatchDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/VehicleStockDto"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Vehicles"
+          ]
+        },
+        "delete": {
+          "operationId": "VehiclesV2Controller_remove",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "204": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Vehicles"
+          ]
+        }
+      },
+      "/api/v2/favorites": {
+        "get": {
+          "operationId": "FavoritesV2Controller_list",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Favorites"
+          ]
+        }
+      },
+      "/api/v2/favorites/{vehicleId}": {
+        "post": {
+          "operationId": "FavoritesV2Controller_add",
+          "parameters": [
+            {
+              "name": "vehicleId",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Favorites"
+          ]
+        },
+        "delete": {
+          "operationId": "FavoritesV2Controller_remove",
+          "parameters": [
+            {
+              "name": "vehicleId",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "204": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Favorites"
+          ]
+        }
+      },
+      "/api/v2/reservations": {
+        "post": {
+          "operationId": "ReservationsV2Controller_create",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Reservations"
+          ]
+        },
+        "get": {
+          "operationId": "ReservationsV2Controller_all",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Reservations"
+          ]
+        }
+      },
+      "/api/v2/reservations/my": {
+        "get": {
+          "operationId": "ReservationsV2Controller_mine",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Reservations"
+          ]
+        }
+      },
+      "/api/v2/reservations/{id}": {
+        "get": {
+          "operationId": "ReservationsV2Controller_get",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Reservations"
+          ]
+        },
+        "patch": {
+          "operationId": "ReservationsV2Controller_patch",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationPatchDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Reservations"
+          ]
+        }
+      },
+      "/api/v2/reservations/{id}/cancel": {
+        "post": {
+          "operationId": "ReservationsV2Controller_cancel",
+          "parameters": [
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Reservations"
+          ]
+        }
+      },
+      "/api/v2/payments/simulate": {
+        "post": {
+          "operationId": "PaymentsV2Controller_simulate",
+          "parameters": [],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentDto"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "summary": "Pago simulado para demostración. El número solo se valida por formato y longitud; no existe procesamiento bancario real.",
+          "tags": [
+            "Payments"
+          ]
+        }
+      },
+      "/api/v2/payments": {
+        "get": {
+          "operationId": "PaymentsV2Controller_list",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Payments"
+          ]
+        }
+      },
+      "/api/v2/admin/dashboard": {
+        "get": {
+          "operationId": "AdminV2Controller_dashboard",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Admin"
+          ]
+        }
+      },
+      "/api/v2/health": {
+        "get": {
+          "operationId": "HealthV2Controller_get",
+          "parameters": [],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Health"
+          ]
+        }
+      },
+      "/api/v2/{resource}": {
+        "get": {
+          "operationId": "CatalogV2Controller_list",
+          "parameters": [
+            {
+              "name": "resource",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "enum": [
+                  "brands",
+                  "vehicle-models",
+                  "categories",
+                  "locations",
+                  "suppliers",
+                  "depots",
+                  "depot-scores"
+                ],
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": ""
+            }
+          },
+          "tags": [
+            "Brands",
+            "Vehicle Models",
+            "Categories",
+            "Locations",
+            "Suppliers",
+            "Depots",
+            "Depot Scores"
+          ]
+        },
+        "post": {
+          "operationId": "CatalogV2Controller_create",
+          "parameters": [
+            {
+              "name": "resource",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "enum": [
+                  "brands",
+                  "vehicle-models",
+                  "categories",
+                  "locations",
+                  "suppliers",
+                  "depots",
+                  "depot-scores"
+                ],
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "201": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Brands",
+            "Vehicle Models",
+            "Categories",
+            "Locations",
+            "Suppliers",
+            "Depots",
+            "Depot Scores"
+          ]
+        }
+      },
+      "/api/v2/{resource}/{id}": {
+        "get": {
+          "operationId": "CatalogV2Controller_get",
+          "parameters": [
+            {
+              "name": "resource",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "enum": [
+                  "brands",
+                  "vehicle-models",
+                  "categories",
+                  "locations",
+                  "suppliers",
+                  "depots",
+                  "depot-scores"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "tags": [
+            "Brands",
+            "Vehicle Models",
+            "Categories",
+            "Locations",
+            "Suppliers",
+            "Depots",
+            "Depot Scores"
+          ]
+        },
+        "put": {
+          "operationId": "CatalogV2Controller_put",
+          "parameters": [
+            {
+              "name": "resource",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "enum": [
+                  "brands",
+                  "vehicle-models",
+                  "categories",
+                  "locations",
+                  "suppliers",
+                  "depots",
+                  "depot-scores"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Brands",
+            "Vehicle Models",
+            "Categories",
+            "Locations",
+            "Suppliers",
+            "Depots",
+            "Depot Scores"
+          ]
+        },
+        "patch": {
+          "operationId": "CatalogV2Controller_patch",
+          "parameters": [
+            {
+              "name": "resource",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "enum": [
+                  "brands",
+                  "vehicle-models",
+                  "categories",
+                  "locations",
+                  "suppliers",
+                  "depots",
+                  "depot-scores"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Brands",
+            "Vehicle Models",
+            "Categories",
+            "Locations",
+            "Suppliers",
+            "Depots",
+            "Depot Scores"
+          ]
+        },
+        "delete": {
+          "operationId": "CatalogV2Controller_remove",
+          "parameters": [
+            {
+              "name": "resource",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "enum": [
+                  "brands",
+                  "vehicle-models",
+                  "categories",
+                  "locations",
+                  "suppliers",
+                  "depots",
+                  "depot-scores"
+                ],
+                "type": "string"
+              }
+            },
+            {
+              "name": "id",
+              "required": true,
+              "in": "path",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "204": {
+              "description": ""
+            }
+          },
+          "security": [
+            {
+              "bearer": []
+            }
+          ],
+          "tags": [
+            "Brands",
+            "Vehicle Models",
+            "Categories",
+            "Locations",
+            "Suppliers",
+            "Depots",
+            "Depot Scores"
+          ]
+        }
+      }
+    },
+    "info": {
+      "title": "Maneja de Una API",
+      "description": "Marketplace REST de alquiler de vehículos.",
+      "version": "2.0",
+      "contact": {}
+    },
+    "tags": [
+      {
+        "name": "Auth",
+        "description": ""
+      },
+      {
+        "name": "Vehicles",
+        "description": ""
+      },
+      {
+        "name": "Brands",
+        "description": ""
+      },
+      {
+        "name": "Vehicle Models",
+        "description": ""
+      },
+      {
+        "name": "Categories",
+        "description": ""
+      },
+      {
+        "name": "Locations",
+        "description": ""
+      },
+      {
+        "name": "Suppliers",
+        "description": ""
+      },
+      {
+        "name": "Depots",
+        "description": ""
+      },
+      {
+        "name": "Depot Scores",
+        "description": ""
+      },
+      {
+        "name": "Users",
+        "description": ""
+      },
+      {
+        "name": "Favorites",
+        "description": ""
+      },
+      {
+        "name": "Reservations",
+        "description": ""
+      },
+      {
+        "name": "Payments",
+        "description": ""
+      },
+      {
+        "name": "Admin",
+        "description": ""
+      },
+      {
+        "name": "Health",
+        "description": ""
+      }
+    ],
+    "servers": [],
+    "components": {
+      "securitySchemes": {
+        "bearer": {
+          "scheme": "bearer",
+          "bearerFormat": "JWT",
+          "type": "http"
+        },
+        "ApiKeyAuth": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "X-API-Key"
+        }
+      },
+      "schemas": {
+        "HealthResponse": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "example": "ok",
+              "enum": [
+                "ok"
+              ]
+            },
+            "service": {
+              "type": "string",
+              "example": "maneja-de-una-api"
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "status",
+            "service",
+            "timestamp"
+          ]
+        },
+        "PromotionAgreementV2Dto": {
+          "type": "object",
+          "properties": {
+            "permite_promociones": {
+              "type": "boolean"
+            },
+            "porcentaje_descuento_maximo": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "destinos_habilitados": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "vigencia_hasta": {
+              "type": "string"
+            },
+            "condiciones_combo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "permite_promociones",
+            "porcentaje_descuento_maximo"
+          ]
+        },
+        "SearchAutosV2Dto": {
+          "type": "object",
+          "properties": {
+            "pickup_location": {
+              "type": "string"
+            },
+            "dropoff_location": {
+              "type": "string"
+            },
+            "pickup_date": {
+              "type": "string"
+            },
+            "pickup_time": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+            },
+            "dropoff_date": {
+              "type": "string"
+            },
+            "dropoff_time": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+            },
+            "driver_age": {
+              "type": "number",
+              "minimum": 18,
+              "maximum": 100
+            },
+            "driver_age_bracket": {
+              "type": "string",
+              "enum": [
+                "JOVEN",
+                "ADULTO",
+                "SENIOR"
+              ]
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "ECONOMICO",
+                "COMPACTO",
+                "SUV",
+                "PREMIUM",
+                "VAN"
+              ]
+            },
+            "transmission": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "MANUAL",
+                "AUTOMATICO"
+              ]
+            }
+          },
+          "required": [
+            "pickup_location",
+            "pickup_date",
+            "pickup_time",
+            "dropoff_date",
+            "dropoff_time"
+          ]
+        },
+        "DriverV2Dto": {
+          "type": "object",
+          "properties": {
+            "nombre": {
+              "type": "string"
+            },
+            "documento": {
+              "type": "string"
+            },
+            "edad": {
+              "type": "number",
+              "minimum": 18,
+              "maximum": 100
+            }
+          }
+        },
+        "CreateAutoOrderV2Dto": {
+          "type": "object",
+          "properties": {
+            "vehicle_id": {
+              "type": "string"
+            },
+            "pickup_date": {
+              "type": "string"
+            },
+            "dropoff_date": {
+              "type": "string"
+            },
+            "hora_recogida": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+            },
+            "hora_devolucion": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+            },
+            "pickup_location": {
+              "type": "string"
+            },
+            "dropoff_location": {
+              "type": "string"
+            },
+            "conductor": {
+              "$ref": "#/components/schemas/DriverV2Dto"
+            },
+            "tipo_cobertura": {
+              "type": "string",
+              "enum": [
+                "BASICA",
+                "TOTAL",
+                "PREMIUM"
+              ]
+            }
+          },
+          "required": [
+            "vehicle_id",
+            "pickup_date",
+            "dropoff_date",
+            "conductor"
+          ]
+        },
+        "DigitalCheckinV2Dto": {
+          "type": "object",
+          "properties": {
+            "documento_identidad": {
+              "type": "string"
+            },
+            "numero_licencia": {
+              "type": "string"
+            },
+            "fecha_vencimiento_licencia": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "documento_identidad"
+          ]
+        },
+        "DeliveryCheckinV2Dto": {
+          "type": "object",
+          "properties": {
+            "licencia_conducir": {
+              "type": "string"
+            },
+            "km_salida": {
+              "type": "number",
+              "minimum": 0
+            },
+            "tecnico_entrega": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "licencia_conducir",
+            "km_salida"
+          ]
+        },
+        "ReturnCheckinV2Dto": {
+          "type": "object",
+          "properties": {
+            "km_retorno": {
+              "type": "number",
+              "minimum": 0
+            },
+            "nivel_combustible": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "observaciones": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "km_retorno"
+          ]
+        },
+        "CancelOrderV2Dto": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "motivo": {
+              "type": "string"
+            },
+            "solicitante": {
+              "type": "string",
+              "enum": [
+                "CLIENTE",
+                "SAGA_ORCHESTRATOR",
+                "ADMIN"
+              ]
+            }
+          }
+        },
+        "MaintenanceV2Dto": {
+          "type": "object",
+          "properties": {
+            "tecnico_id": {
+              "type": "string"
+            },
+            "kilometraje_registrado": {
+              "type": "number",
+              "minimum": 0
+            },
+            "nivel_combustible": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "condiciones_carroceria": {
+              "type": "string"
+            },
+            "estado_neumaticos": {
+              "type": "string"
+            },
+            "observaciones": {
+              "type": "string"
+            },
+            "mantenimiento_realizado": {
+              "type": "boolean"
+            },
+            "nuevo_proximo_mantenimiento_km": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "tecnico_id",
+            "kilometraje_registrado",
+            "nivel_combustible"
+          ]
+        },
+        "DriverV3Dto": {
+          "type": "object",
+          "properties": {
+            "full_name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string",
+              "format": "email"
+            },
+            "phone": {
+              "type": "string"
+            },
+            "license_number": {
+              "type": "string"
+            },
+            "country_license": {
+              "type": "string"
+            },
+            "age": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "flight_number": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "full_name",
+            "email",
+            "phone",
+            "license_number",
+            "age"
+          ]
+        },
+        "CreateAutoOrderV3Dto": {
+          "type": "object",
+          "properties": {
+            "vehicle_id": {
+              "type": "string"
+            },
+            "pickup_date": {
+              "type": "string"
+            },
+            "dropoff_date": {
+              "type": "string"
+            },
+            "pickup_time": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+            },
+            "dropoff_time": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):(?:00|30)$"
+            },
+            "pickup_location": {
+              "type": "string"
+            },
+            "dropoff_location": {
+              "type": "string"
+            },
+            "coverage_type": {
+              "type": "string",
+              "enum": [
+                "BASIC",
+                "BASICA",
+                "TOTAL",
+                "PREMIUM"
+              ]
+            },
+            "driver": {
+              "$ref": "#/components/schemas/DriverV3Dto"
+            }
+          },
+          "required": [
+            "vehicle_id",
+            "pickup_date",
+            "dropoff_date",
+            "driver"
+          ]
+        },
+        "RegisterV2Dto": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 72
+            },
+            "firstName": {
+              "type": "string"
+            },
+            "lastName": {
+              "type": "string"
+            },
+            "cedula": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 10
+            },
+            "phone": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "email",
+            "password",
+            "firstName",
+            "lastName",
+            "cedula",
+            "phone"
+          ]
+        },
+        "LoginV2Dto": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 72
+            }
+          },
+          "required": [
+            "email",
+            "password"
+          ]
+        },
+        "SelfUpdateDto": {
+          "type": "object",
+          "properties": {
+            "firstName": {
+              "type": "string"
+            },
+            "lastName": {
+              "type": "string"
+            },
+            "phone": {
+              "type": "string"
+            },
+            "cedula": {
+              "type": "string"
+            }
+          }
+        },
+        "UserCreateDto": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 72
+            },
+            "firstName": {
+              "type": "string"
+            },
+            "lastName": {
+              "type": "string"
+            },
+            "cedula": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 10
+            },
+            "phone": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "ADMIN"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "INACTIVE",
+                "SUSPENDED"
+              ]
+            }
+          },
+          "required": [
+            "email",
+            "password",
+            "firstName",
+            "lastName",
+            "cedula",
+            "phone"
+          ]
+        },
+        "UserStatusDto": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "INACTIVE",
+                "SUSPENDED"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        "UserUpdateDto": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 72
+            },
+            "firstName": {
+              "type": "string"
+            },
+            "lastName": {
+              "type": "string"
+            },
+            "cedula": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 10
+            },
+            "phone": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "USER",
+                "ADMIN"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ACTIVE",
+                "INACTIVE",
+                "SUSPENDED"
+              ]
+            }
+          }
+        },
+        "VehicleStockDto": {
+          "type": "object",
+          "properties": {
+            "quantity": {
+              "type": "number",
+              "minimum": 0
+            },
+            "stockTotal": {
+              "type": "number",
+              "minimum": 0
+            },
+            "stockAvailable": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "quantity",
+            "stockTotal",
+            "stockAvailable"
+          ]
+        },
+        "VehicleDto": {
+          "type": "object",
+          "properties": {
+            "quantity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "description": "Cantidad total de unidades físicas activas para el mismo modelo."
+            }
+          }
+        },
+        "VehiclePatchDto": {
+          "type": "object",
+          "properties": {
+            "quantity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "description": "Cantidad total de unidades físicas activas para el mismo modelo."
+            }
+          }
+        },
+        "ReservationDto": {
+          "type": "object",
+          "properties": {}
+        },
+        "ReservationPatchDto": {
+          "type": "object",
+          "properties": {}
+        },
+        "PaymentDto": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  }
