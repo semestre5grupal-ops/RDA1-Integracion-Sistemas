@@ -379,7 +379,7 @@ function emparejarTipo(tiposB, codigoPosada, nombrePosada) {
     tiposB.find((t) => normCodigo(t.codigo) === c) ||
     tiposB.find((t) => normCodigo(t.nombre) === c || (nombrePosada && normCodigo(t.nombre) === normCodigo(nombrePosada))) ||
     tiposB.find((t) => normCodigo(t.codigo).endsWith(c) || c.endsWith(normCodigo(t.codigo))) ||
-    (tiposB.length === 1 ? tiposB[0] : null)
+    null
   );
 }
 
