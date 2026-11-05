@@ -38,6 +38,16 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     this.eventos = new SincronizadorEventosVuelos(socios, reservas);
   }
 
+  /** Aerolíneas que piden la referencia de pago como `paymentReferenceValue` (contrato v1.5). */
+  static readonly nodosRefV15 = new Set<string>();
+
+  /** Cuerpo de la reserva adaptado al nodo (solo cambia el nombre del campo de la referencia). */
+  static cuerpoParaNodo(nodo: string, cuerpo: any) {
+    if (!VuelosSociosMiddleware.nodosRefV15.has(nodo)) return cuerpo;
+    const { paymentReference, ...resto } = cuerpo.payment ?? {};
+    return { ...cuerpo, payment: { ...resto, paymentReferenceValue: paymentReference } };
+  }
+
   /** Lee el feed de eventos de las aerolíneas (check-in, cancelaciones) en segundo plano. */
   onModuleInit() {
     const apagado = String(process.env.VUELOS_EVENTOS_POLL ?? '').toLowerCase() === 'off';
@@ -239,7 +249,16 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // En un reintento (el intento anterior falló y se reembolsó) la aerolínea
     // necesita otra Idempotency-Key: con la misma y otros datos responde 409.
     const cabecerasReserva = cobro.reintento ? { ...entrantes, 'idempotency-key': randomUUID() } : entrantes;
-    const r = await this.socios.reenviar(nodo, 'POST', ['bookings'], '', cuerpo, cabecerasReserva);
+    let r = await this.socios.reenviar(nodo, 'POST', ['bookings'], '', VuelosSociosMiddleware.cuerpoParaNodo(nodo, cuerpo), cabecerasReserva);
+    // Compatibilidad: algunas aerolíneas siguen el contrato v1.5, donde la
+    // referencia se llama payment.paymentReferenceValue. Si rechazan la
+    // referencia, se reintenta una vez con ese nombre y se recuerda para ese nodo.
+    if (r.status === 400 && !VuelosSociosMiddleware.nodosRefV15.has(nodo) && /referencia de pago|payment ?reference/i.test(`${r.body?.title ?? ''} ${r.body?.detail ?? ''}`)) {
+      VuelosSociosMiddleware.nodosRefV15.add(nodo);
+      this.traza(entrantes, 'reserva_aerolinea', 'aviso', `${nodo} pide paymentReferenceValue (contrato v1.5): se reintenta`, { nodo });
+      r = await this.socios.reenviar(nodo, 'POST', ['bookings'], '', VuelosSociosMiddleware.cuerpoParaNodo(nodo, cuerpo),
+        { ...cabecerasReserva, 'idempotency-key': randomUUID() });
+    }
     const confirmo = r.status >= 200 && r.status < 300 && !!r.body?.bookingId;
     this.traza(entrantes, 'reserva_aerolinea', confirmo ? 'ok' : 'error',
       confirmo ? `Aerolínea confirmó · PNR ${r.body?.pnr ?? '?'}` : `Aerolínea rechazó (HTTP ${r.status}): ${r.body?.detail || r.body?.title || ''}`,

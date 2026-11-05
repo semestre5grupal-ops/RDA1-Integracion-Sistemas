@@ -48,6 +48,8 @@ export interface ResultadoSocio {
   ms: number;
   ofertas: number;
   error?: string;
+  /** Ofertas que la aerolínea devolvió con otra fecha o ya salidas. */
+  descartadas?: number;
 }
 
 export interface RespuestaProxy {
@@ -313,7 +315,13 @@ export class VuelosSociosService {
         resumen.error = datos?.detail || datos?.title || `HTTP ${res.status}`;
         return { ofertas: [], resumen };
       }
-      const lista: any[] = Array.isArray(datos?.offers) ? datos.offers : Array.isArray(datos) ? datos : [];
+      const recibidas: any[] = Array.isArray(datos?.offers) ? datos.offers : Array.isArray(datos) ? datos : [];
+      // Solo vuelos de la fecha pedida y que no hayan salido: una aerolínea que
+      // ignore la fecha no debe vender un vuelo pasado desde Booking.
+      const lista = recibidas.filter((o) => ofertaCoincideConFechas(o, body));
+      if (lista.length < recibidas.length) {
+        resumen.descartadas = recibidas.length - lista.length;
+      }
       const ofertas = lista.map((o) => ({
         ...VuelosSociosService.normalizarSegmentos(VuelosSociosService.prefijarIds(o, nodo.codigoNodo)),
         provider: { nodeCode: nodo.codigoNodo, name: nodo.nombreProveedor, emoji: nodo.emoji || '✈️' },
@@ -333,7 +341,8 @@ export class VuelosSociosService {
       resumen.ms = Date.now() - t0;
       this.logger.log(
         `[vuelos-socios] search ${nodo.codigoNodo} -> ${resumen.ok ? 'OK' : 'FALLO'} ` +
-          `(${resumen.status ?? '-'}, ${resumen.ms} ms, ${resumen.ofertas} ofertas)${resumen.error ? ' ' + resumen.error : ''}`,
+          `(${resumen.status ?? '-'}, ${resumen.ms} ms, ${resumen.ofertas} ofertas` +
+          `${resumen.descartadas ? `, ${resumen.descartadas} descartadas por fecha` : ''})${resumen.error ? ' ' + resumen.error : ''}`,
       );
     }
   }
@@ -455,4 +464,30 @@ function problema(status: number, title: string, detail: string): RespuestaProxy
     body: { type: `https://httpstatuses.com/${status}`, title, status, detail },
     headers: { 'Content-Type': 'application/problem+json' },
   };
+}
+
+/** Fecha (AAAA-MM-DD) de un instante en hora de Ecuador; si no se puede leer, la del texto. */
+function fechaEnEcuador(iso: unknown): string | null {
+  const t = String(iso ?? '');
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return /^\d{4}-\d{2}-\d{2}/.test(t) ? t.slice(0, 10) : null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(d);
+}
+
+/**
+ * true si cada itinerario de la oferta sale en la fecha pedida (hora de Ecuador
+ * o la fecha local que trae el texto) y el primer vuelo no ha salido aún.
+ */
+export function ofertaCoincideConFechas(oferta: any, body: any, ahora = new Date()): boolean {
+  const pedidos: any[] = Array.isArray(body?.itineraries) ? body.itineraries : [];
+  const its: any[] = Array.isArray(oferta?.itineraries) ? oferta.itineraries : [];
+  for (let i = 0; i < its.length; i++) {
+    const seg = its[i]?.segments?.[0];
+    const salida = seg?.departureAt ?? seg?.departure?.at;
+    if (!salida) continue;
+    if (i === 0 && new Date(salida).getTime() < ahora.getTime()) return false;
+    const pedida = pedidos[i]?.departureDate;
+    if (pedida && fechaEnEcuador(salida) !== pedida && String(salida).slice(0, 10) !== pedida) return false;
+  }
+  return true;
 }
