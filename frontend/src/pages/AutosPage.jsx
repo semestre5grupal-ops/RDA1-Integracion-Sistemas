@@ -871,7 +871,14 @@ export function AutosPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
                 {autos.map((a, i) => (
-                  <AutoCard key={a.vehicle_id || i} auto={a} dias={calculateDays()} />
+                  <AutoCard
+                    key={a.vehicle_id || i}
+                    auto={a}
+                    dias={calculateDays()}
+                    startDate={startDate}
+                    endDate={endDate}
+                    pickupLocation={pickupLocation}
+                  />
                 ))}
               </div>
             </div>
