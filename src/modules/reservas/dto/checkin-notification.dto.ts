@@ -116,4 +116,24 @@ export class CheckinNotificationDto {
   @IsNumber()
   @IsOptional()
   fuel_level?: number;
+
+  @ApiPropertyOptional({ description: 'Proveedor o socio' })
+  @IsString()
+  @IsOptional()
+  proveedor?: string;
+
+  @ApiPropertyOptional({ description: 'Modulo del sistema' })
+  @IsString()
+  @IsOptional()
+  modulo?: string;
+
+  @ApiPropertyOptional({ description: 'Tipo' })
+  @IsString()
+  @IsOptional()
+  tipo?: string;
+
+  @ApiPropertyOptional({ description: 'ID' })
+  @IsString()
+  @IsOptional()
+  id?: string;
 }

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Headers, Req, HttpCode, HttpStatus, Version } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Headers, Req, HttpCode, HttpStatus, Version, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiParam } from '@nestjs/swagger';
 import { ReservasService } from './reservas.service';
 import { CheckinNotificationDto } from './dto/checkin-notification.dto';
@@ -17,6 +17,7 @@ export class ReservasController {
   @Post(':id/checkin')
   @Version(['1', '2', '3'])
   @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: true }))
   @ApiOperation({
     summary: 'Notificar confirmación de asistencia presencial (Check-in) desde la web del socio',
     description: 'Recibe la confirmación física de llegada del cliente emitida por el administrador del socio, transicionando la reserva a CONFIRMADO_ASISTIDO.',
@@ -40,6 +41,7 @@ export class ReservasController {
   @Post('notificar-checkin')
   @Version(['1', '2', '3'])
   @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: true }))
   @ApiOperation({ summary: 'Notificar confirmación de asistencia presencial (Check-in Body Payload)' })
   async notificarCheckinAlias(
     @Body() dto: CheckinNotificationDto,
