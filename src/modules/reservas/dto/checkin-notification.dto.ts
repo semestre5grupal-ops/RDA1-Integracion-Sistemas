@@ -92,6 +92,16 @@ export class CheckinNotificationDto {
   @IsOptional()
   localizador?: string;
 
+  @ApiPropertyOptional({ description: 'Código PNR de la reserva' })
+  @IsString()
+  @IsOptional()
+  pnr?: string;
+
+  @ApiPropertyOptional({ description: 'ID o código de reserva alternativo' })
+  @IsString()
+  @IsOptional()
+  reserva_id?: string;
+
   @ApiPropertyOptional({ description: 'ID de reserva interna del socio' })
   @IsString()
   @IsOptional()
@@ -106,4 +116,24 @@ export class CheckinNotificationDto {
   @IsNumber()
   @IsOptional()
   fuel_level?: number;
+
+  @ApiPropertyOptional({ description: 'Proveedor o socio' })
+  @IsString()
+  @IsOptional()
+  proveedor?: string;
+
+  @ApiPropertyOptional({ description: 'Modulo del sistema' })
+  @IsString()
+  @IsOptional()
+  modulo?: string;
+
+  @ApiPropertyOptional({ description: 'Tipo' })
+  @IsString()
+  @IsOptional()
+  tipo?: string;
+
+  @ApiPropertyOptional({ description: 'ID' })
+  @IsString()
+  @IsOptional()
+  id?: string;
 }

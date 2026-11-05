@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { createOrderAuto, getAutoById } from '../services/autosApi';
 import { v4 as uuidv4 } from 'uuid';
@@ -21,14 +21,16 @@ export function AutoDetail() {
   const [fetchedAuto, setFetchedAuto] = useState(null);
 
   useEffect(() => {
-    if (!location.state?.auto && id) {
+    if (id) {
       getAutoById(id)
-        .then(data => setFetchedAuto(data))
-        .catch(err => console.warn('No se pudo cargar vehículo por ID:', err));
+        .then(data => {
+          if (data) setFetchedAuto(prev => ({ ...(prev || {}), ...data }));
+        })
+        .catch(err => console.warn('No se pudo refrescar datos de vehículo:', err));
     }
-  }, [id, location.state?.auto]);
+  }, [id]);
 
-  const auto = location.state?.auto || fetchedAuto || {};
+  const auto = { ...(location.state?.auto || {}), ...(fetchedAuto || {}) };
 
   const precioDiario = auto.price || 35.50;
   const make = auto.make || 'Chevrolet';
@@ -72,6 +74,40 @@ export function AutoDetail() {
   const [reservaConfirmada, setReservaConfirmada] = useState(null);
   const [diasError, setDiasError] = useState('');
   const [driverAgeError, setDriverAgeError] = useState('');
+  const [modalError, setModalError] = useState(null);
+
+  const fechasOcupadas = auto.fechas_ocupadas || auto.occupied_dates || [];
+
+  const hayConflictoFechas = useMemo(() => {
+    if (!fechasOcupadas.length || !pickupDate || !dropoffDate) return false;
+    const pStart = new Date(pickupDate).getTime();
+    const pEnd = new Date(dropoffDate).getTime();
+    return fechasOcupadas.some((f) => {
+      const oStart = new Date(f.pickup || f.fecha_inicio).getTime();
+      const oEnd = new Date(f.dropoff || f.fecha_fin).getTime();
+      return pStart <= oEnd && pEnd >= oStart;
+    });
+  }, [fechasOcupadas, pickupDate, dropoffDate]);
+
+  useEffect(() => {
+    if (fechasOcupadas.length > 0 && pickupDate && dropoffDate) {
+      const pStart = new Date(pickupDate).getTime();
+      const pEnd = new Date(dropoffDate).getTime();
+      const choca = fechasOcupadas.some((f) => {
+        const oStart = new Date(f.pickup || f.fecha_inicio).getTime();
+        const oEnd = new Date(f.dropoff || f.fecha_fin).getTime();
+        return pStart <= oEnd && pEnd >= oStart;
+      });
+      if (choca) {
+        const maxOccupiedEnd = Math.max(...fechasOcupadas.map(f => new Date(f.dropoff || f.fecha_fin).getTime()));
+        const nextFreeDate = new Date(maxOccupiedEnd + 2 * 24 * 3600 * 1000);
+        const freeStart = nextFreeDate.toISOString().split('T')[0];
+        const freeEnd = new Date(nextFreeDate.getTime() + (parseInt(dias || 3, 10)) * 24 * 3600 * 1000).toISOString().split('T')[0];
+        setPickupDate(freeStart);
+        setDropoffDate(freeEnd);
+      }
+    }
+  }, [fechasOcupadas]);
 
   // Sanitizar entradas para permitir solo números
   const handleNumberKeyDown = (e) => {
@@ -140,7 +176,13 @@ export function AutoDetail() {
       return;
     }
 
+    if (hayConflictoFechas) {
+      setError(`El vehículo ya está reservado en las fechas seleccionadas (${fechasOcupadas.map(f => `${f.pickup} al ${f.dropoff}`).join(', ')}). Por favor selecciona otras fechas libres.`);
+      return;
+    }
+
     setError('');
+    setModalError(null);
     setDiasError('');
     setDriverAgeError('');
     // Abrir modal de pagos en lugar de llamar directamente a la API
@@ -148,6 +190,14 @@ export function AutoDetail() {
   };
 
   const procesarPagoYReserva = async () => {
+    if (loading) return;
+    if (hayConflictoFechas) {
+      const msg = `El vehículo ya está reservado en esas fechas (${fechasOcupadas.map(f => `${f.pickup} al ${f.dropoff}`).join(', ')}). Por favor selecciona otras fechas libres.`;
+      setModalError(msg);
+      setError(msg);
+      return;
+    }
+
     // Si no hay conexión, mostrar modal de aviso ANTES de guardar
     if (!navigator.onLine && !pendingOfflinePay) {
       setPendingOfflinePay(true);
@@ -157,6 +207,7 @@ export function AutoDetail() {
     setPendingOfflinePay(false);
     setLoading(true);
     setError(null);
+    setModalError(null);
     setSuccess(null);
 
     const costoCoberturaDiaria = tipoCobertura === 'TOTAL' ? 18.00 : 0.00;
@@ -227,9 +278,14 @@ export function AutoDetail() {
         }
       } catch (err) {
         console.error('Error al crear reserva de auto:', err);
-        const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message || 'El vehículo no está disponible para las fechas seleccionadas.';
+        const isConflict = err.response?.status === 409 || err.status === 409;
+        const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message || (
+          isConflict
+            ? 'El vehículo ya está reservado para las fechas seleccionadas en la agencia. Por favor selecciona otras fechas libres.'
+            : 'Error al procesar la reserva del vehículo.'
+        );
         setError(errMsg);
-        setShowPaymentModal(false);
+        setModalError(errMsg);
         setLoading(false);
         return;
       }
@@ -517,14 +573,26 @@ export function AutoDetail() {
               </div>
             </div>
 
+            {/* Alerta de Conflicto de Fechas ocupadas */}
+            {hayConflictoFechas && (
+              <div style={{ background: '#fff3cd', color: '#856404', border: '1px solid #ffeeba', padding: '14px', borderRadius: '4px', fontSize: '0.92rem', lineHeight: '1.4' }}>
+                <strong>⚠️ Fechas no disponibles para este vehículo:</strong>
+                <p style={{ margin: '6px 0 0 0' }}>
+                  El auto ya cuenta con reserva activa en las fechas seleccionadas ({fechasOcupadas.map(f => `${f.pickup} al ${f.dropoff}`).join(', ')}).
+                  <br />
+                  💡 <em>Sugerencia: Cambia las fechas en el panel derecho "Ajustar Reserva" (por ejemplo, a partir del 23 de noviembre).</em>
+                </p>
+              </div>
+            )}
+
             {/* Error y Exito */}
             {error && <div style={{ color: '#d93025', background: '#fce8e6', padding: '12px', borderRadius: '4px' }}>{error}</div>}
             {success && <div style={{ color: '#137333', background: '#e6f4ea', padding: '12px', borderRadius: '4px' }}>{success}</div>}
 
             {/* Continuar button form */}
             <form onSubmit={handleBooking} style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-              <button type="submit" style={{ background: '#006ce4', color: 'white', border: 'none', padding: '12px 24px', fontSize: '1rem', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer' }}>
-                {!user ? 'Inicia sesión para continuar' : 'Continuar a Pago'}
+              <button type="submit" disabled={hayConflictoFechas} style={{ background: hayConflictoFechas ? '#9ca3af' : '#006ce4', color: 'white', border: 'none', padding: '12px 24px', fontSize: '1rem', fontWeight: 'bold', borderRadius: '4px', cursor: hayConflictoFechas ? 'not-allowed' : 'pointer' }}>
+                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : 'Continuar a Pago')}
               </button>
             </form>
 
@@ -664,9 +732,29 @@ export function AutoDetail() {
       {/* PAYMENT MODAL (SIMULADOR DE PASARELA) */}
       {showPaymentModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'white', borderRadius: '8px', padding: '30px', width: '400px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '20px', color: '#333' }}>Pasarela de Pago</h2>
-            <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '20px' }}>Total a pagar: <strong>{total}</strong></p>
+          <div style={{ background: 'white', borderRadius: '8px', padding: '30px', width: '420px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '15px', color: '#333' }}>Pasarela de Pago</h2>
+            <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '10px' }}>Total a pagar: <strong>{total}</strong></p>
+            <p style={{ fontSize: '0.85rem', color: '#444', marginBottom: '15px', background: '#f8f9fa', padding: '8px 12px', borderRadius: '4px' }}>
+              📅 <strong>Fechas:</strong> {pickupDate} al {dropoffDate} ({dias} días)
+            </p>
+
+            {modalError && (
+              <div style={{ background: '#fce8e6', border: '1px solid #fad2cf', color: '#d93025', padding: '12px', borderRadius: '4px', marginBottom: '15px', fontSize: '0.88rem' }}>
+                <strong>⚠️ Conflicto de Disponibilidad:</strong>
+                <p style={{ margin: '6px 0 10px 0' }}>{modalError}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalError(null);
+                    setShowPaymentModal(false);
+                  }}
+                  style={{ background: '#006ce4', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem' }}
+                >
+                  Modificar Fechas
+                </button>
+              </div>
+            )}
 
             <div style={{ marginBottom: '20px' }}>
               <label htmlFor="pago-metodo" style={{ display: 'block', fontSize: '0.9rem', color: '#333', marginBottom: '10px', fontWeight: 'bold' }}>Método de pago:</label>
@@ -678,7 +766,7 @@ export function AutoDetail() {
             </div>
 
             <div style={{ display: 'flex', gap: '15px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowPaymentModal(false)} style={{ background: 'transparent', color: '#666', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>
+              <button onClick={() => { setModalError(null); setShowPaymentModal(false); }} style={{ background: 'transparent', color: '#666', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>
                 Cancelar
               </button>
               {isAdmin ? (
@@ -687,7 +775,7 @@ export function AutoDetail() {
                 </div>
               ) : (
                 <>
-                  <button onClick={procesarPagoYReserva} disabled={loading} style={{ background: '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  <button onClick={procesarPagoYReserva} disabled={loading || !!modalError || hayConflictoFechas} style={{ background: (loading || !!modalError || hayConflictoFechas) ? '#9ca3af' : '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', fontWeight: 'bold', cursor: (loading || !!modalError || hayConflictoFechas) ? 'not-allowed' : 'pointer' }}>
                     {loading ? 'Procesando...' : 'Pagar y Reservar'}
                   </button>
 

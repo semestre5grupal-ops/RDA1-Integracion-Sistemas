@@ -254,6 +254,57 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Consulta las reservas activas en el proveedor para determinar fechas ya ocupadas.
+   */
+  async getOccupiedDates(vehicleId: string): Promise<{ pickup: string; dropoff: string }[]> {
+    try {
+      const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
+      const cleanId = (vehicleId || '').toLowerCase().replace(/^auto-/, '');
+      const response = await firstValueFrom(
+        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/orders', {
+          headers: {
+            'X-API-Key': key,
+          },
+          timeout: 4000,
+        })
+      );
+      const orders = Array.isArray(response.data) ? response.data : [];
+      return orders
+        .filter((o: any) => {
+          const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
+          return oVid === cleanId && o.status !== 'CANCELLED';
+        })
+        .map((o: any) => ({
+          pickup: o.retiro?.fecha || o.pickup_date,
+          dropoff: o.devolucion?.fecha || o.dropoff_date,
+        }))
+        .filter((o: any) => o.pickup && o.dropoff);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
+   * Obtiene todas las órdenes activas en el socio externo para reconciliación.
+   */
+  async getOrdersDirect(): Promise<any[]> {
+    try {
+      const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
+      const response = await firstValueFrom(
+        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/orders', {
+          headers: {
+            'X-API-Key': key,
+          },
+          timeout: 4000,
+        })
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
    * Envía reserva a proveedor externo con Idempotency-Key y protección resiliente.
    * Conecta con POST /api/v3/orders de RutaLibre (NODE_AUT_RUTALIBRE).
    */

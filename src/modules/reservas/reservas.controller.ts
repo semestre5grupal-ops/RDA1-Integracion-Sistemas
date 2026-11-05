@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Headers, Req, HttpCode, HttpStatus, Version } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Headers, Req, HttpCode, HttpStatus, Version, UsePipes, ValidationPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiParam } from '@nestjs/swagger';
 import { ReservasService } from './reservas.service';
 import { CheckinNotificationDto } from './dto/checkin-notification.dto';
@@ -15,8 +15,9 @@ export class ReservasController {
    * Disparado por la web del socio cuando el administrador confirma la asistencia.
    */
   @Post(':id/checkin')
-  @Version(['2', '3'])
+  @Version(['1', '2', '3'])
   @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: true }))
   @ApiOperation({
     summary: 'Notificar confirmación de asistencia presencial (Check-in) desde la web del socio',
     description: 'Recibe la confirmación física de llegada del cliente emitida por el administrador del socio, transicionando la reserva a CONFIRMADO_ASISTIDO.',
@@ -35,6 +36,23 @@ export class ReservasController {
     const rawApiKey = apiKey || req?.headers?.['X-Api-Key'] || req?.headers?.['x_api_key'];
     const safeCorrId = correlationId || req?.headers?.['x-correlation-id'];
     return this.reservasService.confirmarCheckin(id, dto, rawApiKey, safeCorrId);
+  }
+
+  @Post('notificar-checkin')
+  @Version(['1', '2', '3'])
+  @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: true }))
+  @ApiOperation({ summary: 'Notificar confirmación de asistencia presencial (Check-in Body Payload)' })
+  async notificarCheckinAlias(
+    @Body() dto: CheckinNotificationDto,
+    @Headers('x-api-key') apiKey?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+    @Req() req?: any,
+  ) {
+    const rawApiKey = apiKey || req?.headers?.['X-Api-Key'] || req?.headers?.['x_api_key'];
+    const safeCorrId = correlationId || req?.headers?.['x-correlation-id'];
+    const targetId = dto.reserva_id || dto.pnr || dto.codigo_reserva || dto.localizador || (dto as any).id || 'UNKNOWN';
+    return this.reservasService.confirmarCheckin(targetId, dto, rawApiKey, safeCorrId);
   }
 
   /**
