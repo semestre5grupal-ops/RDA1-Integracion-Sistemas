@@ -158,22 +158,31 @@ export function AutoDetail() {
     const totalCalculado = (precioDiarioFinal * dias).toFixed(2);
     const idempotencyKey = uuidv4();
 
+    const userEmail = (user?.email || '').trim().toLowerCase();
     const payload = {
       vehicle_id: id,
+      auto_id: id,
+      vehiculo: {
+        marca: make,
+        modelo: model,
+        categoria: auto.categoria || 'Económico',
+        transmision: transmission,
+        foto_url: auto.images?.[0] || auto.foto_url || ''
+      },
       dias: parseInt(dias, 10),
       tipo_cobertura: tipoCobertura,
       conductor: {
         nombre: (user?.user_metadata?.full_name || user?.nombre || 'Usuario Web').trim().replace(/\s{2,}/g, ' '),
-        email: user?.email?.trim(),
+        email: userEmail,
         telefono: (user?.telefono || '+593998765432').trim(),
         licencia: (user?.user_metadata?.cedula || '1723456789').trim(),
         edad: parseInt(driverAge, 10)
       },
-      driver: { age: parseInt(driverAge, 10) },
+      driver: { age: parseInt(driverAge, 10), email: userEmail },
       booker: {
         country: 'EC',
         name: (user?.nombre || user?.user_metadata?.full_name || 'Usuario Web').trim().replace(/\s{2,}/g, ' '),
-        email: user?.email?.trim()
+        email: userEmail
       },
       payment_method: paymentMethod
     };
@@ -207,7 +216,12 @@ export function AutoDetail() {
           backendRes = res;
         }
       } catch (err) {
-        console.warn('Backend falló, simulando confirmación local:', err);
+        console.error('Error al crear reserva de auto:', err);
+        const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message || 'El vehículo no está disponible para las fechas seleccionadas.';
+        setError(errMsg);
+        setShowPaymentModal(false);
+        setLoading(false);
+        return;
       }
 
       enviarFacturaTrasCompra({
@@ -252,7 +266,8 @@ export function AutoDetail() {
       date: new Date().toISOString().split('T')[0],
       dias: parseInt(dias, 10),
       status: 'CONFIRMED',
-      totalPrice: { currency: 'USD', total: totalCalculado }
+      totalPrice: { currency: 'USD', total: totalCalculado },
+      email: userEmail,
     };
     const existing = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
     localStorage.setItem('reservas_autos', JSON.stringify([autoRes, ...existing]));

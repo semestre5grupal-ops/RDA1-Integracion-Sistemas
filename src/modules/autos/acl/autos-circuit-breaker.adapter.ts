@@ -78,6 +78,18 @@ export class AutosCircuitBreakerAdapter {
     this.logger.log(`[AutosCircuitBreaker] API Key de proveedor actualizada en vivo.`);
   }
 
+  private resolveImageUrl(imageUrl?: string): string {
+    if (!imageUrl) return 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800';
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
+    if (imageUrl.startsWith('/cars/')) {
+      return `https://arrendamiento-autos-web.onrender.com${imageUrl}`;
+    }
+    if (imageUrl.startsWith('/api/images/')) {
+      return `https://rutalibre-autos-api.azurewebsites.net${imageUrl}`;
+    }
+    return `https://arrendamiento-autos-web.onrender.com${imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl}`;
+  }
+
   private cachedRutaLibreToken: string | null = null;
   private tokenExpiresAt: number = 0;
 
@@ -140,10 +152,11 @@ export class AutosCircuitBreakerAdapter {
         const realCars = models
           .filter((m: any) => m.published !== false && m.active !== false)
           .map((m: any) => {
-            const unit = fleet.find((f: any) => f.vehicleModelId === m.id && f.active !== false);
+            const availUnit = fleet.find((f: any) => f.vehicleModelId === m.id && f.active !== false && f.status === 'AVAILABLE');
+            const unit = availUnit || fleet.find((f: any) => f.vehicleModelId === m.id && f.active !== false);
             const plate = unit?.plate;
             const vId = plate ? `auto-${plate.toLowerCase()}` : `ext-model-${m.id}`;
-            const isAvail = unit ? unit.status === 'AVAILABLE' : true;
+            const isAvail = !!availUnit;
             return {
               vehicle_id: vId,
               marca: m.make || 'Toyota',
@@ -170,11 +183,7 @@ export class AutosCircuitBreakerAdapter {
                 ubicacion: 'Andes — Aeropuerto Mariscal Sucre (UIO)',
               },
               estado: isAvail ? 'DISPONIBLE' : 'NO_DISPONIBLE',
-              images: [
-                m.imageUrl?.startsWith('http')
-                  ? m.imageUrl
-                  : (m.imageUrl ? `https://rutalibre-autos-api.azurewebsites.net${m.imageUrl}` : 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'),
-              ],
+              images: [this.resolveImageUrl(m.imageUrl)],
             };
           });
 
@@ -233,11 +242,7 @@ export class AutosCircuitBreakerAdapter {
             ubicacion: o.pickupDepot?.name || 'Andes — Aeropuerto Mariscal Sucre (UIO)',
           },
           estado: 'DISPONIBLE',
-          images: [
-            o.vehicle?.imageUrl?.startsWith('http')
-              ? o.vehicle.imageUrl
-              : (o.vehicle?.imageUrl ? `https://rutalibre-autos-api.azurewebsites.net${o.vehicle.imageUrl}` : 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'),
-          ],
+          images: [this.resolveImageUrl(o.vehicle?.imageUrl)],
         }));
       }
     } catch (err: any) {
@@ -331,7 +336,10 @@ export class AutosCircuitBreakerAdapter {
         }).pipe(
           timeout(this.TIMEOUT_MS),
           catchError((err) => {
-            this.handleFailure(err);
+            // Solo errores de red o 5xx cuentan como falla de circuito, nunca 4xx (conflictos de negocio)
+            if (!err.response || err.response.status >= 500) {
+              this.handleFailure(err);
+            }
             throw err;
           })
         )
@@ -348,13 +356,48 @@ export class AutosCircuitBreakerAdapter {
         raw_response: response.data,
       };
     } catch (err: any) {
-      this.logger.warn(`[AutosCircuitBreaker] Error despachando a RutaLibre (${err.message}): ${JSON.stringify(err.response?.data || '')}. Activando fallback.`);
-      return {
-        external_order_id: `EXT-MOCK-TIMEOUT-${Date.now()}`,
-        status: 'CONFIRMED_FALLBACK',
-        circuit_breaker_open: true,
-        message: `Reserva confirmada vía Mock Fallback (${err.message}).`,
-      };
+      if (err.response?.status === 409) {
+        const detail = err.response?.data?.message || err.response?.data?.detail || 'El vehículo ya se encuentra reservado o en el taller en esas fechas.';
+        this.logger.warn(`[AutosCircuitBreaker] Conflicto 409 en RutaLibre: ${detail}`);
+        throw new HttpException({
+          type: 'https://api.booking.local/errors/conflict',
+          title: 'Vehículo No Disponible',
+          status: HttpStatus.CONFLICT,
+          detail: detail,
+          message: detail,
+          code: 'VEHICLE_ALREADY_RESERVED',
+        }, HttpStatus.CONFLICT);
+      }
+      if (err.response?.status === 400 || err.response?.status === 422) {
+        const detail = err.response?.data?.message || err.response?.data?.detail || 'Datos de reserva no válidos para el proveedor.';
+        this.logger.warn(`[AutosCircuitBreaker] Error 400/422 en RutaLibre: ${detail}`);
+        throw new HttpException({
+          type: 'https://api.booking.local/errors/bad-request',
+          title: 'Datos Inválidos',
+          status: HttpStatus.BAD_REQUEST,
+          detail: detail,
+          message: detail,
+          code: 'BAD_REQUEST',
+        }, HttpStatus.BAD_REQUEST);
+      }
+
+      this.logger.warn(`[AutosCircuitBreaker] Error despachando a RutaLibre (${err.message}): ${JSON.stringify(err.response?.data || '')}.`);
+      if ((this.circuitState as any) === CircuitState.OPEN || this.consecutiveFailures >= this.FAILURE_THRESHOLD) {
+        return {
+          external_order_id: `EXT-MOCK-TIMEOUT-${Date.now()}`,
+          status: 'CONFIRMED_FALLBACK',
+          circuit_breaker_open: true,
+          message: `Reserva confirmada vía Mock Fallback de contingencia (${err.message}).`,
+        };
+      }
+      throw new HttpException({
+        type: 'https://api.booking.local/errors/external-service-error',
+        title: 'Error de Comunicación con Proveedor',
+        status: HttpStatus.SERVICE_UNAVAILABLE,
+        detail: `No se pudo comunicar con el sistema del proveedor de autos (${err.message}).`,
+        message: `No se pudo conectar con el proveedor: ${err.message}`,
+        code: 'PARTNER_SERVICE_UNAVAILABLE',
+      }, HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 

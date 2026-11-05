@@ -240,7 +240,7 @@ export function MisReservasPage() {
           status: a.status || 'CONFIRMED',
           totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
           imagen: DEFAULT_IMAGES.auto,
-          email: (a.driver?.email || a.conductor?.email || a.email || a.booker?.email || '').trim().toLowerCase(),
+          email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
           link: '/autos',
         }));
       } catch (err) {
@@ -261,7 +261,7 @@ export function MisReservasPage() {
         status: a.status || 'CONFIRMED',
         totalRaw: a.totalPrice?.total || a.total || 106.50,
         imagen: DEFAULT_IMAGES.auto,
-        email: (a.driver?.email || a.conductor?.email || a.email || a.booker?.email || '').trim().toLowerCase(),
+        email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
         link: '/autos',
       }));
 
@@ -406,9 +406,12 @@ export function MisReservasPage() {
         ...atraccionesItems,
         ...atraccionesLocalesFormatted,
       ].forEach((item) => {
-        // Si el usuario tiene sesión activa, solo mostrar reservas asociadas a su correo
-        if (correoSesion && item.email && item.email !== correoSesion) {
-          return;
+        // Si el usuario tiene sesión activa y no es admin global, solo mostrar reservas asociadas a su correo
+        if (correoSesion && !isAdmin) {
+          const itemEmail = (item.email || '').trim().toLowerCase();
+          if (!itemEmail || itemEmail !== correoSesion) {
+            return;
+          }
         }
 
         const pnrVal = item.pnr && item.pnr !== '—' && !['HOTEL', 'AUTO', 'ATRAC'].includes(item.pnr) ? item.pnr : null;

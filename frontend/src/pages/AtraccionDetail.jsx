@@ -228,6 +228,7 @@ export function AtraccionDetail() {
         ticket_count: totalTickets,
         status: 'CONFIRMED',
         totalPrice: { currency: 'USD', total: totalCalculado.toFixed(2) },
+        email: (user?.email || '').trim().toLowerCase(),
         guia_asignado: 'Carlos Villacís (Guía Oficial Certificado MINTUR)',
         punto_encuentro: atraccion?.locations?.[0]?.address || 'Punto de Encuentro Central'
       };
