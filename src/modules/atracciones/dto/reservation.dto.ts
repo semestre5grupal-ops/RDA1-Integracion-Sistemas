@@ -31,6 +31,21 @@ export class ReservationRequestDto {
   @MaxLength(64)
   atraccion_id?: string;
 
+  @ApiProperty({ description: 'ID de la atracción (alias camelCase)', required: false })
+  @IsOptional()
+  @IsString()
+  atraccionId?: string;
+
+  @ApiProperty({ description: 'Código del proveedor del socio', required: false })
+  @IsOptional()
+  @IsString()
+  proveedor_codigo?: string;
+
+  @ApiProperty({ description: 'Partner ID del socio', required: false })
+  @IsOptional()
+  @IsString()
+  partner_id?: string;
+
   @ApiProperty({ description: 'Fecha para la reserva (YYYY-MM-DD)', example: '2026-10-25', format: 'date', required: false })
   @IsOptional()
   @IsString({ message: 'La fecha debe ser una cadena de texto.' })

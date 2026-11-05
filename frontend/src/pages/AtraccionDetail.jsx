@@ -205,6 +205,7 @@ export function AtraccionDetail() {
         customer_email: user.email?.trim() || '',
         customer_phone: (user.user_metadata?.telefono || '+593987654321').trim(),
         document_id: (user.user_metadata?.cedula || '1720000000').trim(),
+        cliente_id: user?.id || null,
         proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedor?.codigo || 'NODE_ATR_ARIEL',
         special_requirements: (form.special_requirements || '').trim().replace(/\s{2,}/g, ' ')
       };
@@ -231,7 +232,11 @@ export function AtraccionDetail() {
         try {
           result = await reservarAtraccion(id, payload, idempotencyKey);
         } catch (backendErr) {
-          result = { reservation_id: idempotencyKey, local_fallback: true };
+          console.error('Error al reservar atracción en backend:', backendErr);
+          setIsBooking(false);
+          const msg = backendErr.response?.data?.detail || backendErr.response?.data?.message || backendErr.message || 'Error al procesar la reserva con el socio.';
+          alert(`Error al procesar la reserva: ${msg}`);
+          return;
         }
       }
       
