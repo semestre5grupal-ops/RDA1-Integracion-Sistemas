@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseInterceptors, Header, Headers, Post, Put, Patch, Delete, Body, HttpCode, HttpStatus, HttpException, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseInterceptors, Header, Headers, Post, Put, Patch, Delete, Body, HttpCode, HttpStatus, HttpException, UseGuards, Req, UsePipes, ValidationPipe } from '@nestjs/common';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { AtraccionesService } from './atracciones.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
@@ -224,6 +224,7 @@ export class AtraccionesController {
 
   @Post(':id/reservations')
   @UseGuards(SupabaseAuthGuard)
+  @UsePipes(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: true }))
   @Header('X-API-Deprecation-Date', '2027-12-31')
   @ApiOperation({ summary: 'Reservar una atracción (Requiere autenticación JWT e Idempotency-Key)' })
   @ApiParam({ name: 'id', description: 'ID de la atracción', type: 'string' })
@@ -238,6 +239,10 @@ export class AtraccionesController {
   ) {
     if (!idempotencyKey) {
       throw new HttpException('Idempotency-Key header is required', HttpStatus.BAD_REQUEST);
+    }
+    if (req.user) {
+      if (!dto.cliente_id && req.user.id) dto.cliente_id = req.user.id;
+      if (!dto.customer_email && req.user.email) dto.customer_email = req.user.email;
     }
     return this.atraccionesService.reservar(id, dto, idempotencyKey);
   }

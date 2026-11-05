@@ -1,7 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, ILike } from 'typeorm';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { SearchAtraccionesRequestDto } from './dto/search-atracciones.dto';
 import { CreateAtraccionDto } from './dto/create-atraccion.dto';
@@ -348,6 +348,80 @@ export class AtraccionesService {
       }
     } catch (e: any) {
       this.logger.warn(`Error al sincronizar catálogo con Ariel: ${e.message}`);
+    }
+  }
+
+  // ============================================================================
+  // 1.3. SINCRONIZACIÓN CROSS-PLATFORM DE CLIENTES CON ARIEL (GET/POST /clientes)
+  // ============================================================================
+  async sincronizarClienteConAriel(customer: { nombre: string; email: string; identificacion: string; telefono: string }): Promise<any> {
+    try {
+      // 1. Consultar si ya existe en Ariel por identificación
+      if (customer.identificacion) {
+        try {
+          const checkRes = await firstValueFrom(
+            this.httpService.get(
+              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/clientes?identificacion=${encodeURIComponent(customer.identificacion)}`,
+              {
+                headers: { 'X-API-Key': 'atr-ariel-ecua-travel-2026' },
+                timeout: 4000,
+              },
+            ),
+          );
+          if (checkRes.status === 200 && checkRes.data) {
+            this.logger.log(`[Cross-Platform Ariel] Cliente ya existía en Ariel por cédula: ${JSON.stringify(checkRes.data)}`);
+            return checkRes.data;
+          }
+        } catch (_) {}
+      }
+
+      // 2. Consultar por email si no se encontró por identificación
+      if (customer.email) {
+        try {
+          const checkEmailRes = await firstValueFrom(
+            this.httpService.get(
+              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/clientes?email=${encodeURIComponent(customer.email)}`,
+              {
+                headers: { 'X-API-Key': 'atr-ariel-ecua-travel-2026' },
+                timeout: 4000,
+              },
+            ),
+          );
+          if (checkEmailRes.status === 200 && checkEmailRes.data) {
+            this.logger.log(`[Cross-Platform Ariel] Cliente ya existía en Ariel por email: ${JSON.stringify(checkEmailRes.data)}`);
+            return checkEmailRes.data;
+          }
+        } catch (_) {}
+      }
+    } catch (e: any) {
+      this.logger.debug(`[Cross-Platform Ariel] Error consultando cliente previo: ${e.message}`);
+    }
+
+    // 3. Si no existe, crearlo en Ariel
+    try {
+      const createRes = await firstValueFrom(
+        this.httpService.post(
+          'https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/clientes',
+          {
+            nombre: customer.nombre,
+            email: customer.email,
+            identificacion: customer.identificacion,
+            telefono: customer.telefono,
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': 'atr-ariel-ecua-travel-2026',
+            },
+            timeout: 4000,
+          },
+        ),
+      );
+      this.logger.log(`[Cross-Platform Ariel] Cliente registrado exitosamente en Ariel: ${JSON.stringify(createRes.data)}`);
+      return createRes.data;
+    } catch (err: any) {
+      this.logger.warn(`[Cross-Platform Ariel] Error al registrar cliente en Ariel: ${err.response?.data?.message || err.message}`);
+      return null;
     }
   }
 
@@ -772,6 +846,19 @@ export class AtraccionesService {
         ? dto.slot_id
         : `slot-${dateCompact}-${timeCompact}`;
 
+      const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
+      const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';
+      const clientPhone = dto.customer_phone || dto.customer?.phone || '+593999999999';
+      const clientDoc = dto.document_id || dto.customer?.document_id || '1720000000';
+
+      // Cross-Platform: Sincronizar cliente con Ariel (GET/POST /api/v3/clientes)
+      await this.sincronizarClienteConAriel({
+        nombre: clientName,
+        email: clientEmail,
+        identificacion: clientDoc,
+        telefono: clientPhone,
+      });
+
       const arielPayload = {
         atraccion_id: id,
         slot_id: slotIdAriel,
@@ -782,11 +869,11 @@ export class AtraccionesService {
         senior_count: seniorCount,
         infant_count: infantCount,
         customer: {
-          full_name: dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central',
-          email: dto.customer_email || dto.customer?.email || 'turista@booking.local',
-          phone: dto.customer_phone || dto.customer?.phone || '+593999999999',
+          full_name: clientName,
+          email: clientEmail,
+          phone: clientPhone,
           document_type: 'CEDULA',
-          document_id: dto.document_id || dto.customer?.document_id || '1720000000',
+          document_id: clientDoc,
         },
       };
 
@@ -1460,7 +1547,7 @@ export class AtraccionesService {
   }
 
   async getReservas(email?: string): Promise<any[]> {
-    const whereClause = email ? { customerEmail: email } : {};
+    const whereClause = email ? { customerEmail: ILike(email.trim()) } : {};
     const reservas = await this.reservaRepo.find({ where: whereClause, order: { createdAt: 'DESC' } });
 
     // Live sync check-in status with partners (e.g. Ariel)
