@@ -380,7 +380,11 @@ export class AutosService implements OnModuleInit {
         const external = await this.circuitBreakerAdapter.fetchExternalCars({});
         const foundExt = external.find((c: any) => c.vehicle_id === id || c.id === id);
         if (foundExt) {
-          return foundExt;
+          const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
+          return {
+            ...foundExt,
+            fechas_ocupadas: occupied,
+          };
         }
       } catch (_) {}
 
@@ -529,10 +533,12 @@ export class AutosService implements OnModuleInit {
       userEmail: driverEmail
     });
 
-    // Cambiar estado del auto a RESERVADO
-    auto.estado = EstadoVehiculo.RESERVADO;
+    // Cambiar estado del auto a RESERVADO solo si pertenece a la flota local
+    if (isLocalAuto) {
+      auto.estado = EstadoVehiculo.RESERVADO;
+    }
 
-    const qrData = `BOOKING-CAR-${pnr}-${auto.id}-CONFIRMED`;
+    const qrData = `BOOKING-CAR-${pnr}-${autoId}-CONFIRMED`;
 
     const orderResponse = {
       order_id: pnr,
@@ -545,7 +551,7 @@ export class AutosService implements OnModuleInit {
       email: driverEmail,
       vehiculo: {
         marca: orderData.vehiculo?.marca || (externalOrder ? 'Toyota' : auto.marca),
-        modelo: orderData.vehiculo?.modelo || (externalOrder ? 'Vehículo de Flota' : auto.modelo),
+        modelo: orderData.vehiculo?.modelo || (externalOrder ? 'Toyota Yaris Cross 2026 Prueba' : auto.modelo),
         categoria: orderData.vehiculo?.categoria || auto.categoria,
         transmision: orderData.vehiculo?.transmision || auto.transmision,
         foto_url: orderData.vehiculo?.foto_url || (orderData.vehiculo?.images?.[0]) || auto.foto_url

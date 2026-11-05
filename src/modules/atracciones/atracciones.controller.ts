@@ -124,11 +124,19 @@ export class AtraccionesController {
   }
 
   @Get('reservations')
-  @UseGuards(SupabaseAuthGuard)
-  @ApiOperation({ summary: 'Consultar el historial de reservas del usuario (Requiere autenticación JWT)' })
+  @ApiOperation({ summary: 'Consultar el historial de reservas del usuario' })
   @ApiResponse({ status: 200, description: 'Listado de reservas.' })
-  async getReservas(@Req() req: any) {
-    return this.atraccionesService.getReservas(req.user?.email);
+  async getReservas(@Req() req: any, @Query('email') email?: string) {
+    const userEmail = req.user?.email || email;
+    return this.atraccionesService.getReservas(userEmail);
+  }
+
+  @Get('reservas')
+  @ApiOperation({ summary: 'Consultar el historial de reservas (Alias canónico)' })
+  @ApiResponse({ status: 200, description: 'Listado de reservas.' })
+  async getReservasAlias(@Req() req: any, @Query('email') email?: string) {
+    const userEmail = req.user?.email || email;
+    return this.atraccionesService.getReservas(userEmail);
   }
 
   @Get('reservations/:reservationId')

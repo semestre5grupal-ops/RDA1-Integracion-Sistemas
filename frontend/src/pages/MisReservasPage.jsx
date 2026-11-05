@@ -50,6 +50,11 @@ export function MisReservasPage() {
   const [avisoDescarga, setAvisoDescarga] = useState('');
   const { convertPrice } = useCurrency();
   const { user } = useAuth();
+  const isAdmin = !!(user?.email && (
+    user.email.toLowerCase().includes('admin') ||
+    user.email.toLowerCase() === 'booking.admin@epn.edu.ec' ||
+    user.user_metadata?.role === 'admin'
+  ));
 
   // Report form state
   const [modalView, setModalView] = useState('detail'); // 'detail' | 'report' | 'cancel'
@@ -226,22 +231,30 @@ export function MisReservasPage() {
       try {
         const respuestaAutos = await getOrdersAuto();
         const listaAutos = Array.isArray(respuestaAutos) ? respuestaAutos : (respuestaAutos?.orders || []);
-        autosItems = listaAutos.map((a) => ({
-          id: a.order_id || a.id,
-          pnr: (a.order_id || a.id || 'AUTO').substring(0, 6).toUpperCase(),
-          tipo: 'auto',
-          servicioTexto: 'Renta de auto',
-          destino: 'Quito',
-          titulo: (a.auto_id || a.autoId) ? `Renta de Vehículo (${a.dias_renta || a.diasRenta || 3} días)` : 'Renta de Auto Chevrolet Sail',
-          fechasTexto: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : '3 días de renta',
-          fecha: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-          rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
-          status: a.status || 'CONFIRMED',
-          totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
-          imagen: DEFAULT_IMAGES.auto,
-          email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
-          link: '/autos',
-        }));
+        autosItems = listaAutos.map((a) => {
+          const autoModel = a.vehiculo?.modelo || a.auto_id || a.autoId || '';
+          const autoMake = a.vehiculo?.marca || '';
+          const displayTitle = (autoMake || autoModel)
+            ? `Renta de ${autoMake} ${autoModel} (${a.dias_renta || a.diasRenta || 3} días)`.trim()
+            : 'Renta de Auto';
+          const pnrReal = a.pnr || a.codigo_reserva || a.order_id || a.id || 'AUTO';
+          return {
+            id: a.order_id || a.id,
+            pnr: pnrReal,
+            tipo: 'auto',
+            servicioTexto: 'Renta de auto',
+            destino: 'Quito',
+            titulo: displayTitle,
+            fechasTexto: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : '3 días de renta',
+            fecha: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
+            rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
+            status: a.status || 'CONFIRMED',
+            totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
+            imagen: a.vehiculo?.foto_url || DEFAULT_IMAGES.auto,
+            email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+            link: '/autos',
+          };
+        });
       } catch (err) {
         // Fallback silenciado
       }
@@ -249,39 +262,41 @@ export function MisReservasPage() {
       const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
       const autosLocalesFormatted = autosLocales.map((a) => ({
         id: a.id || a.orderId,
-        pnr: (a.id || a.orderId || 'AUTO').substring(0, 6).toUpperCase(),
+        pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
         tipo: 'auto',
         servicioTexto: 'Renta de auto',
         destino: 'Quito',
-        titulo: a.titulo || 'Renta de Auto Chevrolet Sail (3 días)',
+        titulo: a.titulo || 'Renta de Auto (3 días)',
         fechasTexto: a.createdAt || a.date ? formatearFecha(String(a.createdAt || a.date).split('T')[0]) : '3 días de renta',
         fecha: a.createdAt || a.date ? formatearFecha(String(a.createdAt || a.date).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
         rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
         status: a.status || 'CONFIRMED',
         totalRaw: a.totalPrice?.total || a.total || 106.50,
-        imagen: DEFAULT_IMAGES.auto,
+        imagen: a.foto_url || DEFAULT_IMAGES.auto,
         email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
         link: '/autos',
+        isLocal: true,
       }));
 
       // 3. Atracciones API & Local
       let atraccionesItems = [];
       try {
-        const respuestaAtracciones = await getReservasAtracciones();
+        const correoSesionActual = (user?.email || '').trim().toLowerCase();
+        const respuestaAtracciones = await getReservasAtracciones(isAdmin ? undefined : correoSesionActual);
         const listaAtracciones = Array.isArray(respuestaAtracciones) ? respuestaAtracciones : (respuestaAtracciones?.data || []);
         atraccionesItems = listaAtracciones.map((at) => ({
           id: at.reservation_id || at.id,
-          pnr: (at.reservation_id || at.id || 'ATRAC').substring(0, 6).toUpperCase(),
+          pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
           tipo: 'atraccion',
           servicioTexto: 'Atracción',
           destino: 'Quito',
-          titulo: at.titulo || `Tour Quito Centro Histórico (${at.ticket_count || 1} entradas)`,
-          fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · 10:00 a.m.` : 'Tour guiado',
+          titulo: at.titulo || at.atraccion_nombre || at.name || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
+          fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · ${at.time || '10:00 a.m.'}` : 'Tour guiado',
           fecha: at.createdAt ? formatearFecha(String(at.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
           rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
           status: at.status || 'CONFIRMED',
           totalRaw: at.total_price?.total || at.total_price || 55.00,
-          imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
+          imagen: at.photoUrl || at.foto_url || DEFAULT_IMAGES.atraccion,
           email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
           link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
         }));
@@ -292,12 +307,12 @@ export function MisReservasPage() {
       const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
       const atraccionesLocalesFormatted = atraccionesLocales.map((at) => ({
         id: at.id || at.reservation_id,
-        pnr: (at.id || at.reservation_id || 'ATRAC').substring(0, 6).toUpperCase(),
+        pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
         tipo: 'atraccion',
         servicioTexto: 'Atracción',
         destino: 'Quito',
-        titulo: at.titulo || `Tour Quito Centro Histórico (${at.ticket_count || 1} entradas)`,
-        fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · 10:00 a.m.` : 'Tour guiado',
+        titulo: at.titulo || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
+        fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · ${at.time || '10:00 a.m.'}` : 'Tour guiado',
         fecha: at.createdAt ? formatearFecha(String(at.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
         rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
         status: at.status || 'CONFIRMED',
@@ -305,6 +320,7 @@ export function MisReservasPage() {
         imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
         email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
         link: '/',
+        isLocal: true,
       }));
 
       // 4. Alojamientos API & Local
@@ -317,10 +333,11 @@ export function MisReservasPage() {
           const checkoutStr = al.checkout ? formatearFecha(al.checkout) : '16 nov.';
           return {
             id: al.reservation_id || al.id,
-            pnr: al.codigo_reserva || (al.reservation_id || al.id || 'HOTEL').substring(0, 8).toUpperCase(),
+            pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
             tipo: 'alojamiento',
             servicioTexto: 'Alojamiento',
             destino: al.destino || 'Quito',
+            email: (al.customer_email || al.email || al.customerEmail || al.userEmail || '').trim().toLowerCase(),
             // Nombre del hotel, tipo de habitación reservado y número de huéspedes.
             titulo: al.nombre_alojamiento
               ? `${al.nombre_alojamiento}${al.tipo_habitacion?.nombre ? ` · ${(al.habitaciones_count || 1) > 1 ? `${al.habitaciones_count} × ` : ''}${al.tipo_habitacion.nombre}` : ''} (${al.huespedes || 1} persona${(al.huespedes || 1) > 1 ? 's' : ''})`
@@ -334,8 +351,6 @@ export function MisReservasPage() {
             link: al.alojamiento_id ? `/alojamientos/${al.alojamiento_id}` : '/',
             raw: {
               createdAt: al.created_at || new Date().toISOString(),
-              // Huéspedes registrados en la reserva (titular y acompañantes); si la
-              // reserva es antigua y no los tiene, el cliente que reservó.
               passengers: (al.huespedes_detalle?.length ? al.huespedes_detalle : [{ nombre: al.customer_name || 'Huésped', apellido: '' }]).map((h, i) => ({
                 firstName: h.nombre,
                 lastName: h.apellido || '',
@@ -355,13 +370,13 @@ export function MisReservasPage() {
       // sesión. Las del servidor ya vienen filtradas por cuenta y correo.
       const correoSesion = (user?.email || '').trim().toLowerCase();
       const alojamientosLocales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]')
-        .filter((al) => correoSesion && (al.email || '').trim().toLowerCase() === correoSesion);
+        .filter((al) => !correoSesion || (al.email || '').trim().toLowerCase() === correoSesion);
       const alojamientosLocalesFormatted = alojamientosLocales.map((al) => {
         const checkinStr = al.checkin ? formatearFecha(al.checkin) : '10 nov.';
         const checkoutStr = al.checkout ? formatearFecha(al.checkout) : '16 nov.';
         return {
           id: al.reservationId || al.id,
-          pnr: al.codigoReserva || al.reservationId || (al.id || 'HOTEL').substring(0, 8).toUpperCase(),
+          pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
           tipo: 'alojamiento',
           servicioTexto: 'Alojamiento',
           destino: al.destino || 'Quito',
@@ -375,6 +390,8 @@ export function MisReservasPage() {
           totalRaw: al.totalPrice || al.total || 0,
           imagen: al.photoUrl || DEFAULT_IMAGES.alojamiento,
           link: al.alojamientoId ? `/alojamientos/${al.alojamientoId}` : '/',
+          email: (al.email || al.customer_email || '').trim().toLowerCase(),
+          isLocal: true,
           raw: {
             createdAt: al.createdAt || new Date().toISOString(),
             passengers: [
@@ -396,7 +413,7 @@ export function MisReservasPage() {
       const seenPnrs = new Set();
       const mapaCombinado = new Map();
 
-      [
+      const todasLasReservas = [
         ...alojamientosApiItems,
         ...alojamientosLocalesFormatted,
         ...vuelosItems,
@@ -404,12 +421,20 @@ export function MisReservasPage() {
         ...autosLocalesFormatted,
         ...atraccionesItems,
         ...atraccionesLocalesFormatted,
-      ].forEach((item) => {
-        // Si el usuario tiene sesión activa y no es admin global, solo mostrar reservas asociadas a su correo
-        if (correoSesion && !isAdmin) {
-          const itemEmail = (item.email || '').trim().toLowerCase();
-          if (!itemEmail || itemEmail !== correoSesion) {
-            return;
+      ];
+
+      todasLasReservas.forEach((item) => {
+        // Regla de Aislamiento y Privacidad Cross-Platform (Defensa Cátedra):
+        if (!isAdmin) {
+          if (!correoSesion) {
+            // Usuario sin sesión activa: no mostrar ninguna reserva del backend central
+            if (!item.isLocal) return;
+          } else {
+            // Usuario con sesión activa: debe coincidir exactamente su correo
+            const itemEmail = (item.email || '').trim().toLowerCase();
+            if (!itemEmail || itemEmail !== correoSesion) {
+              return;
+            }
           }
         }
 
