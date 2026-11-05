@@ -374,8 +374,16 @@ export class AutosService implements OnModuleInit {
    */
   async getAutoById(id: string): Promise<any> {
     this.evaluateCleaningCooldowns();
-    const auto = this.memoryFleet.find(c => c.id === id);
+    let auto = this.memoryFleet.find(c => c.id === id);
     if (!auto) {
+      try {
+        const external = await this.circuitBreakerAdapter.fetchExternalCars({});
+        const foundExt = external.find((c: any) => c.vehicle_id === id || c.id === id);
+        if (foundExt) {
+          return foundExt;
+        }
+      } catch (_) {}
+
       throw new HttpException({
         type: 'https://api.booking.local/errors/vehicle-not-found',
         title: 'Vehículo No Encontrado',
@@ -501,6 +509,13 @@ export class AutosService implements OnModuleInit {
         }, idempotencyKey, cId);
       } catch (err: any) {
         this.logger.warn(`[AutosService] Fallo despachando a RutaLibre: ${err.message}`);
+        if (err instanceof HttpException) {
+          throw err;
+        }
+        throw new HttpException(
+          err.message || 'Error al procesar reserva con proveedor externo',
+          HttpStatus.BAD_GATEWAY
+        );
       }
     }
 
@@ -526,13 +541,14 @@ export class AutosService implements OnModuleInit {
       idempotency_key: idempotencyKey,
       status: 'CONFIRMED',
       estado: 'CONFIRMED',
-      auto_id: auto.id,
+      auto_id: autoId,
+      email: driverEmail,
       vehiculo: {
-        marca: auto.marca,
-        modelo: auto.modelo,
-        categoria: auto.categoria,
-        transmision: auto.transmision,
-        foto_url: auto.foto_url
+        marca: orderData.vehiculo?.marca || (externalOrder ? 'Toyota' : auto.marca),
+        modelo: orderData.vehiculo?.modelo || (externalOrder ? 'Vehículo de Flota' : auto.modelo),
+        categoria: orderData.vehiculo?.categoria || auto.categoria,
+        transmision: orderData.vehiculo?.transmision || auto.transmision,
+        foto_url: orderData.vehiculo?.foto_url || (orderData.vehiculo?.images?.[0]) || auto.foto_url
       },
       dias_renta: dias,
       tipo_cobertura: tipoCobertura,
@@ -1210,7 +1226,14 @@ export class AutosService implements OnModuleInit {
   }
 
   async getOrders(): Promise<any> {
-    return Array.from(this.memoryOrders.values());
+    const unique = new Map<string, any>();
+    for (const order of this.memoryOrders.values()) {
+      const key = order.pnr || order.order_id || order.idempotency_key;
+      if (key && !unique.has(key)) {
+        unique.set(key, order);
+      }
+    }
+    return Array.from(unique.values());
   }
 
   async getOrderById(orderId: string): Promise<any> {
