@@ -92,6 +92,16 @@ export class CheckinNotificationDto {
   @IsOptional()
   localizador?: string;
 
+  @ApiPropertyOptional({ description: 'Código PNR de la reserva' })
+  @IsString()
+  @IsOptional()
+  pnr?: string;
+
+  @ApiPropertyOptional({ description: 'ID o código de reserva alternativo' })
+  @IsString()
+  @IsOptional()
+  reserva_id?: string;
+
   @ApiPropertyOptional({ description: 'ID de reserva interna del socio' })
   @IsString()
   @IsOptional()
