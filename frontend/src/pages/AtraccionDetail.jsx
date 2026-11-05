@@ -45,7 +45,7 @@ export function AtraccionDetail() {
 
   const [form, setForm] = useState({
     date: todayStr,
-    time: '10:30 a.m.',
+    time: '09:00 a.m.',
     adult_count: 1,
     child_count: 0,
     senior_count: 0,
@@ -118,9 +118,9 @@ export function AtraccionDetail() {
         .then(res => {
           const list = Array.isArray(res) ? res : (res?.turnos || res?.time_slots || res?.slots || []);
           if (Array.isArray(list) && list.length > 0) {
-            setTimeSlots(list.map(s => {
+            const mapped = list.map(s => {
               const cuposNum = Number(s.cupos ?? s.cupos_disponibles ?? s.available_spots ?? 5);
-              const timeVal = s.time || s.horaInicio || s.hora || '09:00';
+              const timeVal = s.time || s.horaInicio || s.hora || '09:00 a.m.';
               return {
                 ...s,
                 time: timeVal,
@@ -128,7 +128,16 @@ export function AtraccionDetail() {
                 cupos_disponibles: cuposNum,
                 estado: s.estado || s.status || (cuposNum > 0 ? 'DISPONIBLE' : 'AGOTADO')
               };
-            }));
+            });
+            setTimeSlots(mapped);
+            // Sincronizar automáticamente el formulario si el horario actual no existe en los turnos disponibles
+            setForm(prev => {
+              const exists = mapped.some(s => s.time === prev.time);
+              if (!exists && mapped[0]) {
+                return { ...prev, time: mapped[0].time };
+              }
+              return prev;
+            });
           }
         })
         .catch(() => {});
@@ -197,12 +206,17 @@ export function AtraccionDetail() {
       const timeCompact = time24.replace(/[^0-9]/g, '').slice(0, 4).padStart(4, '0');
       const targetSlotId = selectedSlot?.slot_id || selectedSlot?.id || `slot-${dateCompact}-${timeCompact}`;
 
+      // Reconciliación automática y segura de fecha y hora según el slot seleccionado
+      const slotMatch = (targetSlotId || '').match(/^slot-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/);
+      const safeDate = slotMatch ? `${slotMatch[1]}-${slotMatch[2]}-${slotMatch[3]}` : (form.date || todayStr);
+      const safeTime = slotMatch ? `${slotMatch[4]}:${slotMatch[5]}` : time24;
+
       const payload = {
         atraccionId: id,
         atraccion_id: id,
         slot_id: targetSlotId,
-        date: form.date,
-        time: time24,
+        date: safeDate,
+        time: safeTime,
         adult_count: form.adult_count,
         child_count: form.child_count,
         senior_count: form.senior_count,
@@ -211,9 +225,9 @@ export function AtraccionDetail() {
         customer_name: (user.user_metadata?.full_name || user.email.split('@')[0]).trim().replace(/\s{2,}/g, ' '),
         customer_email: user.email?.trim() || '',
         customer_phone: (user.user_metadata?.telefono || '+593987654321').trim(),
-        document_id: (user.user_metadata?.cedula || '1720000000').trim(),
+        document_id: (user.user_metadata?.cedula || '1755073481').trim(),
         cliente_id: user?.id || null,
-        proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedor?.codigo || 'NODE_ATR_ARIEL',
+        proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedor?.codigo || (id.startsWith('6f03') ? 'NODE_ATR_DILAN' : 'NODE_ATR_ARIEL'),
         special_requirements: (form.special_requirements || '').trim().replace(/\s{2,}/g, ' ')
       };
 
