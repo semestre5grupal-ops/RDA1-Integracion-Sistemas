@@ -1,6 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom, timeout, catchError } from 'rxjs';
+import { v4 as uuidv4 } from 'uuid';
 import { ConnectorHealthService } from '../../admin/connector-health.service';
 import { TraceContextService } from '../../../core/tracing/trace-context.service';
 
@@ -77,9 +78,34 @@ export class AutosCircuitBreakerAdapter {
     this.logger.log(`[AutosCircuitBreaker] API Key de proveedor actualizada en vivo.`);
   }
 
+  private cachedRutaLibreToken: string | null = null;
+  private tokenExpiresAt: number = 0;
+
+  private async getRutaLibreToken(): Promise<string | null> {
+    if (this.cachedRutaLibreToken && Date.now() < this.tokenExpiresAt) {
+      return this.cachedRutaLibreToken;
+    }
+    try {
+      const res = await firstValueFrom(
+        this.httpService.post('https://rutalibre-autos-api.azurewebsites.net/api/auth/login', {
+          email: 'booking.admin@gmail.com',
+          password: 'booking123',
+        }, { timeout: 4000 })
+      );
+      if (res.data?.accessToken) {
+        this.cachedRutaLibreToken = res.data.accessToken;
+        this.tokenExpiresAt = Date.now() + 30 * 60 * 1000;
+        return this.cachedRutaLibreToken;
+      }
+    } catch (e: any) {
+      this.logger.debug(`[AutosCircuitBreaker] Login en RutaLibre falló: ${e.message}`);
+    }
+    return null;
+  }
+
   /**
    * Consulta flota de vehículos externos con protección por Circuit Breaker.
-   * Si la tienda externa falla o el circuito está abierto, retorna Mock Fallback automático (CE01).
+   * Conecta directamente a la tienda del socio RutaLibre (NODE_AUT_RUTALIBRE).
    */
   async fetchExternalCars(searchParams: any, correlationId?: string, apiKey?: string): Promise<any[]> {
     this.checkCircuit();
@@ -89,36 +115,142 @@ export class AutosCircuitBreakerAdapter {
       return this.getMockCarsFallback();
     }
 
+    // 1. Intentar obtener modelos y flota real desde RutaLibre
     try {
-      const key = apiKey || this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY;
-      const response = await firstValueFrom(
-        this.httpService.get(this.EXTERNAL_API_URL, {
-          params: { _limit: 3 },
-          headers: {
-            'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`,
-            ...(key ? { 'X-API-Key': key } : {}),
+      const token = await this.getRutaLibreToken();
+      if (token) {
+        const [modelsRes, fleetRes] = await Promise.all([
+          firstValueFrom(
+            this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/admin/models', {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: this.TIMEOUT_MS,
+            })
+          ),
+          firstValueFrom(
+            this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/admin/fleet', {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: this.TIMEOUT_MS,
+            })
+          ),
+        ]);
+
+        const models = modelsRes.data || [];
+        const fleet = fleetRes.data || [];
+
+        const realCars = models
+          .filter((m: any) => m.published !== false && m.active !== false)
+          .map((m: any) => {
+            const unit = fleet.find((f: any) => f.vehicleModelId === m.id && f.active !== false);
+            const plate = unit?.plate;
+            const vId = plate ? `auto-${plate.toLowerCase()}` : `ext-model-${m.id}`;
+            const isAvail = unit ? unit.status === 'AVAILABLE' : true;
+            return {
+              vehicle_id: vId,
+              marca: m.make || 'Toyota',
+              modelo: m.model || 'Modelo',
+              categoria: (m.category?.name || m.category?.code || 'SUV').toUpperCase(),
+              precio_diario: 45.0,
+              precio_base: 45.0,
+              recargo_conductor_joven: 0,
+              moneda: 'USD',
+              transmision: m.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
+              asientos: m.seats || 5,
+              puertas: m.doors || 4,
+              bag_capacity: m.bagCapacity || 2,
+              maletas_grandes: m.bagCapacity || 2,
+              maletas_pequenas: 1,
+              aire_acondicionado: m.airConditioning !== false,
+              kilometraje_ilimitado: true,
+              politica_combustible: 'Lleno a lleno',
+              cancelacion_gratuita: true,
+              proveedor_id: 4,
+              proveedor: {
+                nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
+                rating: 9.5,
+                ubicacion: 'Andes — Aeropuerto Mariscal Sucre (UIO)',
+              },
+              estado: isAvail ? 'DISPONIBLE' : 'NO_DISPONIBLE',
+              images: [
+                m.imageUrl?.startsWith('http')
+                  ? m.imageUrl
+                  : (m.imageUrl ? `https://rutalibre-autos-api.azurewebsites.net${m.imageUrl}` : 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'),
+              ],
+            };
+          });
+
+        if (realCars.length > 0) {
+          this.handleSuccess();
+          return realCars;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`[AutosCircuitBreaker] No se pudo obtener modelos directo de RutaLibre (${err.message}). Intentando endpoint search...`);
+    }
+
+    // 2. Intentar buscar en /api/search de RutaLibre
+    try {
+      const now = new Date();
+      const pickup = new Date(now.getTime() + 4 * 3600 * 1000).toISOString();
+      const dropoff = new Date(now.getTime() + 28 * 3600 * 1000).toISOString();
+      const searchRes = await firstValueFrom(
+        this.httpService.post(
+          'https://rutalibre-autos-api.azurewebsites.net/api/search',
+          {
+            pickupDepotId: 1,
+            dropoffDepotId: 1,
+            pickupAt: pickup,
+            dropoffAt: dropoff,
+            driverAge: 30,
           },
-          timeout: this.TIMEOUT_MS
-        }).pipe(
-          timeout(this.TIMEOUT_MS),
-          catchError((err) => {
-            this.handleFailure(err);
-            throw err;
-          })
+          { timeout: this.TIMEOUT_MS }
         )
       );
 
-      this.handleSuccess();
-      return this.transformExternalCars(response.data);
-    } catch (err) {
-      this.logger.warn(`[AutosCircuitBreaker] Falló consulta externa (${err.message}). Retornando Mock Fallback automático para evitar congelamiento de plataforma (CE01).`);
-      return this.getMockCarsFallback();
+      const offers = searchRes.data?.offers || [];
+      if (offers.length > 0) {
+        this.handleSuccess();
+        return offers.map((o: any, idx: number) => ({
+          vehicle_id: o.vehicle?.id ? `ext-offer-${o.vehicle.id}` : `ext-auto-${idx}`,
+          marca: o.vehicle?.make || 'Toyota',
+          modelo: o.vehicle?.model || 'Vehículo',
+          categoria: (o.vehicle?.category?.name || 'COMPACTO').toUpperCase(),
+          precio_diario: o.rate?.totalPrice || 45.0,
+          moneda: 'USD',
+          transmision: o.vehicle?.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
+          asientos: o.vehicle?.seats || 5,
+          puertas: o.vehicle?.doors || 4,
+          bag_capacity: o.vehicle?.bagCapacity || 2,
+          maletas_grandes: o.vehicle?.bagCapacity || 2,
+          maletas_pequenas: 1,
+          aire_acondicionado: o.vehicle?.airConditioning !== false,
+          kilometraje_ilimitado: true,
+          politica_combustible: 'Lleno a lleno',
+          cancelacion_gratuita: true,
+          proveedor_id: 4,
+          proveedor: {
+            nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
+            rating: 9.2,
+            ubicacion: o.pickupDepot?.name || 'Andes — Aeropuerto Mariscal Sucre (UIO)',
+          },
+          estado: 'DISPONIBLE',
+          images: [
+            o.vehicle?.imageUrl?.startsWith('http')
+              ? o.vehicle.imageUrl
+              : (o.vehicle?.imageUrl ? `https://rutalibre-autos-api.azurewebsites.net${o.vehicle.imageUrl}` : 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'),
+          ],
+        }));
+      }
+    } catch (err: any) {
+      this.logger.warn(`[AutosCircuitBreaker] Falló consulta externa RutaLibre (${err.message}). Retornando Mock Fallback automático (CE01).`);
+      this.handleFailure(err);
     }
+
+    return this.getMockCarsFallback();
   }
 
   /**
    * Envía reserva a proveedor externo con Idempotency-Key y protección resiliente.
-   * Si el proveedor está fuera de línea o el circuito está abierto, retorna confirmación Mock Fallback (CE01).
+   * Conecta con POST /api/v3/orders de RutaLibre (NODE_AUT_RUTALIBRE).
    */
   async createExternalOrder(
     payload: ExternalAutoBookingPayload,
@@ -139,24 +271,63 @@ export class AutosCircuitBreakerAdapter {
     }
 
     const normalizedPhone = this.normalizePhone(payload.conductor.telefono);
+    const key = apiKey || this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
+    const cId = correlationId || `corr-auto-${Date.now()}`;
+
+    // Asegurar que idempotencyKey tenga formato UUID v4 requerido por RutaLibre
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const safeIdempotencyKey = uuidRegex.test(idempotencyKey) ? idempotencyKey : uuidv4();
+
+    // Sincronizar conductor con microservicio de clientes en RutaLibre (Fase 1 Cross-Platform)
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          'https://rutalibre-autos-api.azurewebsites.net/api/v3/clientes',
+          {
+            nombre: payload.conductor.nombre,
+            email: payload.conductor.email,
+            identificacion: payload.conductor.licencia || '1723456789',
+            telefono: normalizedPhone,
+            licencia: payload.conductor.licencia || '1723456789',
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': key,
+            },
+            timeout: 3000,
+          }
+        )
+      );
+    } catch (_) {}
+
+    // Despachar orden canónica a RutaLibre v3: POST /api/v3/orders
+    const requestPayload = {
+      vehicle_id: payload.vehicle_id,
+      pickup_date: payload.pickup_date || new Date().toISOString().split('T')[0],
+      dropoff_date: payload.dropoff_date || new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().split('T')[0],
+      pickup_location: payload.pickup_location || 'Quito Aeropuerto',
+      dropoff_location: payload.dropoff_location || 'Quito Aeropuerto',
+      driver: {
+        full_name: payload.conductor.nombre || 'Conductor Booking',
+        email: payload.conductor.email || 'conductor@booking.com',
+        phone: normalizedPhone,
+        license_number: payload.conductor.licencia || '1723456789',
+        age: payload.conductor.edad || 30,
+      },
+    };
 
     try {
-      const key = apiKey || this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY;
+      this.logger.log(`[AutosCircuitBreaker] Despachando reserva a RutaLibre v3 (/api/v3/orders): ${payload.vehicle_id}`);
       const response = await firstValueFrom(
-        this.httpService.post(`${this.EXTERNAL_API_URL}`, {
-          ...payload,
-          conductor: {
-            ...payload.conductor,
-            telefono: normalizedPhone
-          }
-        }, {
+        this.httpService.post('https://rutalibre-autos-api.azurewebsites.net/api/v3/orders', requestPayload, {
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'X-Correlation-Id': correlationId || `corr-auto-${Date.now()}`,
-            ...(key ? { 'X-API-Key': key } : {}),
+            'Idempotency-Key': safeIdempotencyKey,
+            'X-Correlation-Id': cId,
+            'X-API-Key': key,
           },
-          timeout: this.TIMEOUT_MS
+          timeout: this.TIMEOUT_MS,
         }).pipe(
           timeout(this.TIMEOUT_MS),
           catchError((err) => {
@@ -167,21 +338,22 @@ export class AutosCircuitBreakerAdapter {
       );
 
       this.handleSuccess();
+      const pnr = response.data?.pnr || response.data?.order_id || response.data?.locator;
       return {
-        external_order_id: `EXT-${response.data?.order_id || response.data?.pnr || response.data?.id || Date.now()}`,
+        external_order_id: pnr || `EXT-${Date.now()}`,
         status: response.data?.status === 'RESERVADO' ? 'CONFIRMED' : (response.data?.status || 'CONFIRMED'),
-        pnr: response.data?.pnr || response.data?.order_id,
-        auto_id: response.data?.auto_id || response.data?.vehicle_id,
-        voucher_qr_data: response.data?.voucher_qr_data || response.data?.voucher_qr_payload,
+        pnr: pnr,
+        auto_id: response.data?.auto_id || response.data?.vehicle_id || payload.vehicle_id,
+        voucher_qr_data: response.data?.voucher_qr_data || `BOOKING-CAR-${pnr}`,
         raw_response: response.data,
       };
-    } catch (err) {
-      this.logger.warn(`[AutosCircuitBreaker] Proveedor externo no respondió o falló (${err.message}). Activando Mock Fallback para no interrumpir el flujo del usuario (CE01).`);
+    } catch (err: any) {
+      this.logger.warn(`[AutosCircuitBreaker] Error despachando a RutaLibre (${err.message}): ${JSON.stringify(err.response?.data || '')}. Activando fallback.`);
       return {
         external_order_id: `EXT-MOCK-TIMEOUT-${Date.now()}`,
         status: 'CONFIRMED_FALLBACK',
         circuit_breaker_open: true,
-        message: `Reserva confirmada vía Mock Fallback por timeout/error de red del socio externo (${this.TIMEOUT_MS}ms).`,
+        message: `Reserva confirmada vía Mock Fallback (${err.message}).`,
       };
     }
   }

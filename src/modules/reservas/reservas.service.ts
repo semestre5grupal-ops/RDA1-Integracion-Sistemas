@@ -31,22 +31,26 @@ export class ReservasService {
     const { cliente_id, codigo_nodo } = dto;
 
     // 1. Revisar si ya existe el mapeo en base de datos local
-    const mappingRows = await this.dataSource.query(
-      `SELECT external_client_id, metadata 
-       FROM schema_clientes.clientes_socios_mapeo 
-       WHERE cliente_id = $1 AND codigo_nodo = $2 
-       LIMIT 1`,
-      [cliente_id, codigo_nodo],
-    );
+    try {
+      const mappingRows = await this.dataSource.query(
+        `SELECT external_client_id, metadata 
+         FROM schema_clientes.clientes_socios_mapeo 
+         WHERE cliente_id = $1 AND codigo_nodo = $2 
+         LIMIT 1`,
+        [cliente_id, codigo_nodo],
+      );
 
-    if (mappingRows && mappingRows.length > 0) {
-      this.logger.log(`[Cross-Platform] Mapeo existente recuperado para cliente ${cliente_id} en socio ${codigo_nodo}: ${mappingRows[0].external_client_id}`);
-      return {
-        mapped: true,
-        external_client_id: mappingRows[0].external_client_id,
-        origen: 'MAPEO_LOCAL_EXISTENTE',
-        codigo_nodo,
-      };
+      if (mappingRows && mappingRows.length > 0) {
+        this.logger.log(`[Cross-Platform] Mapeo existente recuperado para cliente ${cliente_id} en socio ${codigo_nodo}: ${mappingRows[0].external_client_id}`);
+        return {
+          mapped: true,
+          external_client_id: mappingRows[0].external_client_id,
+          origen: 'MAPEO_LOCAL_EXISTENTE',
+          codigo_nodo,
+        };
+      }
+    } catch (e: any) {
+      this.logger.warn(`[Cross-Platform] Error consultando tabla de mapeo: ${e.message}`);
     }
 
     // 2. Obtener datos completos del cliente si no vinieron en el DTO
@@ -56,29 +60,51 @@ export class ReservasService {
     let telefono = dto.telefono;
 
     if (!email || !identificacion) {
-      const userRows = await this.dataSource.query(
-        `SELECT nombre, email, cedula_ruc, telefono 
-         FROM schema_clientes.clientes 
-         WHERE id = $1 LIMIT 1`,
-        [cliente_id],
-      );
-      if (userRows && userRows.length > 0) {
-        nombre = nombre || userRows[0].nombre;
-        email = email || userRows[0].email;
-        identificacion = identificacion || userRows[0].cedula_ruc;
-        telefono = telefono || userRows[0].telefono;
-      }
+      try {
+        const userRows = await this.dataSource.query(
+          `SELECT nombre, email, cedula_ruc, telefono 
+           FROM schema_clientes.clientes 
+           WHERE id = $1 LIMIT 1`,
+          [cliente_id],
+        );
+        if (userRows && userRows.length > 0) {
+          nombre = nombre || userRows[0].nombre;
+          email = email || userRows[0].email;
+          identificacion = identificacion || userRows[0].cedula_ruc;
+          telefono = telefono || userRows[0].telefono;
+        }
+      } catch (_) {}
     }
 
     // 3. Buscar la configuración del socio para conectar con su microservicio
-    const providerRows = await this.dataSource.query(
-      `SELECT base_url_rest, api_key, nombre_proveedor 
-       FROM schema_proveedores.config_proveedor 
-       WHERE codigo_nodo = $1 LIMIT 1`,
-      [codigo_nodo],
-    );
+    let baseUrl = '';
+    let apiKey = '';
 
-    if (!providerRows || providerRows.length === 0 || !providerRows[0].base_url_rest) {
+    try {
+      const providerRows = await this.dataSource.query(
+        `SELECT base_url_rest, api_key, nombre_proveedor 
+         FROM schema_proveedores.config_proveedor 
+         WHERE codigo_nodo = $1 LIMIT 1`,
+        [codigo_nodo],
+      );
+      if (providerRows && providerRows.length > 0 && providerRows[0].base_url_rest) {
+        baseUrl = providerRows[0].base_url_rest.replace(/\/$/, '');
+        apiKey = providerRows[0].api_key || '';
+      }
+    } catch (_) {}
+
+    // Fallback de configuración directa si no está en BD
+    if (!baseUrl) {
+      if (codigo_nodo === 'NODE_AUT_RUTALIBRE' || codigo_nodo?.includes('AUT')) {
+        baseUrl = process.env.TIENDA_AUTOS_URL || 'https://rutalibre-autos-api.azurewebsites.net/api/v3';
+        apiKey = process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
+      } else if (codigo_nodo === 'NODE_ATR_ALISSON' || codigo_nodo?.includes('ATR')) {
+        baseUrl = 'https://alisson-atracciones-api.azurewebsites.net/api/v3';
+        apiKey = 'booking-atracciones-alisson-secret-2026';
+      }
+    }
+
+    if (!baseUrl) {
       const fallbackId = `CLI-AUTO-${cliente_id.slice(0, 8)}`;
       await this.guardarMapeoLocal(cliente_id, codigo_nodo, fallbackId, { fallback: true, razon: 'PROVEEDOR_NO_ENCONTRADO' });
       return {
@@ -89,9 +115,7 @@ export class ReservasService {
       };
     }
 
-    const provider = providerRows[0];
-    const baseUrl = provider.base_url_rest.replace(/\/$/, '');
-    const apiKey = provider.api_key;
+    baseUrl = baseUrl.replace(/\/$/, '');
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Correlation-Id': `corr-sync-cli-${Date.now()}`,
@@ -175,6 +199,18 @@ export class ReservasService {
 
   private async guardarMapeoLocal(clienteId: string, codigoNodo: string, externalId: string, metadata: any) {
     try {
+      await this.dataSource.query(`
+        CREATE TABLE IF NOT EXISTS schema_clientes.clientes_socios_mapeo (
+          id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+          cliente_id VARCHAR(120) NOT NULL,
+          codigo_nodo VARCHAR(60) NOT NULL,
+          external_client_id VARCHAR(120) NOT NULL,
+          metadata JSONB DEFAULT '{}',
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          CONSTRAINT uq_cli_nodo UNIQUE (cliente_id, codigo_nodo)
+        )
+      `);
       await this.dataSource.query(
         `INSERT INTO schema_clientes.clientes_socios_mapeo (cliente_id, codigo_nodo, external_client_id, metadata)
          VALUES ($1, $2, $3, $4)
@@ -211,13 +247,16 @@ export class ReservasService {
     apiKey?: string,
     correlationId?: string,
   ): Promise<any> {
-    const targetId = id || dto.external_order_id;
+    const targetId = id || dto.external_order_id || dto.order_id;
     const safeCorrId = correlationId || `corr-chk-${Date.now()}`;
-    const fechaCheckin = dto.fecha_checkin || new Date().toISOString();
+    const fechaCheckin = dto.fecha_checkin || dto.checked_in_at || new Date().toISOString();
+    const estado = dto.estado || dto.status || 'CONFIRMADO_ASISTIDO';
+    const adminId = dto.admin_id || dto.staff_user || 'operador-socio';
+    const docId = dto.document_id || null;
     let verticalActualizada: string | null = null;
     let reservaActualizada: any = null;
 
-    this.logger.log(`[Check-in Inbound] Procesando confirmación de asistencia para orden ${targetId} con estado ${dto.estado}`);
+    this.logger.log(`[Check-in Inbound] Procesando confirmación de asistencia para orden ${targetId} con estado ${estado}`);
 
     // 1. Intentar actualizar en Atracciones
     const atrUpdate = await this.dataSource.query(
@@ -226,9 +265,13 @@ export class ReservasService {
            checkin_at = NOW(),
            guia_oficial_asignado = COALESCE($2, guia_oficial_asignado),
            updated_at = NOW()
-       WHERE id = $1 OR voucher_qr_payload LIKE '%' || $1 || '%'
+       WHERE id = $1 
+          OR voucher_qr_payload LIKE '%' || $1 || '%' 
+          OR idempotency_key = $1
+          OR cancel_code = $1
+          OR ($3::text IS NOT NULL AND document_id = $3::text)
        RETURNING *`,
-      [targetId, dto.admin_id || null],
+      [targetId, adminId, docId],
     );
 
     if (atrUpdate && atrUpdate.length > 0) {
@@ -317,7 +360,8 @@ export class ReservasService {
       acknowledged: true,
       status: 'CONFIRMADO_ASISTIDO',
       reserva_id: reservaActualizada?.id || targetId,
-      external_order_id: dto.external_order_id || targetId,
+      external_order_id: dto.external_order_id || dto.order_id || targetId,
+      order_id: dto.order_id || dto.external_order_id || targetId,
       vertical: verticalActualizada || 'SOCIO_EXTERNO',
       asistentes_confirmados: dto.asistentes_reales || 1,
       fecha_checkin: fechaCheckin,

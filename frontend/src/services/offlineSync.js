@@ -73,10 +73,12 @@ export async function syncPendingReservations() {
 
     } catch (error) {
       console.error(`[Offline Sync] ❌ Error sincronizando reserva de ${task.tipo} (${task.id}):`, error);
-      // Si el error es de red (no hay conexión aún), lo devolvemos a la cola.
-      // Si es un error 400 o 500 del backend, quizás deberíamos descartarlo o alertar.
-      // Por simplicidad, si falla por cualquier razón, lo mantenemos para intentar de nuevo.
-      pending.push(task);
+      // Si el error es 404 o 400 (Bad Request / Not Found), el recurso o ID ya no existe en el servidor.
+      // Se descarta de la cola para no reintentar infinitamente en cada render/reconexión.
+      const status = error.response?.status;
+      if (!status || status >= 500) {
+        pending.push(task);
+      }
     }
   }
 

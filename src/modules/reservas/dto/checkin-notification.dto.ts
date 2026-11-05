@@ -1,21 +1,36 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CheckinNotificationDto {
-  @ApiProperty({ description: 'ID de reserva o localizador externo emitido por el socio', example: 'CAR532X9' })
+  @ApiPropertyOptional({ description: 'ID de reserva o localizador externo emitido por el socio', example: 'CAR532X9' })
   @IsString()
-  @IsNotEmpty()
-  external_order_id: string;
+  @IsOptional()
+  external_order_id?: string;
+
+  @ApiPropertyOptional({ description: 'Alias para external_order_id', example: 'CAR532X9' })
+  @IsString()
+  @IsOptional()
+  order_id?: string;
 
   @ApiPropertyOptional({ description: 'Identificador del cliente en el sistema del socio', example: 'CLI-RL-1029' })
   @IsString()
   @IsOptional()
   client_id?: string;
 
-  @ApiProperty({ description: 'Estado resultante tras la validación física en el socio', example: 'CONFIRMADO_ASISTIDO' })
+  @ApiPropertyOptional({ description: 'Documento de identidad o cédula del cliente', example: '1720000000' })
   @IsString()
-  @IsNotEmpty()
-  estado: string;
+  @IsOptional()
+  document_id?: string;
+
+  @ApiPropertyOptional({ description: 'Estado resultante tras la validación física en el socio', example: 'CONFIRMADO_ASISTIDO' })
+  @IsString()
+  @IsOptional()
+  estado?: string;
+
+  @ApiPropertyOptional({ description: 'Alias en inglés para estado', example: 'CONFIRMED' })
+  @IsString()
+  @IsOptional()
+  status?: string;
 
   @ApiPropertyOptional({ description: 'Cantidad de personas o pasajeros reales que asistieron', example: 1 })
   @IsNumber()
@@ -27,19 +42,68 @@ export class CheckinNotificationDto {
   @IsOptional()
   admin_id?: string;
 
+  @ApiPropertyOptional({ description: 'Alias para admin_id', example: 'operador-01' })
+  @IsString()
+  @IsOptional()
+  staff_user?: string;
+
   @ApiPropertyOptional({ description: 'Fecha y hora UTC en que se confirmó la asistencia', example: '2026-11-04T19:30:00.000Z' })
   @IsString()
   @IsOptional()
   fecha_checkin?: string;
+
+  @ApiPropertyOptional({ description: 'Alias para fecha_checkin', example: '2026-11-04T19:30:00.000Z' })
+  @IsString()
+  @IsOptional()
+  checked_in_at?: string;
 
   @ApiPropertyOptional({ description: 'Observaciones operativas tomadas en mostrador o punto de encuentro' })
   @IsString()
   @IsOptional()
   observaciones?: string;
 
+  @ApiPropertyOptional({ description: 'Alias para observaciones' })
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
   @ApiPropertyOptional({ description: 'ID del dispositivo móvil o terminal usado para validar' })
   @IsString()
   @IsOptional()
   scanner_device_id?: string;
-}
 
+  @ApiPropertyOptional({ description: 'Placa del vehículo en checkin' })
+  @IsString()
+  @IsOptional()
+  placa?: string;
+
+  @ApiPropertyOptional({ description: 'Plate del vehículo en checkin' })
+  @IsString()
+  @IsOptional()
+  plate?: string;
+
+  @ApiPropertyOptional({ description: 'Código de reserva alternativo' })
+  @IsString()
+  @IsOptional()
+  codigo_reserva?: string;
+
+  @ApiPropertyOptional({ description: 'Localizador' })
+  @IsString()
+  @IsOptional()
+  localizador?: string;
+
+  @ApiPropertyOptional({ description: 'ID de reserva interna del socio' })
+  @IsString()
+  @IsOptional()
+  reservation_id?: string;
+
+  @ApiPropertyOptional({ description: 'Kilometraje registrado en salida' })
+  @IsNumber()
+  @IsOptional()
+  km_salida?: number;
+
+  @ApiPropertyOptional({ description: 'Nivel de combustible' })
+  @IsNumber()
+  @IsOptional()
+  fuel_level?: number;
+}
