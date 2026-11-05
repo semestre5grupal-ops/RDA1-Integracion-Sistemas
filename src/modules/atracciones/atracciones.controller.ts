@@ -69,9 +69,8 @@ export class AtraccionesController {
   }
 
   @Get()
-  @UseInterceptors(CacheInterceptor)
   @Header('X-API-Deprecation-Date', '2027-12-31')
-  @ApiOperation({ summary: 'Obtener el listado de atracciones (Caché habilitado)' })
+  @ApiOperation({ summary: 'Obtener el listado de atracciones en tiempo real' })
   @ApiResponse({ status: 200, description: 'Listado de atracciones recuperado exitosamente.' })
   @ApiResponse({ status: 503, description: 'Servicio de Atracciones Externo no disponible.' })
   async findAll(@Query() query: PaginationQueryDto) {
@@ -163,11 +162,41 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Realizar Check-in presencial con QR y asignación de guía (RDA2)' })
   @ApiParam({ name: 'reservationId', description: 'ID de la reserva' })
   @ApiResponse({ status: 200, description: 'Check-in exitoso con voucher digital verificado.' })
+  @ApiResponse({ status: 401, description: 'Clave de API inválida o requerida.' })
+  @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
   async checkin(
     @Param('reservationId') reservationId: string,
-    @Body() dto: CheckinAtraccionDto
+    @Body() dto: CheckinAtraccionDto,
+    @Req() req: any
   ) {
-    return this.atraccionesService.checkin(reservationId, dto);
+    return this.atraccionesService.checkin(reservationId, dto, req);
+  }
+
+  @Post('reservations/:reservationId/checkin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Realizar Check-in presencial (Alias OpenAPI v2)' })
+  @ApiResponse({ status: 200, description: 'Check-in exitoso con voucher digital verificado.' })
+  @ApiResponse({ status: 401, description: 'Clave de API inválida o requerida.' })
+  @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
+  async checkinAlias(
+    @Param('reservationId') reservationId: string,
+    @Body() dto: CheckinAtraccionDto,
+    @Req() req: any
+  ) {
+    return this.atraccionesService.checkin(reservationId, dto, req);
+  }
+
+  @Post('clientes/sincronizar')
+  @ApiOperation({ summary: 'Sincronizar cliente cross-platform con socios de atracciones (Dilan y Ariel)' })
+  async sincronizarCliente(@Body() dto: any) {
+    return this.atraccionesService.sincronizarClienteGlobal(dto);
+  }
+
+  @Post('sync-catalogo')
+  @ApiOperation({ summary: 'Forzar sincronización inmediata de catálogos de socios (Dilan, Ariel)' })
+  async syncCatalogo() {
+    await this.atraccionesService.syncAllCatalogs();
+    return { success: true, message: 'Catálogos de socios sincronizados exitosamente.' };
   }
 
   @Post('reservas')
