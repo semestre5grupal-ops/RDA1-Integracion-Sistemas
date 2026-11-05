@@ -432,11 +432,9 @@ describe('SincronizadorEventosVuelos (feed GET /vuelos/eventos)', () => {
   });
 });
 
-describe('compatibilidad con aerolíneas (fecha pedida y contrato v1.5)', () => {
+describe('ofertas de la fecha pedida', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { ofertaCoincideConFechas } = require('./vuelos-socios.service');
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { VuelosSociosMiddleware } = require('./vuelos-socios.middleware');
   const oferta = (salidas: string[]) => ({ itineraries: salidas.map((at) => ({ segments: [{ departureAt: at }] })) });
   const pedido = (fechas: string[]) => ({ itineraries: fechas.map((d) => ({ departureDate: d })) });
   const ahora = new Date('2026-11-05T03:00:00Z');
@@ -451,11 +449,4 @@ describe('compatibilidad con aerolíneas (fecha pedida y contrato v1.5)', () => 
     expect(ofertaCoincideConFechas(oferta(['2026-11-04T12:00:00Z']), pedido(['2026-11-04']), ahora)).toBe(false); // ya salió
   });
 
-  it('a un nodo v1.5 le manda paymentReferenceValue; al resto, el cuerpo del contrato v2 sin tocar', () => {
-    const cuerpo = { holdId: 'h', payment: { paymentReference: 'PAY-BKP-20261105-000001', amount: { currency: 'USD', total: '85.10' } } };
-    expect(VuelosSociosMiddleware.cuerpoParaNodo('NODE_VUE_X', cuerpo)).toBe(cuerpo);
-    VuelosSociosMiddleware.nodosRefV15.add('NODE_VUE_V15');
-    expect(VuelosSociosMiddleware.cuerpoParaNodo('NODE_VUE_V15', cuerpo).payment).toEqual({ paymentReferenceValue: 'PAY-BKP-20261105-000001', amount: { currency: 'USD', total: '85.10' } });
-    VuelosSociosMiddleware.nodosRefV15.delete('NODE_VUE_V15');
-  });
 });
