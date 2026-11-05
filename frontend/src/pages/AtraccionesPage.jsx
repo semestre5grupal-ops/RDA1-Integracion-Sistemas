@@ -260,42 +260,6 @@ export function AtraccionesPage() {
       </section>
 
       <div className="main-content">
-        
-        {/* CATEGORÍAS JERÁRQUICAS DE ATRACCIONES (RDA2) */}
-        <section className="section-block" style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px', scrollbarWidth: 'none' }}>
-            <button 
-              onClick={() => setBusqueda('')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #006ce4', background: !busqueda ? '#006ce4' : '#fff', color: !busqueda ? '#fff' : '#006ce4', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🌟 Todas las experiencias
-            </button>
-            <button 
-              onClick={() => setBusqueda('Tours')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🚶 Tours y Visitas Guiadas 🗣️
-            </button>
-            <button 
-              onClick={() => setBusqueda('Cacao')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🍫 Gastronomía y Degustación 🍽️
-            </button>
-            <button 
-              onClick={() => setBusqueda('Museo')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🏛️ Museos y Cultura
-            </button>
-            <button 
-              onClick={() => setBusqueda('Volcán')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🌋 Naturaleza y Volcanes 🚌
-            </button>
-          </div>
-        </section>
 
         {/* RECOMENDADO GENERADO POR IA */}
         <section className="section-block">

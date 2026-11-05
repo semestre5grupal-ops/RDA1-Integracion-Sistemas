@@ -24,6 +24,7 @@ export function AtraccionesSearchPage() {
   const [filtroComida, setFiltroComida] = useState(false);
   const [filtroTransporte, setFiltroTransporte] = useState(false);
   const [filtroGuia, setFiltroGuia] = useState(false);
+  const [criterioOrden, setCriterioOrden] = useState('favoritos'); // 'favoritos' | 'precio_bajo' | 'mejores_comentarios'
 
   useEffect(() => {
     async function fetchArbol() {
@@ -84,8 +85,40 @@ export function AtraccionesSearchPage() {
     return true;
   });
 
-  const totalCalculatedPages = Math.max(1, Math.ceil(filteredItems.length / limit));
-  const displayedItems = filteredItems.slice((page - 1) * limit, page * limit);
+  // Ordenamiento interactivo por tabs
+  const sortedItems = [...filteredItems].sort((a, b) => {
+    const getPrecio = (item) => {
+      if (typeof item.price === 'object' && item.price !== null) {
+        return Number(item.price.total || item.price.adult || item.price.amount || 0);
+      }
+      if (typeof item.precio === 'object' && item.precio !== null) {
+        return Number(item.precio.total || item.precio.adulto || item.precio.amount || 0);
+      }
+      return Number(item.precio_unitario_adulto || item.precio || 0);
+    };
+
+    const getScore = (item) => {
+      const scoreObj = item.rating || item.calificacion || item.ratings;
+      if (typeof scoreObj === 'object' && scoreObj !== null) {
+        return Number(scoreObj.score || scoreObj.rating || scoreObj.general || 0);
+      }
+      return Number(item.rating_general || item.rating || 0);
+    };
+
+    if (criterioOrden === 'precio_bajo') {
+      return getPrecio(a) - getPrecio(b);
+    }
+    if (criterioOrden === 'mejores_comentarios') {
+      return getScore(b) - getScore(a);
+    }
+    // 'favoritos' por defecto: prioridad por mayor rating y reviews
+    const reviewsA = Number(a.reviews_count || a.ratings?.number_of_reviews || 0);
+    const reviewsB = Number(b.reviews_count || b.ratings?.number_of_reviews || 0);
+    return getScore(b) - getScore(a) || reviewsB - reviewsA;
+  });
+
+  const totalCalculatedPages = Math.max(1, Math.ceil(sortedItems.length / limit));
+  const displayedItems = sortedItems.slice((page - 1) * limit, page * limit);
 
   return (
     <div className="search-page-wrapper">
@@ -221,9 +254,27 @@ export function AtraccionesSearchPage() {
           <h1 className="search-results-title">Atracciones: {categoriaSeleccionada || busqueda || 'Ecuador'}</h1>
           
           <div className="sort-tabs">
-            <button className="active">Nuestros favoritos</button>
-            <button>Precio más bajo</button>
-            <button>Mejores comentarios</button>
+            <button
+              type="button"
+              className={criterioOrden === 'favoritos' ? 'active' : ''}
+              onClick={() => { setCriterioOrden('favoritos'); setPage(1); }}
+            >
+              Nuestros favoritos
+            </button>
+            <button
+              type="button"
+              className={criterioOrden === 'precio_bajo' ? 'active' : ''}
+              onClick={() => { setCriterioOrden('precio_bajo'); setPage(1); }}
+            >
+              Precio más bajo
+            </button>
+            <button
+              type="button"
+              className={criterioOrden === 'mejores_comentarios' ? 'active' : ''}
+              onClick={() => { setCriterioOrden('mejores_comentarios'); setPage(1); }}
+            >
+              Mejores comentarios
+            </button>
           </div>
 
           {loading && <div className="spinner"></div>}
