@@ -475,8 +475,37 @@ export class AutosService implements OnModuleInit {
     const totalPagar = parseFloat((precioDiarioFinal * dias).toFixed(2));
     const depositoGarantia = tipoCobertura === 'TOTAL' ? 0.00 : 1200.00;
 
-    // Generar Localizador PNR de 8 caracteres
-    const pnr = 'CAR' + Math.random().toString(36).substring(2, 7).toUpperCase();
+    // Despacho a socio externo RutaLibre si el vehículo no es local de memoria
+    const isLocalAuto = this.memoryFleet.some(c => c.id === autoId);
+    let externalOrder: any = null;
+
+    if (!isLocalAuto || autoId.startsWith('auto-p') || autoId.startsWith('ext-')) {
+      try {
+        this.logger.log(`[AutosService] Vehículo ${autoId} detectado como externo. Despachando a RutaLibre (NODE_AUT_RUTALIBRE)...`);
+        externalOrder = await this.circuitBreakerAdapter.createExternalOrder({
+          vehicle_id: autoId,
+          dias,
+          pickup_date: pickupDateStr || new Date().toISOString().split('T')[0],
+          dropoff_date: dropoffDateStr || new Date(Date.now() + dias * 24 * 3600 * 1000).toISOString().split('T')[0],
+          pickup_location: orderData.pickup_location || 'Quito Aeropuerto',
+          dropoff_location: orderData.dropoff_location || 'Quito Aeropuerto',
+          tipo_cobertura: tipoCobertura,
+          conductor: {
+            nombre: driverName,
+            email: driverEmail,
+            telefono: driverPhone,
+            licencia: driverLicense,
+            edad: driverAge,
+            numero_vuelo: flightNum
+          }
+        }, idempotencyKey, cId);
+      } catch (err: any) {
+        this.logger.warn(`[AutosService] Fallo despachando a RutaLibre: ${err.message}`);
+      }
+    }
+
+    // Usar el localizador PNR canónico devuelto por el socio si existe
+    const pnr = externalOrder?.pnr || externalOrder?.external_order_id || ('CAR' + Math.random().toString(36).substring(2, 7).toUpperCase());
 
     // Procesar pago síncrono simulado
     await this.pagoService.procesarPago({

@@ -215,6 +215,7 @@ export function MisReservasPage() {
           totalRaw: r.grandTotal?.total || 106.50,
           imagen: DEFAULT_IMAGES.vuelo,
           raw: r,
+          email: (r.passengers?.[0]?.email || r.customerEmail || r.userEmail || r.email || '').trim().toLowerCase(),
           link: `/vuelos/reservas/${r.bookingId}`,
         }));
       } catch (err) {
@@ -239,6 +240,7 @@ export function MisReservasPage() {
           status: a.status || 'CONFIRMED',
           totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
           imagen: DEFAULT_IMAGES.auto,
+          email: (a.driver?.email || a.conductor?.email || a.email || a.booker?.email || '').trim().toLowerCase(),
           link: '/autos',
         }));
       } catch (err) {
@@ -259,6 +261,7 @@ export function MisReservasPage() {
         status: a.status || 'CONFIRMED',
         totalRaw: a.totalPrice?.total || a.total || 106.50,
         imagen: DEFAULT_IMAGES.auto,
+        email: (a.driver?.email || a.conductor?.email || a.email || a.booker?.email || '').trim().toLowerCase(),
         link: '/autos',
       }));
 
@@ -280,6 +283,7 @@ export function MisReservasPage() {
           status: at.status || 'CONFIRMED',
           totalRaw: at.total_price?.total || at.total_price || 55.00,
           imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
+          email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
           link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
         }));
       } catch (err) {
@@ -300,6 +304,7 @@ export function MisReservasPage() {
         status: at.status || 'CONFIRMED',
         totalRaw: at.totalPrice?.total || at.total || 55.00,
         imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
+        email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
         link: '/',
       }));
 
@@ -401,6 +406,11 @@ export function MisReservasPage() {
         ...atraccionesItems,
         ...atraccionesLocalesFormatted,
       ].forEach((item) => {
+        // Si el usuario tiene sesión activa, solo mostrar reservas asociadas a su correo
+        if (correoSesion && item.email && item.email !== correoSesion) {
+          return;
+        }
+
         const pnrVal = item.pnr && item.pnr !== '—' && !['HOTEL', 'AUTO', 'ATRAC'].includes(item.pnr) ? item.pnr : null;
         const idVal = item.id;
 
