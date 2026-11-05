@@ -26,6 +26,11 @@ const ESTADOS_ES = {
   PENDING_PAYMENT: 'Pendiente de pago',
   TICKET_ISSUING: 'Emitiendo billetes',
   CONFIRMED: 'Confirmada',
+  CONFIRMADO_ASISTIDO: 'Check-in Realizado (Entregado)',
+  CHECKED_IN: 'Check-in Realizado',
+  PICKED_UP: 'Vehículo Entregado (En curso)',
+  ENTREGADO: 'Vehículo Entregado (En curso)',
+  COMPLETADA: 'Completada',
   FAILED: 'Fallida',
   CHANGE_PENDING: 'Cambio en curso',
   CANCELLATION_PENDING: 'Cancelación en curso',
@@ -250,6 +255,8 @@ export function MisReservasPage() {
             fecha: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
             rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
             status: a.status || 'CONFIRMED',
+            placa: a.placa || a.checkin?.placa,
+            checkin: a.checkin,
             totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
             imagen: a.vehiculo?.foto_url || DEFAULT_IMAGES.auto,
             email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
@@ -1042,6 +1049,11 @@ export function MisReservasPage() {
                         <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
                           {ESTADOS_ES[r.status] ?? r.status}
                         </span>
+                        {r.status === 'CONFIRMADO_ASISTIDO' && (
+                          <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
+                            • Llaves entregadas {r.placa ? `(Placa: ${r.placa})` : ''}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1218,6 +1230,11 @@ export function MisReservasPage() {
                     <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
                       {ESTADOS_ES[selectedReserva.status] ?? selectedReserva.status}
                     </span>
+                    {selectedReserva.status === 'CONFIRMADO_ASISTIDO' && (
+                      <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
+                        • Llaves entregadas {selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ background: '#f5f5f5', borderRadius: '6px', padding: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>

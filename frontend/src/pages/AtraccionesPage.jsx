@@ -88,14 +88,11 @@ export function AtraccionesPage() {
 
   const handleSearchChange = (e) => {
     const raw = e.target.value.slice(0, 60);
-    const hasNumbers = /[0-9]/.test(raw);
-    const hasSymbols = /[^a-zA-Z\s,áéíóúÁÉÍÓÚñÑ0-9]/.test(raw);
+    const hasSymbols = /[^a-zA-Z0-9\s,áéíóúÁÉÍÓÚñÑ\-_.]/.test(raw);
     const hasMultipleSpaces = /\s{2,}/.test(raw);
 
-    if (hasNumbers) {
-      triggerFlash('No se permiten números en el destino');
-    } else if (hasSymbols) {
-      triggerFlash('Solo se permiten letras, comas y acentos');
+    if (hasSymbols) {
+      triggerFlash('Solo se permiten letras, números y signos comunes');
     } else if (hasMultipleSpaces) {
       triggerFlash('No se permiten espacios consecutivos');
     } else if (raw.length >= 60) {
@@ -104,7 +101,7 @@ export function AtraccionesPage() {
       setSearchError('');
     }
 
-    const clean = raw.replace(/[^a-zA-Z\s,áéíóúÁÉÍÓÚñÑ]/g, '').replace(/\s{2,}/g, ' ');
+    const clean = raw.replace(/[^a-zA-Z0-9\s,áéíóúÁÉÍÓÚñÑ\-_.]/g, '').replace(/\s{2,}/g, ' ');
     setBusqueda(clean);
     setShowSuggestions(clean.trim().length > 0);
     setFormError('');
@@ -195,7 +192,7 @@ export function AtraccionesPage() {
               <input
                 type="text"
                 maxLength={60}
-                placeholder="Destino o ¿A dónde vas?"
+                placeholder="Buscar por nombre de atracción o ciudad..."
                 value={busqueda}
                 onChange={handleSearchChange}
                 onFocus={() => setShowSuggestions(busqueda.trim().length > 0)}

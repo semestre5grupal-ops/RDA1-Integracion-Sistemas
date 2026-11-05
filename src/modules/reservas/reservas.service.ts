@@ -390,22 +390,93 @@ export class ReservasService {
   }
 
   /**
-   * Consultar estado actual de una reserva en Booking
+   * Consultar estado actual de una reserva en Booking (Soporta Check-in Cross-Platform)
    */
   async getEstadoReserva(id: string): Promise<any> {
-    // Buscar en atracciones
-    const atr = await this.dataSource.query(
-      `SELECT id, status AS estado, 'ATRACCIONES' AS vertical, checkin_at, created_at FROM schema_atracciones.atracciones_reservas WHERE id = $1 LIMIT 1`,
-      [id],
-    );
-    if (atr.length > 0) return atr[0];
+    // 1. Buscar primero en auditoría de Check-in presencial
+    try {
+      const audits = await this.dataSource.query(
+        `SELECT id, registro_id, detalles_json, created_at 
+         FROM schema_auditoria.auditoria_transaccional 
+         WHERE modulo = 'RESERVAS_CHECKIN' 
+           AND (registro_id = $1 
+                OR detalles_json->>'pnr' = $1 
+                OR detalles_json->>'external_order_id' = $1 
+                OR detalles_json->>'order_id' = $1)
+         ORDER BY created_at DESC LIMIT 1`,
+        [id],
+      );
+      if (audits && audits.length > 0) {
+        const a = audits[0];
+        const det = a.detalles_json || {};
+        return {
+          id,
+          estado: det.estado || 'CONFIRMADO_ASISTIDO',
+          status: det.estado || 'CONFIRMADO_ASISTIDO',
+          vertical: det.vertical || 'AUTOS',
+          placa: det.placa,
+          admin_id: det.admin_id,
+          fecha_checkin: det.fecha_checkin || a.created_at,
+          mensaje: 'Asistencia física y entrega confirmada exitosamente.',
+          detalles: det,
+        };
+      }
+    } catch (_) {}
 
-    // Buscar en autos
-    const aut = await this.dataSource.query(
-      `SELECT id, estado, 'AUTOS' AS vertical, created_at FROM schema_autos.autos_reservas WHERE id = $1 LIMIT 1`,
-      [id],
-    );
-    if (aut.length > 0) return aut[0];
+    // 2. Buscar en atracciones
+    try {
+      const atr = await this.dataSource.query(
+        `SELECT id, status AS estado, 'ATRACCIONES' AS vertical, checkin_at, created_at FROM schema_atracciones.atracciones_reservas WHERE id = $1 LIMIT 1`,
+        [id],
+      );
+      if (atr && atr.length > 0) {
+        if (atr[0].estado === 'CONFIRMADO_ASISTIDO' || atr[0].estado === 'CHECKED_IN') {
+          return {
+            id,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'ATRACCIONES',
+            fecha_checkin: atr[0].checkin_at || atr[0].created_at,
+            mensaje: 'Check-in presencial confirmado.',
+          };
+        }
+      }
+    } catch (_) {}
+
+    // 2.1 Consulta en tiempo real a Ariel si es código ECT
+    if (id.startsWith('ECT-')) {
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.get(`https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${id}`, {
+            headers: { 'X-API-Key': 'atr-ariel-ecua-travel-2026' },
+            timeout: 3000,
+          }),
+        );
+        if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO')) {
+          await this.dataSource.query(
+            `UPDATE schema_atracciones.atracciones_reservas SET status = 'CONFIRMADO_ASISTIDO', checkin_at = NOW() WHERE id = $1`,
+            [id],
+          );
+          return {
+            id,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'ATRACCIONES',
+            fecha_checkin: data.hora_checkin || new Date().toISOString(),
+            mensaje: 'Asistencia presencial verificada con el socio Ecuatravel (Ariel).',
+          };
+        }
+      } catch (_) {}
+    }
+
+    // 3. Buscar en autos
+    try {
+      const aut = await this.dataSource.query(
+        `SELECT id, estado, 'AUTOS' AS vertical, created_at FROM schema_autos.autos_reservas WHERE id = $1 LIMIT 1`,
+        [id],
+      );
+      if (aut && aut.length > 0) return aut[0];
+    } catch (_) {}
 
     return {
       id,
