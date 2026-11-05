@@ -431,3 +431,31 @@ describe('SincronizadorEventosVuelos (feed GET /vuelos/eventos)', () => {
     expect(cursor()).toBeNull();
   });
 });
+
+describe('compatibilidad con aerolíneas (fecha pedida y contrato v1.5)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ofertaCoincideConFechas } = require('./vuelos-socios.service');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { VuelosSociosMiddleware } = require('./vuelos-socios.middleware');
+  const oferta = (salidas: string[]) => ({ itineraries: salidas.map((at) => ({ segments: [{ departureAt: at }] })) });
+  const pedido = (fechas: string[]) => ({ itineraries: fechas.map((d) => ({ departureDate: d })) });
+  const ahora = new Date('2026-11-05T03:00:00Z');
+
+  it('descarta vuelos de otra fecha o que ya salieron (EQ10 devolvía octubre para cualquier fecha)', () => {
+    expect(ofertaCoincideConFechas(oferta(['2026-10-08T06:30:00+00:00']), pedido(['2026-11-06']), ahora)).toBe(false);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-06T12:00:00.000Z']), pedido(['2026-11-06']), ahora)).toBe(true);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-06T07:00:00-05:00', '2026-11-08T09:00:00-05:00']), pedido(['2026-11-06', '2026-11-08']), ahora)).toBe(true);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-06T07:00:00-05:00', '2026-11-09T09:00:00-05:00']), pedido(['2026-11-06', '2026-11-08']), ahora)).toBe(false);
+    // 23:30 en Ecuador = 04:30Z del día siguiente: sigue siendo la fecha pedida
+    expect(ofertaCoincideConFechas(oferta(['2026-11-07T04:30:00Z']), pedido(['2026-11-06']), ahora)).toBe(true);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-04T12:00:00Z']), pedido(['2026-11-04']), ahora)).toBe(false); // ya salió
+  });
+
+  it('a un nodo v1.5 le manda paymentReferenceValue; al resto, el cuerpo del contrato v2 sin tocar', () => {
+    const cuerpo = { holdId: 'h', payment: { paymentReference: 'PAY-BKP-20261105-000001', amount: { currency: 'USD', total: '85.10' } } };
+    expect(VuelosSociosMiddleware.cuerpoParaNodo('NODE_VUE_X', cuerpo)).toBe(cuerpo);
+    VuelosSociosMiddleware.nodosRefV15.add('NODE_VUE_V15');
+    expect(VuelosSociosMiddleware.cuerpoParaNodo('NODE_VUE_V15', cuerpo).payment).toEqual({ paymentReferenceValue: 'PAY-BKP-20261105-000001', amount: { currency: 'USD', total: '85.10' } });
+    VuelosSociosMiddleware.nodosRefV15.delete('NODE_VUE_V15');
+  });
+});
