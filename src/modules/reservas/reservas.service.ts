@@ -410,8 +410,45 @@ export class ReservasService {
         `SELECT id, status AS estado, 'ATRACCIONES' AS vertical, checkin_at, created_at FROM schema_atracciones.atracciones_reservas WHERE id = $1 LIMIT 1`,
         [id],
       );
-      if (atr && atr.length > 0) return atr[0];
+      if (atr && atr.length > 0) {
+        if (atr[0].estado === 'CONFIRMADO_ASISTIDO' || atr[0].estado === 'CHECKED_IN') {
+          return {
+            id,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'ATRACCIONES',
+            fecha_checkin: atr[0].checkin_at || atr[0].created_at,
+            mensaje: 'Check-in presencial confirmado.',
+          };
+        }
+      }
     } catch (_) {}
+
+    // 2.1 Consulta en tiempo real a Ariel si es código ECT
+    if (id.startsWith('ECT-')) {
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.get(`https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${id}`, {
+            headers: { 'X-API-Key': 'atr-ariel-ecua-travel-2026' },
+            timeout: 3000,
+          }),
+        );
+        if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO')) {
+          await this.dataSource.query(
+            `UPDATE schema_atracciones.atracciones_reservas SET status = 'CONFIRMADO_ASISTIDO', checkin_at = NOW() WHERE id = $1`,
+            [id],
+          );
+          return {
+            id,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'ATRACCIONES',
+            fecha_checkin: data.hora_checkin || new Date().toISOString(),
+            mensaje: 'Asistencia presencial verificada con el socio Ecuatravel (Ariel).',
+          };
+        }
+      } catch (_) {}
+    }
 
     // 3. Buscar en autos
     try {

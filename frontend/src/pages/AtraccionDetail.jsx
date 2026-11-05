@@ -113,9 +113,19 @@ export function AtraccionDetail() {
     if (id && form.date) {
       getDisponibilidadAtraccion(id, form.date)
         .then(res => {
-          const list = Array.isArray(res) ? res : (res?.turnos || res?.time_slots || []);
+          const list = Array.isArray(res) ? res : (res?.turnos || res?.time_slots || res?.slots || []);
           if (Array.isArray(list) && list.length > 0) {
-            setTimeSlots(list);
+            setTimeSlots(list.map(s => {
+              const cuposNum = Number(s.cupos ?? s.cupos_disponibles ?? s.available_spots ?? 5);
+              const timeVal = s.time || s.horaInicio || s.hora || '09:00';
+              return {
+                ...s,
+                time: timeVal,
+                cupos: cuposNum,
+                cupos_disponibles: cuposNum,
+                estado: s.estado || s.status || (cuposNum > 0 ? 'DISPONIBLE' : 'AGOTADO')
+              };
+            }));
           }
         })
         .catch(() => {});
@@ -134,8 +144,8 @@ export function AtraccionDetail() {
 
   // Heurística 5 & V-07: Validación reactiva de aforo y cupos en turno
   const selectedSlot = timeSlots.find(s => s.time === form.time) || timeSlots[0];
-  const cuposDisponibles = selectedSlot ? (selectedSlot.cupos ?? 0) : 0;
-  const isAgotadoSlot = selectedSlot ? (selectedSlot.estado === 'AGOTADO' || cuposDisponibles === 0) : false;
+  const cuposDisponibles = selectedSlot ? Number(selectedSlot.cupos ?? selectedSlot.cupos_disponibles ?? selectedSlot.available_spots ?? 10) : 10;
+  const isAgotadoSlot = selectedSlot ? (selectedSlot.estado === 'AGOTADO' || cuposDisponibles <= 0) : false;
   const cuposExcedidos = totalTickets > cuposDisponibles;
 
   const handleBooking = async (e) => {
@@ -174,10 +184,18 @@ export function AtraccionDetail() {
     const idempotencyKey = uuidv4();
     try {
       let result = null;
+      const dateCompact = (form.date || todayStr).replace(/-/g, '');
+      const timeNormalized = (form.time || '09:00').replace(/(a\.m\.|p\.m\.|\s)/gi, '').slice(0, 5) || '09:00';
+      const time24 = timeNormalized.length === 4 ? `0${timeNormalized}` : timeNormalized;
+      const timeCompact = time24.replace(/[^0-9]/g, '').slice(0, 4).padStart(4, '0');
+      const targetSlotId = selectedSlot?.slot_id || selectedSlot?.id || `slot-${dateCompact}-${timeCompact}`;
+
       const payload = {
         atraccionId: id,
+        atraccion_id: id,
+        slot_id: targetSlotId,
         date: form.date,
-        time: form.time,
+        time: time24,
         adult_count: form.adult_count,
         child_count: form.child_count,
         senior_count: form.senior_count,
@@ -187,6 +205,7 @@ export function AtraccionDetail() {
         customer_email: user.email?.trim() || '',
         customer_phone: (user.user_metadata?.telefono || '+593987654321').trim(),
         document_id: (user.user_metadata?.cedula || '1720000000').trim(),
+        proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedor?.codigo || 'NODE_ATR_ARIEL',
         special_requirements: (form.special_requirements || '').trim().replace(/\s{2,}/g, ' ')
       };
 
@@ -216,9 +235,11 @@ export function AtraccionDetail() {
         }
       }
       
+      const realPnr = result?.reservation_code || result?.reservation_id || result?.pnr || idempotencyKey;
       const atraccionRes = {
-        id: result?.reservation_id || idempotencyKey,
-        reservation_id: result?.reservation_id || idempotencyKey,
+        id: realPnr,
+        reservation_id: realPnr,
+        pnr: realPnr,
         tipo: 'atraccion',
         titulo: atraccion?.nombre || atraccion?.name || `Tour / Atracción (${totalTickets} personas)`,
         date: form.date,
@@ -229,7 +250,7 @@ export function AtraccionDetail() {
         status: 'CONFIRMED',
         totalPrice: { currency: 'USD', total: totalCalculado.toFixed(2) },
         email: (user?.email || '').trim().toLowerCase(),
-        guia_asignado: 'Carlos Villacís (Guía Oficial Certificado MINTUR)',
+        guia_asignado: result?.guia_asignado || 'Carlos Villacís (Guía Oficial Certificado MINTUR)',
         punto_encuentro: atraccion?.locations?.[0]?.address || 'Punto de Encuentro Central'
       };
 
