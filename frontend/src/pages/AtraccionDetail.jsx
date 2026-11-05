@@ -11,6 +11,7 @@ import { OfflineReservaModal } from '../components/OfflineReservaModal';
 import { VoucherModal } from '../components/VoucherModal';
 
 export function AtraccionDetail() {
+  const todayStr = new Date().toISOString().split('T')[0];
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -132,7 +133,6 @@ export function AtraccionDetail() {
     }
   }, [id, form.date]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
   const precioAdulto = parseFloat(atraccion?.precio_unitario || atraccion?.price?.total || atraccion?.precioTicket || 55);
   const precioNino = parseFloat((precioAdulto * 0.5).toFixed(2));
   const precioSenior = parseFloat((precioAdulto * 0.7).toFixed(2)); // Tarifa 3ra edad 30% descuento
