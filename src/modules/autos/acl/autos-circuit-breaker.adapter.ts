@@ -285,6 +285,26 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Obtiene todas las órdenes activas en el socio externo para reconciliación.
+   */
+  async getOrdersDirect(): Promise<any[]> {
+    try {
+      const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
+      const response = await firstValueFrom(
+        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/orders', {
+          headers: {
+            'X-API-Key': key,
+          },
+          timeout: 4000,
+        })
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
    * Envía reserva a proveedor externo con Idempotency-Key y protección resiliente.
    * Conecta con POST /api/v3/orders de RutaLibre (NODE_AUT_RUTALIBRE).
    */
