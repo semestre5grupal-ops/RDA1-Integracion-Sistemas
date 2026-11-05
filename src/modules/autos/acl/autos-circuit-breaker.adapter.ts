@@ -305,6 +305,28 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Notifica la cancelación de una orden al socio externo RutaLibre.
+   */
+  async cancelOrder(orderId: string, reason = 'Cancelado por el cliente'): Promise<boolean> {
+    try {
+      const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
+      const cleanId = orderId.toUpperCase();
+      await firstValueFrom(
+        this.httpService.post(
+          `https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
+          { reason },
+          { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
+        )
+      );
+      this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre: ${cleanId}`);
+      return true;
+    } catch (err: any) {
+      this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en RutaLibre (${orderId}): ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Envía reserva a proveedor externo con Idempotency-Key y protección resiliente.
    * Conecta con POST /api/v3/orders de RutaLibre (NODE_AUT_RUTALIBRE).
    */

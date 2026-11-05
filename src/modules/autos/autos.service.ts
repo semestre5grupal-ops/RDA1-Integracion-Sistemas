@@ -1233,9 +1233,34 @@ export class AutosService implements OnModuleInit {
 
   async getOrders(): Promise<any> {
     const unique = new Map<string, any>();
+
+    // 1. Obtener auditoría de check-ins presenciales para enriquecer estados en tiempo real
+    const checkinMap = new Map<string, any>();
+    try {
+      const audits = await this.orderRepo.query(
+        `SELECT registro_id, detalles_json FROM schema_auditoria.auditoria_transaccional WHERE modulo = 'RESERVAS_CHECKIN'`
+      );
+      if (Array.isArray(audits)) {
+        for (const a of audits) {
+          const id = (a.registro_id || '').toUpperCase();
+          const det = a.detalles_json || {};
+          const pnr = (det.pnr || det.external_order_id || det.order_id || id || '').toUpperCase();
+          if (pnr) checkinMap.set(pnr, det);
+          if (id) checkinMap.set(id, det);
+        }
+      }
+    } catch (_) {}
+
     for (const order of this.memoryOrders.values()) {
       const key = order.pnr || order.order_id || order.idempotency_key;
       if (key && !unique.has(key)) {
+        const chk = checkinMap.get(key.toUpperCase());
+        if (chk && order.status !== 'CANCELLED') {
+          order.status = 'CONFIRMADO_ASISTIDO';
+          order.estado = 'CONFIRMADO_ASISTIDO';
+          order.checkin = chk;
+          order.placa = chk.placa || order.placa;
+        }
         unique.set(key, order);
       }
     }
@@ -1252,13 +1277,25 @@ export class AutosService implements OnModuleInit {
           if (!email) {
             email = 'cliente@booking.com';
           }
+
+          let finalStatus = ext.status || ext.estado || 'CONFIRMED';
+          const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
+          if (chk && finalStatus !== 'CANCELLED') {
+            finalStatus = 'CONFIRMADO_ASISTIDO';
+          }
+
+          const modelName = ext.vehiculo?.modelo || (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba');
+          const plateName = chk?.placa || ext.placa || (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : ''));
+
           unique.set(pnr, {
             order_id: pnr,
             pnr: pnr,
             codigo_reserva: pnr,
-            status: ext.status || 'CONFIRMED',
-            estado: ext.status || 'CONFIRMED',
+            status: finalStatus,
+            estado: finalStatus,
             auto_id: ext.auto_id || ext.vehicle_id || 'auto-pru-1234',
+            placa: plateName,
+            checkin: chk || null,
             email: email,
             conductor: {
               nombre: ext.driver?.full_name || 'Conductor Verificado',
@@ -1271,7 +1308,7 @@ export class AutosService implements OnModuleInit {
             },
             vehiculo: {
               marca: 'Toyota',
-              modelo: 'Yaris Cross 2026 Prueba',
+              modelo: modelName,
               categoria: 'SUV',
               transmision: 'Manual',
               foto_url: 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1',
@@ -1336,6 +1373,17 @@ export class AutosService implements OnModuleInit {
       order.refund = refund;
     }
 
+    // 3. Propagar cancelación al socio externo (RutaLibre / Daniel)
+    const targetCancelId = order?.pnr || orderId;
+    if (targetCancelId) {
+      try {
+        await this.circuitBreakerAdapter.cancelOrder(
+          targetCancelId,
+          cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
+        );
+      } catch (_) {}
+    }
+
     this.winstonLogger.logAudit('RESERVA_AUTO_CANCELADA_COMPENSADA', {
       orderId,
       auto_id: autoId,
@@ -1347,8 +1395,8 @@ export class AutosService implements OnModuleInit {
 
     return {
       order_id: order?.order_id || orderId,
-      pnr: order?.pnr || orderId.substring(0, 6).toUpperCase(),
-      codigo_reserva: order?.pnr || orderId.substring(0, 6).toUpperCase(),
+      pnr: order?.pnr || orderId.toUpperCase(),
+      codigo_reserva: order?.pnr || orderId.toUpperCase(),
       status: 'CANCELLED',
       estado: 'CANCELLED',
       auto_id: autoId,
