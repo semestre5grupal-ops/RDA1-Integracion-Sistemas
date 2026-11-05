@@ -46,8 +46,14 @@ export function AutoDetail() {
   };
   const supplierInfo = suppliersMap[supplierId] || suppliersMap[1];
 
-  const [dias, setDias] = useState(3);
+  const stateAuto = location.state?.auto || {};
+  const [dias, setDias] = useState(stateAuto.dias || 3);
   const [driverAge, setDriverAge] = useState(30);
+
+  const initialStartDate = stateAuto.startDate || new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const initialEndDate = stateAuto.endDate || new Date(Date.now() + (parseInt(stateAuto.dias || 3, 10) + 1) * 86400000).toISOString().split('T')[0];
+  const [pickupDate, setPickupDate] = useState(initialStartDate);
+  const [dropoffDate, setDropoffDate] = useState(initialEndDate);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -170,6 +176,10 @@ export function AutoDetail() {
         foto_url: auto.images?.[0] || auto.foto_url || ''
       },
       dias: parseInt(dias, 10),
+      pickup_date: pickupDate,
+      dropoff_date: dropoffDate,
+      pickup_location: stateAuto.pickupLocation || 'Quito Aeropuerto',
+      dropoff_location: stateAuto.pickupLocation || 'Quito Aeropuerto',
       tipo_cobertura: tipoCobertura,
       conductor: {
         nombre: (user?.user_metadata?.full_name || user?.nombre || 'Usuario Web').trim().replace(/\s{2,}/g, ' '),
@@ -527,6 +537,42 @@ export function AutoDetail() {
             <div style={{ background: 'white', borderRadius: '4px', border: '1px solid #e7e7e7', padding: '20px' }}>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#333', marginBottom: '15px' }}>Ajustar Reserva</h3>
               <div style={{ marginBottom: '15px' }}>
+                <label htmlFor="auto-pickup-date" style={{ fontSize: '0.9rem', color: '#666', display: 'block', marginBottom: '5px' }}>Fecha de recogida:</label>
+                <input
+                  id="auto-pickup-date"
+                  type="date"
+                  value={pickupDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setPickupDate(val);
+                    if (val && dropoffDate) {
+                      const diff = Math.max(1, Math.round((new Date(dropoffDate).getTime() - new Date(val).getTime()) / (1000 * 60 * 60 * 24)));
+                      setDias(diff);
+                    }
+                  }}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label htmlFor="auto-dropoff-date" style={{ fontSize: '0.9rem', color: '#666', display: 'block', marginBottom: '5px' }}>Fecha de devolución:</label>
+                <input
+                  id="auto-dropoff-date"
+                  type="date"
+                  value={dropoffDate}
+                  min={pickupDate || new Date().toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDropoffDate(val);
+                    if (pickupDate && val) {
+                      const diff = Math.max(1, Math.round((new Date(val).getTime() - new Date(pickupDate).getTime()) / (1000 * 60 * 60 * 24)));
+                      setDias(diff);
+                    }
+                  }}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                   <label htmlFor="auto-dias" style={{ fontSize: '0.9rem', color: '#666' }}>Días de renta:</label>
                   <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>Máx 30 días</span>
@@ -572,15 +618,15 @@ export function AutoDetail() {
 
                 <div style={{ marginBottom: '20px', position: 'relative' }}>
                   <div style={{ position: 'absolute', left: '-25px', top: '2px', width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #666', background: 'white' }}></div>
-                  <div style={{ fontSize: '0.9rem', color: '#333' }}>lun, 5 oct - 10:00</div>
-                  <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>Quito Aeropuerto</div>
+                  <div style={{ fontSize: '0.9rem', color: '#333' }}>{pickupDate} - 10:00</div>
+                  <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{stateAuto.pickupLocation || 'Quito Aeropuerto'}</div>
                   <div onClick={() => { setInstructionsType('recogida'); setShowInstructionsModal(true); }} style={{ color: '#006ce4', fontSize: '0.9rem', cursor: 'pointer', marginTop: '5px' }}>Ver instrucciones para la recogida</div>
                 </div>
 
                 <div style={{ position: 'relative' }}>
                   <div style={{ position: 'absolute', left: '-25px', top: '2px', width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #666', background: 'white' }}></div>
-                  <div style={{ fontSize: '0.9rem', color: '#333' }}>jue, 8 oct - 10:00</div>
-                  <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>Quito Aeropuerto</div>
+                  <div style={{ fontSize: '0.9rem', color: '#333' }}>{dropoffDate} - 10:00</div>
+                  <div style={{ fontWeight: 'bold', color: '#333', fontSize: '1rem' }}>{stateAuto.pickupLocation || 'Quito Aeropuerto'}</div>
                   <div onClick={() => { setInstructionsType('devolución'); setShowInstructionsModal(true); }} style={{ color: '#006ce4', fontSize: '0.9rem', cursor: 'pointer', marginTop: '5px' }}>Ver instrucciones para la devolución</div>
                 </div>
               </div>
