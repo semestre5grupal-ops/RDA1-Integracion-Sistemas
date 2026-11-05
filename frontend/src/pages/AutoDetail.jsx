@@ -21,13 +21,18 @@ export function AutoDetail() {
   const [fetchedAuto, setFetchedAuto] = useState(null);
 
   useEffect(() => {
-    if (id) {
+    if (!id) return;
+    const refrescarAuto = () => {
       getAutoById(id)
         .then(data => {
           if (data) setFetchedAuto(prev => ({ ...(prev || {}), ...data }));
         })
         .catch(err => console.warn('No se pudo refrescar datos de vehículo:', err));
-    }
+    };
+
+    refrescarAuto();
+    const interval = setInterval(refrescarAuto, 4000);
+    return () => clearInterval(interval);
   }, [id]);
 
   const auto = { ...(location.state?.auto || {}), ...(fetchedAuto || {}) };

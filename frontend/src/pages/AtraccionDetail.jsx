@@ -111,7 +111,9 @@ export function AtraccionDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (id && form.date) {
+    if (!id || !form.date) return;
+
+    const refrescarDisponibilidad = () => {
       getDisponibilidadAtraccion(id, form.date)
         .then(res => {
           const list = Array.isArray(res) ? res : (res?.turnos || res?.time_slots || res?.slots || []);
@@ -130,7 +132,12 @@ export function AtraccionDetail() {
           }
         })
         .catch(() => {});
-    }
+    };
+
+    refrescarDisponibilidad();
+    // Auto-polling para reflejar en tiempo real la deducción o adición de cupos
+    const interval = setInterval(refrescarDisponibilidad, 4000);
+    return () => clearInterval(interval);
   }, [id, form.date]);
 
   const precioAdulto = parseFloat(atraccion?.precio_unitario || atraccion?.price?.total || atraccion?.precioTicket || 55);

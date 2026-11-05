@@ -477,6 +477,14 @@ export function MisReservasPage() {
 
   useEffect(() => {
     cargarTodasLasReservas();
+
+    // Auto-polling (RDA2 / Simulación gRPC en tiempo real)
+    // Refresca automáticamente el estado de las reservas (Check-in, asistencias y entregas) cada 4 segundos
+    const pollInterval = setInterval(() => {
+      cargarTodasLasReservas();
+    }, 4000);
+
+    return () => clearInterval(pollInterval);
   }, [cargarTodasLasReservas]);
 
   // Close popup menu on outside click
