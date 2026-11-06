@@ -127,7 +127,110 @@ export class AutosCircuitBreakerAdapter {
       return this.getMockCarsFallback();
     }
 
-    // 1. Intentar obtener modelos y flota real desde RutaLibre
+    const allCars: any[] = [];
+
+    // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo
+    const [danielRes, mateoRes] = await Promise.allSettled([
+      firstValueFrom(
+        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos', {
+          headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
+          timeout: this.TIMEOUT_MS,
+        }),
+      ),
+      firstValueFrom(
+        this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos', {
+          headers: { 'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=' },
+          timeout: this.TIMEOUT_MS,
+        }),
+      ),
+    ]);
+
+    // Procesar flota de Daniel (RutaLibre - NODE_AUT_RUTALIBRE)
+    if (danielRes.status === 'fulfilled' && danielRes.value?.data) {
+      const rawCars = Array.isArray(danielRes.value.data)
+        ? danielRes.value.data
+        : (danielRes.value.data?.items || danielRes.value.data?.data || []);
+      for (const c of rawCars) {
+        const vId = c.vehicle_id || c.auto_id || c.id;
+        if (!vId) continue;
+        allCars.push({
+          vehicle_id: vId,
+          marca: c.marca || c.brand || 'Toyota',
+          modelo: c.modelo || c.model || 'Vehículo',
+          categoria: (c.categoria || c.category || 'COMPACTO').toUpperCase(),
+          precio_diario: Number(c.precio_diario || c.daily_price || 39.0),
+          precio_base: Number(c.precio_diario || c.daily_price || 39.0),
+          recargo_conductor_joven: 0,
+          moneda: 'USD',
+          transmision: c.transmision === 'AUTOMATICO' || c.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
+          asientos: c.asientos || c.seats || 5,
+          puertas: c.puertas || c.doors || 4,
+          bag_capacity: c.maletas_grandes || 2,
+          maletas_grandes: c.maletas_grandes || 2,
+          maletas_pequenas: c.maletas_pequenas || 1,
+          aire_acondicionado: c.aire_acondicionado !== false,
+          kilometraje_ilimitado: true,
+          politica_combustible: 'Lleno a lleno',
+          cancelacion_gratuita: true,
+          proveedor_id: 4,
+          proveedor_codigo: 'NODE_AUT_RUTALIBRE',
+          proveedor: {
+            nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
+            rating: 9.5,
+            ubicacion: c.ubicacion?.agencia || 'Andes — Aeropuerto Mariscal Sucre (UIO)',
+          },
+          estado: c.estado || c.status || 'DISPONIBLE',
+          images: Array.isArray(c.images) && c.images.length > 0 ? c.images : [this.resolveImageUrl(c.foto_url)],
+        });
+      }
+    }
+
+    // Procesar flota de Mateo (Maneja de Una - NODE_AUT_MDU)
+    if (mateoRes.status === 'fulfilled' && mateoRes.value?.data) {
+      const rawCars = Array.isArray(mateoRes.value.data)
+        ? mateoRes.value.data
+        : (mateoRes.value.data?.items || mateoRes.value.data?.data || []);
+      for (const c of rawCars) {
+        const vId = c.vehicle_id || c.auto_id || c.id;
+        if (!vId) continue;
+        allCars.push({
+          vehicle_id: vId,
+          marca: c.marca || c.brand || 'Suzuki',
+          modelo: c.modelo || c.model || 'Swift',
+          categoria: (c.categoria || c.category || 'COMPACTO').toUpperCase(),
+          precio_diario: Number(c.precio_diario || c.daily_price || c.precio_total || 31.0),
+          precio_base: Number(c.precio_diario || c.daily_price || c.precio_total || 31.0),
+          recargo_conductor_joven: 0,
+          moneda: 'USD',
+          transmision: c.transmision === 'AUTOMATICO' || c.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
+          asientos: c.asientos || c.seats || 5,
+          puertas: c.puertas || c.doors || 4,
+          bag_capacity: c.maletas_grandes || 2,
+          maletas_grandes: c.maletas_grandes || 2,
+          maletas_pequenas: c.maletas_pequenas || 1,
+          aire_acondicionado: c.aire_acondicionado !== false,
+          kilometraje_ilimitado: true,
+          politica_combustible: 'Lleno a lleno',
+          cancelacion_gratuita: true,
+          proveedor_id: 5,
+          proveedor_codigo: 'NODE_AUT_MDU',
+          proveedor: {
+            nombre: 'Maneja de Una (NODE_AUT_MDU)',
+            rating: 9.4,
+            ubicacion: 'Quito — Tababela Express',
+          },
+          estado: c.mantenimiento_requerido ? 'MANTENIMIENTO' : (c.estado || c.status || 'DISPONIBLE'),
+          images: [c.foto_url || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'],
+        });
+      }
+    }
+
+    if (allCars.length > 0) {
+      this.handleSuccess();
+      return allCars;
+    }
+
+    // 2. Fallback secundario: Intentar obtener modelos y flota de admin de RutaLibre
     try {
       const token = await this.getRutaLibreToken();
       if (token) {
@@ -177,6 +280,7 @@ export class AutosCircuitBreakerAdapter {
               politica_combustible: 'Lleno a lleno',
               cancelacion_gratuita: true,
               proveedor_id: 4,
+              proveedor_codigo: 'NODE_AUT_RUTALIBRE',
               proveedor: {
                 nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
                 rating: 9.5,
@@ -193,61 +297,7 @@ export class AutosCircuitBreakerAdapter {
         }
       }
     } catch (err: any) {
-      this.logger.warn(`[AutosCircuitBreaker] No se pudo obtener modelos directo de RutaLibre (${err.message}). Intentando endpoint search...`);
-    }
-
-    // 2. Intentar buscar en /api/search de RutaLibre
-    try {
-      const now = new Date();
-      const pickup = new Date(now.getTime() + 4 * 3600 * 1000).toISOString();
-      const dropoff = new Date(now.getTime() + 28 * 3600 * 1000).toISOString();
-      const searchRes = await firstValueFrom(
-        this.httpService.post(
-          'https://rutalibre-autos-api.azurewebsites.net/api/search',
-          {
-            pickupDepotId: 1,
-            dropoffDepotId: 1,
-            pickupAt: pickup,
-            dropoffAt: dropoff,
-            driverAge: 30,
-          },
-          { timeout: this.TIMEOUT_MS }
-        )
-      );
-
-      const offers = searchRes.data?.offers || [];
-      if (offers.length > 0) {
-        this.handleSuccess();
-        return offers.map((o: any, idx: number) => ({
-          vehicle_id: o.vehicle?.id ? `ext-offer-${o.vehicle.id}` : `ext-auto-${idx}`,
-          marca: o.vehicle?.make || 'Toyota',
-          modelo: o.vehicle?.model || 'Vehículo',
-          categoria: (o.vehicle?.category?.name || 'COMPACTO').toUpperCase(),
-          precio_diario: o.rate?.totalPrice || 45.0,
-          moneda: 'USD',
-          transmision: o.vehicle?.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
-          asientos: o.vehicle?.seats || 5,
-          puertas: o.vehicle?.doors || 4,
-          bag_capacity: o.vehicle?.bagCapacity || 2,
-          maletas_grandes: o.vehicle?.bagCapacity || 2,
-          maletas_pequenas: 1,
-          aire_acondicionado: o.vehicle?.airConditioning !== false,
-          kilometraje_ilimitado: true,
-          politica_combustible: 'Lleno a lleno',
-          cancelacion_gratuita: true,
-          proveedor_id: 4,
-          proveedor: {
-            nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
-            rating: 9.2,
-            ubicacion: o.pickupDepot?.name || 'Andes — Aeropuerto Mariscal Sucre (UIO)',
-          },
-          estado: 'DISPONIBLE',
-          images: [this.resolveImageUrl(o.vehicle?.imageUrl)],
-        }));
-      }
-    } catch (err: any) {
-      this.logger.warn(`[AutosCircuitBreaker] Falló consulta externa RutaLibre (${err.message}). Retornando Mock Fallback automático (CE01).`);
-      this.handleFailure(err);
+      this.logger.warn(`[AutosCircuitBreaker] No se pudo obtener modelos directo de RutaLibre (${err.message}).`);
     }
 
     return this.getMockCarsFallback();
@@ -308,9 +358,32 @@ export class AutosCircuitBreakerAdapter {
    * Notifica la cancelación de una orden al socio externo RutaLibre.
    */
   async cancelOrder(orderId: string, reason = 'Cancelado por el cliente'): Promise<boolean> {
+    const cleanId = orderId.toUpperCase();
+    if (cleanId.startsWith('MDU-') || cleanId.length === 36) {
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
+            { reason },
+            {
+              headers: {
+                'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+                'Content-Type': 'application/json',
+              },
+              timeout: 5000,
+            }
+          )
+        );
+        this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a Maneja de Una: ${cleanId}`);
+        return true;
+      } catch (err: any) {
+        this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en Maneja de Una (${orderId}): ${err.message}`);
+        return false;
+      }
+    }
+
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
-      const cleanId = orderId.toUpperCase();
       await firstValueFrom(
         this.httpService.post(
           `https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
@@ -328,7 +401,7 @@ export class AutosCircuitBreakerAdapter {
 
   /**
    * Envía reserva a proveedor externo con Idempotency-Key y protección resiliente.
-   * Conecta con POST /api/v3/orders de RutaLibre (NODE_AUT_RUTALIBRE).
+   * Conecta con RutaLibre (NODE_AUT_RUTALIBRE) o Maneja de Una (NODE_AUT_MDU).
    */
   async createExternalOrder(
     payload: ExternalAutoBookingPayload,
@@ -352,9 +425,76 @@ export class AutosCircuitBreakerAdapter {
     const key = apiKey || this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
     const cId = correlationId || `corr-auto-${Date.now()}`;
 
-    // Asegurar que idempotencyKey tenga formato UUID v4 requerido por RutaLibre
+    // Asegurar que idempotencyKey tenga formato UUID v4
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const safeIdempotencyKey = uuidRegex.test(idempotencyKey) ? idempotencyKey : uuidv4();
+
+    const isMateo =
+      payload.vehicle_id?.length === 36 ||
+      (payload as any).proveedor_codigo === 'NODE_AUT_MDU' ||
+      (payload as any).proveedor_id === 5;
+
+    // Despacho a Maneja de Una (Mateo Morales - NODE_AUT_MDU)
+    if (isMateo) {
+      const mateoPayload = {
+        vehicle_id: payload.vehicle_id,
+        pickup_date: payload.pickup_date || new Date().toISOString().split('T')[0],
+        dropoff_date: payload.dropoff_date || new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().split('T')[0],
+        driver: {
+          full_name: payload.conductor.nombre || 'Conductor Booking',
+          email: payload.conductor.email || 'conductor@booking.com',
+          phone: normalizedPhone,
+          license_number: payload.conductor.licencia || '1723456789',
+          age: payload.conductor.edad || 30,
+        },
+      };
+
+      try {
+        this.logger.log(`[AutosCircuitBreaker] Despachando reserva a Maneja de Una (/api/v3/autos/orders/create): ${payload.vehicle_id}`);
+        const response = await firstValueFrom(
+          this.httpService.post(
+            'https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders/create',
+            mateoPayload,
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'Idempotency-Key': safeIdempotencyKey,
+                'X-Correlation-Id': cId,
+                'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+              },
+              timeout: this.TIMEOUT_MS,
+            }
+          )
+        );
+
+        this.handleSuccess();
+        const pnr = response.data?.pnr || response.data?.order_id || response.data?.codigo_reserva;
+        return {
+          external_order_id: pnr || `MDU-${Date.now()}`,
+          status: 'CONFIRMED',
+          pnr: pnr,
+          auto_id: response.data?.auto_id || response.data?.vehicle_id || payload.vehicle_id,
+          voucher_qr_data: response.data?.voucher_qr_payload || `BOOKING-CAR-${pnr}`,
+          raw_response: response.data,
+        };
+      } catch (err: any) {
+        this.logger.error(`[AutosCircuitBreaker] Error despachando a Maneja de Una: ${JSON.stringify(err.response?.data || err.message)}`);
+        if (err.response?.status === 409) {
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Vehículo No Disponible',
+            status: HttpStatus.CONFLICT,
+            detail: err.response?.data?.detail || 'El vehículo no está disponible en esas fechas.',
+          }, HttpStatus.CONFLICT);
+        }
+        throw new HttpException({
+          type: 'https://api.booking.local/errors/bad-request',
+          title: 'Datos Inválidos',
+          status: HttpStatus.BAD_REQUEST,
+          detail: err.response?.data?.detail || 'No se pudo crear la orden en el proveedor de autos.',
+        }, HttpStatus.BAD_REQUEST);
+      }
+    }
 
     // Sincronizar conductor con microservicio de clientes en RutaLibre (Fase 1 Cross-Platform)
     try {

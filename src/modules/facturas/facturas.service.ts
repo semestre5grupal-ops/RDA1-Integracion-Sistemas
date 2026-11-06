@@ -49,12 +49,28 @@ export class FacturasService implements OnModuleDestroy {
    */
   async enviarFactura(dto: EnviarFacturaDto, destinatario: string) {
     if (this.platformConfig && !(await this.platformConfig.getValor('emailsEnabled'))) {
-      throw new ServiceUnavailableException('El envío de emails está desactivado desde el panel de administración.');
+      this.logger.warn(`El envío de facturas por email está desactivado en la configuración.`);
+      return {
+        enviado: false,
+        motivo: 'EMAILS_DISABLED',
+        mensaje: 'El envío de correos está desactivado temporalmente.',
+        pnr: dto.pnr,
+        destinatario,
+      };
     }
     const pdf = this.decodificarPdf(dto.pdfBase64);
     const nombreAdjunto = this.nombreArchivo(dto.pnr);
 
     const transporte = this.obtenerTransporte();
+    if (!transporte) {
+      return {
+        enviado: false,
+        motivo: 'SMTP_NO_CONFIGURADO',
+        mensaje: 'SMTP no configurado en servidor. El comprobante se gestiona vía EmailJS y descarga directa.',
+        pnr: dto.pnr,
+        destinatario,
+      };
+    }
 
     try {
       const info = await transporte.sendMail({
@@ -82,31 +98,31 @@ export class FacturasService implements OnModuleDestroy {
         message_id: info.messageId,
       };
     } catch (error) {
-      // El 5xx lo registra entero el filtro global de RFC 7807. Aqui solo se anade
-      // el motivo de SMTP, que es accionable ("535 credenciales invalidas") y no
-      // aparece en el cuerpo de la respuesta para no filtrar configuracion.
       this.logger.error(
         `Fallo al enviar la factura ${dto.pnr} por SMTP: ${(error as Error).message}`,
         (error as Error).stack,
       );
 
-      throw new HttpException(
-        'No se pudo enviar el correo con la factura. Intenta de nuevo en unos minutos.',
-        HttpStatus.BAD_GATEWAY,
-      );
+      return {
+        enviado: false,
+        motivo: 'SMTP_SEND_FAILED',
+        mensaje: 'No se pudo enviar el correo con la factura por SMTP. La reserva sigue confirmada.',
+        pnr: dto.pnr,
+        destinatario,
+      };
     }
   }
 
   // ── Configuracion SMTP ─────────────────────────────────────────────────────
 
   /**
-   * Transporte perezoso, o un 503 si el SMTP no esta configurado.
+   * Transporte perezoso, o null si el SMTP no esta configurado.
    *
    * Se construye en la primera llamada y no en el constructor para que el modulo
-   * arranque aunque falten las variables: un despliegue sin `SMTP_PASS`Levanta
-   * error en UN endpoint concreto, no impide que levante el backend entero.
+   * arranque aunque falten las variables: un despliegue sin `SMTP_PASS` opera en
+   * modo fallback sin provocar caídas ni errores 503 en el frontend.
    */
-  private obtenerTransporte(): Transporter {
+  private obtenerTransporte(): Transporter | null {
     if (this.transporter) return this.transporter;
 
     const host = this.configService.get<string>('SMTP_HOST');
@@ -114,12 +130,10 @@ export class FacturasService implements OnModuleDestroy {
     const pass = this.configService.get<string>('SMTP_PASS');
 
     if (!host || !user || !pass) {
-      this.logger.error(
-        'Faltan SMTP_HOST, SMTP_USER o SMTP_PASS en el entorno: el envio de facturas por correo no esta disponible.',
+      this.logger.warn(
+        'Faltan SMTP_HOST, SMTP_USER o SMTP_PASS en el entorno: el servicio operará en modo fallback silencioso (EmailJS / descarga directa).',
       );
-      throw new ServiceUnavailableException(
-        'El envio de facturas por correo no esta configurado en el servidor.',
-      );
+      return null;
     }
 
     const port = Number(this.configService.get<string>('SMTP_PORT') ?? 587);
