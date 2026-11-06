@@ -1091,6 +1091,10 @@
 }
 .modal-input:focus-visible { outline: 2px solid var(--booking-blue); outline-offset: 1px; border-color: var(--booking-blue); }
 .modal-input.es-error { border-color: #dc2626; background: #fef2f2; }
+/* Teléfono: país (prefijo) + número, en una sola fila. */
+.telefono-pais { display: flex; gap: 6px; min-width: 0; }
+.telefono-pais .modal-input { flex: 1 1 auto; min-width: 0; }
+.telefono-pais .telefono-pais-select { flex: 0 0 auto; width: auto; padding-right: 4px; }
 /* Error de un campo concreto: sin fondo, porque va pegado al input. */
 .modal-error-campo {
   display: block;
@@ -2809,3 +2813,22 @@
   background: #999;
   cursor: wait;
 }
+
+/* ── Mapa de asientos real (por tramo) ───────────────────────────────── */
+.mapa-tramo { margin-top: 10px; }
+.mapa-tramo-titulo { display: flex; justify-content: space-between; align-items: baseline; font-size: .8rem; font-weight: 700; color: var(--text-dark); margin-bottom: 6px; }
+.mapa-tramo-elegido { font-weight: 600; color: #0066cc; font-size: .75rem; }
+.mapa-asientos-real { max-height: 300px; overflow-y: auto; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #fafbfc; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.fila-asientos { display: flex; align-items: center; gap: 4px; }
+.fila-numero { width: 22px; text-align: right; font-size: .7rem; color: #6b7280; margin-right: 4px; }
+.asiento-celda { display: inline-flex; align-items: center; }
+.asiento-pasillo { display: inline-block; width: 14px; }
+.asiento { width: 38px; height: 32px; border: 2px solid #ccc; border-radius: 6px 6px 4px 4px; background: #fff; font-size: .68rem; cursor: pointer; padding: 0; color: inherit; transition: border-color .15s, background .15s; }
+.asiento:hover:not(:disabled) { border-color: #0066cc; }
+.asiento-extra { border-color: #93c5fd; }
+.asiento-elegido { border-color: #0066cc; background: #e6f0fa; font-weight: 700; }
+.asiento-ocupado, .asiento:disabled { background: #e5e7eb; border-color: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+.mapa-leyenda { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: .7rem; color: #4b5563; }
+.mapa-leyenda span { display: inline-flex; align-items: center; gap: 4px; }
+.asiento.muestra { display: inline-block; width: 14px; height: 12px; cursor: default; border-width: 2px; }
+.enlace-boton { background: none; border: none; padding: 0; color: #0066cc; text-decoration: underline; cursor: pointer; font: inherit; }

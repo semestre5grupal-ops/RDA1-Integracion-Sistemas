@@ -89,7 +89,7 @@ export async function estaAutenticado(): Promise<boolean> {
 
 export const api = axios.create({
   baseURL: API_BASE,
-  timeout: 15000,
+  timeout: 45000,
   // Valor por defecto para las rutas AUTENTICADAS: permite que viaje la
   // cookie httpOnly de sesion. Con origins distintos el backend debe responder
   // `Access-Control-Allow-Credentials` junto a un origen EXACTO, nunca `*`.

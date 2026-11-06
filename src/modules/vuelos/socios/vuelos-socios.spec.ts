@@ -179,6 +179,11 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       obtener: jest.fn(async (id: string) => copias.get(id) ?? null),
       actualizarDesdeSocio: jest.fn(async () => undefined),
       marcarEstado: jest.fn(async (id: string, status: string) => copias.has(id) && (copias.get(id).status = status)),
+      facturar: jest.fn(async (d: any) => ({ numero: 'FAC-20261104-000001', partnerOrderId: d.partnerOrderId, total: d.total.toFixed(2) })),
+      factura: jest.fn(async () => null),
+      mapearClienteSocio: jest.fn(async () => undefined),
+      marcarCheckin: jest.fn(async () => true),
+      notaCredito: jest.fn(async (d: any) => ({ numero: 'NC-20261104-000001', monto: d.monto.toFixed(2) })),
       listar: jest.fn(async (prop: string) =>
         [...copias.values()].filter((c) => c.propietarioId === prop).map((c) => ({
           bookingId: c.bookingId, codigoNodo: c.codigoNodo, pnr: 'ABC123', status: c.status, origin: 'UIO', destination: 'GYE',
@@ -245,6 +250,10 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(cobros.at(-1)).toEqual({ monto: 150, idem: 'idem-ok', propietario: DUENO });
       const enviada = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST')!;
       expect(enviada.body.payment.paymentReference).toBe('AUTH-777');
+      // Contrato v2: monto cobrado, quién cobró y la orden de Booking para conciliar.
+      expect(enviada.body.payment).toMatchObject({ amount: { currency: 'USD', total: '150.00' }, provider: 'BOOKING_PROTOTIPO' });
+      expect(enviada.body.salesChannel).toMatchObject({ partnerId: 'BOOKING_PROTOTIPO', partnerOrderId: expect.stringMatching(/^ORD-BKP-[0-9A-F]{10}$/) });
+      expect(datos.factura).toMatchObject({ numero: 'FAC-20261104-000001' });
       expect(enviada.headers['x-user-id']).toBe(DUENO); // la aerolínea ve al mismo dueño que Booking
       expect(enviada.body.holdId).toBe('HOLD-key');
       expect(copias.get('NODE_VUE_KEY~BK-1')).toMatchObject({ propietarioId: DUENO, codigoNodo: 'NODE_VUE_KEY' });
@@ -260,7 +269,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       });
       const { eventos, contadores } = trazaVuelos.desde(0);
       const deLaCompra = eventos.filter((e) => e.correlacion === corr).map((e) => `${e.paso}:${e.resultado}`);
-      expect(deLaCompra).toEqual(['busqueda:aviso', 'cobro:ok', 'reserva_aerolinea:ok', 'copia:ok', 'confirmada:ok']);
+      expect(deLaCompra).toEqual(['busqueda:aviso', 'cobro:ok', 'reserva_aerolinea:ok', 'copia:ok', 'factura:ok', 'confirmada:ok']);
       expect(contadores.cobro.ok).toBe(1);
       // La aerolínea recibe el mismo correlation ID que el cliente.
       const enviado = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST')!;
@@ -305,7 +314,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       });
       const datos = await r.json();
       expect(r.status).toBe(200);
-      expect(datos.refund).toMatchObject({ amount: '125.00', executedByBooking: true, executedAmount: '125.00' });
+      expect(datos.refund).toMatchObject({ amount: '125.00', executedByBooking: true, executedAmount: '125.00', creditNote: { numero: 'NC-20261104-000001' } });
       expect(reembolsos.at(-1)).toMatchObject({ tx: 'tx-1', monto: 125 });
       expect(copias.get('NODE_VUE_KEY~BK-1').status).toBe('CANCELLED');
     });
@@ -333,4 +342,111 @@ describe('referenciaPagoBooking', () => {
     expect(a).toMatch(/^PAY-BKP-20261104-\d{6}$/);
     expect(referenciaPagoBooking('7d1a7ccd-d58e-497b-aa8a-c3a521bb577a', new Date('2026-11-05T03:00:00Z'))).toBe(a);
   });
+});
+
+describe('normalizarPasajero', () => {
+  it('pasa la nacionalidad a alfa-2 y el teléfono a E.164', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { normalizarPasajero } = require('./vuelos-socios.middleware');
+    expect(normalizarPasajero({ nationality: 'ECU', contact: { phone: '099 123 4567' } })).toMatchObject({ nationality: 'EC', contact: { phone: '+593991234567' } });
+    expect(normalizarPasajero({ nationality: 'col', contact: { phone: '+573001234567' } })).toMatchObject({ nationality: 'CO', contact: { phone: '+573001234567' } });
+    expect(normalizarPasajero({ nationality: 'EC', contact: { phone: '593991234567' } }).contact.phone).toBe('+593991234567');
+  });
+});
+
+
+describe('facturación de vuelos (cálculos)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const f = require('./vuelos-facturacion');
+  it('usa el desglose de la aerolínea si cuadra con el total; si no, IVA 15% incluido', () => {
+    expect(f.desglose(79.85, 59, 20.85)).toEqual({ subtotal: 59, impuestos: 20.85, pct: 35.34 });
+    expect(f.desglose(80.5, null, null)).toEqual({ subtotal: 70, impuestos: 10.5, pct: 15 });
+  });
+  it('quincena y orden estables', () => {
+    expect(f.periodoQuincena(new Date('2026-11-16T04:00:00Z'))).toBe('2026-11-Q1'); // 15-nov 23:00 en Ecuador
+    expect(f.periodoQuincena(new Date('2026-11-16T06:00:00Z'))).toBe('2026-11-Q2');
+    expect(f.ordenDeReserva('abc')).toBe(f.ordenDeReserva('abc'));
+  });
+});
+
+
+describe('SincronizadorEventosVuelos (feed GET /vuelos/eventos)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { SincronizadorEventosVuelos } = require('./vuelos-eventos');
+  const hace = (ms: number) => new Date(Date.now() - ms).toISOString();
+  function armar(eventos: any[], copias: Record<string, any>) {
+    const llamadas: any[] = [];
+    const socios = {
+      nodosActivos: async () => [{ codigoNodo: 'NODE_VUE_X' }],
+      reenviar: jest.fn(async (_n: string, _m: string, _s: string[], q: string) => {
+        llamadas.push(q);
+        return { status: 200, body: { events: q.includes('after=') ? [] : eventos } };
+      }),
+    };
+    let cursor: string | null = null;
+    const reservas = {
+      cursorEventos: jest.fn(async () => cursor),
+      guardarCursor: jest.fn(async (_n: string, c: string) => { cursor = c; }),
+      obtener: jest.fn(async (id: string) => copias[id] ?? null),
+      marcarCheckin: jest.fn(async () => true),
+      reembolsar: jest.fn(async (_t: string, m: number) => m),
+      notaCredito: jest.fn(async () => ({ numero: 'NC-1', monto: '10.00' })),
+      marcarEstado: jest.fn(async () => undefined),
+      idClienteEnSocio: jest.fn(async () => undefined),
+    };
+    return { s: new SincronizadorEventosVuelos(socios as any, reservas as any), reservas, llamadas, cursor: () => cursor };
+  }
+  const copia = { status: 'CONFIRMED', grandTotal: 80.5, reembolsado: 0, transaccionId: 'tx-1', propietarioId: 'u-1', pnr: 'ABC' };
+
+  it('check-in en la aerolínea → CHECKED_IN; ignora reservas que no vendió Booking; guarda el cursor', async () => {
+    const { s, reservas, cursor } = armar([
+      { id: 'e1', type: 'ec.edu.epn.booking.vuelos.booking.checked_in', time: hace(1000), data: { bookingId: 'B1', pnr: 'ABC', passengersCheckedIn: 1 } },
+      { id: 'e2', type: 'ec.edu.epn.booking.vuelos.booking.checked_in', time: hace(1000), data: { bookingId: 'AJENA' } },
+      // así llega por el proxy de Booking: el id ya trae el código de la aerolínea
+      { id: 'e2b', type: 'ec.edu.epn.booking.vuelos.booking.checked_in', time: hace(1000), data: { bookingId: 'NODE_VUE_X~B2' } },
+    ], { 'NODE_VUE_X~B1': copia, 'NODE_VUE_X~B2': copia });
+    expect(await s.sincronizarNodo('NODE_VUE_X')).toBe(2);
+    expect(reservas.marcarCheckin).toHaveBeenCalledWith('NODE_VUE_X~B1', expect.any(Date), 'aerolinea');
+    expect(reservas.marcarCheckin).toHaveBeenCalledWith('NODE_VUE_X~B2', expect.any(Date), 'aerolinea');
+    expect(reservas.marcarCheckin).toHaveBeenCalledTimes(2);
+    expect(cursor()).toBe('e2b');
+  });
+
+  it('cancelación hecha en la aerolínea → reembolsa lo que informa, nota de crédito y CANCELLED', async () => {
+    const { s, reservas } = armar([
+      { id: 'e3', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(5 * 60_000), data: { bookingId: 'B1', reasonCode: 'CUSTOMER_REQUEST', refundAmount: '10.50', refundId: 'R1' } },
+    ], { 'NODE_VUE_X~B1': copia });
+    await s.sincronizarNodo('NODE_VUE_X');
+    expect(reservas.reembolsar).toHaveBeenCalledWith('tx-1', 10.5, expect.any(String));
+    expect(reservas.notaCredito).toHaveBeenCalledWith(expect.objectContaining({ bookingId: 'NODE_VUE_X~B1', monto: 10.5, claveReembolso: 'R1' }));
+    expect(reservas.marcarEstado).toHaveBeenCalledWith('NODE_VUE_X~B1', 'CANCELLED', 10.5);
+  });
+
+  it('una cancelación recién hecha espera (puede ser la que hizo Booking) y no avanza el cursor', async () => {
+    const { s, reservas, cursor } = armar([
+      { id: 'e4', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(5_000), data: { bookingId: 'B1' } },
+    ], { 'NODE_VUE_X~B1': copia });
+    await s.sincronizarNodo('NODE_VUE_X');
+    expect(reservas.marcarEstado).not.toHaveBeenCalled();
+    expect(cursor()).toBeNull();
+  });
+});
+
+describe('ofertas de la fecha pedida', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ofertaCoincideConFechas } = require('./vuelos-socios.service');
+  const oferta = (salidas: string[]) => ({ itineraries: salidas.map((at) => ({ segments: [{ departureAt: at }] })) });
+  const pedido = (fechas: string[]) => ({ itineraries: fechas.map((d) => ({ departureDate: d })) });
+  const ahora = new Date('2026-11-05T03:00:00Z');
+
+  it('descarta vuelos de otra fecha o que ya salieron (EQ10 devolvía octubre para cualquier fecha)', () => {
+    expect(ofertaCoincideConFechas(oferta(['2026-10-08T06:30:00+00:00']), pedido(['2026-11-06']), ahora)).toBe(false);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-06T12:00:00.000Z']), pedido(['2026-11-06']), ahora)).toBe(true);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-06T07:00:00-05:00', '2026-11-08T09:00:00-05:00']), pedido(['2026-11-06', '2026-11-08']), ahora)).toBe(true);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-06T07:00:00-05:00', '2026-11-09T09:00:00-05:00']), pedido(['2026-11-06', '2026-11-08']), ahora)).toBe(false);
+    // 23:30 en Ecuador = 04:30Z del día siguiente: sigue siendo la fecha pedida
+    expect(ofertaCoincideConFechas(oferta(['2026-11-07T04:30:00Z']), pedido(['2026-11-06']), ahora)).toBe(true);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-04T12:00:00Z']), pedido(['2026-11-04']), ahora)).toBe(false); // ya salió
+  });
+
 });

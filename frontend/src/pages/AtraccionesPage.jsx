@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAtracciones } from '../services/atraccionesApi';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
+import { useAuth } from '../hooks/useAuth';
 
 // Datos Mock para Destinos Top en Ecuador
 const DESTINOS_TOP = [
@@ -71,6 +70,7 @@ const getEcuadorImage = (idx) => ECUADOR_IMAGES[idx % ECUADOR_IMAGES.length];
 
 export function AtraccionesPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [atracciones, setAtracciones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -88,14 +88,11 @@ export function AtraccionesPage() {
 
   const handleSearchChange = (e) => {
     const raw = e.target.value.slice(0, 60);
-    const hasNumbers = /[0-9]/.test(raw);
-    const hasSymbols = /[^a-zA-Z\s,áéíóúÁÉÍÓÚñÑ0-9]/.test(raw);
+    const hasSymbols = /[^a-zA-Z0-9\s,áéíóúÁÉÍÓÚñÑ\-_.]/.test(raw);
     const hasMultipleSpaces = /\s{2,}/.test(raw);
 
-    if (hasNumbers) {
-      triggerFlash('No se permiten números en el destino');
-    } else if (hasSymbols) {
-      triggerFlash('Solo se permiten letras, comas y acentos');
+    if (hasSymbols) {
+      triggerFlash('Solo se permiten letras, números y signos comunes');
     } else if (hasMultipleSpaces) {
       triggerFlash('No se permiten espacios consecutivos');
     } else if (raw.length >= 60) {
@@ -104,7 +101,7 @@ export function AtraccionesPage() {
       setSearchError('');
     }
 
-    const clean = raw.replace(/[^a-zA-Z\s,áéíóúÁÉÍÓÚñÑ]/g, '').replace(/\s{2,}/g, ' ');
+    const clean = raw.replace(/[^a-zA-Z0-9\s,áéíóúÁÉÍÓÚñÑ\-_.]/g, '').replace(/\s{2,}/g, ' ');
     setBusqueda(clean);
     setShowSuggestions(clean.trim().length > 0);
     setFormError('');
@@ -134,26 +131,12 @@ export function AtraccionesPage() {
     setTimeout(() => setTabTransitioning(false), 200);
   };
 
-  const [dateRange, setDateRange] = useState([null, null]);
-  const [startDate, endDate] = dateRange;
   const [formError, setFormError] = useState('');
 
   const handleSearch = () => {
     const cleanDestino = busqueda.trim().replace(/\s{2,}/g, ' ');
-    const faltantes = [];
-    if (!cleanDestino) faltantes.push('el destino');
-    if (!startDate) faltantes.push('la fecha de inicio');
-    if (!endDate) faltantes.push('la fecha de fin');
-
-    if (faltantes.length > 0) {
-      let mensaje = '';
-      if (faltantes.length === 1) {
-        mensaje = `Por favor proporcione ${faltantes[0]}.`;
-      } else if (faltantes.length === 2) {
-        mensaje = `Por favor proporcione ${faltantes[0]} y ${faltantes[1]}.`;
-      } else {
-        mensaje = `Por favor proporcione ${faltantes[0]}, ${faltantes[1]} y ${faltantes[2]}.`;
-      }
+    if (!cleanDestino) {
+      const mensaje = 'Por favor proporcione el destino o atracción.';
       setFormError(mensaje);
       triggerFlash(mensaje);
       return;
@@ -167,7 +150,7 @@ export function AtraccionesPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await getAtracciones({ page: 1, limit: 10 });
+      const result = await getAtracciones({ page: 1, limit: 100 });
       const items = result.data || result;
       setAtracciones(Array.isArray(items) ? items : []);
     } catch (err) {
@@ -182,8 +165,13 @@ export function AtraccionesPage() {
   }, [fetchData]);
 
   const atraccionesFiltradas = atracciones.filter((a) => {
+    if (!busqueda) return true;
+    const term = busqueda.toLowerCase().trim();
     const nombre = (a.nombre || a.name || a.title || '').toLowerCase();
-    return nombre.includes(busqueda.toLowerCase());
+    const ciudad = (a.ciudad || a.city || a.ubicacion || '').toLowerCase();
+    const descripcion = (a.descripcion_corta || a.descripcion || a.description || '').toLowerCase();
+    const inclusiones = Array.isArray(a.inclusiones) ? a.inclusiones.join(' ').toLowerCase() : '';
+    return nombre.includes(term) || ciudad.includes(term) || descripcion.includes(term) || inclusiones.includes(term);
   });
 
   return (
@@ -196,7 +184,7 @@ export function AtraccionesPage() {
         </div>
         
         <div className="search-box">
-          <div className="search-input-group" style={{ position: 'relative', background: flashRed ? '#fce8e6' : 'white', border: flashRed ? '3px solid #d93025' : '3px solid transparent', transition: 'background-color 0.2s, border 0.2s' }}>
+          <div className="search-input-group" style={{ position: 'relative', flex: 1, background: flashRed ? '#fce8e6' : 'white', border: flashRed ? '3px solid #d93025' : '3px solid transparent', transition: 'background-color 0.2s, border 0.2s' }}>
             <svg width="24" height="24" fill="none" stroke={flashRed ? '#d93025' : 'currentColor'} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
             </svg>
@@ -204,7 +192,7 @@ export function AtraccionesPage() {
               <input
                 type="text"
                 maxLength={60}
-                placeholder="Destino o ¿A dónde vas?"
+                placeholder="Buscar por nombre de atracción o ciudad..."
                 value={busqueda}
                 onChange={handleSearchChange}
                 onFocus={() => setShowSuggestions(busqueda.trim().length > 0)}
@@ -259,30 +247,7 @@ export function AtraccionesPage() {
             )}
           </div>
           
-          <div className="search-input-group date-group">
-            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="2" x2="16" y2="6"></line>
-              <line x1="8" y1="2" x2="8" y2="6"></line>
-              <line x1="3" y1="10" x2="21" y2="10"></line>
-            </svg>
-            <div className="input-text-wrapper date-picker-wrapper" style={{display: 'flex', flex: 1}}>
-              <DatePicker
-                selectsRange={true}
-                startDate={startDate}
-                endDate={endDate}
-                onChange={(update) => {
-                  setDateRange(update);
-                  setFormError('');
-                }}
-                monthsShown={2}
-                placeholderText="Fechas"
-                dateFormat="dd/MM/yyyy"
-                className="custom-date-picker-input"
-                minDate={new Date()}
-              />
-            </div>
-          </div>
+          
           
           <button className="search-btn" onClick={handleSearch}>Buscar</button>
         </div>
@@ -295,42 +260,6 @@ export function AtraccionesPage() {
       </section>
 
       <div className="main-content">
-        
-        {/* CATEGORÍAS JERÁRQUICAS DE ATRACCIONES (RDA2) */}
-        <section className="section-block" style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px', scrollbarWidth: 'none' }}>
-            <button 
-              onClick={() => setBusqueda('')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #006ce4', background: !busqueda ? '#006ce4' : '#fff', color: !busqueda ? '#fff' : '#006ce4', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🌟 Todas las experiencias
-            </button>
-            <button 
-              onClick={() => setBusqueda('Tours')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🚶 Tours y Visitas Guiadas 🗣️
-            </button>
-            <button 
-              onClick={() => setBusqueda('Cacao')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🍫 Gastronomía y Degustación 🍽️
-            </button>
-            <button 
-              onClick={() => setBusqueda('Museo')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🏛️ Museos y Cultura
-            </button>
-            <button 
-              onClick={() => setBusqueda('Volcán')} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #d1d5db', background: '#fff', color: '#1f2937', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >
-              🌋 Naturaleza y Volcanes 🚌
-            </button>
-          </div>
-        </section>
 
         {/* RECOMENDADO GENERADO POR IA */}
         <section className="section-block">
@@ -389,23 +318,25 @@ export function AtraccionesPage() {
           </div>
         </section>
 
-        {/* TU CUENTA BANNER */}
-        <section className="section-block">
-          <h2 className="section-title">Tu cuenta, tus viajes</h2>
-          <div className="account-banner">
-            <div className="account-banner-content">
-              <h3>Todos los detalles de tus viajes en un mismo lugar</h3>
-              <p>Inicia sesión para reservar más rápido y administrar tus viajes fácilmente</p>
-              <div className="account-actions">
-                <button className="btn-iniciar-sesion">Iniciar sesión</button>
-                <button className="btn-registrate">Regístrate</button>
+        {/* TU CUENTA BANNER (Solo visible para usuarios no logueados) */}
+        {!user && (
+          <section className="section-block">
+            <h2 className="section-title">Tu cuenta, tus viajes</h2>
+            <div className="account-banner">
+              <div className="account-banner-content">
+                <h3>Todos los detalles de tus viajes en un mismo lugar</h3>
+                <p>Inicia sesión para reservar más rápido y administrar tus viajes fácilmente</p>
+                <div className="account-actions">
+                  <button className="btn-iniciar-sesion" onClick={() => navigate('/login')}>Iniciar sesión</button>
+                  <button className="btn-registrate" onClick={() => navigate('/register')}>Regístrate</button>
+                </div>
+              </div>
+              <div className="account-banner-img">
+                <span className="genius-icon">🎁 Genius</span>
               </div>
             </div>
-            <div className="account-banner-img">
-              <span className="genius-icon">🎁 Genius</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* CUENTA CON NOSOTROS */}
         <section className="section-block">

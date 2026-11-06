@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseInterceptors, Header, Headers, Post, Put, Patch, Delete, Body, HttpCode, HttpStatus, HttpException, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseInterceptors, Header, Headers, Post, Put, Patch, Delete, Body, HttpCode, HttpStatus, HttpException, UseGuards, Req, UsePipes, ValidationPipe } from '@nestjs/common';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { AtraccionesService } from './atracciones.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
@@ -69,9 +69,8 @@ export class AtraccionesController {
   }
 
   @Get()
-  @UseInterceptors(CacheInterceptor)
   @Header('X-API-Deprecation-Date', '2027-12-31')
-  @ApiOperation({ summary: 'Obtener el listado de atracciones (Caché habilitado)' })
+  @ApiOperation({ summary: 'Obtener el listado de atracciones en tiempo real' })
   @ApiResponse({ status: 200, description: 'Listado de atracciones recuperado exitosamente.' })
   @ApiResponse({ status: 503, description: 'Servicio de Atracciones Externo no disponible.' })
   async findAll(@Query() query: PaginationQueryDto) {
@@ -124,11 +123,19 @@ export class AtraccionesController {
   }
 
   @Get('reservations')
-  @UseGuards(SupabaseAuthGuard)
-  @ApiOperation({ summary: 'Consultar el historial de reservas del usuario (Requiere autenticación JWT)' })
+  @ApiOperation({ summary: 'Consultar el historial de reservas del usuario' })
   @ApiResponse({ status: 200, description: 'Listado de reservas.' })
-  async getReservas(@Req() req: any) {
-    return this.atraccionesService.getReservas(req.user?.email);
+  async getReservas(@Req() req: any, @Query('email') email?: string) {
+    const userEmail = req.user?.email || email;
+    return this.atraccionesService.getReservas(userEmail);
+  }
+
+  @Get('reservas')
+  @ApiOperation({ summary: 'Consultar el historial de reservas (Alias canónico)' })
+  @ApiResponse({ status: 200, description: 'Listado de reservas.' })
+  async getReservasAlias(@Req() req: any, @Query('email') email?: string) {
+    const userEmail = req.user?.email || email;
+    return this.atraccionesService.getReservas(userEmail);
   }
 
   @Get('reservations/:reservationId')
@@ -155,11 +162,41 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Realizar Check-in presencial con QR y asignación de guía (RDA2)' })
   @ApiParam({ name: 'reservationId', description: 'ID de la reserva' })
   @ApiResponse({ status: 200, description: 'Check-in exitoso con voucher digital verificado.' })
+  @ApiResponse({ status: 401, description: 'Clave de API inválida o requerida.' })
+  @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
   async checkin(
     @Param('reservationId') reservationId: string,
-    @Body() dto: CheckinAtraccionDto
+    @Body() dto: CheckinAtraccionDto,
+    @Req() req: any
   ) {
-    return this.atraccionesService.checkin(reservationId, dto);
+    return this.atraccionesService.checkin(reservationId, dto, req);
+  }
+
+  @Post('reservations/:reservationId/checkin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Realizar Check-in presencial (Alias OpenAPI v2)' })
+  @ApiResponse({ status: 200, description: 'Check-in exitoso con voucher digital verificado.' })
+  @ApiResponse({ status: 401, description: 'Clave de API inválida o requerida.' })
+  @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
+  async checkinAlias(
+    @Param('reservationId') reservationId: string,
+    @Body() dto: CheckinAtraccionDto,
+    @Req() req: any
+  ) {
+    return this.atraccionesService.checkin(reservationId, dto, req);
+  }
+
+  @Post('clientes/sincronizar')
+  @ApiOperation({ summary: 'Sincronizar cliente cross-platform con socios de atracciones (Dilan y Ariel)' })
+  async sincronizarCliente(@Body() dto: any) {
+    return this.atraccionesService.sincronizarClienteGlobal(dto);
+  }
+
+  @Post('sync-catalogo')
+  @ApiOperation({ summary: 'Forzar sincronización inmediata de catálogos de socios (Dilan, Ariel)' })
+  async syncCatalogo() {
+    await this.atraccionesService.syncAllCatalogs();
+    return { success: true, message: 'Catálogos de socios sincronizados exitosamente.' };
   }
 
   @Post('reservas')
@@ -216,6 +253,7 @@ export class AtraccionesController {
 
   @Post(':id/reservations')
   @UseGuards(SupabaseAuthGuard)
+  @UsePipes(new ValidationPipe({ whitelist: false, forbidNonWhitelisted: false, transform: true }))
   @Header('X-API-Deprecation-Date', '2027-12-31')
   @ApiOperation({ summary: 'Reservar una atracción (Requiere autenticación JWT e Idempotency-Key)' })
   @ApiParam({ name: 'id', description: 'ID de la atracción', type: 'string' })
@@ -230,6 +268,10 @@ export class AtraccionesController {
   ) {
     if (!idempotencyKey) {
       throw new HttpException('Idempotency-Key header is required', HttpStatus.BAD_REQUEST);
+    }
+    if (req.user) {
+      if (!dto.cliente_id && req.user.id) dto.cliente_id = req.user.id;
+      if (!dto.customer_email && req.user.email) dto.customer_email = req.user.email;
     }
     return this.atraccionesService.reservar(id, dto, idempotencyKey);
   }

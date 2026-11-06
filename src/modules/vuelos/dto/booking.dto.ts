@@ -52,7 +52,7 @@ const REGEX_DOCUMENTO = /^[A-Z0-9][A-Z0-9-]{3,19}$/;
 const REGEX_TELEFONO = /^\+?[0-9]{7,20}$/;
 
 /** Nacionalidad en formato ISO-3166-1 alfa-3. El DDL exige `^[A-Z]{3}$`. */
-const REGEX_NACIONALIDAD = /^[A-Z]{3}$/;
+const REGEX_NACIONALIDAD = /^[A-Z]{2,3}$/; // contrato v2: ISO alfa-2 (EC); se acepta alfa-3 por compatibilidad
 
 /**
  * `PassengerItem.assignedSeats[]` y `SeatAssignment` del contrato: un par
@@ -156,7 +156,7 @@ export class PassengerDetailDto {
 
   @ApiProperty({ example: 'ECU' })
   @Matches(REGEX_NACIONALIDAD, {
-    message: 'La nacionalidad debe ser un codigo de 3 letras en mayusculas (ej. ECU).',
+    message: 'La nacionalidad debe ser un codigo ISO de 2 letras en mayusculas (ej. EC).',
   })
   nationality: string;
 

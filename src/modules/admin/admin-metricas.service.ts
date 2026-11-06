@@ -1,3 +1,4 @@
+import { conciliacionVuelos, fechaEcuador } from '../vuelos/socios/vuelos-facturacion';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -215,6 +216,24 @@ export class AdminMetricasService {
    * socias hay en cada estado, cuánto se cobró y reembolsó, y el estado real
    * de cada aerolínea registrada.
    */
+  /**
+   * Conciliación con las aerolíneas socias en un rango de fechas (Ecuador):
+   * por aerolínea, lo vendido, devuelto, comisión de Booking y neto a pagar, y el
+   * detalle por reserva (orden, PNR, id en la aerolínea, factura).
+   */
+  async getConciliacionVuelos(filtros: { desde?: string; hasta?: string; proveedor?: string }) {
+    const hoy = fechaEcuador().ymdIso;
+    const fecha = (v: string | undefined, def: string) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : def);
+    const desde = fecha(filtros.desde, `${hoy.slice(0, 8)}${Number(hoy.slice(8)) <= 15 ? '01' : '16'}`);
+    const hasta = fecha(filtros.hasta, hoy);
+    try {
+      return await conciliacionVuelos(this.dataSource, { desde, hasta, proveedor: filtros.proveedor || undefined });
+    } catch (e: any) {
+      this.logger?.warn?.(`Conciliación vuelos no disponible: ${e?.message}`);
+      return { desde, hasta, comisionPct: 10, totales: [], reservas: [] };
+    }
+  }
+
   async getProcesoVuelos() {
     const [estados, dinero, aerolineas] = await Promise.all([
       this.seguro(

@@ -221,6 +221,16 @@
   color: #008009;
 }
 
+.trip-card-status.confirmado_asistido,
+.trip-card-status.checked_in,
+.trip-card-status.picked_up {
+  color: #15803d;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid #86efac;
+}
+
 .trip-card-status.cancelled {
   color: #595959;
 }

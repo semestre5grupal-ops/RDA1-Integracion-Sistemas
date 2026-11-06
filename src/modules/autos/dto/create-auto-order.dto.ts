@@ -232,6 +232,10 @@ export class CreateAutoOrderDto {
   @IsOptional()
   route?: any;
 
+  @ApiProperty({ description: 'Datos del vehículo opcional', required: false })
+  @IsOptional()
+  vehiculo?: any;
+
   @ApiProperty({ description: 'Método de pago', example: 'TARJETA', required: false })
   @IsOptional()
   @IsString()

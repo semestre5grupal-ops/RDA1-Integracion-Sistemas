@@ -22,11 +22,13 @@ const PASOS = [
   { id: 'cobro', label: 'Cobro', sub: 'MS_PAG', icon: '💳' },
   { id: 'reserva_aerolinea', label: 'Reserva', sub: 'en la aerolínea', icon: '✈️' },
   { id: 'copia', label: 'Copia', sub: 'Mis Reservas', icon: '🗂️' },
+  { id: 'factura', label: 'Factura', sub: 'Factura · NC · comisión', icon: '🧾' },
   { id: 'confirmada', label: 'Confirmada', sub: 'fin feliz', icon: '✅' },
 ];
 const RAMAS = [
   { id: 'reembolso', label: 'Reembolso', sub: 'SAGA / cancelación', icon: '↩️' },
   { id: 'cancelacion', label: 'Cancelación', sub: 'del cliente', icon: '🛑' },
+  { id: 'checkin', label: 'Check-in', sub: 'Asistencia en aerolínea', icon: '🛂' },
   { id: 'estado_vuelo', label: 'Estado de vuelo', sub: 'consulta', icon: '📡' },
 ];
 const TODOS = [...PASOS, ...RAMAS, { id: 'consulta', label: 'Otra consulta', icon: '🔁' }];
@@ -103,7 +105,13 @@ export function ProcesoEnVivo() {
   const seqRef = useRef(0);
   const inicioRef = useRef(null);
 
+  const enCurso = useRef(false);
+
   const consultar = useCallback(async () => {
+    // Si el backend tarda más de 2 s, no se lanza otra consulta con el mismo
+    // "desde": eso traía los mismos eventos dos o tres veces.
+    if (enCurso.current) return;
+    enCurso.current = true;
     try {
       const { data } = await api.get('/admin/procesos/vuelos/en-vivo', { params: { desde: seqRef.current } });
       // Si el servidor se reinició, la secuencia vuelve a empezar: se limpia la vista.
@@ -117,7 +125,10 @@ export function ProcesoEnVivo() {
       setError(null);
       if (data.eventos?.length) {
         seqRef.current = data.ultimoSeq;
-        setEventos((prev) => [...prev, ...data.eventos].slice(-500));
+        setEventos((prev) => {
+          const vistos = new Set(prev.map((e) => e.seq));
+          return [...prev, ...data.eventos.filter((e) => !vistos.has(e.seq))].slice(-500);
+        });
         const ahora = Date.now();
         const nuevos = {};
         data.eventos.forEach((e) => { nuevos[e.paso] = { resultado: e.resultado, hasta: ahora + 2500 }; });
@@ -125,6 +136,8 @@ export function ProcesoEnVivo() {
       }
     } catch (e) {
       setError(e?.response?.data?.message || e?.message || 'Sin conexión con el backend');
+    } finally {
+      enCurso.current = false;
     }
   }, []);
 

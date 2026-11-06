@@ -11,6 +11,7 @@ import { OfflineReservaModal } from '../components/OfflineReservaModal';
 import { VoucherModal } from '../components/VoucherModal';
 
 export function AtraccionDetail() {
+  const todayStr = new Date().toISOString().split('T')[0];
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -43,8 +44,8 @@ export function AtraccionDetail() {
   ]);
 
   const [form, setForm] = useState({
-    date: '2026-10-25',
-    time: '10:30 a.m.',
+    date: todayStr,
+    time: '09:00 a.m.',
     adult_count: 1,
     child_count: 0,
     senior_count: 0,
@@ -52,16 +53,40 @@ export function AtraccionDetail() {
     special_requirements: ''
   });
 
+  const [calendarViewDate, setCalendarViewDate] = useState(() => {
+    const parts = todayStr.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, 1);
+  });
+
+  const handleOpenCalendar = (e) => {
+    e.preventDefault();
+    const parts = (form.date || todayStr).split('-').map(Number);
+    setCalendarViewDate(new Date(parts[0], parts[1] - 1, 1));
+    setShowCalendar(true);
+  };
+
+  const prevMonth = () => {
+    setCalendarViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const nextMonth = () => {
+    setCalendarViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
   useEffect(() => {
     if (id) {
       const saved = localStorage.getItem(`atraccion_form_${id}`);
       if (saved) {
         try {
-          setForm(JSON.parse(saved));
+          const parsed = JSON.parse(saved);
+          if (!parsed.date || parsed.date < todayStr) {
+            parsed.date = todayStr;
+          }
+          setForm(parsed);
         } catch (e) {}
       }
     }
-  }, [id]);
+  }, [id, todayStr]);
 
   useEffect(() => {
     if (id) {
@@ -86,18 +111,44 @@ export function AtraccionDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (id && form.date) {
+    if (!id || !form.date) return;
+
+    const refrescarDisponibilidad = () => {
       getDisponibilidadAtraccion(id, form.date)
-        .then(slots => {
-          if (Array.isArray(slots) && slots.length > 0) {
-            setTimeSlots(slots);
+        .then(res => {
+          const list = Array.isArray(res) ? res : (res?.turnos || res?.time_slots || res?.slots || []);
+          if (Array.isArray(list) && list.length > 0) {
+            const mapped = list.map(s => {
+              const cuposNum = Number(s.cupos ?? s.cupos_disponibles ?? s.available_spots ?? 5);
+              const timeVal = s.time || s.horaInicio || s.hora || '09:00 a.m.';
+              return {
+                ...s,
+                time: timeVal,
+                cupos: cuposNum,
+                cupos_disponibles: cuposNum,
+                estado: s.estado || s.status || (cuposNum > 0 ? 'DISPONIBLE' : 'AGOTADO')
+              };
+            });
+            setTimeSlots(mapped);
+            // Sincronizar automáticamente el formulario si el horario actual no existe en los turnos disponibles
+            setForm(prev => {
+              const exists = mapped.some(s => s.time === prev.time);
+              if (!exists && mapped[0]) {
+                return { ...prev, time: mapped[0].time };
+              }
+              return prev;
+            });
           }
         })
         .catch(() => {});
-    }
+    };
+
+    refrescarDisponibilidad();
+    // Auto-polling para reflejar en tiempo real la deducción o adición de cupos
+    const interval = setInterval(refrescarDisponibilidad, 4000);
+    return () => clearInterval(interval);
   }, [id, form.date]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
   const precioAdulto = parseFloat(atraccion?.precio_unitario || atraccion?.price?.total || atraccion?.precioTicket || 55);
   const precioNino = parseFloat((precioAdulto * 0.5).toFixed(2));
   const precioSenior = parseFloat((precioAdulto * 0.7).toFixed(2)); // Tarifa 3ra edad 30% descuento
@@ -109,8 +160,8 @@ export function AtraccionDetail() {
 
   // Heurística 5 & V-07: Validación reactiva de aforo y cupos en turno
   const selectedSlot = timeSlots.find(s => s.time === form.time) || timeSlots[0];
-  const cuposDisponibles = selectedSlot ? (selectedSlot.cupos ?? 0) : 0;
-  const isAgotadoSlot = selectedSlot ? (selectedSlot.estado === 'AGOTADO' || cuposDisponibles === 0) : false;
+  const cuposDisponibles = selectedSlot ? Number(selectedSlot.cupos ?? selectedSlot.cupos_disponibles ?? selectedSlot.available_spots ?? 10) : 10;
+  const isAgotadoSlot = selectedSlot ? (selectedSlot.estado === 'AGOTADO' || cuposDisponibles <= 0) : false;
   const cuposExcedidos = totalTickets > cuposDisponibles;
 
   const handleBooking = async (e) => {
@@ -149,10 +200,23 @@ export function AtraccionDetail() {
     const idempotencyKey = uuidv4();
     try {
       let result = null;
+      const dateCompact = (form.date || todayStr).replace(/-/g, '');
+      const timeNormalized = (form.time || '09:00').replace(/(a\.m\.|p\.m\.|\s)/gi, '').slice(0, 5) || '09:00';
+      const time24 = timeNormalized.length === 4 ? `0${timeNormalized}` : timeNormalized;
+      const timeCompact = time24.replace(/[^0-9]/g, '').slice(0, 4).padStart(4, '0');
+      const targetSlotId = selectedSlot?.slot_id || selectedSlot?.id || `slot-${dateCompact}-${timeCompact}`;
+
+      // Reconciliación automática y segura de fecha y hora según el slot seleccionado
+      const slotMatch = (targetSlotId || '').match(/^slot-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/);
+      const safeDate = slotMatch ? `${slotMatch[1]}-${slotMatch[2]}-${slotMatch[3]}` : (form.date || todayStr);
+      const safeTime = slotMatch ? `${slotMatch[4]}:${slotMatch[5]}` : time24;
+
       const payload = {
         atraccionId: id,
-        date: form.date,
-        time: form.time,
+        atraccion_id: id,
+        slot_id: targetSlotId,
+        date: safeDate,
+        time: safeTime,
         adult_count: form.adult_count,
         child_count: form.child_count,
         senior_count: form.senior_count,
@@ -161,7 +225,9 @@ export function AtraccionDetail() {
         customer_name: (user.user_metadata?.full_name || user.email.split('@')[0]).trim().replace(/\s{2,}/g, ' '),
         customer_email: user.email?.trim() || '',
         customer_phone: (user.user_metadata?.telefono || '+593987654321').trim(),
-        document_id: (user.user_metadata?.cedula || '1720000000').trim(),
+        document_id: (user.user_metadata?.cedula || '1755073481').trim(),
+        cliente_id: user?.id || null,
+        proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedorCodigo || atraccion?.proveedor?.codigo || atraccion?.proveedor?.id || undefined,
         special_requirements: (form.special_requirements || '').trim().replace(/\s{2,}/g, ' ')
       };
 
@@ -187,15 +253,21 @@ export function AtraccionDetail() {
         try {
           result = await reservarAtraccion(id, payload, idempotencyKey);
         } catch (backendErr) {
-          result = { reservation_id: idempotencyKey, local_fallback: true };
+          console.error('Error al reservar atracción en backend:', backendErr);
+          setIsBooking(false);
+          const msg = backendErr.response?.data?.detail || backendErr.response?.data?.message || backendErr.message || 'Error al procesar la reserva con el socio.';
+          alert(`Error al procesar la reserva: ${msg}`);
+          return;
         }
       }
       
+      const realPnr = result?.reservation_code || result?.reservation_id || result?.pnr || idempotencyKey;
       const atraccionRes = {
-        id: result?.reservation_id || idempotencyKey,
-        reservation_id: result?.reservation_id || idempotencyKey,
+        id: realPnr,
+        reservation_id: realPnr,
+        pnr: realPnr,
         tipo: 'atraccion',
-        titulo: atraccion?.nombre || atraccion?.name || `Tour / Atracción (${totalTickets} personas)`,
+        titulo: atraccion?.nombre || atraccion?.name || result?.titulo || result?.name || `Tour / Atracción (${totalTickets} personas)`,
         date: form.date,
         time: form.time,
         adult_count: form.adult_count,
@@ -203,7 +275,8 @@ export function AtraccionDetail() {
         ticket_count: totalTickets,
         status: 'CONFIRMED',
         totalPrice: { currency: 'USD', total: totalCalculado.toFixed(2) },
-        guia_asignado: 'Carlos Villacís (Guía Oficial Certificado MINTUR)',
+        email: (user?.email || '').trim().toLowerCase(),
+        guia_asignado: result?.guia_asignado || 'Carlos Villacís (Guía Oficial Certificado MINTUR)',
         punto_encuentro: atraccion?.locations?.[0]?.address || 'Punto de Encuentro Central'
       };
 
@@ -494,7 +567,7 @@ export function AtraccionDetail() {
 
             {/* SELECTOR DE FECHAS */}
             {!showCalendar && (
-              <a href="#" className="link-action" onClick={(e) => { e.preventDefault(); setShowCalendar(true); }} style={{ color: '#006ce4', textDecoration: 'underline', fontSize: '0.9rem', fontWeight: 600 }}>
+              <a href="#" className="link-action" onClick={handleOpenCalendar} style={{ color: '#006ce4', textDecoration: 'underline', fontSize: '0.9rem', fontWeight: 600 }}>
                 📅 Cambiar fecha ({form.date})
               </a>
             )}
@@ -502,20 +575,53 @@ export function AtraccionDetail() {
             {showCalendar ? (
               <div className="custom-calendar-container" style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px', marginTop: '12px', marginBottom: '20px', background: '#fff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <strong style={{ fontSize: '1rem' }}>octubre de 2026</strong>
-                  <button onClick={() => setShowCalendar(false)} style={{ background: 'none', border: 'none', color: '#006ce4', cursor: 'pointer', fontSize: '0.85rem' }}>Cerrar</button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button 
+                      type="button" 
+                      onClick={prevMonth} 
+                      style={{ background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', padding: '4px 8px', fontSize: '0.85rem' }}
+                      title="Mes anterior"
+                    >
+                      ◀
+                    </button>
+                    <strong style={{ fontSize: '1rem', textTransform: 'capitalize' }}>
+                      {calendarViewDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                    </strong>
+                    <button 
+                      type="button" 
+                      onClick={nextMonth} 
+                      style={{ background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', padding: '4px 8px', fontSize: '0.85rem' }}
+                      title="Mes siguiente"
+                    >
+                      ▶
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setShowCalendar(false)} style={{ background: 'none', border: 'none', color: '#006ce4', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>Cerrar ✕</button>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontSize: '0.85rem' }}>
-                  <div style={{ color: '#6b7280' }}>do</div><div style={{ color: '#6b7280' }}>lu</div><div style={{ color: '#6b7280' }}>ma</div><div style={{ color: '#6b7280' }}>mi</div><div style={{ color: '#6b7280' }}>ju</div><div style={{ color: '#6b7280' }}>vi</div><div style={{ color: '#6b7280' }}>sa</div>
-                  <div></div><div></div><div></div><div></div>
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
-                    const dateStr = `2026-10-${day.toString().padStart(2, '0')}`;
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>do</div>
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>lu</div>
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>ma</div>
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>mi</div>
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>ju</div>
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>vi</div>
+                  <div style={{ color: '#6b7280', fontWeight: 600 }}>sa</div>
+
+                  {Array.from({ length: new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth(), 1).getDay() }).map((_, idx) => (
+                    <div key={`empty-${idx}`}></div>
+                  ))}
+
+                  {Array.from({ length: new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map((day) => {
+                    const cYear = calendarViewDate.getFullYear();
+                    const cMonth = String(calendarViewDate.getMonth() + 1).padStart(2, '0');
+                    const cDay = String(day).padStart(2, '0');
+                    const dateStr = `${cYear}-${cMonth}-${cDay}`;
                     const isSelected = form.date === dateStr;
                     const isPast = dateStr < todayStr;
                     return (
                       <div 
-                        key={day}
+                        key={dateStr}
                         onClick={() => {
                           if (isPast) return;
                           setForm({ ...form, date: dateStr });
@@ -529,7 +635,8 @@ export function AtraccionDetail() {
                           color: isPast ? '#9ca3af' : isSelected ? '#fff' : '#1a1a1a',
                           fontWeight: isSelected ? 'bold' : 'normal',
                           textDecoration: isPast ? 'line-through' : 'none',
-                          opacity: isPast ? 0.35 : 1
+                          opacity: isPast ? 0.35 : 1,
+                          transition: 'background-color 0.15s'
                         }}
                         title={isPast ? 'No es posible seleccionar fechas pasadas' : `Seleccionar ${dateStr}`}
                       >
@@ -538,10 +645,27 @@ export function AtraccionDetail() {
                     );
                   })}
                 </div>
+
+                <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>O elige en el selector:</span>
+                  <input 
+                    type="date" 
+                    min={todayStr} 
+                    value={form.date} 
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setForm({ ...form, date: e.target.value });
+                        const parts = e.target.value.split('-').map(Number);
+                        setCalendarViewDate(new Date(parts[0], parts[1] - 1, 1));
+                      }
+                    }}
+                    style={{ fontSize: '0.85rem', padding: '4px 8px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+                  />
+                </div>
               </div>
             ) : (
               <div className="date-selector" style={{ display: 'flex', gap: '8px', marginTop: '12px', marginBottom: '16px' }}>
-                {[-1, 0, 1].map(offset => {
+                {((form.date <= todayStr) ? [0, 1, 2] : [-1, 0, 1]).map(offset => {
                   const d = new Date(form.date + 'T00:00:00');
                   d.setDate(d.getDate() + offset);
                   const dateStr = d.toISOString().split('T')[0];
@@ -581,16 +705,19 @@ export function AtraccionDetail() {
             {/* SELECTOR DINÁMICO DE TURNOS HORARIOS */}
             <p style={{ margin: '16px 0 8px 0', fontWeight: 700, fontSize: '0.95rem' }}>Selecciona tu turno horario:</p>
             <div className="time-selector" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '20px' }}>
-              {timeSlots.map((slot) => {
-                const isSelected = form.time === slot.time;
-                const isAgotado = slot.estado === 'AGOTADO' || slot.cupos === 0;
+              {timeSlots.map((slot, idx) => {
+                const slotTime = slot.time || slot.hora || slot.hora_inicio || '10:30 a.m.';
+                const isSelected = form.time === slotTime;
+                const cupos = slot.cupos ?? slot.cupos_disponibles ?? 0;
+                const estado = slot.estado ?? slot.status ?? (cupos <= 0 ? 'AGOTADO' : (cupos <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'));
+                const isAgotado = estado === 'AGOTADO' || cupos === 0;
 
                 return (
                   <button
-                    key={slot.time}
+                    key={slot.id || slotTime || idx}
                     type="button"
                     disabled={isAgotado}
-                    onClick={() => setForm({ ...form, time: slot.time })}
+                    onClick={() => setForm({ ...form, time: slotTime })}
                     style={{
                       padding: '10px 8px',
                       borderRadius: '8px',
@@ -603,9 +730,9 @@ export function AtraccionDetail() {
                       fontSize: '0.85rem'
                     }}
                   >
-                    <div>{slot.time}</div>
-                    <span style={{ fontSize: '0.75rem', display: 'block', marginTop: '2px', color: isAgotado ? '#ef4444' : slot.estado === 'ULTIMOS_CUPOS' ? '#f59e0b' : '#10b981' }}>
-                      {isAgotado ? 'Agotado' : slot.estado === 'ULTIMOS_CUPOS' ? `¡${slot.cupos} cupos!` : `${slot.cupos} libres`}
+                    <div>{slotTime}</div>
+                    <span style={{ fontSize: '0.75rem', display: 'block', marginTop: '2px', color: isAgotado ? '#ef4444' : estado === 'ULTIMOS_CUPOS' ? '#f59e0b' : '#10b981' }}>
+                      {isAgotado ? 'Agotado' : estado === 'ULTIMOS_CUPOS' ? `¡${cupos} cupos!` : `${cupos} libres`}
                     </span>
                   </button>
                 );
@@ -825,7 +952,7 @@ export function AtraccionDetail() {
                           disabled={isBooking || cuposExcedidos || isAgotadoSlot}
                         >
                           {isBooking 
-                            ? 'Procesando Pago Seguro...' 
+                            ? '⏳ Conectando con socio y emitiendo boletos...' 
                             : isAgotadoSlot 
                             ? 'Turno Agotado' 
                             : cuposExcedidos 

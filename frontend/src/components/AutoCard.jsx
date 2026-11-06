@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 
-export function AutoCard({ auto, dias = 3 }) {
+export function AutoCard({ auto, dias = 3, startDate, endDate, pickupLocation }) {
   const navigate = useNavigate();
   const id = auto.vehicle_id || auto.id || 'auto-spark-01';
   const precioDiario = auto.precio_diario || auto.price || 35.50;
@@ -23,7 +23,24 @@ export function AutoCard({ auto, dias = 3 }) {
   const supplierInfo = suppliersMap[supplierId] || suppliersMap[1];
 
   const handleSelect = () => {
-    navigate(`/autos/${id}`, { state: { auto: { ...auto, price: precioDiario, make, model, seats, doors, bag_capacity, transmission, dias } } });
+    navigate(`/autos/${id}`, {
+      state: {
+        auto: {
+          ...auto,
+          price: precioDiario,
+          make,
+          model,
+          seats,
+          doors,
+          bag_capacity,
+          transmission,
+          dias,
+          startDate,
+          endDate,
+          pickupLocation
+        }
+      }
+    });
   };
 
   return (

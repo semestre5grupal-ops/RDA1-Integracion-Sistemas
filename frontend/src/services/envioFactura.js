@@ -1,5 +1,7 @@
 import emailjs from '@emailjs/browser';
 import { supabase } from './supabase';
+import { api } from './api';
+import { facturaComoBase64 } from '../utils/facturaPdf';
 
 /**
  * Envío automático de la factura al completar una compra.
@@ -99,6 +101,8 @@ export function normalizar(datos) {
   return {
     pnr: datos.pnr || '000000',
     titulo: datos.titulo || etiqueta,
+    // Factura real emitida por el backend (número, cliente, subtotal, impuestos).
+    factura: datos.factura ?? null,
     totalRaw: aNumero(datos.total),
     raw: {
       createdAt: datos.creadaEn || new Date().toISOString(),
@@ -132,6 +136,21 @@ export async function enviarFacturaTrasCompra(datos) {
       return { enviado: false, motivo: 'No hay correo destino' };
     }
 
+    // 1) Factura en PDF adjunta, enviada por el backend al correo de la sesión.
+    //    Si el servidor no tiene SMTP configurado (503) o no hay sesión (401),
+    //    se manda la confirmación por EmailJS como antes.
+    try {
+      await api.post('/facturas/enviar', {
+        pdfBase64: facturaComoBase64(reserva),
+        pnr: String(reserva.pnr).slice(0, 40),
+        concepto: String(reserva.factura?.descripcion || reserva.titulo).slice(0, 200),
+      });
+      console.log(`[Factura] PDF ${reserva.factura?.numero ?? ''} enviado a ${userEmail} (PNR ${reserva.pnr})`);
+      return { enviado: true, via: 'pdf' };
+    } catch (e) {
+      console.warn(`[Factura] Envío del PDF no disponible (HTTP ${e?.response?.status ?? '?'}); se usa EmailJS.`);
+    }
+
     const templateParams = {
       to_email: userEmail,
       to_name: userName,
@@ -150,7 +169,7 @@ export async function enviarFacturaTrasCompra(datos) {
     console.log(
       `[Factura] Confirmación enviada a ${userEmail} por EmailJS (PNR ${reserva.pnr})`, response.status, response.text
     );
-    return { enviado: true };
+    return { enviado: true, via: 'emailjs' };
   } catch (err) {
     console.warn(
       `[Factura] No se pudo enviar el comprobante por EmailJS (PNR ${datos?.pnr}). ` +

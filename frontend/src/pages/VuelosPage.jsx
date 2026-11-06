@@ -164,7 +164,18 @@ export function VuelosPage() {
         clave,
         obtenerHuellaDispositivo(),
       );
-      setHoldActivo(respuesta);
+      // El formulario necesita los vuelos del hold y la cabina pagada para
+      // mostrar el mapa de asientos real de cada tramo.
+      const tramos = (oferta.itineraries ?? []).flatMap((it, idx) =>
+        (it.segments ?? []).map((seg) => ({
+          segmentId: seg.segmentId,
+          flightNumber: seg.flightNumber,
+          origen: seg.departure?.iataCode ?? seg.departureIataCode,
+          destino: seg.arrival?.iataCode ?? seg.arrivalIataCode,
+          cabina: selecciones[idx]?.cabinClass ?? cabina,
+        })),
+      );
+      setHoldActivo({ ...respuesta, offerId: oferta.offerId, tramos });
     } catch (error) {
       const detalle = error?.response?.data?.detail ?? 'No se pudo procesar tu selección. Inténtalo de nuevo.';
       setError({ title: 'Error al continuar', detail: detalle });

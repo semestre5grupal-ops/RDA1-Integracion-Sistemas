@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listarReservas as listarReservasVuelos } from '../services/vuelosApi';
+import { listarReservas as listarReservasVuelos, obtenerReserva as obtenerReservaVuelo } from '../services/vuelosApi';
 import { getOrdersAuto, cancelOrderAuto } from '../services/autosApi';
 import { getReservas as getReservasAtracciones, cancelarReservaAtraccion } from '../services/atraccionesApi';
 import { getReservasAlojamientos } from '../services/alojamientosApi';
@@ -21,10 +21,16 @@ import {
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
+  CONFIRMED: 'Confirmada',
+  CHECKED_IN: 'Check-in Realizado (Sí asistió)',
+  CONFIRMADO_ASISTIDO: 'Check-in Realizado (Sí asistió)',
+  ASISTIDO: 'Sí asistió',
+  PICKED_UP: 'Vehículo Entregado (En curso)',
+  ENTREGADO: 'Vehículo Entregado (En curso)',
   PENDING: 'Pendiente',
   PENDING_PAYMENT: 'Pendiente de pago',
   TICKET_ISSUING: 'Emitiendo billetes',
-  CONFIRMED: 'Confirmada',
+  COMPLETADA: 'Completada',
   FAILED: 'Fallida',
   CHANGE_PENDING: 'Cambio en curso',
   CANCELLATION_PENDING: 'Cancelación en curso',
@@ -41,6 +47,10 @@ const DEFAULT_IMAGES = {
 
 export function MisReservasPage() {
   const [reservas, setReservas] = useState([]);
+  const reservasRef = useRef([]);
+  useEffect(() => {
+    reservasRef.current = reservas;
+  }, [reservas]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [selectedReserva, setSelectedReserva] = useState(null);
@@ -50,6 +60,11 @@ export function MisReservasPage() {
   const [avisoDescarga, setAvisoDescarga] = useState('');
   const { convertPrice } = useCurrency();
   const { user } = useAuth();
+  const isAdmin = !!(user?.email && (
+    user.email.toLowerCase().includes('admin') ||
+    user.email.toLowerCase() === 'booking.admin@epn.edu.ec' ||
+    user.user_metadata?.role === 'admin'
+  ));
 
   // Report form state
   const [modalView, setModalView] = useState('detail'); // 'detail' | 'report' | 'cancel'
@@ -84,6 +99,7 @@ export function MisReservasPage() {
   const [busqueda, setBusqueda] = useState('');
 
   const fetchId = useRef(0);
+  const isFetchingRef = useRef(false);
 
   // Check-in Multivertical (Consideraciones RDA2 §4)
   const [checkinReserva, setCheckinReserva] = useState(null);
@@ -187,19 +203,34 @@ export function MisReservasPage() {
     }
   }, [selectedReserva, showHelpModal]);
 
-  const cargarTodasLasReservas = useCallback(async () => {
+  const cargarTodasLasReservas = useCallback(async (isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     const currentFetch = ++fetchId.current;
-    setCargando(true);
-    setError(null);
+    const correoSesion = (user?.email || '').trim().toLowerCase();
+    if (!isSilent) {
+      if (reservasRef.current.length === 0) {
+        setCargando(true);
+      }
+      setError(null);
+    }
 
     try {
-      // 1. Vuelos API
-      let vuelosItems = [];
-      try {
-        const respuestaVuelos = await listarReservasVuelos({
+      // Ejecutar consultas a los 4 servicios en PARALELO para rendimiento ultrarrápido (< 1.5s total)
+      const [vuelosRes, autosRes, atraccionesRes, alojamientosRes] = await Promise.allSettled([
+        listarReservasVuelos({
           status: filtroStatus || undefined,
           limit: 20,
-        });
+        }),
+        getOrdersAuto(),
+        getReservasAtracciones(isAdmin ? undefined : (correoSesion || undefined)),
+        getReservasAlojamientos(),
+      ]);
+
+      // 1. Vuelos API
+      let vuelosItems = [];
+      if (vuelosRes.status === 'fulfilled' && vuelosRes.value) {
+        const respuestaVuelos = vuelosRes.value;
         vuelosItems = (respuestaVuelos.items || []).map((r) => ({
           id: r.bookingId,
           pnr: r.pnr ?? '—',
@@ -214,109 +245,146 @@ export function MisReservasPage() {
           totalRaw: r.grandTotal?.total || 106.50,
           imagen: DEFAULT_IMAGES.vuelo,
           raw: r,
+          email: (r.passengers?.[0]?.email || r.customerEmail || r.userEmail || r.email || '').trim().toLowerCase(),
           link: `/vuelos/reservas/${r.bookingId}`,
         }));
-      } catch (err) {
-        // Fallback silenciado
       }
 
       // 2. Autos API & Local
       let autosItems = [];
-      try {
-        const respuestaAutos = await getOrdersAuto();
+      if (autosRes.status === 'fulfilled' && autosRes.value) {
+        const respuestaAutos = autosRes.value;
         const listaAutos = Array.isArray(respuestaAutos) ? respuestaAutos : (respuestaAutos?.orders || []);
-        autosItems = listaAutos.map((a) => ({
-          id: a.order_id || a.id,
-          pnr: (a.order_id || a.id || 'AUTO').substring(0, 6).toUpperCase(),
+        autosItems = listaAutos.map((a) => {
+          const autoModel = a.vehiculo?.modelo || a.auto_id || a.autoId || '';
+          const autoMake = a.vehiculo?.marca || '';
+          const displayTitle = (autoMake || autoModel)
+            ? `Renta de ${autoMake} ${autoModel} (${a.dias_renta || a.diasRenta || 3} días)`.trim()
+            : 'Renta de Auto';
+          const pnrReal = a.pnr || a.codigo_reserva || a.order_id || a.id || 'AUTO';
+          const pickupStr = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
+          const dropoffStr = a.dropoff_date || a.fecha_fin || a.dropoff || '';
+          const displayFechas = pickupStr
+            ? (dropoffStr ? `${formatearFecha(pickupStr)} – ${formatearFecha(dropoffStr)}` : `${formatearFecha(pickupStr)} (${a.dias_renta || a.diasRenta || 3} días)`)
+            : '3 días de renta';
+          return {
+            id: a.order_id || a.id,
+            pnr: pnrReal,
+            tipo: 'auto',
+            servicioTexto: 'Renta de auto',
+            destino: 'Quito',
+            titulo: displayTitle,
+            fechasTexto: displayFechas,
+            fecha: pickupStr ? formatearFecha(pickupStr) : formatearFecha(new Date().toISOString().split('T')[0]),
+            rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
+            status: a.status || 'CONFIRMED',
+            placa: a.placa || a.checkin?.placa,
+            checkin: a.checkin,
+            totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
+            imagen: a.vehiculo?.foto_url || DEFAULT_IMAGES.auto,
+            email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+            link: '/autos',
+          };
+        });
+      }
+
+      const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]')
+        .filter((a) => !correoSesion || (a.email || a.customer_email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase() === correoSesion);
+      const autosLocalesFormatted = autosLocales.map((a) => {
+        const pickupLocal = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
+        const dropoffLocal = a.dropoff_date || a.fecha_fin || a.dropoff || '';
+        const displayFechasLocal = pickupLocal
+          ? (dropoffLocal ? `${formatearFecha(pickupLocal)} – ${formatearFecha(dropoffLocal)}` : `${formatearFecha(pickupLocal)} (${a.dias || 3} días)`)
+          : '3 días de renta';
+        return {
+          id: a.id || a.orderId,
+          pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
           tipo: 'auto',
           servicioTexto: 'Renta de auto',
           destino: 'Quito',
-          titulo: (a.auto_id || a.autoId) ? `Renta de Vehículo (${a.dias_renta || a.diasRenta || 3} días)` : 'Renta de Auto Chevrolet Sail',
-          fechasTexto: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : '3 días de renta',
-          fecha: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-          rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
+          titulo: a.titulo || 'Renta de Auto (3 días)',
+          fechasTexto: displayFechasLocal,
+          fecha: pickupLocal ? formatearFecha(pickupLocal) : formatearFecha(new Date().toISOString().split('T')[0]),
+          rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
           status: a.status || 'CONFIRMED',
-          totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
-          imagen: DEFAULT_IMAGES.auto,
+          totalRaw: a.totalPrice?.total || a.total || 106.50,
+          imagen: a.foto_url || DEFAULT_IMAGES.auto,
+          email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
           link: '/autos',
-        }));
-      } catch (err) {
-        // Fallback silenciado
-      }
-
-      const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
-      const autosLocalesFormatted = autosLocales.map((a) => ({
-        id: a.id || a.orderId,
-        pnr: (a.id || a.orderId || 'AUTO').substring(0, 6).toUpperCase(),
-        tipo: 'auto',
-        servicioTexto: 'Renta de auto',
-        destino: 'Quito',
-        titulo: a.titulo || 'Renta de Auto Chevrolet Sail (3 días)',
-        fechasTexto: a.createdAt || a.date ? formatearFecha(String(a.createdAt || a.date).split('T')[0]) : '3 días de renta',
-        fecha: a.createdAt || a.date ? formatearFecha(String(a.createdAt || a.date).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-        rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
-        status: a.status || 'CONFIRMED',
-        totalRaw: a.totalPrice?.total || a.total || 106.50,
-        imagen: DEFAULT_IMAGES.auto,
-        link: '/autos',
-      }));
+          isLocal: true,
+        };
+      });
 
       // 3. Atracciones API & Local
       let atraccionesItems = [];
-      try {
-        const respuestaAtracciones = await getReservasAtracciones();
+      if (atraccionesRes.status === 'fulfilled' && atraccionesRes.value) {
+        const respuestaAtracciones = atraccionesRes.value;
         const listaAtracciones = Array.isArray(respuestaAtracciones) ? respuestaAtracciones : (respuestaAtracciones?.data || []);
-        atraccionesItems = listaAtracciones.map((at) => ({
-          id: at.reservation_id || at.id,
-          pnr: (at.reservation_id || at.id || 'ATRAC').substring(0, 6).toUpperCase(),
+        atraccionesItems = listaAtracciones.map((at) => {
+          const fechaAtrac = at.date || at.fecha || at.raw?.date || at.raw?.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
+          const horaAtrac = at.time || at.hora || at.raw?.time || at.raw?.hora || '10:00 a.m.';
+          return {
+            id: at.id || at.reservation_id || at.pnr,
+            pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
+            tipo: 'atraccion',
+            servicioTexto: 'Atracción',
+            destino: 'Quito',
+            titulo: at.titulo || at.atraccion_nombre || at.name || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
+            fechasTexto: fechaAtrac ? `${formatearFecha(fechaAtrac)} · ${horaAtrac}` : 'Tour guiado',
+            fecha: fechaAtrac ? formatearFecha(fechaAtrac) : formatearFecha(new Date().toISOString().split('T')[0]),
+            rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
+            status: at.status || 'CONFIRMED',
+            totalRaw: at.total_price?.total || at.total_price || 55.00,
+            imagen: at.photoUrl || at.foto_url || DEFAULT_IMAGES.atraccion,
+            email: (at.customer_email || at.email || at.customer?.email || at.userEmail || '').trim().toLowerCase(),
+            documentId: (at.documentId || at.document_id || at.customer?.document_id || '').trim(),
+            link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
+            raw: at,
+          };
+        });
+      }
+
+      const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]')
+        .filter((at) => !correoSesion || (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase() === correoSesion);
+      const atraccionesLocalesFormatted = atraccionesLocales.map((at) => {
+        const fechaLocalAtrac = at.date || at.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
+        const horaLocalAtrac = at.time || at.hora || '10:00 a.m.';
+        return {
+          id: at.id || at.reservation_id || at.pnr,
+          pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
           tipo: 'atraccion',
           servicioTexto: 'Atracción',
           destino: 'Quito',
-          titulo: at.titulo || `Tour Quito Centro Histórico (${at.ticket_count || 1} entradas)`,
-          fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · 10:00 a.m.` : 'Tour guiado',
-          fecha: at.createdAt ? formatearFecha(String(at.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-          rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
+          titulo: at.titulo || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
+          fechasTexto: fechaLocalAtrac ? `${formatearFecha(fechaLocalAtrac)} · ${horaLocalAtrac}` : 'Tour guiado',
+          fecha: fechaLocalAtrac ? formatearFecha(fechaLocalAtrac) : formatearFecha(new Date().toISOString().split('T')[0]),
+          rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
           status: at.status || 'CONFIRMED',
-          totalRaw: at.total_price?.total || at.total_price || 55.00,
+          totalRaw: at.totalPrice?.total || at.total || 55.00,
           imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
-          link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
-        }));
-      } catch (err) {
-        // Fallback silenciado
-      }
-
-      const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
-      const atraccionesLocalesFormatted = atraccionesLocales.map((at) => ({
-        id: at.id || at.reservation_id,
-        pnr: (at.id || at.reservation_id || 'ATRAC').substring(0, 6).toUpperCase(),
-        tipo: 'atraccion',
-        servicioTexto: 'Atracción',
-        destino: 'Quito',
-        titulo: at.titulo || `Tour Quito Centro Histórico (${at.ticket_count || 1} entradas)`,
-        fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · 10:00 a.m.` : 'Tour guiado',
-        fecha: at.createdAt ? formatearFecha(String(at.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-        rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
-        status: at.status || 'CONFIRMED',
-        totalRaw: at.totalPrice?.total || at.total || 55.00,
-        imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
-        link: '/',
-      }));
+          email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
+          documentId: (at.document_id || at.documentId || '').trim(),
+          link: '/',
+          isLocal: true,
+          raw: at,
+        };
+      });
 
       // 4. Alojamientos API & Local
       let alojamientosApiItems = [];
-      try {
-        const respuestaAlojamientos = await getReservasAlojamientos();
+      if (alojamientosRes.status === 'fulfilled' && alojamientosRes.value) {
+        const respuestaAlojamientos = alojamientosRes.value;
         const listaAlojamientos = Array.isArray(respuestaAlojamientos) ? respuestaAlojamientos : (respuestaAlojamientos?.data || []);
         alojamientosApiItems = listaAlojamientos.map((al) => {
           const checkinStr = al.checkin ? formatearFecha(al.checkin) : '10 nov.';
           const checkoutStr = al.checkout ? formatearFecha(al.checkout) : '16 nov.';
           return {
             id: al.reservation_id || al.id,
-            pnr: al.codigo_reserva || (al.reservation_id || al.id || 'HOTEL').substring(0, 8).toUpperCase(),
+            pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
             tipo: 'alojamiento',
             servicioTexto: 'Alojamiento',
             destino: al.destino || 'Quito',
-            // Nombre del hotel, tipo de habitación reservado y número de huéspedes.
+            email: (al.customer_email || al.email || al.customerEmail || al.userEmail || '').trim().toLowerCase(),
             titulo: al.nombre_alojamiento
               ? `${al.nombre_alojamiento}${al.tipo_habitacion?.nombre ? ` · ${(al.habitaciones_count || 1) > 1 ? `${al.habitaciones_count} × ` : ''}${al.tipo_habitacion.nombre}` : ''} (${al.huespedes || 1} persona${(al.huespedes || 1) > 1 ? 's' : ''})`
               : 'Alojamiento reservado',
@@ -329,8 +397,6 @@ export function MisReservasPage() {
             link: al.alojamiento_id ? `/alojamientos/${al.alojamiento_id}` : '/',
             raw: {
               createdAt: al.created_at || new Date().toISOString(),
-              // Huéspedes registrados en la reserva (titular y acompañantes); si la
-              // reserva es antigua y no los tiene, el cliente que reservó.
               passengers: (al.huespedes_detalle?.length ? al.huespedes_detalle : [{ nombre: al.customer_name || 'Huésped', apellido: '' }]).map((h, i) => ({
                 firstName: h.nombre,
                 lastName: h.apellido || '',
@@ -340,23 +406,16 @@ export function MisReservasPage() {
             },
           };
         });
-      } catch (err) {
-        // Fallback silencioso
       }
 
-      // Reservas de alojamiento guardadas en ESTE navegador (p. ej. pendientes de
-      // sincronizar sin conexión). El navegador puede tener reservas de otras
-      // personas o hechas como invitado: solo se muestran las del correo de la
-      // sesión. Las del servidor ya vienen filtradas por cuenta y correo.
-      const correoSesion = (user?.email || '').trim().toLowerCase();
       const alojamientosLocales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]')
-        .filter((al) => correoSesion && (al.email || '').trim().toLowerCase() === correoSesion);
+        .filter((al) => !correoSesion || (al.email || '').trim().toLowerCase() === correoSesion);
       const alojamientosLocalesFormatted = alojamientosLocales.map((al) => {
         const checkinStr = al.checkin ? formatearFecha(al.checkin) : '10 nov.';
         const checkoutStr = al.checkout ? formatearFecha(al.checkout) : '16 nov.';
         return {
           id: al.reservationId || al.id,
-          pnr: al.codigoReserva || al.reservationId || (al.id || 'HOTEL').substring(0, 8).toUpperCase(),
+          pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
           tipo: 'alojamiento',
           servicioTexto: 'Alojamiento',
           destino: al.destino || 'Quito',
@@ -370,6 +429,8 @@ export function MisReservasPage() {
           totalRaw: al.totalPrice || al.total || 0,
           imagen: al.photoUrl || DEFAULT_IMAGES.alojamiento,
           link: al.alojamientoId ? `/alojamientos/${al.alojamientoId}` : '/',
+          email: (al.email || al.customer_email || '').trim().toLowerCase(),
+          isLocal: true,
           raw: {
             createdAt: al.createdAt || new Date().toISOString(),
             passengers: [
@@ -391,7 +452,7 @@ export function MisReservasPage() {
       const seenPnrs = new Set();
       const mapaCombinado = new Map();
 
-      [
+      const todasLasReservas = [
         ...alojamientosApiItems,
         ...alojamientosLocalesFormatted,
         ...vuelosItems,
@@ -399,9 +460,49 @@ export function MisReservasPage() {
         ...autosLocalesFormatted,
         ...atraccionesItems,
         ...atraccionesLocalesFormatted,
-      ].forEach((item) => {
+      ];
+
+      todasLasReservas.forEach((item) => {
+        // Regla de Aislamiento y Privacidad Cross-Platform (Defensa Cátedra):
+        if (!isAdmin) {
+          if (!correoSesion) {
+            // Usuario sin sesión activa: no mostrar ninguna reserva
+            return;
+          }
+          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || '').trim().toLowerCase();
+          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || '').trim();
+          const userCedula = (user?.user_metadata?.cedula || '').trim();
+
+          // Si el item tiene email, debe coincidir estrictamente con el correo de la sesión actual
+          if (itemEmail) {
+            if (itemEmail !== correoSesion) {
+              return;
+            }
+          } else if (itemDoc) {
+            if (userCedula && itemDoc !== userCedula) {
+              return;
+            }
+          }
+        }
+
         const pnrVal = item.pnr && item.pnr !== '—' && !['HOTEL', 'AUTO', 'ATRAC'].includes(item.pnr) ? item.pnr : null;
         const idVal = item.id;
+
+        // Si es una reserva proveniente de localStorage, verificar si ya existe la versión del servidor
+        if (item.isLocal) {
+          const existente = Array.from(mapaCombinado.values()).find((e) =>
+            !e.isLocal &&
+            e.tipo === item.tipo &&
+            ((pnrVal && e.pnr === pnrVal) || (idVal && e.id === idVal))
+          );
+          if (existente) {
+            // Si el servidor devolvió un título genérico pero la local tiene el nombre real de la atracción, actualizamos
+            if (item.titulo && (!existente.titulo || (typeof existente.titulo === 'string' && existente.titulo.startsWith('Tour / Atracción')))) {
+              existente.titulo = item.titulo;
+            }
+            return;
+          }
+        }
 
         // Si ya registramos este PNR o este ID para este tipo de servicio, lo evitamos
         const pnrKey = pnrVal ? `${item.tipo}_${pnrVal}` : null;
@@ -419,19 +520,73 @@ export function MisReservasPage() {
       let listaFinal = Array.from(mapaCombinado.values());
       listaFinal.sort((a, b) => b.rawDate - a.rawDate);
 
-      setReservas(listaFinal);
+      // Reactividad tipo Composable (Android):
+      // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),
+      // mantenemos intacta la referencia previa para evitar cualquier re-render o parpadeo visual.
+      setReservas((prev) => {
+        if (prev && prev.length === listaFinal.length) {
+          let hasDiff = false;
+          for (let i = 0; i < listaFinal.length; i++) {
+            const p = prev[i];
+            const n = listaFinal[i];
+            if (
+              !p || !n ||
+              p.id !== n.id ||
+              p.status !== n.status ||
+              p.placa !== n.placa ||
+              p.fechasTexto !== n.fechasTexto ||
+              p.totalRaw !== n.totalRaw ||
+              p.titulo !== n.titulo
+            ) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+        return listaFinal;
+      });
+
+      // Si el modal de detalle de alguna reserva está abierto, actualizarlo en vivo sin cerrarlo
+      setSelectedReserva((prev) => {
+        if (!prev) return null;
+        const matching = listaFinal.find((r) => r.id === prev.id || (r.pnr && r.pnr === prev.pnr));
+        if (matching && (matching.status !== prev.status || matching.placa !== prev.placa)) {
+          return { ...prev, ...matching };
+        }
+        return prev;
+      });
     } catch (fallo) {
-      if (currentFetch !== fetchId.current) return;
-      setError('No se pudieron cargar tus reservas.');
+      console.error('Error al cargar reservas en MisReservasPage:', fallo);
+      if (!isSilent) {
+        setError('No se pudieron cargar tus reservas.');
+      }
     } finally {
-      if (currentFetch === fetchId.current) {
+      isFetchingRef.current = false;
+      if (!isSilent) {
         setCargando(false);
       }
     }
   }, [filtroStatus, user?.email]);
 
   useEffect(() => {
-    cargarTodasLasReservas();
+    let timer = null;
+    let isCancelled = false;
+
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      await cargarTodasLasReservas(silent);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 5000);
+      }
+    };
+
+    runPoll(false);
+
+    return () => {
+      isCancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [cargarTodasLasReservas]);
 
   // Close popup menu on outside click
@@ -443,9 +598,15 @@ export function MisReservasPage() {
 
   const descargarPDF = (reserva) => {
     setIsDownloading(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        descargarFactura(reserva);
+        // Vuelos con aerolíneas socias: el detalle trae la factura real emitida.
+        let conFactura = reserva;
+        if (reserva.tipo === 'vuelo' && reserva.id) {
+          const det = await obtenerReservaVuelo(reserva.id).catch(() => null);
+          if (det?.factura) conFactura = { ...reserva, factura: det.factura, raw: { ...reserva.raw, passengers: det.passengers ?? reserva.raw?.passengers } };
+        }
+        descargarFactura(conFactura);
       } catch (err) {
         setAvisoDescarga('No se pudo generar el PDF de la factura.');
       } finally {
@@ -997,6 +1158,11 @@ export function MisReservasPage() {
                         <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
                           {ESTADOS_ES[r.status] ?? r.status}
                         </span>
+                        {(r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN') && (
+                          <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
+                            • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1173,6 +1339,11 @@ export function MisReservasPage() {
                     <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
                       {ESTADOS_ES[selectedReserva.status] ?? selectedReserva.status}
                     </span>
+                    {(selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'CHECKED_IN') && (
+                      <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
+                        • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ background: '#f5f5f5', borderRadius: '6px', padding: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>

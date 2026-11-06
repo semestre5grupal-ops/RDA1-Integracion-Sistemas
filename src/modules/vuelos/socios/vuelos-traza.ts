@@ -16,9 +16,11 @@ export type PasoVuelo =
   | 'cobro'
   | 'reserva_aerolinea'
   | 'copia'
+  | 'factura'
   | 'confirmada'
   | 'reembolso'
   | 'cancelacion'
+  | 'checkin'
   | 'estado_vuelo'
   | 'consulta';
 

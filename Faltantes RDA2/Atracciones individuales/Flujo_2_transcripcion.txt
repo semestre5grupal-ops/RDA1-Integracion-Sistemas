@@ -1,0 +1,290 @@
+[0.00s -> 5.00s]  Sí, primero, me dejó como una duda de lo de que nos dijo Reino.
+[5.00s -> 12.00s]  O sea, yo en el booking, entro y peo usuario, ya tengo un usuario, hago una compra para autos.
+[12.00s -> 19.00s]  Yo lo que podría hacer es al mitoservicio de clientes de esa página de autos.
+[19.00s -> 27.00s]  Lo quería es poder mandar la información del cliente para que ahí se trae un cliente dentro de la página de autos.
+[27.00s -> 33.00s]  Y hoy voy a eso, me mandé a mi información para que yo pueda hacer toda la reserva y esto es mandar como un resume a la página de autos.
+[33.00s -> 35.00s]  Sí, es de una forma.
+[35.00s -> 40.00s]  Y yo he visto que esa forma está usando ahora, porque mira, ustedes han averagado por el booking.
+[40.00s -> 41.00s]  Sí.
+[41.00s -> 46.00s]  Cuando busquéis comprar un boutique de avión, o sea, el buscador y todo eso es booking.
+[46.00s -> 50.00s]  Pero el rato que puedes reservar y comprar que te has fijado, a dónde se va.
+[50.00s -> 51.00s]  Ah, lo pague suave.
+[51.00s -> 56.00s]  La pague no veo de lo que te has fijado.
+[56.00s -> 57.00s]  Entonces, es lo mismo.
+[57.00s -> 61.00s]  Es que es para evitarse el doble registro, porque cuando vas a hacer doble registro,
+[61.00s -> 64.00s]  esa idita pierdes la consistencia de la información.
+[64.00s -> 70.00s]  Y una vez perdida la consistencia de la información se jodió, porque un chino te lo sirvo de la auto imaginante.
+[70.00s -> 75.00s]  A través del booking llega cuenga la empresa y no.
+[75.00s -> 78.00s]  Por eso yo he visto tiempo, o sea, ahora trabajan de esa manera.
+[78.00s -> 80.00s]  Vos le llaman al booking.
+[80.00s -> 84.00s]  Hace todo lo que tenga que hacer a este booking, pero ya el rato de la reserva, la reserva,
+[84.00s -> 87.00s]  para la parece la página web de Avianca.
+[87.00s -> 88.00s]  Si te has fijado.
+[88.00s -> 89.00s]  Si te ha fijado.
+[89.00s -> 90.00s]  Hace lo mismo.
+[90.00s -> 92.00s]  Hace la prueba con los autos y todo eso.
+[92.00s -> 93.00s]  Vele hasta donde.
+[93.00s -> 95.00s]  Pero ha habido la arriba del dominio.
+[95.00s -> 96.00s]  Sí.
+[96.00s -> 101.00s]  Y yo estoy segurísimo que igual, o sea, le llamo yo a la apíbel, el cliente y ahí es donde cara.
+[101.00s -> 104.00s]  Y en todo caso, el cliente por debajo me manda a mil los datos.
+[104.00s -> 107.00s]  Que vos necesites en solamente para completar el riquismo.
+[107.00s -> 113.00s]  Por lo que no te olvides que en este caso de aviones de autos atracciones y hoteles,
+[113.00s -> 117.00s]  vos necesitas la presencia física de la persona que vaya al otro lado.
+[117.00s -> 118.00s]  Claro.
+[118.00s -> 121.00s]  ¿Por qué otra cosa es que yo te venda un marjador y te malle a dejar el rujazo?
+[121.00s -> 123.00s]  Si a vos no necesitas nunca la presencia física.
+[123.00s -> 126.00s]  Pero en este caso, vos necesitas que la persona vaya al hotel.
+[126.00s -> 127.00s]  Claro.
+[127.00s -> 129.00s]  O sea, hay que tener el informe y que lo tengan al informe.
+[129.00s -> 130.00s]  Exacto.
+[130.00s -> 132.00s]  Entonces, por ejemplo, y continuando en el frujo.
+[132.00s -> 135.00s]  Yo ya te alquilo aquí en el auto, me voy a la computadora.
+[135.00s -> 138.00s]  Y acá, digo, a ver, abre la página de estación.
+[138.00s -> 139.00s]  Vengo a retirar el auto.
+[139.00s -> 142.00s]  Entonces, ¿en dónde se completan procesos?
+[142.00s -> 143.00s]  Desde la página.
+[143.00s -> 144.00s]  Ahí tiene que completarse.
+[144.00s -> 146.00s]  Ahí tiene que completarse el proceso.
+[146.00s -> 148.00s]  O sea, no es que ya se murió.
+[148.00s -> 150.00s]  Entonces, él me tendrá que ingresar a ver todos los datos.
+[150.00s -> 152.00s]  Te busco, sí, está hecha la reserva.
+[152.00s -> 155.00s]  Si quiere poder cambiar de auto, sino no, sino el mismo auto.
+[155.00s -> 157.00s]  No siento que más te dicen, ¿sabe qué?
+[157.00s -> 159.00s]  Ya solamente es hasta las 9.
+[159.00s -> 160.00s]  Ya llegó a las 10.
+[160.00s -> 162.00s]  Ahora tienes que esperar hasta las 3 de la tarde.
+[162.00s -> 165.00s]  O yo que se, pero en dónde se completan es ahí.
+[165.00s -> 167.00s]  Igual en los aviones, en dónde se completan,
+[167.00s -> 170.00s]  es cuando haces el check in que puede ser físico.
+[170.00s -> 171.00s]  ¿Cómo pueden ser?
+[171.00s -> 172.00s]  Un año.
+[172.00s -> 174.00s]  Las atraciones, ¿dónde se debe completar?
+[174.00s -> 177.00s]  El rato que la persona físicamente vaya al palicillo.
+[177.00s -> 178.00s]  Sí.
+[178.00s -> 180.00s]  El hotel, en dónde se completan?
+[180.00s -> 181.00s]  Igual.
+[181.00s -> 183.00s]  El rato que llega a físicamente al costador del hotel.
+[183.00s -> 186.00s]  Entonces, todos los sistemas de administración deben poder...
+[187.00s -> 189.00s]  Deben tener que la opción de completar el proceso.
+[189.00s -> 190.00s]  ¿Por qué caso contrario?
+[190.00s -> 191.00s]  Claro.
+[191.00s -> 192.00s]  Lo cierto.
+[192.00s -> 195.00s]  O sea, que aquí solamente sería como digamos un intermediario
+[195.00s -> 197.00s]  le decía hasta el punto de tú puedes comprar conmigo,
+[197.00s -> 199.00s]  pero finalizas el proceso en cada página.
+[199.00s -> 202.00s]  Es que claro, es que de ley finalizo, ¿por qué?
+[202.00s -> 205.00s]  Porque necesito yo ser el check in en el hotel.
+[205.00s -> 208.00s]  En cambio, si yo te vendo un producto, ¿no?
+[208.00s -> 212.00s]  Pues ya la página se conecta directamente con el Uber,
+[212.00s -> 213.00s]  ¿cómo es Uber?
+[213.00s -> 214.00s]  ¿No sé qué?
+[214.00s -> 215.00s]  Y va y te dejen el caso.
+[215.00s -> 216.00s]  Sí, sí.
+[216.00s -> 219.00s]  O sea, donde necesitas vos que vaya yo físicamente a ser al proceso.
+[219.00s -> 220.00s]  Claro.
+[220.00s -> 223.00s]  Pero cambian estos otros casos sin necesitas que yo haya físicamente
+[223.00s -> 224.00s]  a ser al proceso.
+[224.00s -> 226.00s]  O sea, que en esa segunda prueba que usted va a hacer es...
+[226.00s -> 228.00s]  va a tener un negocioario en Buking.
+[228.00s -> 231.00s]  Buking de ser un auto y después se va a acercar el compañero
+[231.00s -> 232.00s]  que es del lado.
+[232.00s -> 233.00s]  Claro, que va a ser vasto.
+[233.00s -> 236.00s]  Y a ver, cuando demanda los datos y deberías salir la reserva
+[236.00s -> 237.00s]  que hizo desde Buking.
+[237.00s -> 238.00s]  Exacto.
+[238.00s -> 239.00s]  Exacto.
+[239.00s -> 240.00s]  Exacto.
+[240.00s -> 243.00s]  Y él me completa ahí lo que ya sea reglas propias del negocio,
+[243.00s -> 246.00s]  por ejemplo, cuando lo hacemos un auto desde campos,
+[246.00s -> 248.00s]  vas, ya va a pagar y te preguntan.
+[248.00s -> 249.00s]  Te vuelven a repreguntar.
+[249.00s -> 250.00s]  Quiere seguro.
+[250.00s -> 251.00s]  No quiere seguro.
+[251.00s -> 252.00s]  Quiere el lavado.
+[252.00s -> 253.00s]  No quiere el lavado.
+[253.00s -> 254.00s]  Yo que sé, no es cierto.
+[254.00s -> 256.00s]  Y ahí te dices, pero un rotito y primero en un montón de
+[256.00s -> 257.00s]  formularios.
+[257.00s -> 258.00s]  Y se simula.
+[258.00s -> 260.00s]  Tiene que simular el bachero.
+[260.00s -> 261.00s]  Porque ahí pagas.
+[261.00s -> 262.00s]  Sí.
+[262.00s -> 263.00s]  Vamos, nos pagas.
+[263.00s -> 264.00s]  Vos y pagas de acá.
+[264.00s -> 266.00s]  Sólo que estamos haciendo es que ya aquí directamente tenemos
+[266.00s -> 267.00s]  el jonte de pagos.
+[267.00s -> 269.00s]  O sea, ya usted puede pagar directamente.
+[269.00s -> 270.00s]  Y a por qué?
+[270.00s -> 271.00s]  Y a por qué?
+[271.00s -> 272.00s]  Ya también.
+[272.00s -> 273.00s]  Claro, está bien.
+[273.00s -> 274.00s]  O sea, aquí ya está.
+[274.00s -> 276.00s]  Pero acá sí deben hacerme firmar todos los papeles,
+[276.00s -> 278.00s]  sobre todo, porque te va a pagar un auto,
+[278.00s -> 280.00s]  con seguro y todas esas bajas.
+[280.00s -> 281.00s]  Sí.
+[281.00s -> 283.00s]  Entonces, ese proceso no se pueden saltar.
+[283.00s -> 284.00s]  Ya.
+[284.00s -> 285.00s]  Ya.
+[285.00s -> 287.00s]  Es la diferencia con la beta de productos.
+[287.00s -> 289.00s]  Porque la beta de productos, como te digo,
+[289.00s -> 291.00s]  más mal nos va a dejar en la casa ahí.
+[291.00s -> 292.00s]  Y hasta.
+[292.00s -> 296.00s]  Pero acá, aquí no, aquí necesitas que vaya a loter,
+[296.00s -> 297.00s]  o que vaya a retirar el lavado.
+[297.00s -> 299.00s]  O que vaya a la atracción.
+[299.00s -> 301.00s]  Y bueno, en el caso de los vuelos,
+[301.00s -> 303.00s]  es verdad que se puede hacer online.
+[303.00s -> 305.00s]  Pero también, yo me voy a ir a...
+[305.00s -> 307.00s]  Digamos que esa computadora está en el aeropuerto.
+[307.00s -> 308.00s]  Quiero hacer el checking ahorita.
+[308.00s -> 311.00s]  Y traje una maleta que está con sobre pie,
+[311.00s -> 312.00s]  su cobra me dio una vez.
+[312.00s -> 313.00s]  Es sobre pie.
+[313.00s -> 316.00s]  Entonces, eso debe poder hacer.
+[316.00s -> 317.00s]  Claro.
+[317.00s -> 320.00s]  No es que es la realidad.
+[320.00s -> 321.00s]  Eso pasa.
+[321.00s -> 322.00s]  Sí, sí.
+[322.00s -> 323.00s]  Claro.
+[323.00s -> 326.00s]  Entonces, pero suya se me manejara cada persona.
+[326.00s -> 327.00s]  Cada persona.
+[327.00s -> 329.00s]  Ustedes, como booking, cumple,
+[329.00s -> 332.00s]  hasta que yo hago las reservas, por ejemplo, de hotel.
+[332.00s -> 334.00s]  Y ahí se la reserva en el booking.
+[334.00s -> 336.00s]  Bunt, hasta ahí terminas vos.
+[336.00s -> 337.00s]  Entonces, yo me voy.
+[337.00s -> 338.00s]  No es cierto.
+[338.00s -> 339.00s]  Yo me voy a cuenta.
+[339.00s -> 341.00s]  Y allá termino el proceso, si se reserva.
+[341.00s -> 342.00s]  Por qué?
+[342.00s -> 345.00s]  Supongo que ya reservaste y el cliente nunca fue.
+[345.00s -> 347.00s]  O supongo que no reservaste,
+[347.00s -> 350.00s]  pero había una política de poder, como es cancelar,
+[350.00s -> 352.00s]  48 horas antes, 16.
+[352.00s -> 354.00s]  Pero esas políticas de cada una de 11.
+[354.00s -> 355.00s]  Son de cada negocio.
+[355.00s -> 356.00s]  Claro.
+[356.00s -> 357.00s]  Así es.
+[357.00s -> 360.00s]  Pero ahí el booking puede tener sus políticas globales.
+[360.00s -> 365.00s]  Yo booking y política es que el descuento sea hasta del 40%
+[365.00s -> 368.00s]  en temporada de feria.
+[368.00s -> 372.00s]  Entonces, los negocios que quieren unirse a mi política bien.
+[372.00s -> 373.00s]  Sí, sí.
+[373.00s -> 374.00s]  Y entonces, ¿qué no quieres?
+[374.00s -> 375.00s]  Simplemente le digo, ¿no?
+[375.00s -> 376.00s]  O dan a buscar robos.
+[376.00s -> 377.00s]  Sí, sí, sí.
+[377.00s -> 378.00s]  Ya acabo.
+[378.00s -> 379.00s]  Sí.
+[379.00s -> 381.00s]  Pustamente se manejamos y le manejamos que cuando inezamos,
+[381.00s -> 384.00s]  primero nos manda en información hasta cuánto tienen el descuento.
+[384.00s -> 385.00s]  Y sí es que quieren uno de los cuales.
+[385.00s -> 386.00s]  Es sabe.
+[386.00s -> 387.00s]  Sí.
+[387.00s -> 388.00s]  Eso manejamos por los compradores.
+[388.00s -> 390.00s]  Pero así es cuando se interesa.
+[390.00s -> 393.00s]  Pero lo que sí deben tomar en cuenta es de eso, sea.
+[393.00s -> 396.00s]  Que yo voy a ir al hotel a cerrar el proceso.
+[396.00s -> 397.00s]  Ya.
+[397.00s -> 398.00s]  Sí, entonces eso tomé.
+[398.00s -> 401.00s]  Pero eso sería como un usuario administrador.
+[401.00s -> 403.00s]  No, él sería el que terminó el proceso.
+[403.00s -> 404.00s]  Claro.
+[404.00s -> 407.00s]  Pero este pan atentino no tiene que alizar que yo fui.
+[407.00s -> 408.00s]  Claro.
+[408.00s -> 409.00s]  Claro.
+[409.00s -> 411.00s]  Claro que él, porque por ejemplo vos tenia el booking,
+[411.00s -> 412.00s]  vos como doyon el booking.
+[413.00s -> 416.00s]  Te interesa, no te interesa saber de las reservas cuantas realmente
+[416.00s -> 418.00s]  se ejecutaron y cuantas no.
+[418.00s -> 419.00s]  Claro.
+[419.00s -> 420.00s]  Sí, sí, sí.
+[420.00s -> 421.00s]  No, cierto.
+[421.00s -> 423.00s]  Porque caso corrario pueden estar utilizando el booking para jugarnos.
+[423.00s -> 426.00s]  No te llenan de reservas y nunca pagan a reservas.
+[426.00s -> 430.00s]  Entonces también necesitas que yo vayan y apenas yo y así erro
+[430.00s -> 432.00s]  en negocio a los que te tienen que ser.
+[432.00s -> 434.00s]  Te tienen que desmadar un poco.
+[434.00s -> 435.00s]  Claro.
+[435.00s -> 438.00s]  Y ahí lo que pueden hacer es como estados, digamos, un estado de pagado.
+[438.00s -> 439.00s]  Es.
+[439.00s -> 441.00s]  Y que ya hay que ya han confirmado o así.
+[441.00s -> 444.00s]  Esas son las banderas que yo digo que realmente son los estados.
+[444.00s -> 446.00s]  Por ejemplo, aquí dice el reserva.
+[446.00s -> 447.00s]  No sé.
+[447.00s -> 452.00s]  Ya está que se paguen a otra plataforma, así que como reservado,
+[452.00s -> 455.00s]  pero igual para evitar que ustedes lo que mencionan de generar
+[455.00s -> 458.00s]  y de reservas, sin pagar y apartar dos espacios,
+[458.00s -> 463.00s]  pues ya puedo utilizar también como que las peticiones como que por tiempo.
+[463.00s -> 464.00s]  Claro, por tiempo.
+[464.00s -> 465.00s]  Exacto.
+[465.00s -> 467.00s]  Eso sí tienen que averiguar.
+[467.00s -> 470.00s]  No sé cuánto tiempo, pero vos haces una reserva
+[470.00s -> 473.00s]  hasta una hora que te aguantan, o sea.
+[473.00s -> 478.00s]  Si en una hora vos no pagaste de la reserva, ya se termino la reserva.
+[478.00s -> 479.00s]  Claro.
+[479.00s -> 482.00s]  Es que vos no puedes llenarte de reservas un avión y nadie paga.
+[482.00s -> 483.00s]  Claro.
+[483.00s -> 485.00s]  Y después ¿cuánto tiempo realmente es?
+[485.00s -> 486.00s]  Sí.
+[486.00s -> 488.00s]  Eso puedes preguntarle a alguien para tener el tiempo.
+[488.00s -> 489.00s]  Claro.
+[489.00s -> 492.00s]  Entonces claro, si es que en ese tiempo no se canceló.
+[492.00s -> 493.00s]  No se canceló.
+[493.00s -> 496.00s]  Ahora, en el caso de los hoteles, si yo ya pago de cada reserva.
+[496.00s -> 497.00s]  Claro.
+[497.00s -> 498.00s]  Claro.
+[498.00s -> 503.00s]  El problema es que si yo pagué y hay una política de devolución,
+[503.00s -> 506.00s]  de prueba de 48 horas, ¿qué pasa si yo digo?
+[506.00s -> 510.00s]  No voy en esas 48 horas. ¿Quién me devuelve vos hoy?
+[510.00s -> 512.00s]  No, se dice otra cosa.
+[512.00s -> 513.00s]  El boquín.
+[513.00s -> 514.00s]  El boquín.
+[514.00s -> 516.00s]  No ves que yo no se ve el boquín.
+[516.00s -> 517.00s]  Claro.
+[517.00s -> 518.00s]  Claro.
+[518.00s -> 522.00s]  No ves que el boquín generalmente debe ser como es un cierro a cada fin de mes.
+[522.00s -> 525.00s]  Al fin de mes, el cierro dice el hotel de cuenta.
+[525.00s -> 527.00s]  Yo he venido $1.000.
+[527.00s -> 531.00s]  El hotel se coge 800 y yo de comisión 200 y ruco en cobran los 200.
+[531.00s -> 535.00s]  Pero ese cierro no es diario, ese cierro es suele ser mensual.
+[535.00s -> 537.00s]  Generalmente en el uver es mensual.
+[537.00s -> 538.00s]  No sé en el uver.
+[538.00s -> 539.00s]  No debe ser mensual.
+[539.00s -> 540.00s]  Bueno, supongo.
+[540.00s -> 541.00s]  Claro.
+[541.00s -> 543.00s]  Entonces hay que ser un seguro ajuste también,
+[543.00s -> 545.00s]  porque si no, ¿cómo hay que ganas?
+[545.00s -> 546.00s]  Claro, hay que tener homageos.
+[546.00s -> 547.00s]  Sí, sí, sí, sí.
+[547.00s -> 548.00s]  Exactamente.
+[548.00s -> 551.00s]  Y los otros, obviamente, para que le siguen la ajuste
+[551.00s -> 552.00s]  también.
+[552.00s -> 555.00s]  Decibirme a ti, contarlemente y a los otros para que le siguen.
+[555.00s -> 557.00s]  También para tener esta lística, no va a ver.
+[557.00s -> 559.00s]  Y yo estoy pagando un servicio de boquín.
+[559.00s -> 561.00s]  ¿Cuántos me están viniendo del boquín?
+[561.00s -> 562.00s]  Claro.
+[562.00s -> 563.00s]  Resulta que me viene uno.
+[563.00s -> 565.00s]  No me sirven, o sea, mejor me salvo de ahí.
+[565.00s -> 569.00s]  Pero me solta que de cada 100, me vienen 90 de boquín,
+[569.00s -> 570.00s]  cinco para el boquín.
+[570.00s -> 574.00s]  Entonces, todos esos mensajes deben tener los dos lados para poder hacer mejor.
+[574.00s -> 575.00s]  Ya.
+[575.00s -> 576.00s]  Ok.
+[576.00s -> 578.00s]  Si no, ¿cómo? ¿Cómo sacas las tomas decisiones?
+[579.00s -> 580.00s]  ¿Qué?
+[580.00s -> 581.00s]  Nuestro.
+[581.00s -> 582.00s]  Gracias por ver.
+[582.00s -> 583.00s]  Nuestro.
+[583.00s -> 584.00s]  Claro, bien.
+[584.00s -> 585.00s]  ¿Qué?
+[585.00s -> 587.00s]  Ya vamos.
+[587.00s -> 588.00s]  No, son dos y veinte.
+[588.00s -> 589.00s]  ¿Vamos?
+[592.00s -> 593.00s]  Ya nada.
+[593.00s -> 595.00s]  Ya nada.
+[595.00s -> 596.00s]  ¿Qué?
+[596.00s -> 597.00s]  ¿Qué?

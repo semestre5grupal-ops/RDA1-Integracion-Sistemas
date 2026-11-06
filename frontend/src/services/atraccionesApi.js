@@ -21,7 +21,8 @@ export async function reservarAtraccion(id, reservationData, idempotencyKey) {
   const { data } = await api.post(`/atracciones/${id}/reservations`, reservationData, {
     headers: {
       'idempotency-key': idempotencyKey
-    }
+    },
+    timeout: 45000
   });
   return data;
 }
@@ -35,8 +36,9 @@ export async function eliminarAtraccion(id) {
   await api.delete(`/atracciones/${id}`);
 }
 
-export async function getReservas() {
-  const { data } = await api.get('/atracciones/reservations');
+export async function getReservas(email) {
+  const url = email ? `/atracciones/reservations?email=${encodeURIComponent(email)}` : '/atracciones/reservations';
+  const { data } = await api.get(url);
   return data;
 }
 

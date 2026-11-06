@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../hooks/useAuth';
 import { useFocusTrap } from '../hooks/useFocusTrap';
-import { crearReserva } from '../services/vuelosApi';
+import { crearReserva, obtenerMapaAsientos } from '../services/vuelosApi';
 import { obtenerHuellaDispositivo, formatearMoneda } from '../services/formato';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
@@ -11,16 +11,69 @@ import { useTelemetry } from '../hooks/useTelemetry';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
 const COUNTRIES = [
-  { code: 'ECU', name: 'Ecuador' },
-  { code: 'COL', name: 'Colombia' },
-  { code: 'PER', name: 'Perú' },
-  { code: 'ARG', name: 'Argentina' },
-  { code: 'CHL', name: 'Chile' },
-  { code: 'USA', name: 'Estados Unidos' },
-  { code: 'MEX', name: 'México' },
-  { code: 'ESP', name: 'España' },
-  { code: 'BRA', name: 'Brasil' },
+  { code: 'EC', name: 'Ecuador' },
+  { code: 'CO', name: 'Colombia' },
+  { code: 'PE', name: 'Perú' },
+  { code: 'AR', name: 'Argentina' },
+  { code: 'CL', name: 'Chile' },
+  { code: 'US', name: 'Estados Unidos' },
+  { code: 'MX', name: 'México' },
+  { code: 'ES', name: 'España' },
+  { code: 'BR', name: 'Brasil' },
 ];
+
+/**
+ * Países para el teléfono: prefijo y qué número nacional es válido (sin el 0
+ * inicial). El usuario elige el país y escribe solo su número; se valida ahí
+ * mismo y se envía en E.164 (+593991234567), que es lo que exigen las aerolíneas.
+ */
+const PAISES_TELEFONO = [
+  { pais: 'EC', bandera: '🇪🇨', prefijo: '593', regla: /^(9\d{8}|[2-7]\d{7})$/, ejemplo: '991234567', ayuda: 'celular de 9 dígitos que empieza con 9, u 8 dígitos fijo' },
+  { pais: 'CO', bandera: '🇨🇴', prefijo: '57', regla: /^(3\d{9}|60\d{8})$/, ejemplo: '3001234567', ayuda: '10 dígitos (celular empieza con 3)' },
+  { pais: 'PE', bandera: '🇵🇪', prefijo: '51', regla: /^(9\d{8}|[1-8]\d{7})$/, ejemplo: '912345678', ayuda: 'celular de 9 dígitos que empieza con 9' },
+  { pais: 'AR', bandera: '🇦🇷', prefijo: '54', regla: /^9?\d{10}$/, ejemplo: '91123456789', ayuda: '10 dígitos con código de área (celular: 9 + 10)' },
+  { pais: 'CL', bandera: '🇨🇱', prefijo: '56', regla: /^\d{9}$/, ejemplo: '912345678', ayuda: '9 dígitos' },
+  { pais: 'UY', bandera: '🇺🇾', prefijo: '598', regla: /^[249]\d{7}$/, ejemplo: '94123456', ayuda: '8 dígitos (celular empieza con 9)' },
+  { pais: 'US', bandera: '🇺🇸', prefijo: '1', regla: /^[2-9]\d{2}[2-9]\d{6}$/, ejemplo: '2025550123', ayuda: '10 dígitos' },
+  { pais: 'MX', bandera: '🇲🇽', prefijo: '52', regla: /^\d{10}$/, ejemplo: '5512345678', ayuda: '10 dígitos' },
+  { pais: 'ES', bandera: '🇪🇸', prefijo: '34', regla: /^[6-9]\d{8}$/, ejemplo: '612345678', ayuda: '9 dígitos' },
+  { pais: 'BR', bandera: '🇧🇷', prefijo: '55', regla: /^[1-9]{2}9?\d{8}$/, ejemplo: '11912345678', ayuda: 'DDD + número (10 u 11 dígitos)' },
+];
+const PAIS_TELEFONO = Object.fromEntries(PAISES_TELEFONO.map((p) => [p.pais, p]));
+
+/** Solo dígitos y sin el 0 inicial de marcación nacional (099… → 99…). */
+export function numeroNacional(valor) {
+  return String(valor ?? '').replace(/\D/g, '').replace(/^0+/, '');
+}
+
+/** '' si el número es válido para el país; si no, el mensaje a mostrar. */
+export function errorTelefono(pais, local) {
+  const def = PAIS_TELEFONO[pais];
+  if (!def) return 'Elige el país del teléfono.';
+  const n = numeroNacional(local);
+  if (!n) return 'El teléfono es obligatorio.';
+  return def.regla.test(n) ? '' : `Número no válido para ${def.bandera} +${def.prefijo}: ${def.ayuda}.`;
+}
+
+/** Teléfono en E.164 (+593991234567) a partir del país y el número local. */
+export function telefonoE164(pais, local) {
+  const def = PAIS_TELEFONO[pais] ?? PAIS_TELEFONO.EC;
+  return `+${def.prefijo}${numeroNacional(local)}`;
+}
+
+/** Cédula ecuatoriana: 10 dígitos, provincia 01-24 (o 30) y dígito verificador. */
+export function cedulaValida(c) {
+  if (!/^\d{10}$/.test(c)) return false;
+  const provincia = Number(c.slice(0, 2));
+  if (!((provincia >= 1 && provincia <= 24) || provincia === 30) || Number(c[2]) > 5) return false;
+  let suma = 0;
+  for (let i = 0; i < 9; i++) {
+    let x = Number(c[i]) * (i % 2 === 0 ? 2 : 1);
+    if (x > 9) x -= 9;
+    suma += x;
+  }
+  return (10 - (suma % 10)) % 10 === Number(c[9]);
+}
 
 
 /**
@@ -112,11 +165,13 @@ function pasajeroVacio(tipo, indice, idsAdultos) {
     lastName: '',
     documentType: 'NATIONAL_ID',
     documentNumber: '',
-    nationality: 'ECU',
+    nationality: 'EC',
     birthDate: '',
     gender: '',
     email: '',
     phone: '',
+    // Teléfono: país (prefijo) + número local. `phone` se arma en E.164 al enviar.
+    phoneCountry: 'EC',
   };
 }
 
@@ -129,12 +184,18 @@ function pasajeroVacio(tipo, indice, idsAdultos) {
 const REGLAS = {
   firstName: (v) => (v && v.trim() ? '' : 'El nombre es obligatorio.'),
   lastName: (v) => (v && v.trim() ? '' : 'El apellido es obligatorio.'),
-  documentNumber: (v) =>
-    v && /^[A-Z0-9][A-Z0-9-]{3,19}$/.test(v.trim())
+  documentNumber: (v, p) => {
+    const doc = (v ?? '').trim();
+    if (p?.documentType === 'NATIONAL_ID' && p?.nationality === 'EC') {
+      if (!/^\d{10}$/.test(doc)) return 'La cédula debe tener 10 dígitos.';
+      return cedulaValida(doc) ? '' : 'Cédula no válida: revisa los dígitos.';
+    }
+    return /^[A-Z0-9][A-Z0-9-]{3,19}$/.test(doc)
       ? ''
-      : 'Debe tener entre 4 y 20 caracteres alfanumericos en mayusculas.',
+      : 'Debe tener entre 4 y 20 caracteres alfanumericos en mayusculas.';
+  },
   nationality: (v) =>
-    v && v.trim() !== ''
+    v && /^[A-Z]{2}$/.test(v.trim())
       ? ''
       : 'Debe seleccionar una nacionalidad.',
   birthDate: (v) => {
@@ -145,10 +206,7 @@ const REGLAS = {
   gender: (v) => (v ? '' : 'Selecciona una opcion.'),
   email: (v) =>
     v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim()) ? '' : 'Correo no valido.',
-  phone: (v) =>
-    v && /^\+?[0-9]{7,20}$/.test(v.trim())
-      ? ''
-      : 'Entre 7 y 20 digitos, con + opcional.',
+  phone: (v, p) => errorTelefono(p?.phoneCountry ?? 'EC', v),
 };
 
 export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada }) {
@@ -162,6 +220,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const tipos = useMemo(() => distribuir(pasajeros), [pasajeros]);
   const [lista, setLista] = useState([]);
   const [errores, setErrores] = useState({});
+  // Mapas de asientos reales por tramo: { [segmentId]: { estado, asientos, error } }
+  const [mapas, setMapas] = useState({});
   const [enviando, setEnviando] = useState(false);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
@@ -204,6 +264,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     claveIdempotencia.current = uuidv4();
     setErrorGeneral(null);
     setErrores({});
+    setMapas({}); // hold nuevo: el mapa de asientos se vuelve a pedir
     trackEvent('checkout_started', 'vuelos');
 
     const idsAdultos = [];
@@ -221,7 +282,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
 
   /**
    * Normaliza a mayusculas los campos que el DDL exige en mayusculas
-   * (`nacionalidad ^[A-Z]{3}$`, documento alfanumerico). Se hace al escribir y no
+   * (nacionalidad ISO alfa-2, documento alfanumerico). Se hace al escribir y no
    * al enviar para que el usuario vea lo que va a enviarse sin sorpresas.
    */
   const cambiarNormalizado = useCallback(
@@ -234,6 +295,39 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     },
     [cambiar],
   );
+
+  /** Pide a la aerolínea el mapa de asientos de cada tramo del hold. */
+  const cargarMapas = useCallback(async (forzar = false) => {
+    const tramos = hold?.tramos ?? [];
+    if (!hold?.offerId || !tramos.length) return;
+    await Promise.all(tramos.map(async (t) => {
+      if (!forzar && mapas[t.segmentId]?.estado === 'ok') return;
+      setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'cargando' } }));
+      try {
+        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId);
+        setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'ok', asientos: asientosDeCabina(data, t.cabina) } }));
+      } catch {
+        setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'error' } }));
+      }
+    }));
+  }, [hold, mapas]);
+
+  useEffect(() => {
+    if (pasoActual === 2) cargarMapas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pasoActual, hold?.holdId]);
+
+  /** Valida el teléfono del pasajero `i` al momento (al salir del campo o al cambiar el país). */
+  const validarTelefonoAhora = useCallback((i, pais, numero) => {
+    const mensaje = numero ? errorTelefono(pais, numero) : '';
+    setErrores((e) => {
+      const clave = `p${i}.phone`;
+      if (!mensaje && !e[clave]) return e;
+      const copia = { ...e };
+      if (mensaje) copia[clave] = mensaje; else delete copia[clave];
+      return copia;
+    });
+  }, []);
 
   const validar = useCallback(() => {
     const nuevos = {};
@@ -330,7 +424,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             nationality: p.nationality.trim(),
             birthDate: p.birthDate,
             gender: p.gender,
-            contact: { email: p.email.trim(), phone: p.phone.trim() },
+            contact: { email: p.email.trim(), phone: telefonoE164(p.phoneCountry ?? 'EC', p.phone) },
+            ...(p.passengerType !== 'INFANT' && Object.keys(p.asientos ?? {}).length
+              ? { assignedSeats: Object.entries(p.asientos).map(([segmentId, seatNumber]) => ({ segmentId, seatNumber })) }
+              : {}),
           })),
           payment: { paymentReference: `pay_${uuidv4().slice(0, 18)}` },
         };
@@ -368,6 +465,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             ...datosFactura,
             pnr: reserva?.pnr || datosFactura.pnr,
             creadaEn: reserva?.createdAt,
+            titulo: reserva?.factura?.descripcion || datosFactura.titulo,
+            factura: reserva?.factura ?? null,
           });
         }
 
@@ -381,6 +480,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         // "Confirmar pago" es un intento nuevo.
         claveIdempotencia.current = uuidv4();
         const datos = fallo?.response?.data ?? {};
+        // Otro cliente tomó el asiento entre que se vio el mapa y se pagó:
+        // el cobro ya se devolvió; se vuelve a Asientos con el mapa actualizado.
+        if (fallo?.response?.status === 409 && /seat|asiento/i.test(JSON.stringify(datos))) {
+          setPasoActual(2);
+          cargarMapas(true);
+          setErrorGeneral('Ese asiento lo acaba de ocupar otra persona. Elige otro (el cobro ya se devolvió).');
+          return;
+        }
         const campos = (datos.invalidParams ?? [])
           .map((p) => `${String(p.name ?? '').replace(/^passengers[.[]?(\d+)\]?\.?/, (_, i) => `Pasajero ${Number(i) + 1}: `)} ${p.reason ?? ''}`.trim())
           .filter(Boolean);
@@ -394,7 +501,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         setEnviando(false);
       }
     },
-    [enviando, lista, hold, validar, onConfirmada, pasoActual],
+    [enviando, lista, hold, validar, onConfirmada, pasoActual, cargarMapas],
   );
 
   if (!abierto || !hold) return null;
@@ -675,17 +782,40 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                     <label className="modal-label" htmlFor={id('phone')}>
                       Teléfono <span aria-hidden="true">*</span>
                     </label>
-                    <input
-                      className={`modal-input ${err('phone') ? 'es-error' : ''}`}
-                      id={id('phone')}
-                      type="tel"
-                      placeholder="+593991234567"
-                      value={p.phone}
-                      onChange={(e) => cambiar(i, 'phone', e.target.value)}
-                      aria-required="true"
-                      aria-invalid={err('phone') ? 'true' : 'false'}
-                      aria-describedby={enlazado('phone')}
-                    />
+                    <div className="telefono-pais">
+                      <select
+                        className={`modal-input telefono-pais-select ${err('phone') ? 'es-error' : ''}`}
+                        aria-label="País del teléfono"
+                        value={p.phoneCountry ?? 'EC'}
+                        onChange={(e) => {
+                          cambiar(i, 'phoneCountry', e.target.value);
+                          validarTelefonoAhora(i, e.target.value, p.phone);
+                        }}
+                      >
+                        {PAISES_TELEFONO.map((t) => (
+                          <option key={t.pais} value={t.pais}>{t.bandera} +{t.prefijo}</option>
+                        ))}
+                      </select>
+                      <input
+                        className={`modal-input ${err('phone') ? 'es-error' : ''}`}
+                        id={id('phone')}
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel-national"
+                        placeholder={PAIS_TELEFONO[p.phoneCountry ?? 'EC']?.ejemplo}
+                        value={p.phone}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^\d\s]/g, '');
+                          cambiar(i, 'phone', v);
+                          // Si ya había error, se quita en cuanto el número es válido.
+                          if (err('phone')) validarTelefonoAhora(i, p.phoneCountry ?? 'EC', v);
+                        }}
+                        onBlur={(e) => validarTelefonoAhora(i, p.phoneCountry ?? 'EC', e.target.value)}
+                        aria-required="true"
+                        aria-invalid={err('phone') ? 'true' : 'false'}
+                        aria-describedby={enlazado('phone')}
+                      />
+                    </div>
                     {err('phone') && (
                       <span className="modal-error-campo" role="alert">
                         {err('phone')}
@@ -700,59 +830,37 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           {pasoActual === 2 && (
             <div className="paso-extras" style={{ marginTop: '20px' }}>
               <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Selección de Asientos</h3>
-              <p className="modal-nota-bloque">Selecciona tu asiento para cada pasajero.</p>
-              
-              {lista.map((p, i) => (
-                <fieldset className="bloque-pasajero" key={p.passengerId}>
-                  <legend className="bloque-pasajero-legend">
-                    Pasajero {i + 1} · {p.firstName || ETIQUETA_TIPO[p.passengerType]}
-                  </legend>
-                  <div className="rejilla-campos">
-                    <div className="campo">
-                      <label className="modal-label" htmlFor={`${idBase}-p${i}-asiento`}>
-                        Selección de Asiento
-                      </label>
-                      
-                      <div className="mapa-asientos" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', maxWidth: '200px', marginTop: '10px' }}>
-                        {['1A', '1B', '1C', '2A', '2B', '2C', '3A', '3B', '3C'].map((asiento) => {
-                          const estaOcupado = false; // Aquí se podría conectar al backend
-                          const estaSeleccionado = p.asiento === asiento;
-                          
-                          // Evitar que el mismo asiento lo seleccione otro pasajero
-                          const loTieneOtro = lista.some((pas, idx) => pas.asiento === asiento && idx !== i);
-
-                          return (
-                            <button
-                              key={asiento}
-                              type="button"
-                              className="btn-asiento"
-                              disabled={estaOcupado || loTieneOtro}
-                              onClick={() => cambiar(i, 'asiento', estaSeleccionado ? '' : asiento)}
-                              style={{
-                                padding: '10px 5px',
-                                border: '2px solid',
-                                borderColor: estaSeleccionado ? '#0066cc' : '#ccc',
-                                borderRadius: '8px',
-                                background: estaSeleccionado ? '#e6f0fa' : (loTieneOtro ? '#f1f1f1' : 'white'),
-                                cursor: loTieneOtro ? 'not-allowed' : 'pointer',
-                                color: loTieneOtro ? '#999' : 'inherit',
-                                fontWeight: estaSeleccionado ? 'bold' : 'normal',
-                                transition: 'all 0.2s',
-                              }}
-                              title={loTieneOtro ? 'Seleccionado por otro pasajero' : `Seleccionar asiento ${asiento}`}
-                            >
-                              {asiento}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <small className="modal-nota-bloque" style={{ display: 'block', marginTop: '10px' }}>
-                        {p.asiento ? `Asiento seleccionado: ${p.asiento}` : 'Ningún asiento seleccionado (asignación aleatoria).'}
-                      </small>
-                    </div>
-                  </div>
-                </fieldset>
-              ))}
+              <p className="modal-nota-bloque">
+                Mapa real de la aerolínea: los asientos en gris ya están ocupados. Si no eliges, la aerolínea asigna uno.
+              </p>
+              {lista.map((p, i) =>
+                p.passengerType === 'INFANT' ? null : (
+                  <fieldset className="bloque-pasajero" key={p.passengerId}>
+                    <legend className="bloque-pasajero-legend">
+                      Pasajero {i + 1} · {p.firstName || ETIQUETA_TIPO[p.passengerType]}
+                    </legend>
+                    {(hold?.tramos ?? []).map((t) => (
+                      <MapaAsientos
+                        key={t.segmentId}
+                        tramo={t}
+                        mapa={mapas[t.segmentId]}
+                        elegido={p.asientos?.[t.segmentId] ?? ''}
+                        ocupadosPorOtros={lista
+                          .filter((_, idx) => idx !== i)
+                          .map((o) => o.asientos?.[t.segmentId])
+                          .filter(Boolean)}
+                        onElegir={(asiento) =>
+                          cambiar(i, 'asientos', { ...(p.asientos ?? {}), [t.segmentId]: asiento })
+                        }
+                        onReintentar={() => cargarMapas(true)}
+                      />
+                    ))}
+                    {!(hold?.tramos ?? []).length && (
+                      <small className="modal-nota-bloque">La aerolínea asignará el asiento al emitir el boleto.</small>
+                    )}
+                  </fieldset>
+                ),
+              )}
             </div>
           )}
 
@@ -848,4 +956,83 @@ function formatearRestante(expiresAt) {
   return `${m}:${String(seg % 60).padStart(2, '0')}`;
 }
 
+/**
+ * Asientos de la cabina pagada a partir del seatmap del contrato
+ * (cabins[].rows[].seats[]). Devuelve filas: [{ fila, asientos: [{ numero, libre, extra }] }].
+ */
+function asientosDeCabina(data, cabina) {
+  const cabinas = data?.cabins ?? [];
+  const elegida = cabinas.find((c) => c.cabinClass === cabina) ?? (cabinas.length === 1 ? cabinas[0] : null);
+  return (elegida?.rows ?? []).map((r) => ({
+    fila: r.rowNumber,
+    asientos: (r.seats ?? []).map((a) => ({
+      numero: a.seatNumber,
+      libre: a.isAvailable !== false && String(a.status ?? 'AVAILABLE').toUpperCase() === 'AVAILABLE',
+      extra: (a.characteristics ?? []).includes('EXTRA_LEGROOM'),
+      ventana: (a.characteristics ?? []).includes('WINDOW'),
+    })),
+  }));
+}
 
+/** Mapa de asientos de un tramo para un pasajero. */
+function MapaAsientos({ tramo, mapa, elegido, ocupadosPorOtros, onElegir, onReintentar }) {
+  const titulo = `${tramo.flightNumber ?? ''} ${tramo.origen ?? ''} → ${tramo.destino ?? ''}`.trim();
+  if (!mapa || mapa.estado === 'cargando') {
+    return <div className="mapa-tramo"><div className="mapa-tramo-titulo">{titulo}</div><small className="modal-nota-bloque">Cargando asientos…</small></div>;
+  }
+  if (mapa.estado === 'error' || !mapa.asientos?.length) {
+    return (
+      <div className="mapa-tramo">
+        <div className="mapa-tramo-titulo">{titulo}</div>
+        <small className="modal-nota-bloque">
+          No se pudo cargar el mapa de asientos. Puedes continuar y la aerolínea asignará uno.{' '}
+          <button type="button" className="enlace-boton" onClick={onReintentar}>Reintentar</button>
+        </small>
+      </div>
+    );
+  }
+  // Pasillo: en filas de 6 asientos va después del 3.º; en filas de 4, después del 2.º.
+  const ancho = Math.max(...mapa.asientos.map((f) => f.asientos.length));
+  const pasilloDespues = ancho >= 6 ? 2 : ancho >= 4 ? 1 : -1;
+  return (
+    <div className="mapa-tramo">
+      <div className="mapa-tramo-titulo">
+        {titulo}
+        <span className="mapa-tramo-elegido">{elegido ? `Asiento ${elegido}` : 'Sin elegir'}</span>
+      </div>
+      <div className="mapa-asientos-real" role="group" aria-label={`Asientos ${titulo}`}>
+        {mapa.asientos.map((f) => (
+          <div className="fila-asientos" key={f.fila}>
+            <span className="fila-numero">{f.fila}</span>
+            {f.asientos.map((a, idx) => {
+              const deOtro = ocupadosPorOtros.includes(a.numero);
+              const seleccionado = elegido === a.numero;
+              const bloqueado = !a.libre || deOtro;
+              return (
+                <span key={a.numero} className="asiento-celda">
+                  <button
+                    type="button"
+                    className={`asiento ${seleccionado ? 'asiento-elegido' : ''} ${bloqueado ? 'asiento-ocupado' : ''} ${a.extra ? 'asiento-extra' : ''}`}
+                    disabled={bloqueado}
+                    aria-pressed={seleccionado}
+                    title={!a.libre ? `${a.numero}: ocupado` : deOtro ? `${a.numero}: elegido por otro pasajero` : `${a.numero}${a.ventana ? ' · ventana' : ''}${a.extra ? ' · espacio extra' : ''}`}
+                    onClick={() => onElegir(seleccionado ? '' : a.numero)}
+                  >
+                    {a.numero}
+                  </button>
+                  {idx === pasilloDespues && <span className="asiento-pasillo" aria-hidden="true" />}
+                </span>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="mapa-leyenda">
+        <span><i className="asiento muestra" /> Libre</span>
+        <span><i className="asiento muestra asiento-elegido" /> Tu asiento</span>
+        <span><i className="asiento muestra asiento-ocupado" /> Ocupado</span>
+        <span><i className="asiento muestra asiento-extra" /> Espacio extra</span>
+      </div>
+    </div>
+  );
+}
