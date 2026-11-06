@@ -2875,7 +2875,7 @@ export class AtraccionesService implements OnModuleInit {
     }
 
     // Compensación Saga: Notificar a socio externo para liberar stock
-    const isGloria = partnerUrlIcs.includes('ms-catalog') || (atraccionId && atraccionId.length === 36);
+    const isGloria = partnerUrlIcs.includes('ms-catalog') || (atraccionId && atraccionId.length === 36) || (partnerCancelId && partnerCancelId.length === 36 && !partnerCancelId.startsWith('ECT-'));
     const isAriel = atraccionId.startsWith('ECT-') || partnerCancelId.startsWith('ECT-');
     const isAlisson = atraccionId.startsWith('ALI-') || (atraccionId && atraccionId.length === 32);
     const isMichael = atraccionId === 'rLohsmEh6809' || (atraccionId.length === 12 && !atraccionId.startsWith('PRhu'));
