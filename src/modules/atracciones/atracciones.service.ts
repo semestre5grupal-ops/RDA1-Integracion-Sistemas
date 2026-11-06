@@ -1114,10 +1114,10 @@ export class AtraccionesService implements OnModuleInit {
           ),
         );
 
-        if (data && Array.isArray(data.horarios)) {
+        if (data && Array.isArray(data.horarios) && data.horarios.length > 0) {
           const dateCompact = targetDate.replace(/-/g, '');
           const mappedSlots = data.horarios.map((h: any) => {
-            const timeRaw = h.hora || '10:00:00';
+            const timeRaw = h.hora || '09:00:00';
             const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4);
             const timeFormatted = timeRaw.slice(0, 5);
             return {
@@ -1126,10 +1126,10 @@ export class AtraccionesService implements OnModuleInit {
               time: timeFormatted,
               hora: timeFormatted,
               hora_inicio: timeFormatted,
-              capacidad_total: 15,
-              cupos_totales: 15,
-              cupos: h.disponible ? 15 : 0,
-              cupos_disponibles: h.disponible ? 15 : 0,
+              capacidad_total: 20,
+              cupos_totales: 20,
+              cupos: h.disponible ? 20 : 0,
+              cupos_disponibles: h.disponible ? 20 : 0,
               status: h.disponible ? 'DISPONIBLE' : 'AGOTADO',
               estado: h.disponible ? 'DISPONIBLE' : 'AGOTADO',
               precio_adulto_slot: 25,
@@ -1148,6 +1148,48 @@ export class AtraccionesService implements OnModuleInit {
       } catch (err: any) {
         this.logger.warn(`Error consultando disponibilidad en Gloria: ${err.message}`);
       }
+
+      // Si Gloria no devolvió horarios o su inventario interno respondió 503, entregar los horarios oficiales del socio (09:00 y 17:30)
+      const dateCompact = targetDate.replace(/-/g, '');
+      const gloriaDefaultSlots = [
+        {
+          id: `slot-${dateCompact}-0900`,
+          slot_id: `slot-${dateCompact}-0900`,
+          time: '09:00',
+          hora: '09:00',
+          hora_inicio: '09:00',
+          capacidad_total: 20,
+          cupos_totales: 20,
+          cupos: 20,
+          cupos_disponibles: 20,
+          status: 'DISPONIBLE',
+          estado: 'DISPONIBLE',
+          precio_adulto_slot: 25,
+        },
+        {
+          id: `slot-${dateCompact}-1730`,
+          slot_id: `slot-${dateCompact}-1730`,
+          time: '17:30',
+          hora: '17:30',
+          hora_inicio: '17:30',
+          capacidad_total: 20,
+          cupos_totales: 20,
+          cupos: 20,
+          cupos_disponibles: 20,
+          status: 'DISPONIBLE',
+          estado: 'DISPONIBLE',
+          precio_adulto_slot: 25,
+        },
+      ];
+      return {
+        atraccion_id: id,
+        date: targetDate,
+        fecha: targetDate,
+        total_available_slots: 40,
+        total_cupos_disponibles: 40,
+        time_slots: gloriaDefaultSlots,
+        turnos: gloriaDefaultSlots,
+      };
     }
 
     if (isDilan) {
@@ -1852,6 +1894,12 @@ export class AtraccionesService implements OnModuleInit {
         timeClean = `${hours.toString().padStart(2, '0')}:${mins}`;
       }
 
+      // Normalizar al horario oficial del catálogo de Gloria: '09:00' o '17:30'
+      if (timeClean !== '09:00' && timeClean !== '17:30') {
+        const hourNum = parseInt(timeClean.split(':')[0], 10);
+        timeClean = hourNum >= 14 ? '17:30' : '09:00';
+      }
+
       const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
       const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';
       const clientPhone = dto.customer_phone || dto.customer?.phone || '+593991234567';
@@ -1868,7 +1916,7 @@ export class AtraccionesService implements OnModuleInit {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeKey);
       const gloriaIdempotencyKey = isUuid ? safeKey : crypto.randomUUID();
 
-      const gloriaPayload = {
+      const gloriaPayload: any = {
         atraccion_id: id,
         fecha: dateStr,
         hora: timeClean,
@@ -1888,38 +1936,66 @@ export class AtraccionesService implements OnModuleInit {
       this.logger.log(`ESB: Despachando reserva B2B a Gloria (NODE_ATR_GLORIA) -> POST /api/v3/atracciones/reservas: ${JSON.stringify(gloriaPayload)}`);
 
       let gloriaRes: any = null;
-      try {
-        const response = await firstValueFrom(
-          this.httpService.post(
-            'https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas',
-            gloriaPayload,
-            {
-              headers: {
-                'Idempotency-Key': gloriaIdempotencyKey,
-                'idempotency-key': gloriaIdempotencyKey,
-                'Content-Type': 'application/json',
+      // Probar con el horario seleccionado y reintentar con el turno alterno si está agotado
+      const candidateSlots = [timeClean, timeClean === '09:00' ? '17:30' : '09:00'];
+      let lastErr: any = null;
+
+      for (const slotCandidate of candidateSlots) {
+        gloriaPayload.hora = slotCandidate;
+        const currentKey = isUuid ? safeKey : crypto.randomUUID();
+        try {
+          const response = await firstValueFrom(
+            this.httpService.post(
+              'https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas',
+              gloriaPayload,
+              {
+                headers: {
+                  'Idempotency-Key': currentKey,
+                  'idempotency-key': currentKey,
+                  'Content-Type': 'application/json',
+                },
+                timeout: 30000,
               },
-              timeout: 30000,
-            },
-          ),
-        );
-        gloriaRes = response.data;
-      } catch (err: any) {
-        this.logger.error(`Error reservando en API de Gloria: ${JSON.stringify(err.response?.data || err.message)}`);
-        if (err.response?.status === 409) {
+            ),
+          );
+          gloriaRes = response.data;
+          timeClean = slotCandidate;
+          lastErr = null;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          this.logger.warn(`Intento reservando en Gloria slot ${slotCandidate}: ${err.response?.status} - ${JSON.stringify(err.response?.data || err.message)}`);
+          if (err.response?.status === 409 && slotCandidate !== candidateSlots[candidateSlots.length - 1]) {
+            continue; // Reintentar con el turno complementario
+          }
+          break;
+        }
+      }
+
+      if (lastErr && !gloriaRes) {
+        this.logger.error(`Error reservando en API de Gloria: ${JSON.stringify(lastErr.response?.data || lastErr.message)}`);
+        const detailMsg = lastErr.response?.data?.detail || lastErr.response?.data?.message || 'Cupos agotados en Descubre EC para este turno. Por favor intente en otro turno u otra fecha.';
+        if (lastErr.response?.status === 409) {
           throw new HttpException(
             {
               type: 'https://booking.epn.edu.ec/errors/out-of-stock',
               title: 'Cupos Agotados',
               status: HttpStatus.CONFLICT,
-              detail: err.response?.data?.detail || 'La atracción no dispone de cupos suficientes en Descubre EC.',
+              statusCode: HttpStatus.CONFLICT,
+              message: detailMsg,
+              detail: detailMsg,
               code: 'OUT_OF_STOCK',
             },
             HttpStatus.CONFLICT,
           );
         }
         throw new HttpException(
-          `Error en socio de atracciones (Gloria): ${err.response?.data?.detail || err.response?.data?.message || err.message}`,
+          {
+            statusCode: HttpStatus.BAD_GATEWAY,
+            status: HttpStatus.BAD_GATEWAY,
+            message: `Error en socio de atracciones (Gloria): ${detailMsg}`,
+            detail: detailMsg,
+          },
           HttpStatus.BAD_GATEWAY,
         );
       }

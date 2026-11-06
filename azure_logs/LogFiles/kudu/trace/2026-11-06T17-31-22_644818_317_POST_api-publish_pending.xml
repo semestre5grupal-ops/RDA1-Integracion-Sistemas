@@ -1,0 +1,15 @@
+<step title="Incoming Request" date="2026-11-06T17:31:22.208" instance="644818" url="/api/publish?type=zip&amp;async=True" method="POST" type="request" pid="887,1,47" Accept="*/*" Host="booking-core-api.scm.azurewebsites.net" User-Agent="AZURECLI/2.91.0 (MSI)" Accept-Encoding="gzip, deflate, zstd" Authorization="Bea..." Cache-Control="no-cache" Content-Type="application/octet-stream" Cookie="ARRAffinity=644818c0f7c6fe162cbfe986d6c3c34895ec19cbc74b8c6af9740bc1790bb1fe; ARRAffinitySameSite=644818c0f7c6fe162cbfe986d6c3c34895ec19cbc74b8c6af9740bc1790bb1fe" Content-Length="1592861" x-ms-client-request-id="dee9d59e-da07-11f1-b9f2-28d0430a858d" x-ms-artifact-checksum="5f7381bdcf91cecae5d2e45caf899ed614c87c2f99dede1e38d8a62789c449dd" X-ARR-LOG-ID="dee9d59e-da07-11f1-b9f2-28d0430a858d" CLIENT-IP="192.188.55.109:64505" X-SITE-DEPLOYMENT-ID="booking-core-api" WAS-DEFAULT-HOSTNAME="booking-core-api.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?type=zip&amp;async=True" X-Client-IP="192.188.55.109" X-Client-Port="64505" >
+  <step title="OneDeploy" date="2026-11-06T17:31:22.220" >
+    <step title="Starting PushDeployAsync" date="2026-11-06T17:31:22.230" /><!-- duration: 4ms -->
+    <step title="Removing _del_node_modules symlink" date="2026-11-06T17:31:22.244" >
+      <step title="Writing artifact to /tmp/zipdeploy/ea0c3d38-3500-46e9-af89-3a4b4b7bb6db.zip" date="2026-11-06T17:31:22.304" >
+        <step title="Writing multipart request body to /tmp/zipdeploy/ea0c3d38-3500-46e9-af89-3a4b4b7bb6db.zip" date="2026-11-06T17:31:22.307" /><!-- duration: 3ms -->
+        <step title="Writing zip file to /tmp/zipdeploy/ea0c3d38-3500-46e9-af89-3a4b4b7bb6db.zip" date="2026-11-06T17:31:22.313" /><!-- duration: 3402ms -->
+      </step><!-- duration: 3450ms -->
+      <step title="Start deployment in the background" date="2026-11-06T17:31:25.776" >
+        <step title="Acquiring Deployment Lock" date="2026-11-06T17:31:25.855" /><!-- duration: 10ms -->
+        <step title="Acquired Deployment Lock" date="2026-11-06T17:31:25.911" /><!-- duration: 3ms -->
+      </step><!-- duration: 200ms -->
+    </step><!-- duration: 3737ms -->
+    <step title="Outgoing response" date="2026-11-06T17:31:25.985" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 3ms -->
+  </step><!-- duration: 3771ms -->
