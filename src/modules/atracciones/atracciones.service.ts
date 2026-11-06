@@ -395,6 +395,7 @@ export class AtraccionesService {
 
   // 1.2.A. Sincronización con Ariel Chacha (Ecuatravel - NODE_ATR_ARIEL)
   private lastArielSync = 0;
+  private lastLiveSync = 0;
   async syncArielCatalog(): Promise<void> {
     const now = Date.now();
     if (now - this.lastArielSync < 20000) return;
@@ -788,14 +789,7 @@ export class AtraccionesService {
     let item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
 
     if (!item) {
-      try {
-        await this.syncAllCatalogs();
-        item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
-      } catch (_) {}
-    }
-
-    if (!item) {
-      // Probar directamente por ID contra todos los socios en paralelo/cascada
+      // Probar directamente por ID contra todos los socios en PARALELO ultra rápido (3500ms timeout)
       const partnersToProbe = [
         { code: 'NODE_ATR_MOLINA', url: `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/${id}`, key: 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w' },
         { code: 'NODE_ATR_DILAN', url: `https://descubre-gateway.livelymoss-5ea81cc6.chilecentral.azurecontainerapps.io/api/v3/atracciones/${id}`, key: '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568' },
@@ -804,24 +798,25 @@ export class AtraccionesService {
         { code: 'NODE_ATR_GLORIA', url: `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/${id}`, key: null },
       ];
 
-      for (const partner of partnersToProbe) {
+      const probePromises = partnersToProbe.map(async (partner) => {
         try {
           const headers: any = {};
           if (partner.key) {
             headers[partner.code === 'NODE_ATR_DILAN' ? 'x-api-key' : 'X-API-Key'] = partner.key;
           }
           const { data } = await firstValueFrom(
-            this.httpService.get(partner.url, { headers, timeout: 5000 }),
+            this.httpService.get(partner.url, { headers, timeout: 3500 }),
           );
           if (data && (data.id || data.name || data.nombre)) {
             const rawItem = data.item || data.data || data;
             if (!rawItem.id) rawItem.id = id;
             await this.upsertPartnerAttraction(rawItem, partner.code);
-            item = await this.atraccionRepo.findOne({ where: [{ id: rawItem.id }] });
-            if (item) break;
           }
         } catch (_) {}
-      }
+      });
+
+      await Promise.allSettled(probePromises);
+      item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
     }
 
     if (!item) {
@@ -1494,7 +1489,7 @@ export class AtraccionesService {
         totalAmount: totalPrice,
         currency: 'USD',
         status: 'CONFIRMED',
-        specialRequirements: dto.special_requirements,
+        specialRequirements: atraccion?.nombre || dto.special_requirements,
         voucherQrPayload: voucherQr,
         icsCalendarUrl: michaelRes?.ics_calendar_url || `https://booking.epn.edu.ec/api/v3/atracciones/reservas/${reservationCode}/calendar.ics`,
         guiaOficialAsignado: michaelRes?.guia_asignado || 'Guía oficial asignado por TourGirls',
@@ -1591,6 +1586,7 @@ export class AtraccionesService {
         totalAmount: totalPrice,
         currency: 'USD',
         status: 'CONFIRMED',
+        specialRequirements: atraccion?.nombre || dto.special_requirements,
         voucherQrPayload: alissonRes?.voucher_qr_payload || `VOUCHER-${reservationCode}`,
       });
 
@@ -1668,6 +1664,7 @@ export class AtraccionesService {
         totalAmount: totalPrice,
         currency: 'USD',
         status: 'CONFIRMED',
+        specialRequirements: atraccion?.nombre || dto.special_requirements,
       });
 
       const saved = await this.reservaRepo.save(nuevaReserva);
@@ -1796,7 +1793,7 @@ export class AtraccionesService {
         totalAmount: totalPrice,
         currency: 'USD',
         status: 'CONFIRMED',
-        specialRequirements: dto.special_requirements,
+        specialRequirements: atraccion?.nombre || dto.special_requirements,
         voucherQrPayload: voucherQr,
         icsCalendarUrl: dilanRes?.ics_calendar_url || `https://booking.epn.edu.ec/api/v3/atracciones/reservas/${reservationCode}/calendar.ics`,
         guiaOficialAsignado: dilanRes?.guia_asignado || 'Guía oficial asignado por Descubre EC',
@@ -2087,7 +2084,7 @@ export class AtraccionesService {
       totalAmount: totalPrice,
       currency: 'USD',
       status: 'CONFIRMED',
-      specialRequirements: dto.special_requirements,
+      specialRequirements: atraccion?.nombre || dto.special_requirements,
       voucherQrPayload: voucherQr,
       icsCalendarUrl: icsUrl,
       guiaOficialAsignado: 'Carlos Villacís (Guía Oficial MINTUR-441)',
@@ -2629,7 +2626,8 @@ export class AtraccionesService {
       r.createdAt && (now - new Date(r.createdAt).getTime()) < 48 * 3600 * 1000
     ).slice(0, 4);
 
-    if (pendientesSync.length > 0) {
+    if ((now - this.lastLiveSync > 15000) && pendientesSync.length > 0) {
+      this.lastLiveSync = now;
       const syncPromises = pendientesSync.map(async (r) => {
         try {
           // 1. TourGirls (Michael)
@@ -2899,16 +2897,7 @@ export class AtraccionesService {
 
   private formatReservaResponse(reserva: ReservaAtraccion, atraccionNombre?: string): any {
     const totalAmount = Number(reserva.totalAmount);
-    let titulo = atraccionNombre || `Tour / Atracción (${reserva.ticketCount || 1} personas)`;
-    if (!atraccionNombre) {
-      if (reserva.atraccionId === '0bef88e2-2391-4352-9af8-419ed5017f2b') {
-        titulo = 'prueba integración';
-      } else if (reserva.atraccionId === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
-        titulo = 'Prueba descubre EC';
-      } else if (reserva.atraccionId === 'rLohsmEh6809') {
-        titulo = 'Prueba de integración Tour Girls';
-      }
-    }
+    let titulo = atraccionNombre || (reserva.specialRequirements && !reserva.specialRequirements.includes('{') ? reserva.specialRequirements : null) || `Tour / Atracción (${reserva.ticketCount || 1} personas)`;
     return {
       id: reserva.id,
       reservation_id: reserva.id,
