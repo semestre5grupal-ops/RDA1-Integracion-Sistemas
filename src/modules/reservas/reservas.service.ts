@@ -95,7 +95,10 @@ export class ReservasService {
 
     // Fallback de configuración directa si no está en BD
     if (!baseUrl) {
-      if (codigo_nodo === 'NODE_AUT_RUTALIBRE' || codigo_nodo?.includes('AUT')) {
+      if (codigo_nodo === 'NODE_AUT_MATEO' || codigo_nodo === 'NODE_AUT_MDU' || codigo_nodo === 'NODE_AUT_MANEJADEUNA' || codigo_nodo === 'NODE_AUT_2') {
+        baseUrl = 'https://maneja-de-una-autos-api.azurewebsites.net/api/v3';
+        apiKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
+      } else if (codigo_nodo === 'NODE_AUT_RUTALIBRE' || codigo_nodo?.includes('AUT')) {
         baseUrl = process.env.TIENDA_AUTOS_URL || 'https://rutalibre-autos-api.azurewebsites.net/api/v3';
         apiKey = process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
       } else if (codigo_nodo === 'NODE_ATR_ALISSON' || codigo_nodo?.includes('ATR')) {
@@ -159,6 +162,7 @@ export class ReservasService {
               email: email || 'cliente@booking.com',
               identificacion: identificacion || '1710034065',
               telefono: telefono || '0999999999',
+              licencia: identificacion || '1710034065',
               booking_cliente_id: cliente_id,
             },
             { headers, timeout: 4000 },

@@ -475,10 +475,10 @@ export class AutosService implements OnModuleInit {
     const precioBaseDiario = auto.precio_diario;
 
     const cond = orderData.conductor || orderData.driver || {};
-    const driverName = cond.nombre || cond.nombre_completo || cond.full_name || orderData.booker?.name || 'Cliente Verificado';
-    const driverEmail = cond.email || cond.correo || orderData.booker?.email || 'cliente@booking.com';
-    const driverPhone = cond.telefono || cond.phone || orderData.booker?.phone || '+593999999999';
-    const driverLicense = cond.licencia_conducir || cond.licencia || cond.license || '1723456789';
+    const driverName = cond.nombre || cond.nombre_completo || cond.full_name || orderData.customer_name || orderData.booker?.name || 'Cliente Verificado';
+    const driverEmail = cond.email || cond.correo || orderData.customer_email || orderData.booker?.email || 'cliente@booking.com';
+    const driverPhone = cond.telefono || cond.phone || orderData.customer_phone || orderData.booker?.phone || '+593999999999';
+    const driverLicense = cond.licencia_conducir || cond.licencia || cond.license || cond.identificacion || cond.documento || cond.cedula || orderData.document_id || '1755073481';
     const driverAge = cond.edad !== undefined ? cond.edad : (cond.edad_conductor || cond.driver_age || orderData.driver?.age || 30);
     const flightNum = cond.numero_vuelo || 'N/A';
     const recargoEdad = (driverAge < 25 || driverAge > 70) ? 15.00 : 0.00;
@@ -487,18 +487,20 @@ export class AutosService implements OnModuleInit {
     const totalPagar = parseFloat((precioDiarioFinal * dias).toFixed(2));
     const depositoGarantia = tipoCobertura === 'TOTAL' ? 0.00 : 1200.00;
 
-    // Despacho a socio externo RutaLibre si el vehículo no es local de memoria
+    // Despacho a socio externo (RutaLibre o Maneja de Una) si el vehículo no es local de memoria
     const isLocalAuto = this.memoryFleet.some(c => c.id === autoId);
     let externalOrder: any = null;
 
-    if (!isLocalAuto || autoId.startsWith('auto-p') || autoId.startsWith('ext-')) {
+    if (!isLocalAuto || autoId.startsWith('auto-p') || autoId.startsWith('ext-') || autoId.length === 36) {
       try {
-        this.logger.log(`[AutosService] Vehículo ${autoId} detectado como externo. Despachando a RutaLibre (NODE_AUT_RUTALIBRE)...`);
+        this.logger.log(`[AutosService] Vehículo ${autoId} detectado como externo. Despachando a proveedor de autos...`);
         externalOrder = await this.circuitBreakerAdapter.createExternalOrder({
           vehicle_id: autoId,
           dias,
           pickup_date: pickupDateStr || new Date().toISOString().split('T')[0],
           dropoff_date: dropoffDateStr || new Date(Date.now() + dias * 24 * 3600 * 1000).toISOString().split('T')[0],
+          pickup_time: (orderData as any).pickup_time || (orderData as any).hora_recogida || '10:00',
+          dropoff_time: (orderData as any).dropoff_time || (orderData as any).hora_devolucion || '10:00',
           pickup_location: orderData.pickup_location || 'Quito Aeropuerto',
           dropoff_location: orderData.dropoff_location || 'Quito Aeropuerto',
           tipo_cobertura: tipoCobertura,
@@ -512,7 +514,7 @@ export class AutosService implements OnModuleInit {
           }
         }, idempotencyKey, cId);
       } catch (err: any) {
-        this.logger.warn(`[AutosService] Fallo despachando a RutaLibre: ${err.message}`);
+        this.logger.warn(`[AutosService] Fallo despachando a proveedor externo: ${err.message}`);
         if (err instanceof HttpException) {
           throw err;
         }
