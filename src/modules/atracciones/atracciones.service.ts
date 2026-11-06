@@ -750,18 +750,45 @@ export class AtraccionesService implements OnModuleInit {
   async sincronizarClienteConGloria(customer: { nombre: string; email: string; identificacion: string; telefono: string }): Promise<any> {
     const base = 'https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3';
 
+    // 1. Priorizar búsqueda por identificación para respetar el registro en Gloria
+    if (customer.identificacion) {
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.get(`${base}/clientes?identificacion=${encodeURIComponent(customer.identificacion)}`, { timeout: 4000 })
+        );
+        if (data && (data.identificacion || data.client_id || data.id)) {
+          this.logger.log(`[Cross-Platform Gloria] Cliente existente por identificación en Gloria: ${JSON.stringify(data)}`);
+          return {
+            nombre: data.nombre || customer.nombre,
+            email: data.email || customer.email,
+            identificacion: data.identificacion || customer.identificacion,
+            telefono: data.telefono || customer.telefono,
+            client_id: data.client_id || data.id,
+          };
+        }
+      } catch (_) {}
+    }
+
+    // 2. Si no se encontró por identificación, buscar por email
     if (customer.email) {
       try {
         const { data } = await firstValueFrom(
           this.httpService.get(`${base}/clientes?email=${encodeURIComponent(customer.email)}`, { timeout: 4000 })
         );
-        if (data && (data.id || data.client_id || data.email)) {
-          this.logger.log(`[Cross-Platform Gloria] Cliente ya existía en Gloria: ${JSON.stringify(data)}`);
-          return data;
+        if (data && (data.email || data.client_id || data.id)) {
+          this.logger.log(`[Cross-Platform Gloria] Cliente existente por email en Gloria: ${JSON.stringify(data)}`);
+          return {
+            nombre: data.nombre || customer.nombre,
+            email: data.email || customer.email,
+            identificacion: data.identificacion || customer.identificacion,
+            telefono: data.telefono || customer.telefono,
+            client_id: data.client_id || data.id,
+          };
         }
       } catch (_) {}
     }
 
+    // 3. Si no existe ni por identificación ni por email, crearlo en Gloria
     try {
       const createRes = await firstValueFrom(
         this.httpService.post(
@@ -782,7 +809,7 @@ export class AtraccionesService implements OnModuleInit {
       return createRes.data;
     } catch (err: any) {
       this.logger.warn(`[Cross-Platform Gloria] Aviso al registrar cliente en Gloria: ${err.response?.data?.message || err.message}`);
-      return null;
+      return customer;
     }
   }
 
@@ -1905,13 +1932,31 @@ export class AtraccionesService implements OnModuleInit {
       const clientPhone = dto.customer_phone || dto.customer?.phone || '+593991234567';
       const clientDoc = dto.document_id || dto.customer?.document_id || '1755073481';
 
-      // Sincronizar cliente con Gloria en segundo plano
-      this.sincronizarClienteConGloria({
+      // Sincronizar y conciliar cliente con la base de Gloria para evitar rechazos por divergencia email-identificación
+      let gloriaClient = {
         nombre: clientName,
         email: clientEmail,
         identificacion: clientDoc,
         telefono: clientPhone,
-      }).catch(e => this.logger.warn(`[Sync Gloria] Async client sync: ${e.message}`));
+      };
+      try {
+        const synced = await this.sincronizarClienteConGloria({
+          nombre: clientName,
+          email: clientEmail,
+          identificacion: clientDoc,
+          telefono: clientPhone,
+        });
+        if (synced && synced.email && synced.identificacion) {
+          gloriaClient = {
+            nombre: synced.nombre || clientName,
+            email: synced.email,
+            identificacion: synced.identificacion,
+            telefono: synced.telefono || clientPhone,
+          };
+        }
+      } catch (e: any) {
+        this.logger.warn(`[Sync Gloria] Pre-sync client: ${e.message}`);
+      }
 
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeKey);
       const gloriaIdempotencyKey = isUuid ? safeKey : crypto.randomUUID();
@@ -1921,15 +1966,15 @@ export class AtraccionesService implements OnModuleInit {
         fecha: dateStr,
         hora: timeClean,
         personas: totalTickets,
-        cliente_nombre: clientName,
-        cliente_email: clientEmail,
-        cliente_telefono: clientPhone,
-        cliente_documento: clientDoc,
+        cliente_nombre: gloriaClient.nombre,
+        cliente_email: gloriaClient.email,
+        cliente_telefono: gloriaClient.telefono,
+        cliente_documento: gloriaClient.identificacion,
         cliente: {
-          nombre: clientName,
-          email: clientEmail,
-          telefono: clientPhone,
-          documento: clientDoc,
+          nombre: gloriaClient.nombre,
+          email: gloriaClient.email,
+          telefono: gloriaClient.telefono,
+          documento: gloriaClient.identificacion,
         },
       };
 
