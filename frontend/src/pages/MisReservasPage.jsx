@@ -207,6 +207,7 @@ export function MisReservasPage() {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     const currentFetch = ++fetchId.current;
+    const correoSesion = (user?.email || '').trim().toLowerCase();
     if (!isSilent) {
       if (reservasRef.current.length === 0) {
         setCargando(true);
@@ -278,7 +279,8 @@ export function MisReservasPage() {
         // Fallback silenciado
       }
 
-      const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
+      const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]')
+        .filter((a) => !correoSesion || (a.email || a.customer_email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase() === correoSesion);
       const autosLocalesFormatted = autosLocales.map((a) => ({
         id: a.id || a.orderId,
         pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
@@ -300,7 +302,7 @@ export function MisReservasPage() {
       // 3. Atracciones API & Local
       let atraccionesItems = [];
       try {
-        const respuestaAtracciones = await getReservasAtracciones();
+        const respuestaAtracciones = await getReservasAtracciones(isAdmin ? undefined : (correoSesion || undefined));
         const listaAtracciones = Array.isArray(respuestaAtracciones) ? respuestaAtracciones : (respuestaAtracciones?.data || []);
         atraccionesItems = listaAtracciones.map((at) => ({
           id: at.id || at.reservation_id || at.pnr,
@@ -324,7 +326,8 @@ export function MisReservasPage() {
         // Fallback silenciado
       }
 
-      const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
+      const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]')
+        .filter((at) => !correoSesion || (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase() === correoSesion);
       const atraccionesLocalesFormatted = atraccionesLocales.map((at) => ({
         id: at.id || at.reservation_id || at.pnr,
         pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
@@ -449,37 +452,42 @@ export function MisReservasPage() {
         // Regla de Aislamiento y Privacidad Cross-Platform (Defensa Cátedra):
         if (!isAdmin) {
           if (!correoSesion) {
-            // Usuario sin sesión activa: no mostrar ninguna reserva del backend central
-            if (!item.isLocal) return;
-          } else {
-            // Usuario con sesión activa: debe coincidir su correo O su cédula O haber sido creada en esta sesión
-            const itemEmail = (item.email || '').trim().toLowerCase();
-            const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || '').trim();
-            const userCedula = (user?.user_metadata?.cedula || '').trim();
-            const docMatch = Boolean(itemDoc && userCedula && itemDoc === userCedula);
-            const emailMatch = Boolean(itemEmail && correoSesion && itemEmail === correoSesion);
+            // Usuario sin sesión activa: no mostrar ninguna reserva
+            return;
+          }
+          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || '').trim().toLowerCase();
+          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || '').trim();
+          const userCedula = (user?.user_metadata?.cedula || '').trim();
 
-            if (!docMatch && !emailMatch) {
-              if (!item.isLocal) return;
+          // Si el item tiene email, debe coincidir estrictamente con el correo de la sesión actual
+          if (itemEmail) {
+            if (itemEmail !== correoSesion) {
+              return;
             }
+          } else if (itemDoc) {
+            if (!userCedula || itemDoc !== userCedula) {
+              return;
+            }
+          } else {
+            return;
           }
         }
 
         const pnrVal = item.pnr && item.pnr !== '—' && !['HOTEL', 'AUTO', 'ATRAC'].includes(item.pnr) ? item.pnr : null;
         const idVal = item.id;
 
-        // Si es una reserva proveniente de localStorage, verificar que no exista ya la versión sincronizada del servidor
+        // Si es una reserva proveniente de localStorage, verificar si ya existe la versión del servidor
         if (item.isLocal) {
-          const yaExisteEnServidor = Array.from(mapaCombinado.values()).some((existente) =>
-            !existente.isLocal &&
-            existente.tipo === item.tipo &&
-            (
-              (pnrVal && existente.pnr === pnrVal) ||
-              (idVal && existente.id === idVal) ||
-              (existente.titulo === item.titulo && existente.fecha === item.fecha)
-            )
+          const existente = Array.from(mapaCombinado.values()).find((e) =>
+            !e.isLocal &&
+            e.tipo === item.tipo &&
+            ((pnrVal && e.pnr === pnrVal) || (idVal && e.id === idVal))
           );
-          if (yaExisteEnServidor) {
+          if (existente) {
+            // Si el servidor devolvió un título genérico pero la local tiene el nombre real de la atracción, actualizamos
+            if (item.titulo && (!existente.titulo || existente.titulo.startsWith('Tour / Atracción'))) {
+              existente.titulo = item.titulo;
+            }
             return;
           }
         }
