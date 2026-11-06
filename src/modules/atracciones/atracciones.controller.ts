@@ -186,6 +186,17 @@ export class AtraccionesController {
     return this.atraccionesService.checkin(reservationId, dto, req);
   }
 
+  @Post(':reservationId/checkin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Realizar Check-in presencial (Alias directo /:id/checkin)' })
+  async checkinDirectAlias(
+    @Param('reservationId') reservationId: string,
+    @Body() dto: CheckinAtraccionDto,
+    @Req() req: any
+  ) {
+    return this.atraccionesService.checkin(reservationId, dto, req);
+  }
+
   @Post('clientes/sincronizar')
   @ApiOperation({ summary: 'Sincronizar cliente cross-platform con socios de atracciones (Dilan y Ariel)' })
   async sincronizarCliente(@Body() dto: any) {
