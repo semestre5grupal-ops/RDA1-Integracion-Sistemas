@@ -46,6 +46,10 @@ const DEFAULT_IMAGES = {
 
 export function MisReservasPage() {
   const [reservas, setReservas] = useState([]);
+  const reservasRef = useRef([]);
+  useEffect(() => {
+    reservasRef.current = reservas;
+  }, [reservas]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
   const [selectedReserva, setSelectedReserva] = useState(null);
@@ -197,10 +201,14 @@ export function MisReservasPage() {
     }
   }, [selectedReserva, showHelpModal]);
 
-  const cargarTodasLasReservas = useCallback(async () => {
+  const cargarTodasLasReservas = useCallback(async (isSilent = false) => {
     const currentFetch = ++fetchId.current;
-    setCargando(true);
-    setError(null);
+    if (!isSilent) {
+      if (reservasRef.current.length === 0) {
+        setCargando(true);
+      }
+      setError(null);
+    }
 
     try {
       // 1. Vuelos API
@@ -448,6 +456,22 @@ export function MisReservasPage() {
         const pnrVal = item.pnr && item.pnr !== '—' && !['HOTEL', 'AUTO', 'ATRAC'].includes(item.pnr) ? item.pnr : null;
         const idVal = item.id;
 
+        // Si es una reserva proveniente de localStorage, verificar que no exista ya la versión sincronizada del servidor
+        if (item.isLocal) {
+          const yaExisteEnServidor = Array.from(mapaCombinado.values()).some((existente) =>
+            !existente.isLocal &&
+            existente.tipo === item.tipo &&
+            (
+              (pnrVal && existente.pnr === pnrVal) ||
+              (idVal && existente.id === idVal) ||
+              (existente.titulo === item.titulo && existente.fecha === item.fecha)
+            )
+          );
+          if (yaExisteEnServidor) {
+            return;
+          }
+        }
+
         // Si ya registramos este PNR o este ID para este tipo de servicio, lo evitamos
         const pnrKey = pnrVal ? `${item.tipo}_${pnrVal}` : null;
         const idKey = idVal ? `${item.tipo}_${idVal}` : null;
@@ -464,24 +488,62 @@ export function MisReservasPage() {
       let listaFinal = Array.from(mapaCombinado.values());
       listaFinal.sort((a, b) => b.rawDate - a.rawDate);
 
-      setReservas(listaFinal);
+      // Reactividad tipo Composable (Android):
+      // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),
+      // mantenemos intacta la referencia previa para evitar cualquier re-render o parpadeo visual.
+      setReservas((prev) => {
+        if (prev && prev.length === listaFinal.length) {
+          let hasDiff = false;
+          for (let i = 0; i < listaFinal.length; i++) {
+            const p = prev[i];
+            const n = listaFinal[i];
+            if (
+              !p || !n ||
+              p.id !== n.id ||
+              p.status !== n.status ||
+              p.placa !== n.placa ||
+              p.fechasTexto !== n.fechasTexto ||
+              p.totalRaw !== n.totalRaw ||
+              p.titulo !== n.titulo
+            ) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+        return listaFinal;
+      });
+
+      // Si el modal de detalle de alguna reserva está abierto, actualizarlo en vivo sin cerrarlo
+      setSelectedReserva((prev) => {
+        if (!prev) return null;
+        const matching = listaFinal.find((r) => r.id === prev.id || (r.pnr && r.pnr === prev.pnr));
+        if (matching && (matching.status !== prev.status || matching.placa !== prev.placa)) {
+          return { ...prev, ...matching };
+        }
+        return prev;
+      });
     } catch (fallo) {
       if (currentFetch !== fetchId.current) return;
-      setError('No se pudieron cargar tus reservas.');
+      if (!isSilent) {
+        setError('No se pudieron cargar tus reservas.');
+      }
     } finally {
-      if (currentFetch === fetchId.current) {
+      if (currentFetch === fetchId.current && !isSilent) {
         setCargando(false);
       }
     }
   }, [filtroStatus, user?.email]);
 
   useEffect(() => {
-    cargarTodasLasReservas();
+    cargarTodasLasReservas(false);
 
-    // Auto-polling (RDA2 / Simulación gRPC en tiempo real)
-    // Refresca automáticamente el estado de las reservas (Check-in, asistencias y entregas) cada 4 segundos
+    // Auto-polling silencioso (RDA2 / Simulación gRPC en tiempo real)
+    // Refresca automáticamente en segundo plano el estado de las reservas cada 4 segundos
+    // de forma 100% silenciosa: sin skeletons, sin parpadeos y sin interrumpir la interacción del usuario
     const pollInterval = setInterval(() => {
-      cargarTodasLasReservas();
+      cargarTodasLasReservas(true);
     }, 4000);
 
     return () => clearInterval(pollInterval);
