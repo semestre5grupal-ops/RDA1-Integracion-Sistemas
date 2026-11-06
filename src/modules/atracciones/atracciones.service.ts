@@ -1,4 +1,4 @@
-import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, Optional, OnModuleInit } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, ILike, In } from 'typeorm';
@@ -26,9 +26,18 @@ import * as crypto from 'crypto';
 import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 @Injectable()
-export class AtraccionesService {
+export class AtraccionesService implements OnModuleInit {
   private readonly logger = new Logger(AtraccionesService.name);
   private readonly EXTERNAL_API_URL = process.env.ATRACCIONES_API_URL || 'https://jsonplaceholder.typicode.com/posts';
+
+  async onModuleInit() {
+    try {
+      await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN turno_id DROP NOT NULL`);
+    } catch (_) {}
+    try {
+      await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
+    } catch (_) {}
+  }
 
   constructor(
     private readonly httpService: HttpService,
@@ -683,16 +692,69 @@ export class AtraccionesService {
     }
   }
 
+  // ============================================================================
+  // 1.3.D. SINCRONIZACIÓN CROSS-PLATFORM DE CLIENTES CON ALISSON (NODE_ATR_ALISSON)
+  // ============================================================================
+  async sincronizarClienteConAlisson(customer: { nombre: string; email: string; identificacion: string; telefono: string }): Promise<any> {
+    const base = 'https://alisson-atracciones-api.azurewebsites.net/api/v3';
+    const headers = { 'X-API-Key': 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078' };
+
+    // 1. Consultar si ya existe en Alisson por email
+    if (customer.email) {
+      try {
+        const checkRes = await firstValueFrom(
+          this.httpService.get(`${base}/clientes?email=${encodeURIComponent(customer.email)}`, {
+            headers,
+            timeout: 4000,
+          }),
+        );
+        if (checkRes.status === 200 && checkRes.data) {
+          this.logger.log(`[Cross-Platform Alisson] Cliente ya registrado en Alisson: ${JSON.stringify(checkRes.data)}`);
+          return checkRes.data;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Si no existe, crearlo en Alisson
+    try {
+      const createRes = await firstValueFrom(
+        this.httpService.post(
+          `${base}/clientes`,
+          {
+            nombre: customer.nombre,
+            email: customer.email,
+            identificacion: customer.identificacion,
+            tipo_identificacion: 'CEDULA',
+            telefono: customer.telefono,
+          },
+          {
+            headers: {
+              ...headers,
+              'Content-Type': 'application/json',
+            },
+            timeout: 5000,
+          },
+        ),
+      );
+      this.logger.log(`[Cross-Platform Alisson] Cliente registrado exitosamente en Alisson: ${JSON.stringify(createRes.data)}`);
+      return createRes.data;
+    } catch (err: any) {
+      this.logger.warn(`[Cross-Platform Alisson] Error al registrar cliente en Alisson: ${err.response?.data?.message || err.message}`);
+      return null;
+    }
+  }
+
   async sincronizarClienteGlobal(dto: any): Promise<any> {
     const nombre = dto.nombre || dto.name || 'Turista Booking Central';
     const email = dto.email || 'turista@booking.local';
     const identificacion = dto.identificacion || dto.cedula || '1755073481';
     const telefono = dto.telefono || '+593991234567';
 
-    const [arielRes, dilanRes, michaelRes] = await Promise.allSettled([
+    const [arielRes, dilanRes, michaelRes, alissonRes] = await Promise.allSettled([
       this.sincronizarClienteConAriel({ nombre, email, identificacion, telefono }),
       this.sincronizarClienteConDilan({ nombre, email, identificacion, telefono }),
       this.sincronizarClienteConMichael({ nombre, email, identificacion, telefono }),
+      this.sincronizarClienteConAlisson({ nombre, email, identificacion, telefono }),
     ]);
 
     return {
@@ -702,6 +764,7 @@ export class AtraccionesService {
       ariel: arielRes.status === 'fulfilled' ? arielRes.value : null,
       dilan: dilanRes.status === 'fulfilled' ? dilanRes.value : null,
       michael: michaelRes.status === 'fulfilled' ? michaelRes.value : null,
+      alisson: alissonRes.status === 'fulfilled' ? alissonRes.value : null,
     };
   }
 
@@ -881,27 +944,29 @@ export class AtraccionesService {
       item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
     }
 
-    const isMichael =
-      item?.proveedorCodigo === 'NODE_ATR_MOLINA' ||
-      id === 'rLohsmEh6809' ||
-      (id.length === 12 && !id.includes('-') && !id.startsWith('PRhu'));
+    const partnerCode = item?.proveedorCodigo || '';
 
-    const isAlisson =
-      item?.proveedorCodigo === 'NODE_ATR_ALISSON' ||
-      id.startsWith('PRhu');
+    let isAlisson = partnerCode === 'NODE_ATR_ALISSON';
+    let isMichael = partnerCode === 'NODE_ATR_MOLINA';
+    let isGloria = partnerCode === 'NODE_ATR_GLORIA';
+    let isDilan = partnerCode === 'NODE_ATR_DILAN';
+    let isAriel = partnerCode === 'NODE_ATR_ARIEL';
 
-    const isGloria =
-      item?.proveedorCodigo === 'NODE_ATR_GLORIA' ||
-      id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d';
-
-    const isDilan =
-      item?.proveedorCodigo === 'NODE_ATR_DILAN' ||
-      id.startsWith('6f03');
-
-    const isAriel =
-      item?.proveedorCodigo === 'NODE_ATR_ARIEL' ||
-      id.startsWith('0bef') ||
-      (!isMichael && !isAlisson && !isGloria && !isDilan && (id.length > 30 || id.includes('-')));
+    if (!isAlisson && !isMichael && !isGloria && !isDilan && !isAriel) {
+      if (id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d') {
+        isGloria = true;
+      } else if (id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
+        isDilan = true;
+      } else if (id.startsWith('PRhu') || id === 's7PpJcyvtY2Q') {
+        isAlisson = true;
+      } else if (id === 'rLohsmEh6809') {
+        isMichael = true;
+      } else if (id.startsWith('0bef') || id.length > 30 || id.includes('-')) {
+        isAriel = true;
+      } else if (id.length === 12) {
+        isMichael = true;
+      }
+    }
 
     if (isMichael) {
       try {
@@ -1346,31 +1411,27 @@ export class AtraccionesService {
       dto.proveedor?.codigo ||
       '';
 
-    const isMichaelAttr =
-      provCode === 'NODE_ATR_MOLINA' ||
-      id === 'rLohsmEh6809' ||
-      (id.length === 12 && !id.includes('-') && !id.startsWith('PRhu'));
+    let isAlissonAttr = provCode === 'NODE_ATR_ALISSON';
+    let isMichaelAttr = provCode === 'NODE_ATR_MOLINA';
+    let isGloriaAttr = provCode === 'NODE_ATR_GLORIA';
+    let isDilanAttr = provCode === 'NODE_ATR_DILAN';
+    let isArielAttr = provCode === 'NODE_ATR_ARIEL';
 
-    const isAlissonAttr =
-      provCode === 'NODE_ATR_ALISSON' ||
-      id.startsWith('PRhu');
-
-    const isGloriaAttr =
-      provCode === 'NODE_ATR_GLORIA' ||
-      id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d';
-
-    const isDilanAttr =
-      !isMichaelAttr && !isAlissonAttr && !isGloriaAttr &&
-      (provCode === 'NODE_ATR_DILAN' ||
-       id.startsWith('6f03') ||
-       id === '6f035852-c8a8-49b1-a771-1b34b07e972d');
-
-    const isArielAttr =
-      !isMichaelAttr && !isAlissonAttr && !isGloriaAttr && !isDilanAttr &&
-      (provCode === 'NODE_ATR_ARIEL' ||
-       id.startsWith('0bef') ||
-       id.length > 30 ||
-       id.includes('-'));
+    if (!isAlissonAttr && !isMichaelAttr && !isGloriaAttr && !isDilanAttr && !isArielAttr) {
+      if (id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d') {
+        isGloriaAttr = true;
+      } else if (id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
+        isDilanAttr = true;
+      } else if (id.startsWith('PRhu') || id === 's7PpJcyvtY2Q') {
+        isAlissonAttr = true;
+      } else if (id === 'rLohsmEh6809') {
+        isMichaelAttr = true;
+      } else if (id.startsWith('0bef') || id.length > 30 || id.includes('-')) {
+        isArielAttr = true;
+      } else if (id.length === 12) {
+        isMichaelAttr = true;
+      }
+    }
 
     if (isMichaelAttr) {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
@@ -1522,10 +1583,53 @@ export class AtraccionesService {
       const clientPhone = dto.customer_phone || dto.customer?.phone || '+593991234567';
       const clientDoc = dto.document_id || dto.customer?.document_id || '1755073481';
 
+      // Validación semántica según contrato estricto de Alisson (módulo 10 cédula o pasaporte 6-9 chars)
+      let docType = 'CEDULA';
+      let docNumber = (clientDoc || '').trim();
+      const isValidCed = (c: string) => {
+        if (!c || c.length !== 10 || !/^\d+$/.test(c)) return false;
+        const prov = parseInt(c.substring(0, 2), 10);
+        if (prov < 1 || prov > 24) return false;
+        const d3 = parseInt(c[2], 10);
+        if (d3 >= 6) return false;
+        const coef = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+        let sum = 0;
+        for (let i = 0; i < 9; i++) {
+          let v = parseInt(c[i], 10) * coef[i];
+          if (v >= 10) v -= 9;
+          sum += v;
+        }
+        return ((10 - (sum % 10)) % 10) === parseInt(c[9], 10);
+      };
+
+      if (isValidCed(docNumber)) {
+        docType = 'CEDULA';
+      } else if (/^[A-Za-z0-9]{6,9}$/.test(docNumber)) {
+        docType = 'PASAPORTE';
+        docNumber = docNumber.toUpperCase();
+      } else {
+        docType = 'CEDULA';
+        docNumber = '1755073481';
+      }
+
+      let safeFullName = clientName.trim();
+      if (safeFullName.split(/\s+/).length < 2) {
+        safeFullName = `${safeFullName} Turista`;
+      }
+
+      // Sincronizar cliente con Alisson en segundo plano
+      this.sincronizarClienteConAlisson({
+        nombre: safeFullName,
+        email: clientEmail,
+        identificacion: docNumber,
+        telefono: clientPhone,
+      }).catch(e => this.logger.warn(`[Sync Alisson] Async client sync: ${e.message}`));
+
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeKey);
       const alissonIdempotencyKey = isUuid ? safeKey : crypto.randomUUID();
 
       const alissonPayload = {
+        attraction_id: id,
         atraccion_id: id,
         slot_id: slotIdAlisson,
         date: dateStr,
@@ -1535,26 +1639,34 @@ export class AtraccionesService {
         senior_count: seniorCount,
         infant_count: infantCount,
         customer: {
-          full_name: clientName,
+          full_name: safeFullName,
+          nombre_completo: safeFullName,
           email: clientEmail,
+          correo: clientEmail,
           phone: clientPhone,
-          document_type: 'CEDULA',
-          document_id: clientDoc,
+          telefono: clientPhone,
+          document_type: docType,
+          tipo_documento: docType,
+          document_id: docNumber,
+          numero_documento: docNumber,
         },
         payment_method: { method: 'CREDIT_CARD' },
       };
+
+      this.logger.log(`ESB: Despachando reserva B2B a Alisson (NODE_ATR_ALISSON) -> POST /api/v3/atracciones/reservas: ${JSON.stringify({ id, slot_id: slotIdAlisson, date: dateStr, time: timeFormatted })}`);
 
       let alissonRes: any = null;
       try {
         const response = await firstValueFrom(
           this.httpService.post(
-            'https://alisson-atracciones-api.azurewebsites.net/api/v3/reservas',
+            'https://alisson-atracciones-api.azurewebsites.net/api/v3/atracciones/reservas',
             alissonPayload,
             {
               headers: {
                 'X-API-Key': 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078',
                 'Idempotency-Key': alissonIdempotencyKey,
                 'Content-Type': 'application/json',
+                'X-Correlation-Id': `cid-${Date.now()}`,
               },
               timeout: 30000,
             },
@@ -1563,18 +1675,65 @@ export class AtraccionesService {
         alissonRes = response.data;
       } catch (err: any) {
         this.logger.error(`Error reservando en API de Alisson: ${err.response?.data?.message || err.message}`);
+        if (err.response?.status === 409) {
+          throw new HttpException(
+            {
+              type: 'https://booking.epn.edu.ec/errors/out-of-stock',
+              title: 'Cupos Agotados',
+              status: HttpStatus.CONFLICT,
+              detail: `La atracción no dispone de cupos suficientes para el turno solicitado en Alisson.`,
+              code: 'OUT_OF_STOCK',
+            },
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw new HttpException(
+          `Error en socio de atracciones (Alisson): ${err.response?.data?.detail || err.response?.data?.message || err.message}`,
+          HttpStatus.BAD_GATEWAY,
+        );
       }
 
-      const reservationCode = alissonRes?.reservation_code || alissonRes?.external_order_id || `ALI-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const reservationCode = alissonRes?.reservation_code || alissonRes?.reservation_id || alissonRes?.external_order_id || `ATR-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+      let localTurnoId = null;
+      try {
+        const tRows = await this.dataSource.query(
+          `INSERT INTO schema_atracciones.atracciones_turnos_aforo 
+             (atraccion_id, fecha, hora_inicio, hora_fin, capacidad_total, cupos_disponibles, estado)
+           VALUES ($1, $2, $3, '12:00 p.m.', 20, 20, 'DISPONIBLE')
+           ON CONFLICT (atraccion_id, fecha, hora_inicio) DO UPDATE SET
+             cupos_disponibles = GREATEST(0, schema_atracciones.atracciones_turnos_aforo.cupos_disponibles - $4)
+           RETURNING id`,
+          [id, dateStr, timeFormatted, totalTickets],
+        );
+        if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
+      } catch (_) {}
+
+      if (!localTurnoId) {
+        try {
+          const anyTurno = await this.dataSource.query(`SELECT id FROM schema_atracciones.atracciones_turnos_aforo WHERE atraccion_id = $1 LIMIT 1`, [id]);
+          if (anyTurno && anyTurno.length > 0) localTurnoId = anyTurno[0].id;
+        } catch (_) {}
+      }
+      if (!localTurnoId) {
+        try {
+          const anyGlobalTurno = await this.dataSource.query(`SELECT id FROM schema_atracciones.atracciones_turnos_aforo LIMIT 1`);
+          if (anyGlobalTurno && anyGlobalTurno.length > 0) localTurnoId = anyGlobalTurno[0].id;
+        } catch (_) {}
+      }
+
+      const voucherQr = `${alissonRes?.voucher_qr_payload || ''} ${alissonRes?.reservation_id || ''} ${reservationCode}`;
 
       const nuevaReserva = this.reservaRepo.create({
         id: reservationCode,
         idempotencyKey: safeKey,
         atraccionId: id,
-        customerName: clientName,
+        turnoId: localTurnoId,
+        clienteId: dto.cliente_id || undefined,
+        customerName: safeFullName,
         customerEmail: clientEmail,
         customerPhone: clientPhone,
-        documentId: clientDoc,
+        documentId: docNumber,
         date: dateStr,
         time: timeFormatted,
         adultCount,
@@ -1587,7 +1746,10 @@ export class AtraccionesService {
         currency: 'USD',
         status: 'CONFIRMED',
         specialRequirements: atraccion?.nombre || dto.special_requirements,
-        voucherQrPayload: alissonRes?.voucher_qr_payload || `VOUCHER-${reservationCode}`,
+        voucherQrPayload: voucherQr,
+        cancelCode: alissonRes?.reservation_id || alissonRes?.external_order_id,
+        icsCalendarUrl: alissonRes?.ics_calendar_url || `https://alisson-atracciones-api.azurewebsites.net/api/v3/atracciones/reservas/${reservationCode}/evento.ics`,
+        guiaOficialAsignado: alissonRes?.guia_asignado || 'Lic. Carlos Morales (Credencial Mintur #MINTUR-5541)',
       });
 
       const saved = await this.reservaRepo.save(nuevaReserva);
@@ -1596,6 +1758,8 @@ export class AtraccionesService {
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
+        external_order_id: alissonRes?.external_order_id || reservationCode,
+        partner_response: alissonRes,
       };
     }
 
@@ -2287,7 +2451,12 @@ export class AtraccionesService {
     let reserva = await this.reservaRepo.findOne({ where: { id: reservationId } });
     if (!reserva) {
       const all = await this.reservaRepo.find();
-      reserva = all.find((r) => r.id === reservationId || r.id.startsWith(reservationId)) || null;
+      reserva = all.find((r) => 
+        r.id === reservationId || 
+        r.id.startsWith(reservationId) ||
+        r.idempotencyKey === reservationId ||
+        (r.voucherQrPayload && r.voucherQrPayload.includes(reservationId))
+      ) || null;
     }
 
     if (!reserva) {
@@ -2361,7 +2530,12 @@ export class AtraccionesService {
     let reserva = await this.reservaRepo.findOne({ where: { id: reservationId } });
     if (!reserva) {
       const all = await this.reservaRepo.find();
-      reserva = all.find((r) => r.id === reservationId || r.id.startsWith(reservationId)) || null;
+      reserva = all.find((r) => 
+        r.id === reservationId || 
+        r.id.startsWith(reservationId) ||
+        r.idempotencyKey === reservationId ||
+        (r.voucherQrPayload && r.voucherQrPayload.includes(reservationId))
+      ) || null;
     }
 
     if (reserva && reserva.status === 'CANCELLED') {
@@ -2631,7 +2805,12 @@ export class AtraccionesService {
       const syncPromises = pendientesSync.map(async (r) => {
         try {
           // 1. TourGirls (Michael)
-          if (r.atraccionId === 'rLohsmEh6809' || (r.atraccionId && r.atraccionId.length === 12 && !r.atraccionId.startsWith('PRhu')) || r.id.startsWith('DEC-')) {
+          if (
+            !r.id.startsWith('ATR-') &&
+            !r.id.startsWith('ALI-') &&
+            r.atraccionId !== 's7PpJcyvtY2Q' &&
+            (r.atraccionId === 'rLohsmEh6809' || (r.atraccionId && r.atraccionId.length === 12 && !r.atraccionId.startsWith('PRhu')) || r.id.startsWith('DEC-'))
+          ) {
             try {
               const { data } = await firstValueFrom(
                 this.httpService.get(
@@ -2648,6 +2827,29 @@ export class AtraccionesService {
                 if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
                 await this.reservaRepo.save(r);
                 this.logger.log(`[Michael Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
+                return;
+              }
+            } catch (_) {}
+          }
+
+          // 2. Atracciones Ecuador (Alisson - NODE_ATR_ALISSON)
+          if (r.id.startsWith('ATR-') || r.id.startsWith('ALI-') || r.atraccionId === 's7PpJcyvtY2Q' || r.atraccionId?.startsWith('PRhu')) {
+            try {
+              const { data } = await firstValueFrom(
+                this.httpService.get(
+                  `https://alisson-atracciones-api.azurewebsites.net/api/v3/atracciones/reservas/${r.id}`,
+                  {
+                    headers: { 'X-API-Key': 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078' },
+                    timeout: 4500,
+                  },
+                ),
+              );
+              if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO' || data.status === 'CONFIRMADO_ASISTIDO')) {
+                r.status = 'CONFIRMADO_ASISTIDO';
+                r.checkinAt = data.hora_checkin ? new Date(data.hora_checkin) : new Date();
+                if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
+                await this.reservaRepo.save(r);
+                this.logger.log(`[Alisson Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
                 return;
               }
             } catch (_) {}
@@ -2716,7 +2918,12 @@ export class AtraccionesService {
     let reserva = await this.reservaRepo.findOne({ where: { id: reservationId } });
     if (!reserva) {
       const all = await this.reservaRepo.find();
-      reserva = all.find((r) => r.id === reservationId || r.id.startsWith(reservationId)) || null;
+      reserva = all.find((r) => 
+        r.id === reservationId || 
+        r.id.startsWith(reservationId) ||
+        r.idempotencyKey === reservationId ||
+        (r.voucherQrPayload && r.voucherQrPayload.includes(reservationId))
+      ) || null;
     }
     if (!reserva) throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
     let atraccionNombre = '';

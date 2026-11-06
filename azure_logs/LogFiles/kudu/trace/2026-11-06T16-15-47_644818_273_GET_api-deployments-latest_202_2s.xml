@@ -1,0 +1,8 @@
+<step title="Incoming Request" date="2026-11-06T16:15:47.188" instance="644818" url="/api/deployments/latest" method="GET" type="request" pid="887,1,18" Accept="*/*" Host="booking-core-api.scm.azurewebsites.net" User-Agent="AZURECLI/2.91.0 (MSI)" Accept-Encoding="gzip, deflate, zstd" Authorization="Bea..." x-ms-client-request-id="48825b98-d9fd-11f1-bee4-28d0430a858d" X-ARR-LOG-ID="48825b98-d9fd-11f1-bee4-28d0430a858d" CLIENT-IP="192.188.55.109:59249" X-SITE-DEPLOYMENT-ID="booking-core-api" WAS-DEFAULT-HOSTNAME="booking-core-api.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/deployments/latest" X-Client-IP="192.188.55.109" X-Client-Port="59249" >
+  <step title="DeploymentService.GetResult" date="2026-11-06T16:15:47.218" >
+    <step title="DeploymentService.GetLatestDeployment" date="2026-11-06T16:15:47.220" >
+      <step title="DeploymentManager.GetResults" date="2026-11-06T16:15:47.224" /><!-- duration: 1655ms -->
+    </step><!-- duration: 1688ms -->
+  </step><!-- duration: 1712ms -->
+  <step title="Outgoing response" date="2026-11-06T16:15:48.942" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 18ms -->
+</step><!-- duration: 1790ms -->
