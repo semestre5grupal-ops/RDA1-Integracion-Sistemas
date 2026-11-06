@@ -59,6 +59,15 @@ export class AutosController {
     return this.autosService.getCatalog(query);
   }
 
+  @Get('search')
+  @ApiOperation({ summary: 'Búsqueda de vehículos (Catálogo Híbrido GET)' })
+  searchGet(
+    @Query() query: any,
+    @Headers('x-correlation-id') correlationId?: string
+  ) {
+    return this.autosService.search(query || {}, correlationId);
+  }
+
   @Post('search')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Búsqueda avanzada de vehículos (Catálogo Híbrido v2 con Cooldown de 2h)' })

@@ -1143,45 +1143,51 @@ export class AutosService implements OnModuleInit {
   // ============================================================================
   async getCatalog(query?: any): Promise<any> {
     this.evaluateCleaningCooldowns();
-    const limit = query?.limit ? parseInt(query.limit, 10) : 10;
+    const limit = query?.limit ? parseInt(query.limit, 10) : 100;
     const category = query?.category ? query.category.toUpperCase() : null;
     const transmission = query?.transmission ? query.transmission.toUpperCase() : null;
 
-    const cars = this.memoryFleet.filter(c => {
+    const localCars = this.memoryFleet.filter(c => {
       if (c.estado === EstadoVehiculo.EN_LIMPIEZA || c.estado === EstadoVehiculo.RESERVADO) return false;
       if (category && category !== 'ALL' && c.categoria !== category) return false;
       if (transmission && transmission !== 'ALL' && c.transmision !== transmission) return false;
       return true;
-    });
+    }).map(c => ({
+      vehicle_id: c.id,
+      marca: c.marca,
+      modelo: c.modelo,
+      categoria: c.categoria,
+      precio_diario: c.precio_diario,
+      moneda: c.moneda,
+      transmision: c.transmision === 'AUTOMATICO' ? 'Automático' : 'Manual',
+      asientos: c.asientos,
+      puertas: c.puertas,
+      maletas_grandes: c.capacidad_maletas_grandes,
+      maletas_pequenas: c.capacidad_maletas_pequenas,
+      aire_acondicionado: c.aire_acondicionado,
+      kilometraje_ilimitado: c.kilometraje_ilimitado,
+      politica_combustible: 'Lleno a lleno',
+      cancelacion_gratuita: true,
+      proveedor: {
+        nombre: c.proveedor_nombre,
+        rating: 8.4,
+        ubicacion: c.ubicacion_mostrador
+      },
+      estado: c.estado,
+      foto_url: c.foto_url,
+      images: [c.foto_url]
+    }));
 
+    let externalCars: any[] = [];
+    try {
+      externalCars = await this.circuitBreakerAdapter.fetchExternalCars(query || {});
+    } catch (_) {}
+
+    const all = [...localCars, ...externalCars];
     return {
-      total: cars.length,
+      total: all.length,
       limit,
-      data: cars.slice(0, limit).map(c => ({
-        vehicle_id: c.id,
-        marca: c.marca,
-        modelo: c.modelo,
-        categoria: c.categoria,
-        precio_diario: c.precio_diario,
-        moneda: c.moneda,
-        transmision: c.transmision === 'AUTOMATICO' ? 'Automático' : 'Manual',
-        asientos: c.asientos,
-        puertas: c.puertas,
-        maletas_grandes: c.capacidad_maletas_grandes,
-        maletas_pequenas: c.capacidad_maletas_pequenas,
-        aire_acondicionado: c.aire_acondicionado,
-        kilometraje_ilimitado: c.kilometraje_ilimitado,
-        politica_combustible: 'Lleno a lleno',
-        cancelacion_gratuita: true,
-        proveedor: {
-          nombre: c.proveedor_nombre,
-          rating: 8.4,
-          ubicacion: c.ubicacion_mostrador
-        },
-        estado: c.estado,
-        foto_url: c.foto_url,
-        images: [c.foto_url]
-      }))
+      data: all.slice(0, limit)
     };
   }
 
