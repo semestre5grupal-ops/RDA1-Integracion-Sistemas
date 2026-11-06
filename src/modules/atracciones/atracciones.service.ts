@@ -2617,7 +2617,7 @@ export class AtraccionesService {
 
     // Live sync check-in status with partners (Dilan, Michael & Ariel)
     // Se ejecuta en PARALELO para las reservas recientes (< 48h) pendientes de check-in
-    // con timeout de 1500ms para garantizar respuesta ultra rápida (< 1.5s)
+    // con timeout de 5000ms para soportar latencia real de Azure
     const now = Date.now();
     const pendientesSync = reservas.filter(r => 
       r.status !== 'CONFIRMADO_ASISTIDO' && 
@@ -2626,83 +2626,66 @@ export class AtraccionesService {
       r.createdAt && (now - new Date(r.createdAt).getTime()) < 48 * 3600 * 1000
     ).slice(0, 4);
 
-    if ((now - this.lastLiveSync > 15000) && pendientesSync.length > 0) {
+    if ((now - this.lastLiveSync > 2500) && pendientesSync.length > 0) {
       this.lastLiveSync = now;
       const syncPromises = pendientesSync.map(async (r) => {
         try {
           // 1. TourGirls (Michael)
-          if (r.atraccionId === 'rLohsmEh6809' || (r.atraccionId && r.atraccionId.length === 12 && !r.atraccionId.startsWith('PRhu'))) {
-            const { data } = await firstValueFrom(
-              this.httpService.get(
-                `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${r.id}`,
-                {
-                  headers: { 'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w' },
-                  timeout: 1500,
-                },
-              ),
-            );
-            if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO')) {
-              r.status = 'CONFIRMADO_ASISTIDO';
-              r.checkinAt = data.checked_in_at || data.hora_checkin ? new Date(data.checked_in_at || data.hora_checkin) : new Date();
-              if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
-              await this.reservaRepo.save(r);
-              this.logger.log(`[Michael Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
-              return;
-            }
+          if (r.atraccionId === 'rLohsmEh6809' || (r.atraccionId && r.atraccionId.length === 12 && !r.atraccionId.startsWith('PRhu')) || r.id.startsWith('DEC-')) {
+            try {
+              const { data } = await firstValueFrom(
+                this.httpService.get(
+                  `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${r.id}`,
+                  {
+                    headers: { 'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w' },
+                    timeout: 5000,
+                  },
+                ),
+              );
+              if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO' || data.status === 'CONFIRMADO_ASISTIDO')) {
+                r.status = 'CONFIRMADO_ASISTIDO';
+                r.checkinAt = data.checked_in_at || data.hora_checkin ? new Date(data.checked_in_at || data.hora_checkin) : new Date();
+                if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
+                await this.reservaRepo.save(r);
+                this.logger.log(`[Michael Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
+                return;
+              }
+            } catch (_) {}
           }
 
-          // 2. Descubre EC (Dilan) / Fallback Michael
-          if (r.id.startsWith('DEC-')) {
-            let dilanSuccess = false;
+          // 2. Descubre EC (Dilan)
+          if (r.id.startsWith('DEC-') || (r.atraccionId && r.atraccionId.startsWith('6f03'))) {
             try {
               const { data } = await firstValueFrom(
                 this.httpService.get(
                   `https://descubre-gateway.livelymoss-5ea81cc6.chilecentral.azurecontainerapps.io/api/v3/reservas/${r.id}`,
                   {
                     headers: { 'x-api-key': '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568' },
-                    timeout: 1500,
+                    timeout: 4500,
                   },
                 ),
               );
-              if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO')) {
+              if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO' || data.status === 'CONFIRMADO_ASISTIDO')) {
                 r.status = 'CONFIRMADO_ASISTIDO';
                 r.checkinAt = data.checked_in_at || data.hora_checkin ? new Date(data.checked_in_at || data.hora_checkin) : new Date();
                 if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
                 await this.reservaRepo.save(r);
                 this.logger.log(`[Dilan Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
-                dilanSuccess = true;
+                return;
               }
             } catch (_) {}
+          }
 
-            if (!dilanSuccess) {
-              try {
-                const { data } = await firstValueFrom(
-                  this.httpService.get(
-                    `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${r.id}`,
-                    {
-                      headers: { 'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w' },
-                      timeout: 1500,
-                    },
-                  ),
-                );
-                if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO')) {
-                  r.status = 'CONFIRMADO_ASISTIDO';
-                  r.checkinAt = data.checked_in_at || data.hora_checkin ? new Date(data.checked_in_at || data.hora_checkin) : new Date();
-                  if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
-                  await this.reservaRepo.save(r);
-                  this.logger.log(`[Michael Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
-                }
-              } catch (_) {}
-            }
-          } else if (r.id.startsWith('ECT-') || (r.atraccionId?.length > 30 && !r.id.startsWith('DEC-'))) {
+          // 3. EcuaTravel (Ariel)
+          if (r.id.startsWith('ECT-') || (r.atraccionId?.length > 30 && !r.id.startsWith('DEC-'))) {
             try {
               const { data } = await firstValueFrom(
                 this.httpService.get(`https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${r.id}`, {
                   headers: { 'X-API-Key': 'atr-ariel-ecua-travel-2026' },
-                  timeout: 1500,
+                  timeout: 4500,
                 }),
               );
-              if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO')) {
+              if (data && (data.status === 'CHECKED_IN' || data.estado === 'CHECKED_IN' || data.estado_asistencia === 'CONFIRMADO_ASISTIDO' || data.status === 'CONFIRMADO_ASISTIDO')) {
                 r.status = 'CONFIRMADO_ASISTIDO';
                 r.checkinAt = data.hora_checkin ? new Date(data.hora_checkin) : new Date();
                 if (data.guia_asignado) r.guiaOficialAsignado = data.guia_asignado;
