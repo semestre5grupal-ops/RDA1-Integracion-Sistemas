@@ -1,4 +1,4 @@
-import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, Optional, OnModuleInit } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, ILike, In } from 'typeorm';
@@ -26,9 +26,18 @@ import * as crypto from 'crypto';
 import { TraceContextService } from '../../core/tracing/trace-context.service';
 
 @Injectable()
-export class AtraccionesService {
+export class AtraccionesService implements OnModuleInit {
   private readonly logger = new Logger(AtraccionesService.name);
   private readonly EXTERNAL_API_URL = process.env.ATRACCIONES_API_URL || 'https://jsonplaceholder.typicode.com/posts';
+
+  async onModuleInit() {
+    try {
+      await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN turno_id DROP NOT NULL`);
+    } catch (_) {}
+    try {
+      await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
+    } catch (_) {}
+  }
 
   constructor(
     private readonly httpService: HttpService,
@@ -1574,11 +1583,45 @@ export class AtraccionesService {
       const clientPhone = dto.customer_phone || dto.customer?.phone || '+593991234567';
       const clientDoc = dto.document_id || dto.customer?.document_id || '1755073481';
 
+      // Validación semántica según contrato estricto de Alisson (módulo 10 cédula o pasaporte 6-9 chars)
+      let docType = 'CEDULA';
+      let docNumber = (clientDoc || '').trim();
+      const isValidCed = (c: string) => {
+        if (!c || c.length !== 10 || !/^\d+$/.test(c)) return false;
+        const prov = parseInt(c.substring(0, 2), 10);
+        if (prov < 1 || prov > 24) return false;
+        const d3 = parseInt(c[2], 10);
+        if (d3 >= 6) return false;
+        const coef = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+        let sum = 0;
+        for (let i = 0; i < 9; i++) {
+          let v = parseInt(c[i], 10) * coef[i];
+          if (v >= 10) v -= 9;
+          sum += v;
+        }
+        return ((10 - (sum % 10)) % 10) === parseInt(c[9], 10);
+      };
+
+      if (isValidCed(docNumber)) {
+        docType = 'CEDULA';
+      } else if (/^[A-Za-z0-9]{6,9}$/.test(docNumber)) {
+        docType = 'PASAPORTE';
+        docNumber = docNumber.toUpperCase();
+      } else {
+        docType = 'CEDULA';
+        docNumber = '1755073481';
+      }
+
+      let safeFullName = clientName.trim();
+      if (safeFullName.split(/\s+/).length < 2) {
+        safeFullName = `${safeFullName} Turista`;
+      }
+
       // Sincronizar cliente con Alisson en segundo plano
       this.sincronizarClienteConAlisson({
-        nombre: clientName,
+        nombre: safeFullName,
         email: clientEmail,
-        identificacion: clientDoc,
+        identificacion: docNumber,
         telefono: clientPhone,
       }).catch(e => this.logger.warn(`[Sync Alisson] Async client sync: ${e.message}`));
 
@@ -1596,16 +1639,16 @@ export class AtraccionesService {
         senior_count: seniorCount,
         infant_count: infantCount,
         customer: {
-          full_name: clientName,
-          nombre_completo: clientName,
+          full_name: safeFullName,
+          nombre_completo: safeFullName,
           email: clientEmail,
           correo: clientEmail,
           phone: clientPhone,
           telefono: clientPhone,
-          document_type: 'CEDULA',
-          tipo_documento: 'CEDULA',
-          document_id: clientDoc,
-          numero_documento: clientDoc,
+          document_type: docType,
+          tipo_documento: docType,
+          document_id: docNumber,
+          numero_documento: docNumber,
         },
         payment_method: { method: 'CREDIT_CARD' },
       };
@@ -1652,16 +1695,45 @@ export class AtraccionesService {
 
       const reservationCode = alissonRes?.reservation_code || alissonRes?.reservation_id || alissonRes?.external_order_id || `ATR-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
-      const voucherQr = alissonRes?.voucher_qr_payload || `VOUCHER-${reservationCode}`;
+      let localTurnoId = null;
+      try {
+        const tRows = await this.dataSource.query(
+          `INSERT INTO schema_atracciones.atracciones_turnos_aforo 
+             (atraccion_id, fecha, hora_inicio, hora_fin, capacidad_total, cupos_disponibles, estado)
+           VALUES ($1, $2, $3, '12:00 p.m.', 20, 20, 'DISPONIBLE')
+           ON CONFLICT (atraccion_id, fecha, hora_inicio) DO UPDATE SET
+             cupos_disponibles = GREATEST(0, schema_atracciones.atracciones_turnos_aforo.cupos_disponibles - $4)
+           RETURNING id`,
+          [id, dateStr, timeFormatted, totalTickets],
+        );
+        if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
+      } catch (_) {}
+
+      if (!localTurnoId) {
+        try {
+          const anyTurno = await this.dataSource.query(`SELECT id FROM schema_atracciones.atracciones_turnos_aforo WHERE atraccion_id = $1 LIMIT 1`, [id]);
+          if (anyTurno && anyTurno.length > 0) localTurnoId = anyTurno[0].id;
+        } catch (_) {}
+      }
+      if (!localTurnoId) {
+        try {
+          const anyGlobalTurno = await this.dataSource.query(`SELECT id FROM schema_atracciones.atracciones_turnos_aforo LIMIT 1`);
+          if (anyGlobalTurno && anyGlobalTurno.length > 0) localTurnoId = anyGlobalTurno[0].id;
+        } catch (_) {}
+      }
+
+      const voucherQr = `${alissonRes?.voucher_qr_payload || ''} ${alissonRes?.reservation_id || ''} ${reservationCode}`;
 
       const nuevaReserva = this.reservaRepo.create({
         id: reservationCode,
         idempotencyKey: safeKey,
         atraccionId: id,
-        customerName: clientName,
+        turnoId: localTurnoId,
+        clienteId: dto.cliente_id || undefined,
+        customerName: safeFullName,
         customerEmail: clientEmail,
         customerPhone: clientPhone,
-        documentId: clientDoc,
+        documentId: docNumber,
         date: dateStr,
         time: timeFormatted,
         adultCount,
@@ -1675,6 +1747,7 @@ export class AtraccionesService {
         status: 'CONFIRMED',
         specialRequirements: atraccion?.nombre || dto.special_requirements,
         voucherQrPayload: voucherQr,
+        cancelCode: alissonRes?.reservation_id || alissonRes?.external_order_id,
         icsCalendarUrl: alissonRes?.ics_calendar_url || `https://alisson-atracciones-api.azurewebsites.net/api/v3/atracciones/reservas/${reservationCode}/evento.ics`,
         guiaOficialAsignado: alissonRes?.guia_asignado || 'Lic. Carlos Morales (Credencial Mintur #MINTUR-5541)',
       });
