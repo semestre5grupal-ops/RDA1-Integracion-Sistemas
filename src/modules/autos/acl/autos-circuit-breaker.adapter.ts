@@ -228,8 +228,97 @@ export class AutosCircuitBreakerAdapter {
     }
 
     if (allCars.length > 0) {
+      // 1b. Cruzar con órdenes activas para actualizar el estado del auto a RESERVADO o CONFIRMADO_ASISTIDO
+      try {
+        const activeOrders = await this.getOrdersDirect();
+        const searchPickup = searchParams?.pickup_date;
+        const searchDropoff = searchParams?.dropoff_date;
+
+        for (const car of allCars) {
+          const matchingOrders = activeOrders.filter((o: any) => {
+            const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
+            const cVid = car.vehicle_id.toLowerCase().replace(/^auto-/, '');
+            return oVid === cVid && o.status !== 'CANCELLED';
+          });
+
+          if (matchingOrders.length > 0) {
+            // Verificar si alguna orden coincide con las fechas solicitadas o si está activa
+            let isReservedForDates = false;
+            let isAssisted = false;
+
+            for (const ord of matchingOrders) {
+              const ordStatus = (ord.status || ord.estado || '').toUpperCase();
+              if (ordStatus === 'CONFIRMADO_ASISTIDO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
+                isAssisted = true;
+              }
+
+              if (searchPickup && searchDropoff) {
+                const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
+                const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
+                if (oPickup && oDropoff) {
+                  // Conflicto de fechas: solapamiento de intervalos
+                  if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
+                    isReservedForDates = true;
+                  }
+                } else {
+                  isReservedForDates = true;
+                }
+              } else {
+                // Sin fechas específicas de búsqueda: si tiene orden activa PENDING o RESERVADO
+                if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
+                  isReservedForDates = true;
+                }
+              }
+            }
+
+            if (isAssisted) {
+              car.estado = 'CONFIRMADO_ASISTIDO';
+            } else if (isReservedForDates) {
+              car.estado = 'RESERVADO';
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`[AutosCircuitBreaker] No se pudo reconciliar estados con órdenes: ${err.message}`);
+      }
+
+      // 1c. Deduplicación inteligente de modelos replicados (a menos que se pida all_units=true)
+      const allUnitsRequested = searchParams?.all_units === 'true' || searchParams?.all_units === true;
+      let finalCars = allCars;
+
+      if (!allUnitsRequested) {
+        const modelMap = new Map<string, any[]>();
+        for (const car of allCars) {
+          const modelKey = `${car.proveedor_codigo}_${car.marca}_${car.modelo}_${car.categoria}_${car.transmision}`.toUpperCase().trim();
+          if (!modelMap.has(modelKey)) {
+            modelMap.set(modelKey, []);
+          }
+          modelMap.get(modelKey)!.push(car);
+        }
+
+        const deduplicated: any[] = [];
+        for (const [_, units] of modelMap.entries()) {
+          // Priorizar una unidad que esté DISPONIBLE
+          const availUnit = units.find(u => u.estado === 'DISPONIBLE');
+          const chosen = { ...(availUnit || units[0]) };
+          const disponiblesCount = units.filter(u => u.estado === 'DISPONIBLE').length;
+
+          chosen.unidades_disponibles = disponiblesCount;
+          chosen.unidades_totales = units.length;
+          chosen.flota_unificada = true;
+          chosen.disponibilidad_resumen = `${disponiblesCount} de ${units.length} unidades disponibles`;
+
+          if (disponiblesCount === 0) {
+            chosen.estado = 'RESERVADO';
+          }
+
+          deduplicated.push(chosen);
+        }
+        finalCars = deduplicated;
+      }
+
       this.handleSuccess();
-      return allCars;
+      return finalCars;
     }
 
     // 2. Fallback secundario: Intentar obtener modelos y flota de admin de RutaLibre
@@ -416,12 +505,18 @@ export class AutosCircuitBreakerAdapter {
           timeout: 4000,
         })
       );
-      const mData = Array.isArray(mRes.data) ? mRes.data : (mRes.data?.items || mRes.data?.data || []);
+      const mData = Array.isArray(mRes.data)
+        ? mRes.data
+        : (mRes.data?.value || mRes.data?.items || mRes.data?.data || []);
       if (Array.isArray(mData)) {
         for (const m of mData) {
-          if (m.status === 'CONFIRMADO_ASISTIDO' || m.rental_status === 'PICKED_UP' || m.checkin_status === 'COMPLETED') {
+          const mStatus = (m.status || m.estado || '').toUpperCase();
+          if (mStatus === 'CONFIRMADO_ASISTIDO' || m.rental_status === 'PICKED_UP' || m.checkin_status === 'COMPLETED') {
             m.status = 'CONFIRMADO_ASISTIDO';
             m.estado = 'CONFIRMADO_ASISTIDO';
+          } else if (mStatus === 'RESERVADO' || mStatus === 'CONFIRMED') {
+            m.status = 'RESERVADO';
+            m.estado = 'RESERVADO';
           }
           orders.push(m);
         }
