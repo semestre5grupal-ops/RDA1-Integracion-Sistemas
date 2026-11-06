@@ -99,6 +99,7 @@ export function MisReservasPage() {
   const [busqueda, setBusqueda] = useState('');
 
   const fetchId = useRef(0);
+  const isFetchingRef = useRef(false);
 
   // Check-in Multivertical (Consideraciones RDA2 §4)
   const [checkinReserva, setCheckinReserva] = useState(null);
@@ -203,6 +204,8 @@ export function MisReservasPage() {
   }, [selectedReserva, showHelpModal]);
 
   const cargarTodasLasReservas = useCallback(async (isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     const currentFetch = ++fetchId.current;
     if (!isSilent) {
       if (reservasRef.current.length === 0) {
@@ -297,11 +300,10 @@ export function MisReservasPage() {
       // 3. Atracciones API & Local
       let atraccionesItems = [];
       try {
-        const correoSesionActual = (user?.email || '').trim().toLowerCase();
-        const respuestaAtracciones = await getReservasAtracciones(isAdmin ? undefined : correoSesionActual);
+        const respuestaAtracciones = await getReservasAtracciones();
         const listaAtracciones = Array.isArray(respuestaAtracciones) ? respuestaAtracciones : (respuestaAtracciones?.data || []);
         atraccionesItems = listaAtracciones.map((at) => ({
-          id: at.reservation_id || at.id,
+          id: at.id || at.reservation_id || at.pnr,
           pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
           tipo: 'atraccion',
           servicioTexto: 'Atracción',
@@ -313,8 +315,10 @@ export function MisReservasPage() {
           status: at.status || 'CONFIRMED',
           totalRaw: at.total_price?.total || at.total_price || 55.00,
           imagen: at.photoUrl || at.foto_url || DEFAULT_IMAGES.atraccion,
-          email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
+          email: (at.customer_email || at.email || at.customer?.email || at.userEmail || '').trim().toLowerCase(),
+          documentId: (at.documentId || at.document_id || at.customer?.document_id || '').trim(),
           link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
+          raw: at,
         }));
       } catch (err) {
         // Fallback silenciado
@@ -322,21 +326,23 @@ export function MisReservasPage() {
 
       const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
       const atraccionesLocalesFormatted = atraccionesLocales.map((at) => ({
-        id: at.id || at.reservation_id,
+        id: at.id || at.reservation_id || at.pnr,
         pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
         tipo: 'atraccion',
         servicioTexto: 'Atracción',
         destino: 'Quito',
         titulo: at.titulo || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
-        fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · ${at.time || '10:00 a.m.'}` : 'Tour guiado',
-        fecha: at.createdAt ? formatearFecha(String(at.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-        rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
+        fechasTexto: at.createdAt || at.date ? `${formatearFecha(String(at.createdAt || at.date).split('T')[0])} · ${at.time || '10:00 a.m.'}` : 'Tour guiado',
+        fecha: at.createdAt || at.date ? formatearFecha(String(at.createdAt || at.date).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
+        rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
         status: at.status || 'CONFIRMED',
         totalRaw: at.totalPrice?.total || at.total || 55.00,
         imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
         email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
+        documentId: (at.document_id || at.documentId || '').trim(),
         link: '/',
         isLocal: true,
+        raw: at,
       }));
 
       // 4. Alojamientos API & Local
@@ -446,10 +452,15 @@ export function MisReservasPage() {
             // Usuario sin sesión activa: no mostrar ninguna reserva del backend central
             if (!item.isLocal) return;
           } else {
-            // Usuario con sesión activa: debe coincidir exactamente su correo
+            // Usuario con sesión activa: debe coincidir su correo O su cédula O haber sido creada en esta sesión
             const itemEmail = (item.email || '').trim().toLowerCase();
-            if (!itemEmail || itemEmail !== correoSesion) {
-              return;
+            const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || '').trim();
+            const userCedula = (user?.user_metadata?.cedula || '').trim();
+            const docMatch = Boolean(itemDoc && userCedula && itemDoc === userCedula);
+            const emailMatch = Boolean(itemEmail && correoSesion && itemEmail === correoSesion);
+
+            if (!docMatch && !emailMatch) {
+              if (!item.isLocal) return;
             }
           }
         }
@@ -526,28 +537,35 @@ export function MisReservasPage() {
         return prev;
       });
     } catch (fallo) {
-      if (currentFetch !== fetchId.current) return;
       if (!isSilent) {
         setError('No se pudieron cargar tus reservas.');
       }
     } finally {
-      if (currentFetch === fetchId.current && !isSilent) {
+      isFetchingRef.current = false;
+      if (!isSilent) {
         setCargando(false);
       }
     }
   }, [filtroStatus, user?.email]);
 
   useEffect(() => {
-    cargarTodasLasReservas(false);
+    let timer = null;
+    let isCancelled = false;
 
-    // Auto-polling silencioso (RDA2 / Simulación gRPC en tiempo real)
-    // Refresca automáticamente en segundo plano el estado de las reservas cada 4 segundos
-    // de forma 100% silenciosa: sin skeletons, sin parpadeos y sin interrumpir la interacción del usuario
-    const pollInterval = setInterval(() => {
-      cargarTodasLasReservas(true);
-    }, 4000);
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      await cargarTodasLasReservas(silent);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 5000);
+      }
+    };
 
-    return () => clearInterval(pollInterval);
+    runPoll(false);
+
+    return () => {
+      isCancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [cargarTodasLasReservas]);
 
   // Close popup menu on outside click

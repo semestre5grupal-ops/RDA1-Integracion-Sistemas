@@ -952,7 +952,7 @@ export function AtraccionDetail() {
                           disabled={isBooking || cuposExcedidos || isAgotadoSlot}
                         >
                           {isBooking 
-                            ? 'Procesando Pago Seguro...' 
+                            ? '⏳ Conectando con socio y emitiendo boletos...' 
                             : isAgotadoSlot 
                             ? 'Turno Agotado' 
                             : cuposExcedidos 
