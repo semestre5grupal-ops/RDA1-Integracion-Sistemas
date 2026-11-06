@@ -211,10 +211,25 @@ El proceso termina con código 1 si alguna prueba FALLA.
 | 16:29 UTC | sólo lectura | 10 ✅ · 1 ❌ (A05) · 46 ⏭️ | `resultados/2026-11-04T16-29-20-395Z.md` |
 | 16:30 UTC | completa (57 pruebas) | 50 ✅ · 2 ❌ · 1 ⚠️ · 4 ⛔ | `resultados/2026-11-04T16-30-06-331Z.md` |
 | 16:33 UTC | `--solo=S05,A01–A04` (con S05 nuevo y el criterio de A02 corregido) | S05 ❌ · A02 ❌ · A04 ❌ · A01 ⛔ · A03 ⛔ | `resultados/2026-11-04T16-33-46-503Z.md` |
+| **2026-11-06 14:50 UTC** | `--solo=S05,A01–A04`, tras poner `DEFAULT` al `id` en Supabase | **S05 ✅** · A01 ❌ · A02 ❌ · A03 ❌ · A04 ❌ | `resultados/2026-11-06T14-50-07-985Z.md` |
 
 Limpieza verificada al final: en Posada no queda ninguna reserva de prueba activa
 (`GET /orders`: 21 `CANCELLED` de estas corridas y 3 `CHECKED_OUT` que ya existían). En Booking
 no se llegó a crear ninguna reserva, por el error 500 descrito abajo.
+
+### 5.0 Estado al 2026-11-06, tras arreglar el 500
+
+Con el `DEFAULT` en `id` (ver `INVESTIGACION_BOOKING_ALOJAMIENTOS.md`), el Booking ya guarda y cancela
+reservas (S05 ✅). Las cuatro pruebas de doble canal ahora fallan de verdad, tal como predecía el código:
+
+- **A01:** una reserva hecha en Booking (BKG-603834) no llega a Posada: Posada siguió con 8 libres.
+- **A02 (caso del compañero):** con Posada agotada (0 libres), Booking mostraba 5 libres **y vendió**
+  la habitación (BKG-779672). **Sobreventa confirmada.**
+- **A03:** con las 5 vendidas en Booking, Posada aceptó otra reserva directa (BK-HOTEL-9BDEA0AA).
+  **Sobreventa confirmada en el otro sentido.**
+- **A04:** Booking no refleja ni las reservas ni las cancelaciones hechas en Posada.
+
+Todas las reservas de prueba se cancelaron: se verificó `CANCELLED` en las 4 de Booking y en las 3 de Posada.
 
 ### 5.1 Lo que está mal (en orden de gravedad)
 
