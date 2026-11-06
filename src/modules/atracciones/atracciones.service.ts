@@ -744,17 +744,60 @@ export class AtraccionesService implements OnModuleInit {
     }
   }
 
+  // ============================================================================
+  // 1.3.E. SINCRONIZACIÓN CROSS-PLATFORM DE CLIENTES CON GLORIA (NODE_ATR_GLORIA)
+  // ============================================================================
+  async sincronizarClienteConGloria(customer: { nombre: string; email: string; identificacion: string; telefono: string }): Promise<any> {
+    const base = 'https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3';
+
+    if (customer.email) {
+      try {
+        const { data } = await firstValueFrom(
+          this.httpService.get(`${base}/clientes?email=${encodeURIComponent(customer.email)}`, { timeout: 4000 })
+        );
+        if (data && (data.id || data.client_id || data.email)) {
+          this.logger.log(`[Cross-Platform Gloria] Cliente ya existía en Gloria: ${JSON.stringify(data)}`);
+          return data;
+        }
+      } catch (_) {}
+    }
+
+    try {
+      const createRes = await firstValueFrom(
+        this.httpService.post(
+          `${base}/clientes`,
+          {
+            nombre: customer.nombre,
+            email: customer.email,
+            identificacion: customer.identificacion,
+            telefono: customer.telefono,
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 5000,
+          },
+        ),
+      );
+      this.logger.log(`[Cross-Platform Gloria] Cliente registrado en Gloria: ${JSON.stringify(createRes.data)}`);
+      return createRes.data;
+    } catch (err: any) {
+      this.logger.warn(`[Cross-Platform Gloria] Aviso al registrar cliente en Gloria: ${err.response?.data?.message || err.message}`);
+      return null;
+    }
+  }
+
   async sincronizarClienteGlobal(dto: any): Promise<any> {
     const nombre = dto.nombre || dto.name || 'Turista Booking Central';
     const email = dto.email || 'turista@booking.local';
     const identificacion = dto.identificacion || dto.cedula || '1755073481';
     const telefono = dto.telefono || '+593991234567';
 
-    const [arielRes, dilanRes, michaelRes, alissonRes] = await Promise.allSettled([
+    const [arielRes, dilanRes, michaelRes, alissonRes, gloriaRes] = await Promise.allSettled([
       this.sincronizarClienteConAriel({ nombre, email, identificacion, telefono }),
       this.sincronizarClienteConDilan({ nombre, email, identificacion, telefono }),
       this.sincronizarClienteConMichael({ nombre, email, identificacion, telefono }),
       this.sincronizarClienteConAlisson({ nombre, email, identificacion, telefono }),
+      this.sincronizarClienteConGloria({ nombre, email, identificacion, telefono }),
     ]);
 
     return {
@@ -765,6 +808,7 @@ export class AtraccionesService implements OnModuleInit {
       dilan: dilanRes.status === 'fulfilled' ? dilanRes.value : null,
       michael: michaelRes.status === 'fulfilled' ? michaelRes.value : null,
       alisson: alissonRes.status === 'fulfilled' ? alissonRes.value : null,
+      gloria: gloriaRes.status === 'fulfilled' ? gloriaRes.value : null,
     };
   }
 
@@ -1418,7 +1462,24 @@ export class AtraccionesService implements OnModuleInit {
     let isArielAttr = provCode === 'NODE_ATR_ARIEL';
 
     if (!isAlissonAttr && !isMichaelAttr && !isGloriaAttr && !isDilanAttr && !isArielAttr) {
-      if (id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d') {
+      const gloriaKnownIds = [
+        '1bb26d24-f79d-4833-b9da-a35b8d5ef44d',
+        '6e97ed14-3094-4e49-a093-452f028bee97',
+        '6f163ba9-f1c1-4593-8100-92390373688c',
+        'cc25f94a-7246-41a0-8832-7ca662277107',
+        '772f0145-fdf7-4f3f-bc97-d402f5607854',
+        'fb23db38-7474-44d5-86b9-64848371255a',
+        'eaad2abb-be57-4b0c-ab40-60d5b44f2e44',
+        '63f24a11-042e-40bb-a23f-55053314260e',
+        '374b93b8-2315-422a-b913-081448328737',
+        '44bfda1f-6108-446b-b05c-3e656c2131bd',
+        'd8852307-791c-41f0-a3ec-adf4b48cc241',
+        'e9c363eb-c7a6-477c-8c4c-969432776f0b',
+        'f0139d51-8886-485e-bb14-a2099e873073',
+        '074de7b3-3707-4742-bb73-c5ab659f539a',
+        '1563d2a6-65ed-4d4f-a06d-48a6b3ed4ca5',
+      ];
+      if (gloriaKnownIds.includes(id)) {
         isGloriaAttr = true;
       } else if (id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
         isDilanAttr = true;
@@ -1426,10 +1487,22 @@ export class AtraccionesService implements OnModuleInit {
         isAlissonAttr = true;
       } else if (id === 'rLohsmEh6809') {
         isMichaelAttr = true;
-      } else if (id.startsWith('0bef') || id.length > 30 || id.includes('-')) {
-        isArielAttr = true;
       } else if (id.length === 12) {
         isMichaelAttr = true;
+      } else if (id.includes('-')) {
+        // Quick probe to Gloria vs Ariel
+        try {
+          const gCheck = await firstValueFrom(
+            this.httpService.get(`https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/${id}`, { timeout: 2000 })
+          );
+          if (gCheck.status === 200 && (gCheck.data?.id || gCheck.data?.nombre || gCheck.data?.name)) {
+            isGloriaAttr = true;
+          } else {
+            isArielAttr = true;
+          }
+        } catch (_) {
+          isArielAttr = true;
+        }
       }
     }
 
@@ -1765,11 +1838,32 @@ export class AtraccionesService implements OnModuleInit {
 
     if (isGloriaAttr) {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
-      const timeRaw = (dto.time || dto.hora || '10:00').trim().slice(0, 5);
+      let timeRaw = (dto.time || dto.hora || '09:00').trim();
+      let timeClean = '09:00';
+      const match24 = timeRaw.match(/(\d{1,2}):(\d{2})/);
+      if (match24) {
+        let hours = parseInt(match24[1], 10);
+        const mins = match24[2];
+        if (timeRaw.toLowerCase().includes('p.m.') || timeRaw.toLowerCase().includes('pm')) {
+          if (hours < 12) hours += 12;
+        } else if (timeRaw.toLowerCase().includes('a.m.') || timeRaw.toLowerCase().includes('am')) {
+          if (hours === 12) hours = 0;
+        }
+        timeClean = `${hours.toString().padStart(2, '0')}:${mins}`;
+      }
+
       const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
       const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';
       const clientPhone = dto.customer_phone || dto.customer?.phone || '+593991234567';
       const clientDoc = dto.document_id || dto.customer?.document_id || '1755073481';
+
+      // Sincronizar cliente con Gloria en segundo plano
+      this.sincronizarClienteConGloria({
+        nombre: clientName,
+        email: clientEmail,
+        identificacion: clientDoc,
+        telefono: clientPhone,
+      }).catch(e => this.logger.warn(`[Sync Gloria] Async client sync: ${e.message}`));
 
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeKey);
       const gloriaIdempotencyKey = isUuid ? safeKey : crypto.randomUUID();
@@ -1777,8 +1871,12 @@ export class AtraccionesService implements OnModuleInit {
       const gloriaPayload = {
         atraccion_id: id,
         fecha: dateStr,
-        hora: timeRaw,
+        hora: timeClean,
         personas: totalTickets,
+        cliente_nombre: clientName,
+        cliente_email: clientEmail,
+        cliente_telefono: clientPhone,
+        cliente_documento: clientDoc,
         cliente: {
           nombre: clientName,
           email: clientEmail,
@@ -1786,6 +1884,8 @@ export class AtraccionesService implements OnModuleInit {
           documento: clientDoc,
         },
       };
+
+      this.logger.log(`ESB: Despachando reserva B2B a Gloria (NODE_ATR_GLORIA) -> POST /api/v3/atracciones/reservas: ${JSON.stringify(gloriaPayload)}`);
 
       let gloriaRes: any = null;
       try {
@@ -1796,6 +1896,7 @@ export class AtraccionesService implements OnModuleInit {
             {
               headers: {
                 'Idempotency-Key': gloriaIdempotencyKey,
+                'idempotency-key': gloriaIdempotencyKey,
                 'Content-Type': 'application/json',
               },
               timeout: 30000,
@@ -1804,21 +1905,60 @@ export class AtraccionesService implements OnModuleInit {
         );
         gloriaRes = response.data;
       } catch (err: any) {
-        this.logger.error(`Error reservando en API de Gloria: ${err.response?.data?.message || err.message}`);
+        this.logger.error(`Error reservando en API de Gloria: ${JSON.stringify(err.response?.data || err.message)}`);
+        if (err.response?.status === 409) {
+          throw new HttpException(
+            {
+              type: 'https://booking.epn.edu.ec/errors/out-of-stock',
+              title: 'Cupos Agotados',
+              status: HttpStatus.CONFLICT,
+              detail: err.response?.data?.detail || 'La atracción no dispone de cupos suficientes en Descubre EC.',
+              code: 'OUT_OF_STOCK',
+            },
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw new HttpException(
+          `Error en socio de atracciones (Gloria): ${err.response?.data?.detail || err.response?.data?.message || err.message}`,
+          HttpStatus.BAD_GATEWAY,
+        );
       }
 
-      const reservationCode = gloriaRes?.codigo_reserva || gloriaRes?.id || `GLO-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const reservationCode =
+        gloriaRes?.reserva_id ||
+        gloriaRes?.reservation_id ||
+        gloriaRes?.codigo_reserva ||
+        gloriaRes?.id ||
+        `GLO-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+      let localTurnoId = null;
+      try {
+        const tRows = await this.dataSource.query(
+          `INSERT INTO schema_atracciones.atracciones_turnos_aforo 
+             (atraccion_id, fecha, hora_inicio, hora_fin, capacidad_total, cupos_disponibles, estado)
+           VALUES ($1, $2, $3, '12:00 p.m.', 20, 20, 'DISPONIBLE')
+           ON CONFLICT (atraccion_id, fecha, hora_inicio) DO UPDATE SET
+             cupos_disponibles = GREATEST(0, schema_atracciones.atracciones_turnos_aforo.cupos_disponibles - $4)
+           RETURNING id`,
+          [id, dateStr, timeClean, totalTickets],
+        );
+        if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
+      } catch (_) {}
+
+      const voucherQr = `DESCUBRE-EC-${reservationCode}-${id}-${dateStr}`;
 
       const nuevaReserva = this.reservaRepo.create({
         id: reservationCode,
         idempotencyKey: safeKey,
         atraccionId: id,
+        turnoId: localTurnoId,
+        clienteId: dto.cliente_id || undefined,
         customerName: clientName,
         customerEmail: clientEmail,
         customerPhone: clientPhone,
         documentId: clientDoc,
         date: dateStr,
-        time: timeRaw,
+        time: timeClean,
         adultCount,
         childCount,
         seniorCount,
@@ -1829,14 +1969,21 @@ export class AtraccionesService implements OnModuleInit {
         currency: 'USD',
         status: 'CONFIRMED',
         specialRequirements: atraccion?.nombre || dto.special_requirements,
+        voucherQrPayload: voucherQr,
+        cancelCode: reservationCode,
+        icsCalendarUrl: `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas/${reservationCode}/calendar.ics`,
+        guiaOficialAsignado: 'Guía oficial asignado por Vívelo Ecuador (Descubre EC)',
       });
 
       const saved = await this.reservaRepo.save(nuevaReserva);
       return {
         ...this.formatReservaResponse(saved, atraccion?.nombre),
+        reserva_id: reservationCode,
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
+        external_order_id: reservationCode,
+        partner_response: gloriaRes,
       };
     }
 

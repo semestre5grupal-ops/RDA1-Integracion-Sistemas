@@ -202,6 +202,12 @@ export class AutosService implements OnModuleInit {
 
   async onModuleInit() {
     this.logger.log('Módulo de Autos V2 inicializado con Máquina de Estados, Cooldown 2h y Rol de Mantenimiento.');
+    try {
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ALTER COLUMN auto_id TYPE VARCHAR(100)`);
+    } catch (_) {}
+    try {
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
+    } catch (_) {}
     // Evaluador periódico de cooldown cada 30 segundos (§5 Consideraciones)
     const timer = setInterval(() => {
       this.evaluateCleaningCooldowns();
@@ -610,6 +616,7 @@ export class AutosService implements OnModuleInit {
 
     try {
       const dbOrder = this.orderRepo.create({
+        id: pnr,
         autoId: auto.id,
         idempotencyKey,
         status: 'CONFIRMED',
@@ -678,7 +685,35 @@ export class AutosService implements OnModuleInit {
 
     order.checkin_status = 'CHECKIN_COMPLETED';
     order.fast_track_pickup = true;
+    order.status = 'CONFIRMADO_ASISTIDO';
+    order.estado = 'CONFIRMADO_ASISTIDO';
     order.voucher_qr_data = `AUTOS-CHECKIN-${order.pnr}-VERIFIED-${dto.documento_identidad || 'DOC'}`;
+
+    try {
+      await this.orderRepo.query(
+        `INSERT INTO schema_auditoria.auditoria_transaccional 
+         (modulo, accion, registro_id, detalles_json)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          'RESERVAS_CHECKIN',
+          'CONFIRMAR_ASISTENCIA_PRESENCIAL',
+          order.pnr,
+          JSON.stringify({
+            order_id: order.order_id,
+            pnr: order.pnr,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'AUTOS',
+            documento: dto.documento_identidad,
+            fecha_checkin: new Date().toISOString(),
+          }),
+        ],
+      );
+      await this.orderRepo.query(
+        `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO' WHERE id = $1 OR idempotency_key = $1`,
+        [order.pnr],
+      );
+    } catch (_) {}
 
     this.winstonLogger.logAudit('CHECKIN_AUTO_VALIDADO', {
       pnr: order.pnr,
@@ -689,6 +724,8 @@ export class AutosService implements OnModuleInit {
     return {
       reserva_id: order.order_id,
       pnr: order.pnr,
+      status: 'CONFIRMADO_ASISTIDO',
+      estado: 'CONFIRMADO_ASISTIDO',
       checkin_status: 'CHECKIN_COMPLETED',
       fast_track_pickup: true,
       mensaje: 'Check-in digital exitoso. Presenta tu código QR en el mostrador para retiro express de llaves sin esperas.',
@@ -723,10 +760,39 @@ export class AutosService implements OnModuleInit {
       auto.kilometraje_actual = dto.km_salida || auto.kilometraje_actual;
     }
 
-    order.status = 'ENTREGADO';
+    order.status = 'CONFIRMADO_ASISTIDO';
+    order.estado = 'CONFIRMADO_ASISTIDO';
+    order.checkin_status = 'CHECKIN_COMPLETED';
     order.km_salida = dto.km_salida;
     order.licencia_verificada = dto.licencia_conducir;
     order.fecha_entrega_real = new Date().toISOString();
+
+    try {
+      await this.orderRepo.query(
+        `INSERT INTO schema_auditoria.auditoria_transaccional 
+         (modulo, accion, registro_id, detalles_json)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          'RESERVAS_CHECKIN',
+          'CONFIRMAR_ASISTENCIA_PRESENCIAL',
+          order.pnr,
+          JSON.stringify({
+            order_id: order.order_id,
+            pnr: order.pnr,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'AUTOS',
+            licencia: dto.licencia_conducir,
+            km_salida: dto.km_salida,
+            fecha_checkin: new Date().toISOString(),
+          }),
+        ],
+      );
+      await this.orderRepo.query(
+        `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO' WHERE id = $1 OR idempotency_key = $1`,
+        [order.pnr],
+      );
+    } catch (_) {}
 
     this.winstonLogger.logAudit('CHECKIN_ENTREGA_AUTO_COMPLETADO', {
       order_id: order.order_id,
@@ -1077,45 +1143,51 @@ export class AutosService implements OnModuleInit {
   // ============================================================================
   async getCatalog(query?: any): Promise<any> {
     this.evaluateCleaningCooldowns();
-    const limit = query?.limit ? parseInt(query.limit, 10) : 10;
+    const limit = query?.limit ? parseInt(query.limit, 10) : 100;
     const category = query?.category ? query.category.toUpperCase() : null;
     const transmission = query?.transmission ? query.transmission.toUpperCase() : null;
 
-    const cars = this.memoryFleet.filter(c => {
+    const localCars = this.memoryFleet.filter(c => {
       if (c.estado === EstadoVehiculo.EN_LIMPIEZA || c.estado === EstadoVehiculo.RESERVADO) return false;
       if (category && category !== 'ALL' && c.categoria !== category) return false;
       if (transmission && transmission !== 'ALL' && c.transmision !== transmission) return false;
       return true;
-    });
+    }).map(c => ({
+      vehicle_id: c.id,
+      marca: c.marca,
+      modelo: c.modelo,
+      categoria: c.categoria,
+      precio_diario: c.precio_diario,
+      moneda: c.moneda,
+      transmision: c.transmision === 'AUTOMATICO' ? 'Automático' : 'Manual',
+      asientos: c.asientos,
+      puertas: c.puertas,
+      maletas_grandes: c.capacidad_maletas_grandes,
+      maletas_pequenas: c.capacidad_maletas_pequenas,
+      aire_acondicionado: c.aire_acondicionado,
+      kilometraje_ilimitado: c.kilometraje_ilimitado,
+      politica_combustible: 'Lleno a lleno',
+      cancelacion_gratuita: true,
+      proveedor: {
+        nombre: c.proveedor_nombre,
+        rating: 8.4,
+        ubicacion: c.ubicacion_mostrador
+      },
+      estado: c.estado,
+      foto_url: c.foto_url,
+      images: [c.foto_url]
+    }));
 
+    let externalCars: any[] = [];
+    try {
+      externalCars = await this.circuitBreakerAdapter.fetchExternalCars(query || {});
+    } catch (_) {}
+
+    const all = [...localCars, ...externalCars];
     return {
-      total: cars.length,
+      total: all.length,
       limit,
-      data: cars.slice(0, limit).map(c => ({
-        vehicle_id: c.id,
-        marca: c.marca,
-        modelo: c.modelo,
-        categoria: c.categoria,
-        precio_diario: c.precio_diario,
-        moneda: c.moneda,
-        transmision: c.transmision === 'AUTOMATICO' ? 'Automático' : 'Manual',
-        asientos: c.asientos,
-        puertas: c.puertas,
-        maletas_grandes: c.capacidad_maletas_grandes,
-        maletas_pequenas: c.capacidad_maletas_pequenas,
-        aire_acondicionado: c.aire_acondicionado,
-        kilometraje_ilimitado: c.kilometraje_ilimitado,
-        politica_combustible: 'Lleno a lleno',
-        cancelacion_gratuita: true,
-        proveedor: {
-          nombre: c.proveedor_nombre,
-          rating: 8.4,
-          ubicacion: c.ubicacion_mostrador
-        },
-        estado: c.estado,
-        foto_url: c.foto_url,
-        images: [c.foto_url]
-      }))
+      data: all.slice(0, limit)
     };
   }
 
@@ -1339,7 +1411,31 @@ export class AutosService implements OnModuleInit {
     return Array.from(unique.values());
   }
 
+  markOrderAsistido(orderIdOrPnr: string, details?: any): void {
+    const key = (orderIdOrPnr || '').toUpperCase();
+    for (const [k, order] of this.memoryOrders.entries()) {
+      const pnr = (order.pnr || order.order_id || '').toUpperCase();
+      if (k.toUpperCase() === key || pnr === key) {
+        order.status = 'CONFIRMADO_ASISTIDO';
+        order.estado = 'CONFIRMADO_ASISTIDO';
+        order.checkin_status = 'CHECKIN_COMPLETED';
+        if (details?.placa) order.placa = details.placa;
+      }
+    }
+  }
+
   async getOrderById(orderId: string): Promise<any> {
+    const all = await this.getOrders();
+    const cleanId = orderId.toUpperCase();
+    const found = all.find(
+      (o: any) =>
+        (o.pnr && o.pnr.toUpperCase() === cleanId) ||
+        (o.order_id && o.order_id.toUpperCase() === cleanId) ||
+        (o.codigo_reserva && o.codigo_reserva.toUpperCase() === cleanId)
+    );
+    if (found) {
+      return found;
+    }
     const order = this.memoryOrders.get(orderId);
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);

@@ -131,16 +131,16 @@ export class AutosCircuitBreakerAdapter {
 
     const allCars: any[] = [];
 
-    // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo
+    // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo (limit=100 para no truncar la flota)
     const [danielRes, mateoRes] = await Promise.allSettled([
       firstValueFrom(
-        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos', {
+        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
           headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
           timeout: this.TIMEOUT_MS,
         }),
       ),
       firstValueFrom(
-        this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos', {
+        this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
           headers: { 'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=' },
           timeout: this.TIMEOUT_MS,
         }),
@@ -341,7 +341,7 @@ export class AutosCircuitBreakerAdapter {
    */
   async getOrdersDirect(): Promise<any[]> {
     const orders: any[] = [];
-    // 1. RutaLibre
+    // 1. RutaLibre (v3/orders)
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
       const response = await firstValueFrom(
@@ -357,6 +357,56 @@ export class AutosCircuitBreakerAdapter {
       }
     } catch (_) {}
 
+    // 1b. Obtener estados de Check-in presencial en mostrador de Daniel (RutaLibre admin)
+    try {
+      const token = await this.getRutaLibreToken();
+      if (token) {
+        const adminRes = await firstValueFrom(
+          this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/admin/reservations', {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 5000,
+          })
+        );
+        if (Array.isArray(adminRes.data)) {
+          for (const r of adminRes.data) {
+            const loc = (r.locator || r.id || '').toUpperCase();
+            const existing = orders.find(o => ((o.pnr || o.order_id || o.codigo_reserva || '').toUpperCase()) === loc);
+            const isAssisted = r.rentalStatus === 'PICKED_UP' || r.rentalStatus === 'RETURNED' || r.status === 'CONFIRMADO_ASISTIDO';
+            if (existing) {
+              existing.rentalStatus = r.rentalStatus;
+              existing.rental_status = r.rentalStatus;
+              existing.plate = r.plate || existing.plate;
+              if (isAssisted) {
+                existing.status = 'CONFIRMADO_ASISTIDO';
+                existing.estado = 'CONFIRMADO_ASISTIDO';
+              }
+            } else if (r.fromBooking || loc.startsWith('CAR')) {
+              orders.push({
+                order_id: r.locator || r.id,
+                pnr: r.locator || r.id,
+                codigo_reserva: r.locator || r.id,
+                status: isAssisted ? 'CONFIRMADO_ASISTIDO' : (r.status || 'CONFIRMED'),
+                estado: isAssisted ? 'CONFIRMADO_ASISTIDO' : (r.status || 'CONFIRMED'),
+                rentalStatus: r.rentalStatus,
+                rental_status: r.rentalStatus,
+                plate: r.plate,
+                driver: {
+                  full_name: r.driver,
+                  nombre: r.driver,
+                  email: r.driverEmail || 'cliente@booking.com',
+                  license_number: r.identification || '1150029880',
+                },
+                total_price: { currency: r.currency || 'USD', total: r.totalPrice },
+                moneda: r.currency || 'USD',
+                precio_total_monto: r.totalPrice,
+                created_at: r.createdAt,
+              });
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
     // 2. Maneja de Una (Mateo)
     try {
       const mateoKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
@@ -368,7 +418,13 @@ export class AutosCircuitBreakerAdapter {
       );
       const mData = Array.isArray(mRes.data) ? mRes.data : (mRes.data?.items || mRes.data?.data || []);
       if (Array.isArray(mData)) {
-        orders.push(...mData);
+        for (const m of mData) {
+          if (m.status === 'CONFIRMADO_ASISTIDO' || m.rental_status === 'PICKED_UP' || m.checkin_status === 'COMPLETED') {
+            m.status = 'CONFIRMADO_ASISTIDO';
+            m.estado = 'CONFIRMADO_ASISTIDO';
+          }
+          orders.push(m);
+        }
       }
     } catch (_) {}
 
