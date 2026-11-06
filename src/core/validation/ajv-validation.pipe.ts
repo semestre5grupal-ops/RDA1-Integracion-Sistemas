@@ -131,40 +131,21 @@ export class AjvValidationPipe implements PipeTransform {
       const expectedDate = `${year}-${month}-${day}`;
       const expectedTimePrefix = `${hours}:${minutes}`;
 
+      // Regla de Negocio Semana 9: slot_id manda para bloqueo de aforo;
+      // Reconciliar de forma resiliente la fecha y hora si vinieron desfasadas por timezone o default de cliente
       if (tourDate && tourDate !== expectedDate) {
-        throw new HttpException(
-          {
-            type: 'https://booking.epn.edu.ec/errors/slot-mismatch',
-            title: 'Inconsistencia de Franja Horaria (Slot Date Mismatch)',
-            status: HttpStatus.BAD_REQUEST,
-            detail: `El slot_id '${slotId}' codifica la fecha ${expectedDate}, pero la petición envió 'date': '${tourDate}'.`,
-            instance: '/api/v3/atracciones/reservas',
-            code: 'SLOT_TIME_MISMATCH',
-            correlation_id: `corr-val-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-          },
-          HttpStatus.BAD_REQUEST,
-        );
+        this.logger.warn(`AJV: Reconciliando fecha '${tourDate}' con slot_id '${slotId}' -> '${expectedDate}'`);
+        value.date = expectedDate;
+        if (value.fecha) value.fecha = expectedDate;
       }
 
       if (tourTime) {
-        // Normalizar hora para comparar dígitos de hora y minutos
         const cleanDigits = tourTime.replace(/[^0-9]/g, '');
         const expectedDigits = `${hours}${minutes}`;
         if (cleanDigits.length >= 4 && !cleanDigits.startsWith(expectedDigits)) {
-          throw new HttpException(
-            {
-              type: 'https://booking.epn.edu.ec/errors/slot-mismatch',
-              title: 'Inconsistencia de Franja Horaria (Slot Time Mismatch)',
-              status: HttpStatus.BAD_REQUEST,
-              detail: `El slot_id '${slotId}' codifica la franja de las ${expectedTimePrefix}, pero la petición envió 'time': '${tourTime}'.`,
-              instance: '/api/v3/atracciones/reservas',
-              code: 'SLOT_TIME_MISMATCH',
-              correlation_id: `corr-val-${Date.now()}`,
-              timestamp: new Date().toISOString(),
-            },
-            HttpStatus.BAD_REQUEST,
-          );
+          this.logger.warn(`AJV: Reconciliando hora '${tourTime}' con slot_id '${slotId}' -> '${expectedTimePrefix}'`);
+          value.time = `${expectedTimePrefix} a.m.`;
+          if (value.hora) value.hora = `${expectedTimePrefix} a.m.`;
         }
       }
     }
