@@ -1373,64 +1373,94 @@ export class AutosService implements OnModuleInit {
       const externalOrders = await this.circuitBreakerAdapter.getOrdersDirect();
       for (const ext of externalOrders) {
         const pnr = ext.pnr || ext.order_id || ext.codigo_reserva;
-        if (pnr && !unique.has(pnr)) {
-          let email = ext.client_email || ext.driver?.email;
-          if (!email && ext.client_id === '4469a11f-7667-4ef8-89a0-2a361aa04c66') {
-            email = 'daniel@gmail.com';
-          }
-          if (!email) {
-            email = 'cliente@booking.com';
-          }
+        if (!pnr) continue;
 
-          let finalStatus = ext.status || ext.estado || 'CONFIRMED';
-          const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
-          if (chk && finalStatus !== 'CANCELLED') {
-            finalStatus = 'CONFIRMADO_ASISTIDO';
+        const isExtAssisted = ext.status === 'CONFIRMADO_ASISTIDO' ||
+                              ext.estado === 'CONFIRMADO_ASISTIDO' ||
+                              ext.rentalStatus === 'PICKED_UP' ||
+                              ext.rental_status === 'PICKED_UP' ||
+                              ext.rentalStatus === 'RETURNED' ||
+                              ext.rental_status === 'RETURNED' ||
+                              checkinMap.has(pnr.toUpperCase()) ||
+                              checkinMap.has((ext.order_id || '').toUpperCase()) ||
+                              checkinMap.has((ext.id || '').toUpperCase());
+
+        const existingKey = (pnr && unique.has(pnr)) ? pnr : (ext.order_id && unique.has(ext.order_id)) ? ext.order_id : (ext.id && unique.has(ext.id)) ? ext.id : null;
+
+        if (existingKey) {
+          // Si ya existe en memoria o local, sincronizar el estado confirmado/asistido
+          const existing = unique.get(existingKey);
+          if (isExtAssisted && existing.status !== 'CANCELLED') {
+            existing.status = 'CONFIRMADO_ASISTIDO';
+            existing.estado = 'CONFIRMADO_ASISTIDO';
           }
-
-          const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || (ext.auto_id && ext.auto_id.length === 36);
-          const brandName = ext.vehiculo?.marca || (isMateoOrder ? 'Maneja de Una' : 'Toyota');
-          const modelName = ext.vehiculo?.modelo || (isMateoOrder ? 'Vehículo de Flota' : (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba'));
-          const plateName = chk?.placa || ext.placa || (isMateoOrder ? (ext.auto_id ? ext.auto_id.substring(0, 8) : '') : (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : '')));
-
-          unique.set(pnr, {
-            order_id: pnr,
-            pnr: pnr,
-            codigo_reserva: pnr,
-            status: finalStatus,
-            estado: finalStatus,
-            auto_id: ext.auto_id || ext.vehicle_id || 'auto-pru-1234',
-            placa: plateName,
-            checkin: chk || null,
-            email: email,
-            conductor: {
-              nombre: ext.driver?.full_name || ext.driver?.nombre || 'Conductor Verificado',
-              email: email,
-              telefono: ext.driver?.phone || ext.driver?.telefono || '+593998765432',
-              licencia: ext.driver?.license_number || ext.driver?.licencia || '1150029880',
-            },
-            driver: {
-              email: email,
-            },
-            vehiculo: {
-              marca: brandName,
-              modelo: modelName,
-              categoria: ext.vehiculo?.categoria || 'SUV',
-              transmision: ext.vehiculo?.transmision || 'Manual',
-              foto_url: ext.vehiculo?.foto_url || (isMateoOrder ? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800' : 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1'),
-            },
-            dias_renta: ext.dias_renta || ext.dias || 3,
-            pickup_date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            dropoff_date: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
-            fecha_inicio: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            fecha_fin: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
-            date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            fecha: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            tipo_cobertura: ext.tipo_cobertura || ext.coverage_type || 'BASICA',
-            total_price: ext.total_price || { currency: 'USD', total: ext.precio_total_monto || 156.4 },
-            createdAt: ext.created_at || new Date().toISOString(),
-          });
+          if (ext.plate || ext.placa) {
+            existing.placa = ext.plate || ext.placa;
+          }
+          const mem = this.memoryOrders.get(existingKey) || (pnr ? this.memoryOrders.get(pnr) : null);
+          if (mem) {
+            if (isExtAssisted && mem.status !== 'CANCELLED') {
+              mem.status = 'CONFIRMADO_ASISTIDO';
+              mem.estado = 'CONFIRMADO_ASISTIDO';
+              if (ext.plate || ext.placa) mem.placa = ext.plate || ext.placa;
+            }
+          }
+          continue;
         }
+
+        let email = ext.client_email || ext.driver?.email;
+        if (!email && ext.client_id === '4469a11f-7667-4ef8-89a0-2a361aa04c66') {
+          email = 'daniel@gmail.com';
+        }
+        if (!email) {
+          email = 'cliente@booking.com';
+        }
+
+        let finalStatus = isExtAssisted ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED');
+        const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
+
+        const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || (ext.auto_id && ext.auto_id.length === 36);
+        const brandName = ext.vehiculo?.marca || (isMateoOrder ? 'Maneja de Una' : 'Toyota');
+        const modelName = ext.vehiculo?.modelo || (isMateoOrder ? 'Vehículo de Flota' : (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba'));
+        const plateName = chk?.placa || ext.placa || (isMateoOrder ? (ext.auto_id ? ext.auto_id.substring(0, 8) : '') : (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : '')));
+
+        unique.set(pnr, {
+          order_id: pnr,
+          pnr: pnr,
+          codigo_reserva: pnr,
+          status: finalStatus,
+          estado: finalStatus,
+          auto_id: ext.auto_id || ext.vehicle_id || 'auto-pru-1234',
+          placa: plateName,
+          checkin: chk || null,
+          email: email,
+          conductor: {
+            nombre: ext.driver?.full_name || ext.driver?.nombre || 'Conductor Verificado',
+            email: email,
+            telefono: ext.driver?.phone || ext.driver?.telefono || '+593998765432',
+            licencia: ext.driver?.license_number || ext.driver?.licencia || '1150029880',
+          },
+          driver: {
+            email: email,
+          },
+          vehiculo: {
+            marca: brandName,
+            modelo: modelName,
+            categoria: ext.vehiculo?.categoria || 'SUV',
+            transmision: ext.vehiculo?.transmision || 'Manual',
+            foto_url: ext.vehiculo?.foto_url || (isMateoOrder ? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800' : 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1'),
+          },
+          dias_renta: ext.dias_renta || ext.dias || 3,
+          pickup_date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          dropoff_date: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
+          fecha_inicio: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          fecha_fin: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
+          date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          fecha: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          tipo_cobertura: ext.tipo_cobertura || ext.coverage_type || 'BASICA',
+          total_price: ext.total_price || { currency: 'USD', total: ext.precio_total_monto || 156.4 },
+          createdAt: ext.created_at || new Date().toISOString(),
+        });
       }
     } catch (_) {}
 
