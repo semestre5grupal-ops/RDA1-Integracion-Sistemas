@@ -55,6 +55,7 @@ export class AutosCircuitBreakerAdapter {
   private readonly FAILURE_THRESHOLD = 3;
   private readonly RESET_TIMEOUT_MS = 30000; // 30s
   private readonly TIMEOUT_MS = 5000;         // 5s reglamentarios (Cátedra RDA2 CE01)
+  private readonly cancelledOrderIds = new Set<string>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -523,14 +524,44 @@ export class AutosCircuitBreakerAdapter {
       }
     } catch (_) {}
 
+    // Sobrescribir inmediatamente el estado a CANCELLED para órdenes canceladas registradas
+    for (const ord of orders) {
+      const id1 = ord.id ? String(ord.id).toUpperCase() : '';
+      const id2 = ord.order_id ? String(ord.order_id).toUpperCase() : '';
+      const id3 = ord.pnr ? String(ord.pnr).toUpperCase() : '';
+      const id4 = ord.codigo_reserva ? String(ord.codigo_reserva).toUpperCase() : '';
+      if (
+        this.cancelledOrderIds.has(id1) ||
+        this.cancelledOrderIds.has(id2) ||
+        this.cancelledOrderIds.has(id3) ||
+        this.cancelledOrderIds.has(id4)
+      ) {
+        ord.status = 'CANCELLED';
+        ord.estado = 'CANCELLED';
+      }
+    }
+
     return orders;
   }
 
   /**
-   * Notifica la cancelación de una orden al socio externo RutaLibre.
+   * Registra manualmente un ID de orden como cancelado para actualización inmediata de inventario.
+   */
+  markOrderAsCancelled(orderId: string): void {
+    if (!orderId) return;
+    this.cancelledOrderIds.add(orderId);
+    this.cancelledOrderIds.add(orderId.toUpperCase());
+  }
+
+  /**
+   * Notifica la cancelación de una orden al socio externo (RutaLibre o Maneja de Una) con resiliencia dual.
    */
   async cancelOrder(orderId: string, reason = 'Cancelado por el cliente'): Promise<boolean> {
     const cleanId = orderId.toUpperCase();
+    this.cancelledOrderIds.add(orderId);
+    this.cancelledOrderIds.add(cleanId);
+
+    // 1. Si coincide con formato Maneja de Una (MDU- o UUID)
     if (cleanId.startsWith('MDU-') || cleanId.length === 36) {
       try {
         await firstValueFrom(
@@ -549,24 +580,81 @@ export class AutosCircuitBreakerAdapter {
         this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a Maneja de Una: ${cleanId}`);
         return true;
       } catch (err: any) {
+        if (err.response?.status === 409) {
+          const detail = err.response.data?.detail || err.response.data?.message || 'Cancelación no permitida: El alquiler ya comenzó o no se puede cancelar.';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail: detail,
+          }, HttpStatus.CONFLICT);
+        }
         this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en Maneja de Una (${orderId}): ${err.message}`);
-        return false;
       }
     }
 
+    // 2. RutaLibre (Daniel) - Despacho con endpoint principal y fallback de ruta
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
-      await firstValueFrom(
-        this.httpService.post(
-          `https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
-          { reason },
-          { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
-        )
-      );
-      this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre: ${cleanId}`);
-      return true;
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
+            { reason },
+            { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
+          )
+        );
+        this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre (/autos/orders/...): ${cleanId}`);
+        return true;
+      } catch (err1: any) {
+        if (err1.response?.status === 409) {
+          const detail = err1.response.data?.detail || err1.response.data?.message || 'El alquiler ya comenzó; no se puede cancelar';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail: detail,
+          }, HttpStatus.CONFLICT);
+        }
+        if (err1.response?.status === 404) {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://rutalibre-autos-api.azurewebsites.net/api/v3/orders/${cleanId}/cancel`,
+              { reason },
+              { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
+            )
+          );
+          this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre (/orders/...): ${cleanId}`);
+          return true;
+        }
+        throw err1;
+      }
     } catch (err: any) {
+      if (err instanceof HttpException) {
+        throw err;
+      }
       this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en RutaLibre (${orderId}): ${err.message}`);
+
+      // Fallback resiliente: Si no era MDU pero falló en Daniel, intentar en Mateo
+      if (!cleanId.startsWith('MDU-')) {
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
+              { reason },
+              {
+                headers: {
+                  'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+                  'Content-Type': 'application/json',
+                },
+                timeout: 4000,
+              }
+            )
+          );
+          this.logger.log(`[AutosCircuitBreaker] Cancelación propagada como fallback a Maneja de Una: ${cleanId}`);
+          return true;
+        } catch (_) {}
+      }
       return false;
     }
   }
