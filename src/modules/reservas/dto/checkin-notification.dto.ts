@@ -22,6 +22,36 @@ export class CheckinNotificationDto {
   @IsOptional()
   document_id?: string;
 
+  @ApiPropertyOptional({ description: 'Alias para documento de identidad en español', example: '1720000000' })
+  @IsString()
+  @IsOptional()
+  documento_identidad?: string;
+
+  @ApiPropertyOptional({ description: 'Alias para cédula', example: '1720000000' })
+  @IsString()
+  @IsOptional()
+  cedula?: string;
+
+  @ApiPropertyOptional({ description: 'Alias para identificación', example: '1720000000' })
+  @IsString()
+  @IsOptional()
+  identificacion?: string;
+
+  @ApiPropertyOptional({ description: 'Código o nombre del guía asignado', example: 'Carlos Villacís' })
+  @IsString()
+  @IsOptional()
+  guia_codigo?: string;
+
+  @ApiPropertyOptional({ description: 'Guía asignado', example: 'Carlos Villacís' })
+  @IsString()
+  @IsOptional()
+  guia_asignado?: string;
+
+  @ApiPropertyOptional({ description: 'Código de reserva canónico', example: 'GLO-1234' })
+  @IsString()
+  @IsOptional()
+  reservation_code?: string;
+
   @ApiPropertyOptional({ description: 'Estado resultante tras la validación física en el socio', example: 'CONFIRMADO_ASISTIDO' })
   @IsString()
   @IsOptional()
