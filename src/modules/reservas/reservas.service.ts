@@ -288,14 +288,25 @@ export class ReservasService {
       const autUpdate = await this.dataSource.query(
         `UPDATE schema_autos.autos_reservas 
          SET estado = 'CONFIRMADO_ASISTIDO'
-         WHERE id = $1 OR idempotency_key = $1
+         WHERE id = $1 
+            OR UPPER(id) = UPPER($1)
+            OR idempotency_key = $1
+            OR licencia_conducir = $1
+            OR ($2::text IS NOT NULL AND licencia_conducir = $2::text)
          RETURNING *`,
-        [targetId],
+        [targetId, docId],
       );
 
       if (autUpdate && autUpdate.length > 0) {
         verticalActualizada = 'AUTOS';
         reservaActualizada = autUpdate[0];
+      } else if (
+        targetId.toUpperCase().startsWith('CAR') ||
+        targetId.toUpperCase().startsWith('MDU-') ||
+        targetId.toUpperCase().startsWith('ANDES-') ||
+        targetId.toUpperCase().startsWith('PACIF-')
+      ) {
+        verticalActualizada = 'AUTOS';
       }
     }
 
@@ -364,6 +375,10 @@ export class ReservasService {
           targetId,
           JSON.stringify({
             ...dto,
+            order_id: targetId,
+            pnr: targetId,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
             vertical: verticalActualizada || 'EXTERNO_SOCIO',
             correlation_id: safeCorrId,
             api_key_autenticada: !!apiKey,
