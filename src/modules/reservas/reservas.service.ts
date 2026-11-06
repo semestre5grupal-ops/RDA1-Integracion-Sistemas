@@ -100,7 +100,7 @@ export class ReservasService {
         apiKey = process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
       } else if (codigo_nodo === 'NODE_ATR_ALISSON' || codigo_nodo?.includes('ATR')) {
         baseUrl = 'https://alisson-atracciones-api.azurewebsites.net/api/v3';
-        apiKey = 'booking-atracciones-alisson-secret-2026';
+        apiKey = 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078';
       }
     }
 

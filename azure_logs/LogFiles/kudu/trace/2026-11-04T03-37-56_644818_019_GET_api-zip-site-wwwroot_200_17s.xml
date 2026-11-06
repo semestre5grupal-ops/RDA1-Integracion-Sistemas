@@ -1,0 +1,15 @@
+<step title="Incoming Request" date="2026-11-04T03:37:56.813" instance="644818" url="/api/zip/site/wwwroot/" method="GET" type="request" pid="887,1,3" Accept="*/*" Host="booking-core-api.scm.azurewebsites.net" User-Agent="curl/8.5.0" Authorization="Bea..." X-ARR-LOG-ID="a0fb0722-bb65-4624-b8a8-56f96b3a3089" CLIENT-IP="160.79.106.23:8192" X-SITE-DEPLOYMENT-ID="booking-core-api" WAS-DEFAULT-HOSTNAME="booking-core-api.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/zip/site/wwwroot/" X-Client-IP="160.79.106.23" X-Client-Port="8192" >
+  <step title="Error occurred" date="2026-11-04T03:38:10.295" type="error" text="Unable to open /home/site/wwwroot/node_modules, System.UnauthorizedAccessException: Access to the path &apos;/home/site/wwwroot/node_modules&apos; is denied.
+ ---&gt; System.IO.IOException: Permission denied
+   --- End of inner exception stack trace ---
+   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, UnixFileMode openPermissions, Int64&amp; fileLength, UnixFileMode&amp; filePermissions, Boolean failForSymlink, Boolean&amp; wasSymlink, Func`4 createOpenException)
+   at System.IO.Strategies.OSFileStreamStrategy..ctor(String path, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, Nullable`1 unixCreateMode)
+   at Kudu.Core.Infrastructure.ZipArchiveExtensions.AddFile(ZipArchive zipArchive, FileInfoBase file, ITracer tracer, String directoryNameInArchive) in /tmp/KuduLite/Kudu.Core/Infrastructure/ZipArchiveExtensions.cs:line 111" /><!-- duration: 6ms -->
+  <step title="Error occurred" date="2026-11-04T03:38:14.228" type="error" text="Unable to open /home/site/wwwroot/_del_node_modules, System.UnauthorizedAccessException: Access to the path &apos;/home/site/wwwroot/_del_node_modules&apos; is denied.
+ ---&gt; System.IO.IOException: Permission denied
+   --- End of inner exception stack trace ---
+   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, UnixFileMode openPermissions, Int64&amp; fileLength, UnixFileMode&amp; filePermissions, Boolean failForSymlink, Boolean&amp; wasSymlink, Func`4 createOpenException)
+   at System.IO.Strategies.OSFileStreamStrategy..ctor(String path, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, Nullable`1 unixCreateMode)
+   at Kudu.Core.Infrastructure.ZipArchiveExtensions.AddFile(ZipArchive zipArchive, FileInfoBase file, ITracer tracer, String directoryNameInArchive) in /tmp/KuduLite/Kudu.Core/Infrastructure/ZipArchiveExtensions.cs:line 111" /><!-- duration: 6ms -->
+  <step title="Outgoing response" date="2026-11-04T03:38:14.242" type="response" statusCode="200" statusText="OK" /><!-- duration: 6ms -->
+</step><!-- duration: 17439ms -->
