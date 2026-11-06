@@ -147,3 +147,79 @@ el log el `message` del `QueryFailedError` (hoy el 500 no dice qué columna fall
    y la disponibilidad en vivo (punto 3). Si no, arreglar el 500 convierte el problema en sobreventa real.
 4. Re-sincronizar el catálogo con los tipos reales (punto 4).
 5. Volver a correr la suite completa.
+
+## 6. Solución implementada (2026-11-06): el gateway agrega a los socios
+
+Se siguió el modelo de vuelos (`src/modules/vuelos/socios/`). Código nuevo en
+`src/modules/alojamientos/socios/`:
+
+| Archivo | Qué hace |
+|---|---|
+| `alojamientos-socios.service.ts` | Lee los socios de «Servicios & Prov.» (`config_proveedor`, vertical ALOJAMIENTOS, sin kill-switch), los autentica (`X-API-Key` u `oauth2:client:secret`) y consulta catálogo, ficha, habitaciones y disponibilidad **en vivo**. Expone los hoteles como `NODO~id` (p. ej. `NODE_ALO_PEC~HTL-1001`) con el mismo formato que ya usa el frontend. |
+| `alojamientos-socios-reservas.service.ts` | Reserva y cancela **en el socio** (Saga) y guarda la copia en `schema_alojamientos.alojamientos_reservas_socio` (estado `RESERVADO` → `CONFIRMADO_ASISTIDO` / `CANCELADO`). |
+| `alojamientos-socios.spec.ts` | 21 pruebas con un socio simulado según el contrato v2.2.0. |
+
+`AlojamientosService` desvía al agregador todo id `NODO~id` (catálogo, búsqueda, ficha, tipos,
+disponibilidad, cotización, reserva, cancelación, Mis Reservas). Los hoteles locales siguen igual.
+
+### 6.1 Cómo cierra cada problema
+
+| Problema | Antes | Ahora |
+|---|---|---|
+| Caso del compañero (A02): reservar en la web del hotel y luego en Booking | Booking vendía con su copia | Booking pregunta al hotel y, si el hotel dice `OUT_OF_STOCK`, responde **409** |
+| A01: la reserva de Booking no llegaba al hotel | Solo en la base de Booking | `orders/create` en el socio; Booking solo confirma lo que el socio confirmó |
+| A03: agotar en Booking y luego reservar en el hotel | El hotel volvía a vender | El cupo se descuenta en el hotel, así que el hotel ya no tiene esa habitación |
+| A04 / A05: disponibilidad desactualizada | Copia con un solo tipo «estandar» | Disponibilidad y tipos reales del socio, en vivo |
+| Flujo 1: un producto nuevo del socio no aparecía | Copia manual | Catálogo en vivo (caché de 10 s; se quitó la caché de 60 s de `GET /alojamientos`) |
+| Flujo 2: clientes | No existía | `GET`/`POST /clientes` en el socio, `X-Client-Id` en la orden y mapeo en `schema_clientes.clientes_socios_mapeo` |
+| Flujo 2: check-in | Buscaba la columna inexistente `localizador` | `POST /api/v2/reservas/{external_order_id}/checkin` marca `CONFIRMADO_ASISTIDO`; **solo con la X-API-Key del socio dueño** (401 si no) |
+
+### 6.2 Concurrencia e idempotencia (lo que se exige en la defensa)
+
+- **Doble clic / reintento:** la `Idempotency-Key` del cliente es la misma que va al socio, y el
+  socio la deduplica. En el gateway se serializa por clave y la copia tiene `idempotency_key UNIQUE`.
+  Así, ni con varias instancias de Azure quedan dos reservas.
+- **Última habitación:** decide el socio, que es la única fuente de verdad. Uno confirma y el otro recibe 409.
+- **Timeout o 5xx del socio:** antes de responder error se consulta
+  `GET /alojamientos/orders?idempotency_key=…` (contrato §3), por si la reserva sí se creó.
+- **Fallo al guardar la copia:** se cancela en el socio (`SAGA_ORCHESTRATOR`) para no dejar una
+  reserva huérfana.
+- **Errores del socio traducidos:** 409 (sin cupo o precio cambiado), 400/422 con `invalidParams`,
+  401/403 → 502 sin reservar, 429 → 503.
+
+### 6.3 Verificación
+
+- `npx jest`: **888/888** (36 suites), incluidas las 21 nuevas y las 710 de alojamientos y reservas.
+- `nest build` y `vite build` (frontend) compilan; la inyección de dependencias de
+  `AlojamientosModule` y `ReservasModule` se comprobó con un módulo de prueba.
+- Suite real: el grupo **W** (`test/live/posada-ec/ejecutar.js`, W01–W06) entra por el gateway:
+  doble clic, carrera, reintento, reserva sin documento, check-in con clave real y falsa, y
+  cancelación. Hoy queda ⛔ porque el gateway desplegado todavía no tiene este código.
+
+### 6.4 Para desplegar
+
+1. Desplegar esta rama en Azure. La tabla `alojamientos_reservas_socio` se crea sola al arrancar
+   (`CREATE TABLE IF NOT EXISTS`).
+2. `ALOJAMIENTOS_FUENTE` vale `socios` por defecto: las copias locales `pec-htl-*` dejan de venderse.
+   Usar `mixto` para mostrar además los hoteles dados de alta a mano, o `local` para volver atrás.
+3. En «Servicios & Prov.», cada nodo de alojamientos debe tener la `api_key` con la que **Booking
+   llama al socio**, y el socio debe usar esa misma clave al avisar el check-in.
+4. Volver a correr la suite completa:
+   `POSADA_API_KEY=… node test/live/posada-ec/ejecutar.js` (y lo mismo con `PRUEBAS_SOCIO` para Kawsay).
+
+### 6.5 Pendiente (fuera de este cambio)
+
+- **Socios:** ninguno expone `/api/v2/clientes`. LuxeStays no cumple el contrato (sección 7 de
+  `PRUEBAS_REALES_POSADA_EC.md`): sin él, sus hoteles no se pueden reservar.
+- **Feed de eventos:** una reserva hecha en Booking y cancelada después **en la web del socio**
+  sigue `RESERVADO` en la copia hasta que se lea el feed `GET /alojamientos/eventos` (vuelos lo hace
+  cada 20 s). El cupo que se muestra sí es correcto, porque se lee en vivo.
+- **El flujo ESB `orders/preview` → `orders/create` de Booking** sigue siendo solo local; el frontend
+  usa `/{id}/reservations`.
+- **Seguridad en otros módulos:**
+  - API keys de socios escritas en el código (`atracciones.service.ts:792–797`, `reservas.service.ts:100–106`).
+  - `propietarioDesde` (vuelos) lee el JWT **sin verificar la firma**.
+  - El receptor de check-in responde «confirmado» aunque no encuentre la reserva.
+  - `getResenas` inventa y guarda reseñas cuando un hotel local no tiene.
+- **Atracciones** confirma la reserva aunque el socio la rechace (`atracciones.service.ts:2212`):
+  tiene el mismo riesgo de sobreventa que tenía alojamientos.

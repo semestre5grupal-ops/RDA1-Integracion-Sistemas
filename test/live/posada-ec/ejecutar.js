@@ -76,6 +76,15 @@ function marcarCancelada(ref) {
   const x = ctx.creadasPosada.find((o) => o.ref === ref || (ref?.orderId && o.ref.orderId === ref.orderId));
   if (x) x.cancelada = true;
 }
+/** Reserva hecha por el gateway en un socio: se registra para cancelar en Booking y, de respaldo, en el socio. */
+function registrarGateway(r, etiqueta) {
+  const id = registrarBooking(r, etiqueta);
+  const s = r?.body?.socio;
+  if (id && s && (s.order_id || s.external_order_id)) {
+    ctx.creadasPosada.push({ ref: { orderId: s.order_id, externalOrderId: s.external_order_id, codigoReserva: s.codigo_reserva }, etiqueta: `${etiqueta} (respaldo en el socio)`, cancelada: false });
+  }
+  return id;
+}
 const idOrden = (ref) => ref?.orderId || ref?.externalOrderId || ref?.codigoReserva;
 
 /** Busca un hotel/tipo con cupo dentro de un rango (y presente en Booking si se pide). */
@@ -968,6 +977,151 @@ const ESCENARIOS = [
     },
   },
 
+  // ── W · A través del gateway (agregador de socios) ────────────────────────────
+  {
+    id: 'W01', grupo: 'W · A través del gateway', requiere: ['posada', 'booking', 'escritura', 'agregador'],
+    titulo: 'Doble clic en Booking: la misma reserva enviada dos veces a la vez',
+    historia: 'El cliente pulsa dos veces «Reservar» en Booking; el navegador repite la petición con la misma Idempotency-Key.',
+    esperado: 'Una sola reserva en Booking y UNA sola habitación descontada en el hotel.',
+    async run(t) {
+      const v = await buscarTipo({ n: 14, minRem: 2, exacto: true });
+      if (!v) return t.bloqueado('No hay un tipo con al menos 2 habitaciones libres en ambos sistemas.');
+      t.dato('Hotel / tipo / fechas', `${v.hotelBooking.id} · ${v.opcion.codigo} · ${v.checkin} → ${v.checkout}`);
+      const huesped = titular('w01');
+      const idem = uuid();
+      const pedir = () => booking.reservar(v.hotelBooking.id, { checkin: v.checkin, checkout: v.checkout, tipo: v.tipoBooking.id, idem, huesped });
+      const [a, b] = await Promise.all([pedir(), pedir()]);
+      t.evidencia('Clic 1', a);
+      t.evidencia('Clic 2', b);
+      const ids = new Set([a, b].map((r) => registrarGateway(r, 'W01 (doble clic)')).filter(Boolean));
+      const d = await remanentesPosada(v.hotel.id, v.opcion.codigo, v.checkin, v.checkout);
+      t.dato('Libres en el hotel antes → después', `${v.opcion.remanentes} → ${d.valor}`);
+      if (ids.size > 1 || d.valor < v.opcion.remanentes - 1) return t.falla(`El doble clic creó ${ids.size} reservas en Booking y descontó ${v.opcion.remanentes - d.valor} habitaciones en el hotel.`);
+      if (ids.size === 1 && d.valor === v.opcion.remanentes - 1) return t.pasa('Una sola reserva y una sola habitación descontada.');
+      return t.aviso(`Resultado inesperado: ${resumen(a)} / ${resumen(b)}; libres ${d.valor}.`);
+    },
+  },
+  {
+    id: 'W02', grupo: 'W · A través del gateway', requiere: ['posada', 'booking', 'escritura', 'agregador'],
+    titulo: 'Dos clientes reservan en Booking la última habitación al mismo tiempo',
+    historia: 'Queda 1 habitación; dos viajeros pulsan «Reservar» en Booking en el mismo segundo.',
+    esperado: 'Una reserva confirmada y la otra 409; el hotel queda en 0 (nunca en −1).',
+    async run(t) {
+      const v = await buscarTipo({ n: 15, minRem: 1, maxRem: CONFIG.maxAgotar + 1, exacto: true });
+      if (!v) return t.bloqueado(`No hay un tipo con ≤ ${CONFIG.maxAgotar + 1} libres en ambos sistemas.`);
+      const n = v.opcion.remanentes;
+      t.dato('Hotel / tipo / libres', `${v.hotelBooking.id} · ${v.opcion.codigo} · ${n}`);
+      if (n > 1) {
+        const ag = await agotarEnPosada(v, n - 1, 'W02 (dejar 1 libre)', t);
+        if (!ag.ok) return t.bloqueado('No se pudo dejar una sola habitación libre.');
+      }
+      const [a, b] = await Promise.all([1, 2].map((i) => booking.reservar(v.hotelBooking.id, { checkin: v.checkin, checkout: v.checkout, tipo: v.tipoBooking.id, etiqueta: `w02c${i}` })));
+      t.evidencia('Cliente 1', a);
+      t.evidencia('Cliente 2', b);
+      const ok = [a, b].filter((r) => registrarGateway(r, 'W02 (carrera)')).length;
+      const d = await remanentesPosada(v.hotel.id, v.opcion.codigo, v.checkin, v.checkout);
+      t.dato('Libres en el hotel al final', d.valor);
+      if (ok === 2) return t.falla('SOBREVENTA: Booking confirmó las dos reservas sobre una sola habitación.');
+      if (ok === 1 && [a, b].some((r) => r.status === 409)) return t.pasa('Una confirmada y la otra rechazada con 409.');
+      return t.aviso(`Resultado: ${resumen(a)} / ${resumen(b)}.`);
+    },
+  },
+  {
+    id: 'W03', grupo: 'W · A través del gateway', requiere: ['posada', 'booking', 'escritura', 'agregador'],
+    titulo: 'Reintento en Booking con la misma clave tras una reserva exitosa',
+    historia: 'La app del cliente no recibió la respuesta y reenvía la misma reserva.',
+    esperado: 'Devuelve la misma reserva y el hotel no descuenta otra habitación.',
+    async run(t) {
+      const v = await buscarTipo({ n: 16, minRem: 2, exacto: true });
+      if (!v) return t.bloqueado('No hay un tipo con al menos 2 habitaciones libres en ambos sistemas.');
+      const huesped = titular('w03');
+      const idem = uuid();
+      const a = await booking.reservar(v.hotelBooking.id, { checkin: v.checkin, checkout: v.checkout, tipo: v.tipoBooking.id, idem, huesped });
+      t.evidencia('Primera', a);
+      if (!registrarGateway(a, 'W03')) return t.falla(`La reserva inicial falló: ${resumen(a)}.`);
+      const d1 = await remanentesPosada(v.hotel.id, v.opcion.codigo, v.checkin, v.checkout);
+      const b = await booking.reservar(v.hotelBooking.id, { checkin: v.checkin, checkout: v.checkout, tipo: v.tipoBooking.id, idem, huesped });
+      t.evidencia('Reintento', b);
+      const d2 = await remanentesPosada(v.hotel.id, v.opcion.codigo, v.checkin, v.checkout);
+      if (b.body?.reservation_id && b.body.reservation_id !== a.body.reservation_id) {
+        registrarGateway(b, 'W03 (duplicada)');
+        return t.falla('El reintento creó otra reserva: doble cobro.');
+      }
+      if (d2.valor !== d1.valor) return t.falla(`El hotel descontó otra habitación (${d1.valor} → ${d2.valor}).`);
+      if (b.status >= 200 && b.status < 300) return t.pasa('Misma reserva, sin descontar otra habitación.');
+      return t.aviso(`El reintento no duplicó, pero respondió ${resumen(b)}.`);
+    },
+  },
+  {
+    id: 'W04', grupo: 'W · A través del gateway', requiere: ['posada', 'booking', 'escritura', 'agregador'],
+    titulo: 'Reserva sin documento del titular',
+    historia: 'Un cliente intenta reservar sin cédula ni pasaporte; el hotel no podría registrarlo.',
+    esperado: '400 de Booking sin llegar a crear nada en el hotel.',
+    async run(t) {
+      const m = ctx.mapeados.find((x) => String(x.booking.id).includes('~'));
+      const { checkin, checkout } = ventana(17);
+      const r = await C.http('POST', booking.url(`/alojamientos/${encodeURIComponent(m.booking.id)}/reservations`), {
+        headers: booking.h({ 'Idempotency-Key': uuid() }),
+        body: { checkin, checkout, habitaciones_count: 1, adultos: 1, ninos: 0, customer_name: 'Prueba Automatizada w04', customer_email: 'qa.posada+w04@booking-pruebas.ec' },
+      });
+      t.evidencia('Respuesta', r);
+      if (registrarGateway(r, 'W04 (aceptada por error)')) return t.falla('Booking aceptó la reserva sin documento.');
+      if (r.status === 400) return t.pasa('400: Booking pide el documento antes de contactar al hotel.');
+      return t.aviso(`Rechazada con ${resumen(r)}.`);
+    },
+  },
+  {
+    id: 'W05', grupo: 'W · A través del gateway', requiere: ['posada', 'booking', 'escritura', 'agregador'],
+    titulo: 'Check-in en recepción: el hotel avisa a Booking (Flujo 2)',
+    historia: 'El huésped llega al hotel; el recepcionista confirma su llegada y el hotel notifica a Booking.',
+    esperado: 'Con la X-API-Key del hotel: 200 y la reserva queda CONFIRMADO_ASISTIDO. Con una clave falsa: 401 y no cambia.',
+    async run(t) {
+      if (!CONFIG.posadaKey || CONFIG.posadaKey === 'proxy-injected') return t.bloqueado('La clave del socio la inyecta el proxy y no se puede enviar a Booking desde aquí.');
+      const v = await buscarTipo({ n: 18, minRem: 1, exacto: true });
+      if (!v) return t.bloqueado('No hay cupo en ambos sistemas.');
+      const r = await booking.reservar(v.hotelBooking.id, { checkin: v.checkin, checkout: v.checkout, tipo: v.tipoBooking.id, etiqueta: 'w05' });
+      t.evidencia('Reserva en Booking', r);
+      const id = registrarGateway(r, 'W05 (check-in)');
+      if (!id) return t.falla(`No se pudo reservar: ${resumen(r)}.`);
+      const ext = r.body?.socio?.external_order_id || r.body?.socio?.order_id;
+      const falsa = await booking.checkinDelSocio(ext, 'clave-falsa-' + uuid());
+      t.evidencia('Check-in con clave falsa', falsa);
+      const real = await booking.checkinDelSocio(ext, CONFIG.posadaKey);
+      t.evidencia('Check-in con la clave del hotel', real);
+      const g = await booking.reserva(id);
+      t.dato('Estado final en Booking', g.body?.status);
+      const notas = [];
+      if (falsa.status !== 401) notas.push(`la clave falsa respondió ${falsa.status} (debía ser 401)`);
+      if (real.status !== 200) notas.push(`el aviso real respondió ${resumen(real)}`);
+      if (g.body?.status !== 'CONFIRMADO_ASISTIDO') notas.push(`la reserva quedó en «${g.body?.status}»`);
+      if (notas.length) return t.falla(notas.join('; ') + '.');
+      return t.pasa('El aviso del hotel pasó la reserva a CONFIRMADO_ASISTIDO; la clave falsa fue rechazada.');
+    },
+  },
+  {
+    id: 'W06', grupo: 'W · A través del gateway', requiere: ['posada', 'booking', 'escritura', 'agregador'],
+    titulo: 'Cancelar en Booking libera la habitación en el hotel',
+    historia: 'El cliente cancela desde «Mis reservas»; el hotel debe poder volver a vender esa habitación.',
+    esperado: 'Booking responde CANCELADO y el hotel recupera la habitación.',
+    async run(t) {
+      const v = await buscarTipo({ n: 19, minRem: 1, exacto: true });
+      if (!v) return t.bloqueado('No hay cupo en ambos sistemas.');
+      const r = await booking.reservar(v.hotelBooking.id, { checkin: v.checkin, checkout: v.checkout, tipo: v.tipoBooking.id, etiqueta: 'w06' });
+      t.evidencia('Reserva', r);
+      const id = registrarGateway(r, 'W06');
+      if (!id) return t.falla(`No se pudo reservar: ${resumen(r)}.`);
+      const d1 = await remanentesPosada(v.hotel.id, v.opcion.codigo, v.checkin, v.checkout);
+      const c = await booking.cancelar(id);
+      t.evidencia('Cancelación en Booking', c);
+      if (c.status === 200) ctx.creadasBooking.filter((x) => x.id === id).forEach((x) => (x.cancelada = true));
+      const d2 = await remanentesPosada(v.hotel.id, v.opcion.codigo, v.checkin, v.checkout);
+      t.dato('Libres en el hotel: inicio → reservada → cancelada', `${v.opcion.remanentes} → ${d1.valor} → ${d2.valor}`);
+      if (c.status !== 200) return t.falla(`No se pudo cancelar: ${resumen(c)}.`);
+      if (d1.valor === v.opcion.remanentes - 1 && d2.valor === v.opcion.remanentes) return t.pasa('El hotel descontó al reservar y recuperó al cancelar.');
+      return t.falla('El cupo del hotel no siguió a la reserva y la cancelación de Booking.');
+    },
+  },
+
   // ── J · Rendimiento ───────────────────────────────────────────────────────────
   {
     id: 'J01', grupo: 'J · Rendimiento', requiere: ['posada'],
@@ -1025,6 +1179,7 @@ function cumpleRequisitos(e) {
     if (q === 'booking' && !ctx.bookingOk) return 'BLOQUEADO:Booking no respondió en S02.';
     if (q === 'base' && !ctx.base) return 'BLOQUEADO:Depende de la orden base de P01.';
     if (q === 'ref' && !ctx.ref) return 'BLOQUEADO:Depende del hotel de referencia de P01.';
+    if (q === 'agregador' && !ctx.mapeados.some((m) => String(m.booking.id).includes('~'))) return 'BLOQUEADO:El gateway desplegado aún no tiene el agregador de socios (los hoteles no llegan como NODO~id).';
   }
   return null;
 }

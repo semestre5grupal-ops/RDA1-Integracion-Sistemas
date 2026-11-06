@@ -331,8 +331,13 @@ const booking = {
     });
   },
 
-  reservar(id, { checkin, checkout, habitaciones = 1, adultos, tipo, etiqueta, confirmarDuplicado = true, idem = uuid() }) {
-    const t = titular(etiqueta);
+  /**
+   * Reserva en Booking. Con el agregador (ids `NODO~id`) se envía el documento del titular,
+   * que el hotel exige; la versión anterior del gateway rechaza ese campo (forbidNonWhitelisted).
+   */
+  reservar(id, { checkin, checkout, habitaciones = 1, adultos, tipo, etiqueta, confirmarDuplicado = true, idem = uuid(), huesped }) {
+    const t = huesped || titular(etiqueta);
+    const deSocio = String(id).includes('~');
     return http('POST', booking.url(`/alojamientos/${encodeURIComponent(id)}/reservations`), {
       headers: booking.h({ 'Idempotency-Key': idem }),
       body: {
@@ -346,7 +351,20 @@ const booking = {
         phone: t.telefono,
         ...(tipo ? { tipo_habitacion_id: tipo } : {}),
         ...(confirmarDuplicado ? { confirmar_duplicado: true } : {}),
+        ...(deSocio ? { documento_tipo: t.tipoDocumento || 'CEDULA', documento_numero: t.identificacion } : {}),
       },
+    });
+  },
+
+  reserva(reservationId) {
+    return http('GET', booking.url(`/alojamientos/reservations/${encodeURIComponent(reservationId)}`), { headers: booking.h() });
+  },
+
+  /** Aviso de check-in que el SOCIO envía a Booking (Flujo 2), con su X-API-Key. */
+  checkinDelSocio(ref, clave, body = {}) {
+    return http('POST', booking.url(`/reservas/${encodeURIComponent(ref)}/checkin`), {
+      headers: booking.h(clave ? { 'X-API-Key': clave } : {}),
+      body: { external_order_id: ref, estado: 'CONFIRMADO_ASISTIDO', huespedes_reales: 1, admin_id: 'recepcionista-qa', fecha_checkin: new Date().toISOString(), observaciones: 'Prueba automatizada', ...body },
     });
   },
 

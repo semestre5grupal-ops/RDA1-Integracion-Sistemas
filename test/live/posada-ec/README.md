@@ -1,6 +1,6 @@
 # Pruebas reales Posada EC ⇄ Booking
 
-Suite de 58 escenarios que se ejecuta contra lo **desplegado** de Posada EC (Sam, `NODE_ALO_PEC`) y del Booking.
+Suite de 64 escenarios que se ejecuta contra lo **desplegado** de Posada EC (Sam, `NODE_ALO_PEC`) y del Booking.
 
 ```bash
 POSADA_API_KEY=<clave> npm run test:live:posada                  # completa (crea y cancela reservas)
