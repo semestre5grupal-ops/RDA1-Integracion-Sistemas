@@ -227,7 +227,7 @@ export function AtraccionDetail() {
         customer_phone: (user.user_metadata?.telefono || '+593987654321').trim(),
         document_id: (user.user_metadata?.cedula || '1755073481').trim(),
         cliente_id: user?.id || null,
-        proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedor?.codigo || (id.startsWith('6f03') ? 'NODE_ATR_DILAN' : 'NODE_ATR_ARIEL'),
+        proveedor_codigo: atraccion?.proveedor_codigo || atraccion?.proveedorCodigo || atraccion?.proveedor?.codigo || atraccion?.proveedor?.id || undefined,
         special_requirements: (form.special_requirements || '').trim().replace(/\s{2,}/g, ' ')
       };
 
@@ -267,7 +267,7 @@ export function AtraccionDetail() {
         reservation_id: realPnr,
         pnr: realPnr,
         tipo: 'atraccion',
-        titulo: atraccion?.nombre || atraccion?.name || `Tour / Atracción (${totalTickets} personas)`,
+        titulo: atraccion?.nombre || atraccion?.name || result?.titulo || result?.name || `Tour / Atracción (${totalTickets} personas)`,
         date: form.date,
         time: form.time,
         adult_count: form.adult_count,

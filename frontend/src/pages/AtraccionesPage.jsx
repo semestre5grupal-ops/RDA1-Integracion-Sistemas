@@ -150,7 +150,7 @@ export function AtraccionesPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await getAtracciones({ page: 1, limit: 30 });
+      const result = await getAtracciones({ page: 1, limit: 100 });
       const items = result.data || result;
       setAtracciones(Array.isArray(items) ? items : []);
     } catch (err) {

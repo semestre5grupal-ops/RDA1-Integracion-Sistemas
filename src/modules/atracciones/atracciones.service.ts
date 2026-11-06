@@ -1,7 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, ILike } from 'typeorm';
+import { Repository, DataSource, ILike, In } from 'typeorm';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { SearchAtraccionesRequestDto } from './dto/search-atracciones.dto';
 import { CreateAtraccionDto } from './dto/create-atraccion.dto';
@@ -1322,8 +1322,12 @@ export class AtraccionesService {
       throw new HttpException('Debe reservar al menos 1 boleto en total', HttpStatus.BAD_REQUEST);
     }
 
-    // Consultar atracción para calcular tarifa base
+    // Consultar atracción para calcular tarifa base y obtener proveedor dinámico
     let atraccion = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
+    if (!atraccion) {
+      await this.findOne(id).catch(() => null);
+      atraccion = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
+    }
     const basePrice = atraccion ? Number(atraccion.precioUnitarioAdulto) : 55.0;
 
     // Tarificación transparente:
@@ -1340,33 +1344,35 @@ export class AtraccionesService {
 
     let turnoId = slotId || `slot-${id}`;
 
+    const provCode =
+      atraccion?.proveedorCodigo ||
+      dto.proveedor_codigo ||
+      dto.partner_code ||
+      dto.proveedor?.codigo ||
+      '';
+
     const isMichaelAttr =
-      dto.proveedor_codigo === 'NODE_ATR_MOLINA' ||
-      atraccion?.proveedorCodigo === 'NODE_ATR_MOLINA' ||
+      provCode === 'NODE_ATR_MOLINA' ||
       id === 'rLohsmEh6809' ||
       (id.length === 12 && !id.includes('-') && !id.startsWith('PRhu'));
 
     const isAlissonAttr =
-      dto.proveedor_codigo === 'NODE_ATR_ALISSON' ||
-      atraccion?.proveedorCodigo === 'NODE_ATR_ALISSON' ||
+      provCode === 'NODE_ATR_ALISSON' ||
       id.startsWith('PRhu');
 
     const isGloriaAttr =
-      dto.proveedor_codigo === 'NODE_ATR_GLORIA' ||
-      atraccion?.proveedorCodigo === 'NODE_ATR_GLORIA' ||
+      provCode === 'NODE_ATR_GLORIA' ||
       id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d';
 
     const isDilanAttr =
       !isMichaelAttr && !isAlissonAttr && !isGloriaAttr &&
-      (dto.proveedor_codigo === 'NODE_ATR_DILAN' ||
-       atraccion?.proveedorCodigo === 'NODE_ATR_DILAN' ||
+      (provCode === 'NODE_ATR_DILAN' ||
        id.startsWith('6f03') ||
        id === '6f035852-c8a8-49b1-a771-1b34b07e972d');
 
     const isArielAttr =
       !isMichaelAttr && !isAlissonAttr && !isGloriaAttr && !isDilanAttr &&
-      (dto.proveedor_codigo === 'NODE_ATR_ARIEL' ||
-       atraccion?.proveedorCodigo === 'NODE_ATR_ARIEL' ||
+      (provCode === 'NODE_ATR_ARIEL' ||
        id.startsWith('0bef') ||
        id.length > 30 ||
        id.includes('-'));
@@ -1497,7 +1503,7 @@ export class AtraccionesService {
       const saved = await this.reservaRepo.save(nuevaReserva);
 
       return {
-        ...this.formatReservaResponse(saved),
+        ...this.formatReservaResponse(saved, atraccion?.nombre),
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
@@ -1590,7 +1596,7 @@ export class AtraccionesService {
 
       const saved = await this.reservaRepo.save(nuevaReserva);
       return {
-        ...this.formatReservaResponse(saved),
+        ...this.formatReservaResponse(saved, atraccion?.nombre),
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
@@ -1666,7 +1672,7 @@ export class AtraccionesService {
 
       const saved = await this.reservaRepo.save(nuevaReserva);
       return {
-        ...this.formatReservaResponse(saved),
+        ...this.formatReservaResponse(saved, atraccion?.nombre),
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
@@ -1799,7 +1805,7 @@ export class AtraccionesService {
       const saved = await this.reservaRepo.save(nuevaReserva);
 
       return {
-        ...this.formatReservaResponse(saved),
+        ...this.formatReservaResponse(saved, atraccion?.nombre),
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
@@ -1931,7 +1937,7 @@ export class AtraccionesService {
       const saved = await this.reservaRepo.save(nuevaReserva);
 
       return {
-        ...this.formatReservaResponse(saved),
+        ...this.formatReservaResponse(saved, atraccion?.nombre),
         reservation_id: reservationCode,
         reservation_code: reservationCode,
         pnr: reservationCode,
@@ -2220,7 +2226,7 @@ export class AtraccionesService {
       idempotency_key: safeKey,
     });
 
-    return this.formatReservaResponse(savedReserva);
+    return this.formatReservaResponse(savedReserva, atraccion?.nombre);
   }
 
   async checkin(reservationId: string, dto: CheckinAtraccionDto, req?: any): Promise<any> {
@@ -2713,7 +2719,16 @@ export class AtraccionesService {
       await Promise.allSettled(syncPromises);
     }
 
-    return reservas.map((r) => this.formatReservaResponse(r));
+    const atraccionIds = [...new Set(reservas.map((r) => r.atraccionId).filter(Boolean))];
+    const atraccionMap = new Map<string, string>();
+    if (atraccionIds.length > 0) {
+      try {
+        const foundAtr = await this.atraccionRepo.find({ where: { id: In(atraccionIds) } });
+        foundAtr.forEach((a) => atraccionMap.set(a.id, a.nombre));
+      } catch (_) {}
+    }
+
+    return reservas.map((r) => this.formatReservaResponse(r, atraccionMap.get(r.atraccionId)));
   }
 
   async getReservaById(reservationId: string): Promise<any> {
@@ -2723,7 +2738,12 @@ export class AtraccionesService {
       reserva = all.find((r) => r.id === reservationId || r.id.startsWith(reservationId)) || null;
     }
     if (!reserva) throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
-    return this.formatReservaResponse(reserva);
+    let atraccionNombre = '';
+    try {
+      const at = await this.atraccionRepo.findOne({ where: [{ id: reserva.atraccionId }, { slug: reserva.atraccionId }] });
+      if (at) atraccionNombre = at.nombre;
+    } catch (_) {}
+    return this.formatReservaResponse(reserva, atraccionNombre);
   }
 
   private formatAtraccionResponse(item: Atraccion): any {
@@ -2877,13 +2897,17 @@ export class AtraccionesService {
     };
   }
 
-  private formatReservaResponse(reserva: ReservaAtraccion): any {
+  private formatReservaResponse(reserva: ReservaAtraccion, atraccionNombre?: string): any {
     const totalAmount = Number(reserva.totalAmount);
-    let titulo = `Tour / Atracción (${reserva.ticketCount || 1} personas)`;
-    if (reserva.atraccionId === '0bef88e2-2391-4352-9af8-419ed5017f2b') {
-      titulo = 'prueba integración';
-    } else if (reserva.atraccionId === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
-      titulo = 'Prueba descubre EC';
+    let titulo = atraccionNombre || `Tour / Atracción (${reserva.ticketCount || 1} personas)`;
+    if (!atraccionNombre) {
+      if (reserva.atraccionId === '0bef88e2-2391-4352-9af8-419ed5017f2b') {
+        titulo = 'prueba integración';
+      } else if (reserva.atraccionId === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
+        titulo = 'Prueba descubre EC';
+      } else if (reserva.atraccionId === 'rLohsmEh6809') {
+        titulo = 'Prueba de integración Tour Girls';
+      }
     }
     return {
       id: reserva.id,
