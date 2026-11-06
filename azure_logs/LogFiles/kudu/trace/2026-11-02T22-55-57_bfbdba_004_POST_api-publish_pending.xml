@@ -1,0 +1,18 @@
+<step title="Incoming Request" date="2026-11-02T22:55:57.031" instance="bfbdba" url="/api/publish?type=zip&amp;async=true" method="POST" type="request" pid="885,1,129" Accept="*/*" Host="booking-core-api.scm.azurewebsites.net" User-Agent="curl/8.5.0" Authorization="Bea..." Content-Type="application/zip" Expect="100-continue" Content-Length="66631310" X-ARR-LOG-ID="e8ba157f-92e9-47e6-aaf5-e42b100ce7c3" CLIENT-IP="160.79.106.128:2049" X-SITE-DEPLOYMENT-ID="booking-core-api" WAS-DEFAULT-HOSTNAME="booking-core-api.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?type=zip&amp;async=true" X-Client-IP="160.79.106.128" X-Client-Port="2049" >
+  <step title="OneDeploy" date="2026-11-02T22:55:57.220" >
+    <step title="None repository commit" date="2026-11-02T22:55:57.270" >
+      <step title="Commit id: 8a1fb755-343b-42c7-bab9-7281fd21ff7d" date="2026-11-02T22:55:57.310" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 4ms -->
+    </step><!-- duration: 70ms -->
+    <step title="Starting PushDeployAsync" date="2026-11-02T22:55:57.344" /><!-- duration: 5ms -->
+    <step title="Removing _del_node_modules symlink" date="2026-11-02T22:55:57.423" >
+      <step title="Writing artifact to /tmp/zipdeploy/16cdbf0b-3c69-4382-abd2-4d31f04f8e06.zip" date="2026-11-02T22:55:57.663" >
+        <step title="Writing multipart request body to /tmp/zipdeploy/16cdbf0b-3c69-4382-abd2-4d31f04f8e06.zip" date="2026-11-02T22:55:57.705" /><!-- duration: 47ms -->
+        <step title="Writing zip file to /tmp/zipdeploy/16cdbf0b-3c69-4382-abd2-4d31f04f8e06.zip" date="2026-11-02T22:55:57.769" /><!-- duration: 5085ms -->
+      </step><!-- duration: 5280ms -->
+      <step title="Start deployment in the background" date="2026-11-02T22:56:03.012" >
+        <step title="Acquiring Deployment Lock" date="2026-11-02T22:56:03.280" /><!-- duration: 59ms -->
+        <step title="Acquired Deployment Lock" date="2026-11-02T22:56:03.710" /><!-- duration: 21ms -->
+      </step><!-- duration: 1330ms -->
+    </step><!-- duration: 6989ms -->
+    <step title="Outgoing response" date="2026-11-02T22:56:04.501" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 11ms -->
+  </step><!-- duration: 7301ms -->

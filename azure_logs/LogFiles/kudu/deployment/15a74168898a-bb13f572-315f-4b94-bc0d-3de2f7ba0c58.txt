@@ -1,0 +1,137 @@
+2026-10-28T21:21:29  Fetching changes.
+2026-10-28T21:21:29    Starting  LocalZipHandler
+2026-10-28T21:21:29    Cleaning up temp folders from previous zip deployments and extracting pushed zip file /tmp/zipdeploy/67145c07-3c2a-4851-83aa-b1eb91db3723.zip (1.88 MB) to /tmp/zipdeploy/extracted
+2026-10-28T21:21:33  Updating submodules.
+2026-10-28T21:21:33  Preparing deployment for commit id '36122ae4-c'.
+2026-10-28T21:21:34  PreDeployment: context.CleanOutputPath False
+2026-10-28T21:21:34  PreDeployment: context.OutputPath /home/site/wwwroot
+2026-10-28T21:21:34  Repository path is /tmp/zipdeploy/extracted
+2026-10-28T21:21:34  Running oryx build...
+2026-10-28T21:21:34    Command: oryx build /tmp/zipdeploy/extracted -o /home/site/wwwroot --platform nodejs --platform-version 22 -p virtualenv_name= --log-file /tmp/build-debug.log  -i /tmp/8df3539714887d4 -p compress_node_modules=tar-gz | tee /tmp/oryx-build.log
+2026-10-28T21:21:36    Operation performed by Microsoft Oryx, https://github.com/Microsoft/Oryx
+2026-10-28T21:21:36    You can report issues at https://github.com/Microsoft/Oryx/issues
+2026-10-28T21:21:36    
+2026-10-28T21:21:36    Oryx Version: 0.2.20260904.4+b59c18270651a915d8674b6d8baef6adf95bae39, Commit: b59c18270651a915d8674b6d8baef6adf95bae39, ReleaseTagName: 20260904.4
+2026-10-28T21:21:36    
+2026-10-28T21:21:36    Build Operation ID: ddf07d3f36970548
+2026-10-28T21:21:36    Repository Commit : 36122ae4-cf84-4e57-8302-721946027a8b
+2026-10-28T21:21:36    OS Type           : bookworm
+2026-10-28T21:21:37    Image Type        : githubactions
+2026-10-28T21:21:37    
+2026-10-28T21:21:37    Primary SDK Storage URL: https://oryx-cdn.microsoft.io
+2026-10-28T21:21:37    Backup SDK Storage URL: 
+2026-10-28T21:21:37    ACR SDK Registry URL: (not set)
+2026-10-28T21:21:37    SDK provider status:
+2026-10-28T21:21:37      External ACR SDK provider: Enabled
+2026-10-28T21:21:37      External SDK provider: Disabled
+2026-10-28T21:21:37      Direct ACR SDK provider: Disabled
+2026-10-28T21:21:37      Blob SDK provider: Disabled
+2026-10-28T21:21:37    External ACR SDK provider is enabled. Only using user-specified platform: nodejs
+2026-10-28T21:21:37    Detecting platforms...
+2026-10-28T21:21:42    External ACR provider resolved version '22.23.4' for nodejs.
+2026-10-28T21:21:42    Version resolved using external ACR SDK provider.
+2026-10-28T21:21:42    Detected following platforms:
+2026-10-28T21:21:42      nodejs: 22.23.4
+2026-10-28T21:21:42    Requesting SDK from ACR via external provider: nodejs 22.23.4 (bookworm)
+2026-10-28T21:21:44    Successfully pulled SDK from ACR via external provider: nodejs 22.23.4
+2026-10-28T21:21:45    SDK for 'nodejs' version '22.23.4' fetched via external ACR provider.
+2026-10-28T21:21:45    Version '22.23.4' of platform 'nodejs' is not installed. Generating script to install it...
+2026-10-28T21:21:45    Detected the following frameworks: Typescript
+2026-10-28T21:21:46    
+2026-10-28T21:21:46    Using intermediate directory '/tmp/8df3539714887d4'.
+2026-10-28T21:21:46    
+2026-10-28T21:21:46    Copying files to the intermediate directory...
+2026-10-28T21:21:47    Copying files to intermediate directory done in 1 sec(s).
+2026-10-28T21:21:47    
+2026-10-28T21:21:47    Source directory     : /tmp/8df3539714887d4
+2026-10-28T21:21:47    Destination directory: /home/site/wwwroot
+2026-10-28T21:21:47    
+2026-10-28T21:21:47    Installing platform...
+2026-10-28T21:21:47    
+2026-10-28T21:21:47    Downloading and extracting 'nodejs' version '22.23.4' to '/tmp/oryx/platforms/nodejs/22.23.4'...
+2026-10-28T21:21:47    Detected image debian flavor: bookworm.
+2026-10-28T21:21:47    SDK binary download was skipped. Looking for cached tarball...
+2026-10-28T21:21:48    Found tarball at /var/OryxAcrSdks/nodejs/nodejs-bookworm-22.23.4.tar.gz
+2026-10-28T21:21:57    Successfully extracted nodejs version 22.23.4 from cached tarball.
+2026-10-28T21:21:57    
+2026-10-28T21:21:57    Platform installation done in 10 sec(s).
+2026-10-28T21:21:57    Running build script snippets...
+2026-10-28T21:21:57    Removing existing manifest file
+2026-10-28T21:21:57    Creating directory for command manifest file if it does not exist
+2026-10-28T21:21:57    Creating a manifest file...
+2026-10-28T21:21:57    Node Build Command Manifest file created.
+2026-10-28T21:21:58    
+2026-10-28T21:21:58    Using Node version:
+2026-10-28T21:21:58    v22.23.4
+2026-10-28T21:21:58    
+2026-10-28T21:21:58    Using Npm version:
+2026-10-28T21:21:59    10.9.9
+2026-10-28T21:21:59    
+2026-10-28T21:21:59    Running 'npm install'...
+2026-10-28T21:21:59    
+2026-10-28T21:22:47    npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+2026-10-28T21:23:09    npm warn deprecated lodash.omit@4.5.0: This package is deprecated. Use destructuring assignment syntax instead.
+2026-10-28T21:23:27    npm warn deprecated @apollo/server-plugin-landing-page-graphql-playground@4.0.0: The use of GraphQL Playground in Apollo Server was supported in previous versions, but this is no longer the case as of December 31, 2022. This package exists for v4 migration purposes only. We do not intend to resolve security issues or other bugs with this package if they arise, so please migrate away from this to [Apollo Server's default Explorer](https://www.apollographql.com/docs/apollo-server/api/plugin/landing-pages) as soon as possible.
+2026-10-28T21:23:28    npm warn deprecated @apollo/server-gateway-interface@1.1.1: @apollo/server-gateway-interface v1 is part of Apollo Server v4, which is deprecated and will transition to end-of-life on January 26, 2026. As long as you are already using a non-EOL version of Node.js, upgrading to v2 should take only a few minutes. See https://www.apollographql.com/docs/apollo-server/previous-versions for details.
+2026-10-28T21:23:35    npm warn deprecated subscriptions-transport-ws@0.11.0: The `subscriptions-transport-ws` package is no longer maintained. We recommend you use `graphql-ws` instead. For help migrating Apollo software to `graphql-ws`, see https://www.apollographql.com/docs/apollo-server/data/subscriptions/#switching-from-subscriptions-transport-ws    For general help using `graphql-ws`, see https://github.com/enisdenjo/graphql-ws/blob/master/README.md
+2026-10-28T21:23:44    npm warn deprecated uuid@9.0.1: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+2026-10-28T21:23:45    npm warn deprecated glob@10.4.5: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-10-28T21:23:45    npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-10-28T21:24:37    npm warn deprecated @apollo/server@4.13.0: Apollo Server v4 is end-of-life since January 26, 2026. As long as you are already using a non-EOL version of Node.js, upgrading to v5 should take only a few minutes. See https://www.apollographql.com/docs/apollo-server/previous-versions for details.
+2026-10-28T21:25:01    
+2026-10-28T21:25:02    added 856 packages, and audited 857 packages in 3m
+2026-10-28T21:25:02    
+2026-10-28T21:25:02    171 packages are looking for funding
+2026-10-28T21:25:02      run `npm fund` for details
+2026-10-28T21:25:05    
+2026-10-28T21:25:05    38 vulnerabilities (3 low, 13 moderate, 21 high, 1 critical)
+2026-10-28T21:25:05    
+2026-10-28T21:25:05    To address issues that do not require attention, run:
+2026-10-28T21:25:05      npm audit fix
+2026-10-28T21:25:05    
+2026-10-28T21:25:05    To address all issues (including breaking changes), run:
+2026-10-28T21:25:05      npm audit fix --force
+2026-10-28T21:25:06    
+2026-10-28T21:25:06    Run `npm audit` for details.
+2026-10-28T21:25:06    npm notice
+2026-10-28T21:25:06    npm notice New major version of npm available! 10.9.9 -> 12.2.1
+2026-10-28T21:25:06    npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+2026-10-28T21:25:06    npm notice To update run: npm install -g npm@12.2.1
+2026-10-28T21:25:06    npm notice
+2026-10-28T21:25:09    Package install done in 189 sec(s).
+2026-10-28T21:25:09    
+2026-10-28T21:25:09    Running 'npm run build'...
+2026-10-28T21:25:09    
+2026-10-28T21:25:13    
+2026-10-28T21:25:13    > booking-prototipo-plantilla@1.0.0 build
+2026-10-28T21:25:13    sh: 1: nest: not found
+2026-10-28T21:25:14    > nest build
+2026-10-28T21:25:14    
+2026-10-28T21:25:16    npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+npm warn deprecated lodash.omit@4.5.0: This package is deprecated. Use destructuring assignment syntax instead.
+npm warn deprecated @apollo/server-plugin-landing-page-graphql-playground@4.0.0: The use of GraphQL Playground in Apollo Server was supported in previous versions, but this is no longer the case as of December 31, 2022. This package exists for v4 migration purposes only. We do not intend to resolve security issues or other bugs with this package if they arise, so please migrate away from this to [Apollo Server's default Explorer](https://www.apollographql.com/docs/apollo-server/api/plugin/landing-pages) as soon as possible.
+npm warn deprecated @apollo/server-gateway-interface@1.1.1: @apollo/server-gateway-interface v1 is part of Apollo Server v4, which is deprecated and will transition to end-of-life on January 26, 2026. As long as you are already using a non-EOL version of Node.js, upgrading to v2 should take only a few minutes. See https://www.apollographql.com/docs/apollo-server/previous-versions for details.
+npm warn deprecated subscriptions-transport-ws@0.11.0: The `subscriptions-transport-ws` package is no longer maintained. We recommend you use `graphql-ws` instead. For help migrating Apollo software to `graphql-ws`, see https://www.apollographql.com/docs/apollo-server/data/subscriptions/#switching-from-subscriptions-transport-ws    For general help using `graphql-ws`, see https://github.com/enisdenjo/graphql-ws/blob/master/README.md
+npm warn deprecated uuid@9.0.1: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+npm warn deprecated glob@10.4.5: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated @apollo/server@4.13.0: Apollo Server v4 is end-of-life since January 26, 2026. As long as you are already using a non-EOL version of Node.js, upgrading to v5 should take only a few minutes. See https://www.apollographql.com/docs/apollo-server/previous-versions for details.
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+sh: 1: nest: not found
+/bin/bash -c "oryx build /tmp/zipdeploy/extracted -o /home/site/wwwroot --platform nodejs --platform-version 22 -p virtualenv_name= --log-file /tmp/build-debug.log  -i /tmp/8df3539714887d4 -p compress_node_modules=tar-gz | tee /tmp/oryx-build.log ; exit $PIPESTATUS "
+2026-10-28T21:25:17  
+2026-10-28T21:25:17  
+2026-10-28T21:25:17  Generating summary of Oryx build
+2026-10-28T21:25:18  Parsing the build logs
+2026-10-28T21:25:18  Found 0 issue(s)
+2026-10-28T21:25:18  
+2026-10-28T21:25:19  Build Summary :
+2026-10-28T21:25:19  ===============
+2026-10-28T21:25:19  Errors (0)
+2026-10-28T21:25:19  Warnings (0)
+2026-10-28T21:25:19  
+2026-10-28T21:25:20  Deployment Failed. deployer = OneDeploy deploymentPath = OneDeploy

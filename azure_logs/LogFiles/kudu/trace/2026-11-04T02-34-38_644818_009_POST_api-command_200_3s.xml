@@ -1,0 +1,4 @@
+<step title="Incoming Request" date="2026-11-04T02:34:38.894" instance="644818" url="/api/command" method="POST" type="request" pid="887,1,25" Accept="*/*" Host="booking-core-api.scm.azurewebsites.net" User-Agent="curl/7.81.0" Authorization="Bea..." Content-Type="application/json" Content-Length="119" X-ARR-LOG-ID="e8edf17d-6d16-48bf-801f-080dd0792331" CLIENT-IP="38.51.35.177:61547" X-SITE-DEPLOYMENT-ID="booking-core-api" WAS-DEFAULT-HOSTNAME="booking-core-api.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/command" X-Client-IP="38.51.35.177" X-Client-Port="61547" >
+  <step title="Executing user command. " date="2026-11-04T02:34:38.907" CWD="/home/site/wwwroot" /><!-- duration: 2675ms -->
+  <step title="Outgoing response" date="2026-11-04T02:34:41.602" type="response" statusCode="200" statusText="OK" /><!-- duration: 18ms -->
+</step><!-- duration: 2739ms -->

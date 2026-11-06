@@ -1,0 +1,4 @@
+<step title="Incoming Request" date="2026-11-05T03:28:04.743" instance="644818" url="/api/deployments/39a9e1fa-477d-4edb-b0ce-2d08822f8349" method="GET" type="request" pid="887,1,60" Accept="*/*" Host="booking-core-api.scm.azurewebsites.net" User-Agent="curl/7.81.0" Authorization="Bea..." X-ARR-LOG-ID="c7c13aa6-b25d-4e0c-b371-5f892d631538" CLIENT-IP="38.51.35.177:55606" X-SITE-DEPLOYMENT-ID="booking-core-api" WAS-DEFAULT-HOSTNAME="booking-core-api.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/deployments/39a9e1fa-477d-4edb-b0ce-2d08822f8349" X-Client-IP="38.51.35.177" X-Client-Port="55606" >
+  <step title="DeploymentService.GetResult" date="2026-11-05T03:28:04.751" /><!-- duration: 87ms -->
+  <step title="Outgoing response" date="2026-11-05T03:28:04.843" type="response" statusCode="200" statusText="OK" /><!-- duration: 3ms -->
+</step><!-- duration: 107ms -->
