@@ -21,7 +21,8 @@ export async function reservarAtraccion(id, reservationData, idempotencyKey) {
   const { data } = await api.post(`/atracciones/${id}/reservations`, reservationData, {
     headers: {
       'idempotency-key': idempotencyKey
-    }
+    },
+    timeout: 45000
   });
   return data;
 }

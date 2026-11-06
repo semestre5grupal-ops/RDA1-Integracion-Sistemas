@@ -1386,13 +1386,13 @@ export class AtraccionesService {
       const clientPhone = dto.customer_phone || dto.customer?.phone || '+593991234567';
       const clientDoc = dto.document_id || dto.customer?.document_id || '1755073481';
 
-      // Sincronizar cliente con TourGirls (POST /api/v3/clientes)
-      await this.sincronizarClienteConMichael({
+      // Sincronizar cliente con TourGirls (POST /api/v3/clientes) en segundo plano para no bloquear
+      this.sincronizarClienteConMichael({
         nombre: clientName,
         email: clientEmail,
         identificacion: clientDoc,
         telefono: clientPhone,
-      });
+      }).catch(e => this.logger.warn(`[Sync Michael] Async client sync: ${e.message}`));
 
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(safeKey);
       const michaelIdempotencyKey = isUuid ? safeKey : crypto.randomUUID();
@@ -1430,7 +1430,7 @@ export class AtraccionesService {
                 'Idempotency-Key': michaelIdempotencyKey,
                 'Content-Type': 'application/json',
               },
-              timeout: 12000,
+              timeout: 30000,
             },
           ),
         );
@@ -1555,7 +1555,7 @@ export class AtraccionesService {
                 'Idempotency-Key': alissonIdempotencyKey,
                 'Content-Type': 'application/json',
               },
-              timeout: 10000,
+              timeout: 30000,
             },
           ),
         );
@@ -1632,7 +1632,7 @@ export class AtraccionesService {
                 'Idempotency-Key': gloriaIdempotencyKey,
                 'Content-Type': 'application/json',
               },
-              timeout: 10000,
+              timeout: 30000,
             },
           ),
         );
@@ -1732,7 +1732,7 @@ export class AtraccionesService {
                 'Idempotency-Key': dilanIdempotencyKey,
                 'Content-Type': 'application/json',
               },
-              timeout: 10000,
+              timeout: 30000,
             },
           ),
         );
@@ -1864,7 +1864,7 @@ export class AtraccionesService {
                 'Idempotency-Key': safeKey,
                 'Content-Type': 'application/json',
               },
-              timeout: 10000,
+              timeout: 30000,
             },
           ),
         );

@@ -462,7 +462,7 @@ export class AutosCircuitBreakerAdapter {
                 'X-Correlation-Id': cId,
                 'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
               },
-              timeout: this.TIMEOUT_MS,
+              timeout: 25000,
             }
           )
         );
@@ -545,9 +545,9 @@ export class AutosCircuitBreakerAdapter {
             'X-Correlation-Id': cId,
             'X-API-Key': key,
           },
-          timeout: this.TIMEOUT_MS,
+          timeout: 25000,
         }).pipe(
-          timeout(this.TIMEOUT_MS),
+          timeout(25000),
           catchError((err) => {
             // Solo errores de red o 5xx cuentan como falla de circuito, nunca 4xx (conflictos de negocio)
             if (!err.response || err.response.status >= 500) {
