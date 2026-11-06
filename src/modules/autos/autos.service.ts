@@ -255,11 +255,28 @@ export class AutosService implements OnModuleInit {
     const isYoungOrSenior = driverAge < 25 || driverAge > 70;
     const surchargeRate = isYoungOrSenior ? 15.00 : 0.00;
 
-    // 3. Filtrar flota local: Excluir 'EN_LIMPIEZA' (mientras dure el cooldown) y 'RESERVADO'
+    // 3. Filtrar flota local: Excluir 'EN_LIMPIEZA' (mientras dure el cooldown) y verificar colisión de fechas
     let availableCars = this.memoryFleet.filter(car => {
       // Regla de cátedra: Durante las 2 horas de limpieza queda completamente excluido
-      if (car.estado === EstadoVehiculo.EN_LIMPIEZA || car.estado === EstadoVehiculo.RESERVADO) {
+      if (car.estado === EstadoVehiculo.EN_LIMPIEZA) {
         return false;
+      }
+      if (car.estado === EstadoVehiculo.RESERVADO) {
+        // Si hay fechas de búsqueda, verificar si las fechas colisionan con reservas existentes
+        if (dto.pickup_date && dto.dropoff_date) {
+          const hasCollision = Array.from(this.memoryOrders.values()).some((ord: any) => {
+            if (ord.auto_id !== car.id || ord.status === 'CANCELLED') return false;
+            const oPickup = ord.pickup_date || ord.fecha_inicio;
+            const oDropoff = ord.dropoff_date || ord.fecha_fin;
+            if (oPickup && oDropoff) {
+              return dto.pickup_date! <= oDropoff && dto.dropoff_date! >= oPickup;
+            }
+            return true;
+          });
+          if (hasCollision) return false;
+        } else {
+          return false;
+        }
       }
       if (categoryFilter && categoryFilter !== 'ALL' && car.categoria !== categoryFilter) {
         return false;
@@ -383,10 +400,17 @@ export class AutosService implements OnModuleInit {
     let auto = this.memoryFleet.find(c => c.id === id);
     if (!auto) {
       try {
-        const external = await this.circuitBreakerAdapter.fetchExternalCars({});
+        const external = await this.circuitBreakerAdapter.fetchExternalCars({ all_units: 'true' });
         const foundExt = external.find((c: any) => c.vehicle_id === id || c.id === id);
         if (foundExt) {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
+          // Verificar si tiene orden activa en memoria
+          const isReservedMem = Array.from(this.memoryOrders.values()).some(
+            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED'
+          );
+          if (isReservedMem) {
+            foundExt.estado = 'RESERVADO';
+          }
           return {
             ...foundExt,
             fechas_ocupadas: occupied,
@@ -541,8 +565,8 @@ export class AutosService implements OnModuleInit {
       userEmail: driverEmail
     });
 
-    // Cambiar estado del auto a RESERVADO solo si pertenece a la flota local
-    if (isLocalAuto) {
+    // Cambiar estado del auto a RESERVADO tanto si es local como externo
+    if (isLocalAuto && auto) {
       auto.estado = EstadoVehiculo.RESERVADO;
     }
 
@@ -1364,8 +1388,10 @@ export class AutosService implements OnModuleInit {
             finalStatus = 'CONFIRMADO_ASISTIDO';
           }
 
-          const modelName = ext.vehiculo?.modelo || (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba');
-          const plateName = chk?.placa || ext.placa || (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : ''));
+          const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || (ext.auto_id && ext.auto_id.length === 36);
+          const brandName = ext.vehiculo?.marca || (isMateoOrder ? 'Maneja de Una' : 'Toyota');
+          const modelName = ext.vehiculo?.modelo || (isMateoOrder ? 'Vehículo de Flota' : (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba'));
+          const plateName = chk?.placa || ext.placa || (isMateoOrder ? (ext.auto_id ? ext.auto_id.substring(0, 8) : '') : (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : '')));
 
           unique.set(pnr, {
             order_id: pnr,
@@ -1378,20 +1404,20 @@ export class AutosService implements OnModuleInit {
             checkin: chk || null,
             email: email,
             conductor: {
-              nombre: ext.driver?.full_name || 'Conductor Verificado',
+              nombre: ext.driver?.full_name || ext.driver?.nombre || 'Conductor Verificado',
               email: email,
-              telefono: ext.driver?.phone || '+593998765432',
-              licencia: ext.driver?.license_number || '1150029880',
+              telefono: ext.driver?.phone || ext.driver?.telefono || '+593998765432',
+              licencia: ext.driver?.license_number || ext.driver?.licencia || '1150029880',
             },
             driver: {
               email: email,
             },
             vehiculo: {
-              marca: 'Toyota',
+              marca: brandName,
               modelo: modelName,
-              categoria: 'SUV',
-              transmision: 'Manual',
-              foto_url: 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1',
+              categoria: ext.vehiculo?.categoria || 'SUV',
+              transmision: ext.vehiculo?.transmision || 'Manual',
+              foto_url: ext.vehiculo?.foto_url || (isMateoOrder ? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800' : 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1'),
             },
             dias_renta: ext.dias_renta || ext.dias || 3,
             pickup_date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
