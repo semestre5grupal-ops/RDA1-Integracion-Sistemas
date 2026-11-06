@@ -296,3 +296,59 @@ Que Booking deje de vender a ciegas el inventario de Posada:
    no sólo al mostrar) para que A05 coincida.
 4. Revisar el mock de respaldo del adaptador: con el circuito abierto devuelve
    `CONFIRMED_FALLBACK` sin que el hotel sepa nada. Es justo la sobreventa que estas pruebas detectan.
+
+## 7. Otros socios de alojamientos registrados en el gateway (2026-11-06)
+
+Además de Posada EC, en «Servicios & Prov.» del gateway (`GET /api/v1/nodes`) hay dos nodos de
+alojamientos. Sus X-API-Key quedaron guardadas como secretos del entorno de pruebas (las inyecta el
+proxy; no están en el repo). Por eso **I01–I03 se omiten**: el proxy pondría la clave real incluso en
+las pruebas «sin clave» o «con clave falsa».
+
+### 7.1 Kawsay Estancias (`NODE_ALO_KAWSAY_E_FCKP`) — cumple el contrato
+
+`https://kawsay-alo-78f5556.azurewebsites.net/api/v2` · 1 hotel (`HTL-KAWSAY-001`, `SUITE_DELUXE` ×2).
+
+```bash
+NODE_USE_ENV_PROXY=1 POSADA_API_KEY=proxy-injected PRUEBAS_CLAVE_INYECTADA=1 PRUEBAS_SOCIO="Kawsay Estancias" \
+  POSADA_BASE_URL=https://kawsay-alo-78f5556.azurewebsites.net/api/v2 node test/live/posada-ec/ejecutar.js
+```
+
+Resultado (`resultados/2026-11-06T16-49-49-112Z-kawsay-estancias.md`): **47 ✅ · 1 ❌ · 7 ⛔ · 3 ⏭️**.
+
+- **Pasa todo lo que depende de Kawsay:**
+  - concurrencia: última habitación, doble clic, reintento y clave reutilizada;
+  - precio: pagar $1 → `PRICE_MISMATCH`, cotización vieja → `QUOTE_EXPIRED`;
+  - fechas, capacidad, cédula (módulo 10), pasaporte y campos desconocidos;
+  - ciclo de vida: los tres identificadores, check-in antes de hora, cancelar dos veces, Saga al 100 %;
+  - SLA de menos de 3 s.
+- **❌ S03 (Booking):** ningún hotel de Kawsay aparece en Booking. Es el paso 2 del Flujo 1 (el
+  producto nuevo debe aparecer al refrescar) y depende del agregador del gateway. Por eso S05 y
+  A01–A06 quedan ⛔.
+- Limpieza verificada: las 11 órdenes de prueba están `CANCELLED`.
+
+### 7.2 LuxeStays (`NODE_ALO_LUXESTAY_E5K3`) — NO cumple el contrato v2.2.0
+
+`https://posada-ec-alojamientos.azurewebsites.net/api/v2` · 50 alojamientos (`ALO-001` … `ALO-050`).
+La suite no se puede correr contra este socio. Verificación de contrato con peticiones inofensivas:
+
+| Qué exige el contrato | Qué hace LuxeStays |
+|---|---|
+| `GET /alojamientos/{id}/availability` (o el alias `/disponibilidad`) | **404** en v1 y en v2, aunque su `/api/docs-json` las anuncia |
+| `POST /alojamientos/availability` con `cotizacionId` | 200 con otra estructura (`{ data: { products: [] } }`) |
+| `POST /alojamientos/orders/create` con la X-API-Key del Booking | **401 «Authentication is required»**, con la misma clave con la que sí lista órdenes |
+| `code` del enum `ErrorCode` según el error | Siempre `VALIDATION_FAILED`, también en 401 y 404 |
+| Catálogo paginado con `metadata` | Lista simple sin paginación; tipos con ids `ESP-001` y `codigo: null` |
+| `GET /api/v2/clientes` (Flujo 2) | 404 |
+
+Sí funcionan: `health`, el catálogo, `/{id}`, `/{id}/habitaciones`, `/{id}/inventario`,
+`/promociones/contrato` y `GET /orders`.
+
+**Qué pedirle a LuxeStays:** que exponga `GET /alojamientos/{id}/availability`; que acepte la
+X-API-Key (o diga qué credencial usa) en `orders/create`; que use los `code` del contrato; y que
+implemente `/api/v2/clientes`.
+
+### 7.3 Flujo 2 (clientes cross-platform): ningún socio expone `/api/v2/clientes`
+
+Posada EC, Kawsay y LuxeStays responden 404. El gateway (`reservas.service.ts`, `sincronizarClienteConSocio`)
+aplica un id de cliente de respaldo, pero el socio nunca recibe la ficha del huésped. Hay que pedírselo
+a los tres (instrucciones de cátedra, contrato v2.1).

@@ -25,6 +25,15 @@ const args = process.argv.slice(2);
 const SOLO_LECTURA = args.includes('--solo-lectura');
 const SOLO = (args.find((a) => a.startsWith('--solo=')) || '').replace('--solo=', '').split(',').filter(Boolean);
 const ESPERA_SYNC = Number(process.env.PRUEBAS_ESPERA_SYNC_MS || 5000);
+/** Nombre del socio que se prueba (los textos de los escenarios dicen «Posada»). */
+const SOCIO = process.env.PRUEBAS_SOCIO || 'Posada EC';
+const conSocio = (t) => (SOCIO === 'Posada EC' ? t : String(t).replace(/Posada EC|Posada/g, SOCIO));
+/**
+ * PRUEBAS_CLAVE_INYECTADA=1 cuando la X-API-Key la pone un proxy en todas las peticiones: las
+ * pruebas «sin clave» o «con clave falsa» no se pueden evaluar, porque el proxy pondría la real.
+ */
+const CLAVE_INYECTADA = process.env.PRUEBAS_CLAVE_INYECTADA === '1';
+const SIN_CLAVE = new Set(['I01', 'I02', 'I03']);
 
 // ─── Contexto compartido ─────────────────────────────────────────────────────────
 const ctx = {
@@ -1009,6 +1018,7 @@ function crearT(e) {
 }
 
 function cumpleRequisitos(e) {
+  if (CLAVE_INYECTADA && SIN_CLAVE.has(e.id)) return 'OMITIDO:La X-API-Key la inyecta el proxy en todas las peticiones; no se puede probar sin clave o con una clave falsa.';
   for (const q of e.requiere) {
     if (q === 'escritura' && SOLO_LECTURA) return 'OMITIDO:Modo --solo-lectura (esta prueba crea reservas).';
     if (q === 'posada' && !ctx.posadaOk) return 'BLOQUEADO:Posada no respondió en S01.';
@@ -1039,7 +1049,7 @@ const ICONO = { PASA: '✅', FALLA: '❌', AVISO: '⚠️', BLOQUEADO: '⛔', OM
 function reporteMd(resultados, limpieza, inicio, fin) {
   const cuenta = resultados.reduce((m, r) => ((m[r.resultado] = (m[r.resultado] || 0) + 1), m), {});
   const L = [];
-  L.push(`# Resultados — pruebas reales Posada EC ⇄ Booking`);
+  L.push(`# Resultados — pruebas reales ${SOCIO} ⇄ Booking`);
   L.push('');
   L.push(`- Inicio: ${inicio} · Fin: ${fin}`);
   L.push(`- Posada: \`${CONFIG.posadaBase}\``);
@@ -1097,7 +1107,10 @@ async function main() {
     }
     t.res.ms = Date.now() - t0;
     resultados.push(t.res);
-    console.log(`${ICONO[t.res.resultado]} ${e.id.padEnd(4)} ${t.res.resultado.padEnd(9)} ${e.titulo}\n       ${t.res.detalle}`);
+    for (const k of ['titulo', 'historia', 'esperado', 'detalle']) t.res[k] = conSocio(t.res[k]);
+    t.res.datos = t.res.datos.map(([k, v]) => [conSocio(k), v]);
+    t.res.evidencias = t.res.evidencias.map(conSocio);
+    console.log(`${ICONO[t.res.resultado]} ${e.id.padEnd(4)} ${t.res.resultado.padEnd(9)} ${t.res.titulo}\n       ${t.res.detalle}`);
   }
   console.log('\nLimpieza…');
   const limpieza = await limpiar();
@@ -1106,7 +1119,7 @@ async function main() {
 
   const dir = path.join(__dirname, 'resultados');
   fs.mkdirSync(dir, { recursive: true });
-  const nombre = inicio.replace(/[:.]/g, '-');
+  const nombre = `${inicio.replace(/[:.]/g, '-')}${SOCIO === 'Posada EC' ? '' : `-${SOCIO.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}`;
   fs.writeFileSync(path.join(dir, `${nombre}.md`), reporteMd(resultados, limpieza, inicio, fin));
   fs.writeFileSync(path.join(dir, `${nombre}.json`), JSON.stringify({ inicio, fin, config: { ...CONFIG, posadaKey: '***' }, soloLectura: SOLO_LECTURA, resultados, limpieza, bitacora: C.bitacora }, null, 2));
   const cuenta = resultados.reduce((m, r) => ((m[r.resultado] = (m[r.resultado] || 0) + 1), m), {});
