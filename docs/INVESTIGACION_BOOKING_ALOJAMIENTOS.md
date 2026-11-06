@@ -6,7 +6,7 @@ pasó todas sus pruebas; todo lo que sigue es del **Booking**.
 
 | # | Problema | Prueba | Gravedad | Estado |
 |---|---|---|---|---|
-| 1 | Reservar cualquier hotel da HTTP 500 | S05 | Crítica: nadie puede reservar alojamiento | Causa acotada al `INSERT`; migración lista, **sin aplicar** |
+| 1 | Reservar cualquier hotel da HTTP 500 | S05 | Crítica: nadie puede reservar alojamiento | **Causa confirmada en Supabase** (`id` sin valor por defecto); migración lista, **sin aplicar** |
 | 2 | Booking no envía las reservas a Posada ni las cancela allí | A01, A03 | Crítica en cuanto se arregle el 1: sobreventa y huéspedes sin reserva en el hotel | Confirmado en el código |
 | 3 | Booking no se entera de lo que se reserva o cancela en Posada | A02, A04 | Crítica: sobreventa | Confirmado en vivo y en el código |
 | 4 | El catálogo de Booking tiene otros tipos de habitación y otros cupos | A05 | Alta | Causa encontrada |
@@ -43,8 +43,26 @@ con el modelo viejo y luego se adapta con `03_alojamientos_schema_completo.sql` 
 2. **`CHECK (estado IN ('CONFIRMADA', 'CHECKED_IN', 'FINALIZADA', 'CANCELADA'))`.** El código
    guarda `'CONFIRMED'`. El 03 borra ese CHECK; `migrate_alojamientos.js` **no**.
 
-Cualquiera de las dos produce exactamente lo observado. Sin acceso a la base no se pudo saber cuál
-de las dos (o ambas) está en producción.
+**Confirmado en producción (consulta en el SQL Editor de Supabase, 2026-11-06):**
+
+| Columna | Tipo | Nullable | Default |
+|---|---|---|---|
+| `id` | varchar | NO | **NULL** ← causa del 500 |
+| `alojamiento_id` | varchar | NO | NULL (el código siempre lo envía) |
+| `estado` | varchar | NO | `'CONFIRMADA'` (el código siempre envía `CONFIRMED`) |
+| `idempotency_key` | varchar | NO | NULL (la API la exige) |
+
+Las restricciones de la tabla son sólo la PK, el UNIQUE de `idempotency_key` y las FK a catálogo y
+tipos: **no hay CHECK sobre `estado`**, así que la causa 2 queda descartada. La causa es la 1.
+
+El arreglo mínimo es una sola línea:
+
+```sql
+ALTER TABLE schema_alojamientos.alojamientos_reservas ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+```
+
+Efecto secundario a revisar: las reservas viejas guardadas con `estado = 'CONFIRMADA'` no las cuenta
+el código, que busca `CONFIRMED`, al calcular el cupo.
 
 Al resolverlo aparece un riesgo más: tras guardar la reserva se guardan los huéspedes
 (`guardarHuespedes`, `alojamientos.service.ts:400`) **sin transacción y sin `try/catch`**. Si la tabla
