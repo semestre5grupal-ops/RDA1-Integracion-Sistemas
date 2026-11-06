@@ -16,6 +16,8 @@ export interface ExternalAutoBookingPayload {
   dias: number;
   pickup_date: string;
   dropoff_date: string;
+  pickup_time?: string;
+  dropoff_time?: string;
   pickup_location: string;
   dropoff_location: string;
   tipo_cobertura: string;
@@ -338,6 +340,8 @@ export class AutosCircuitBreakerAdapter {
    * Obtiene todas las órdenes activas en el socio externo para reconciliación.
    */
   async getOrdersDirect(): Promise<any[]> {
+    const orders: any[] = [];
+    // 1. RutaLibre
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
       const response = await firstValueFrom(
@@ -348,10 +352,27 @@ export class AutosCircuitBreakerAdapter {
           timeout: 4000,
         })
       );
-      return Array.isArray(response.data) ? response.data : [];
-    } catch (_) {
-      return [];
-    }
+      if (Array.isArray(response.data)) {
+        orders.push(...response.data);
+      }
+    } catch (_) {}
+
+    // 2. Maneja de Una (Mateo)
+    try {
+      const mateoKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
+      const mRes = await firstValueFrom(
+        this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders', {
+          headers: { 'X-API-Key': mateoKey },
+          timeout: 4000,
+        })
+      );
+      const mData = Array.isArray(mRes.data) ? mRes.data : (mRes.data?.items || mRes.data?.data || []);
+      if (Array.isArray(mData)) {
+        orders.push(...mData);
+      }
+    } catch (_) {}
+
+    return orders;
   }
 
   /**
@@ -432,25 +453,95 @@ export class AutosCircuitBreakerAdapter {
     const isMateo =
       payload.vehicle_id?.length === 36 ||
       (payload as any).proveedor_codigo === 'NODE_AUT_MDU' ||
+      (payload as any).proveedor_codigo === 'NODE_AUT_MATEO' ||
+      (payload as any).proveedor_codigo === 'NODE_AUT_MANEJADEUNA' ||
       (payload as any).proveedor_id === 5;
 
     // Despacho a Maneja de Una (Mateo Morales - NODE_AUT_MDU)
     if (isMateo) {
+      const clientEmail = (payload.conductor.email || 'conductor@booking.com').trim();
+      const clientDoc = (payload.conductor.licencia || (payload.conductor as any).documento || (payload.conductor as any).identificacion || '1755073481').trim();
+      const clientName = (payload.conductor.nombre || 'Conductor Booking').trim();
+      const clientPhone = normalizedPhone || '+593999999999';
+      const mateoKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
+      const mateoBase = 'https://maneja-de-una-autos-api.azurewebsites.net/api/v3';
+
+      // 1. Consultar si el cliente existe mediante GET /api/v3/clientes?email=...&identificacion=...
+      let clientExists = false;
+      try {
+        const checkUrl = `${mateoBase}/clientes?email=${encodeURIComponent(clientEmail)}&identificacion=${encodeURIComponent(clientDoc)}`;
+        this.logger.log(`[Autos Mateo] Paso 1: Consultando existencia de cliente: ${checkUrl}`);
+        const checkRes = await firstValueFrom(
+          this.httpService.get(checkUrl, {
+            headers: { 'X-API-Key': mateoKey },
+            timeout: 5000,
+          })
+        );
+        if (checkRes.status === 200 && checkRes.data) {
+          clientExists = true;
+          this.logger.log(`[Autos Mateo] Cliente ya existe en Maneja de Una: ${JSON.stringify(checkRes.data)}`);
+        }
+      } catch (err: any) {
+        this.logger.debug(`[Autos Mateo] Cliente no encontrado aún (${err.response?.status || err.message}). Procediendo a registrar.`);
+      }
+
+      // 2. Si no existe, registrarlo mediante POST /api/v3/clientes
+      if (!clientExists) {
+        try {
+          this.logger.log(`[Autos Mateo] Paso 2: Registrando cliente en Maneja de Una (POST /api/v3/clientes)`);
+          const regRes = await firstValueFrom(
+            this.httpService.post(
+              `${mateoBase}/clientes`,
+              {
+                nombre: clientName,
+                email: clientEmail,
+                identificacion: clientDoc,
+                telefono: clientPhone,
+                licencia: clientDoc,
+              },
+              {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-API-Key': mateoKey,
+                },
+                timeout: 5000,
+              }
+            )
+          );
+          this.logger.log(`[Autos Mateo] Cliente registrado exitosamente en Maneja de Una: ${JSON.stringify(regRes.data)}`);
+        } catch (regErr: any) {
+          this.logger.warn(`[Autos Mateo] Aviso al registrar cliente en Mateo: ${regErr.response?.data?.message || regErr.message}`);
+        }
+      }
+
+      // 3. Crear la reserva utilizando los datos del conductor y su identificación correctamente asociados
+      const pickupTime = (payload as any).pickup_time || (payload as any).hora_recogida || '10:00';
+      const dropoffTime = (payload as any).dropoff_time || (payload as any).hora_devolucion || '10:00';
+      const safePickupTime = /^([01]\d|2[0-3]):(?:00|30)$/.test(pickupTime) ? pickupTime : '10:00';
+      const safeDropoffTime = /^([01]\d|2[0-3]):(?:00|30)$/.test(dropoffTime) ? dropoffTime : '10:00';
+
+      const coverageType = payload.tipo_cobertura === 'TOTAL' ? 'TOTAL' : (payload.tipo_cobertura === 'PREMIUM' ? 'PREMIUM' : 'BASIC');
+
       const mateoPayload = {
         vehicle_id: payload.vehicle_id,
         pickup_date: payload.pickup_date || new Date().toISOString().split('T')[0],
         dropoff_date: payload.dropoff_date || new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().split('T')[0],
+        pickup_time: safePickupTime,
+        dropoff_time: safeDropoffTime,
+        pickup_location: payload.pickup_location || 'Aeropuerto Quito',
+        dropoff_location: payload.dropoff_location || 'Aeropuerto Quito',
+        coverage_type: coverageType,
         driver: {
-          full_name: payload.conductor.nombre || 'Conductor Booking',
-          email: payload.conductor.email || 'conductor@booking.com',
-          phone: normalizedPhone,
-          license_number: payload.conductor.licencia || '1723456789',
-          age: payload.conductor.edad || 30,
+          full_name: clientName,
+          email: clientEmail,
+          phone: clientPhone,
+          license_number: clientDoc,
+          age: Number(payload.conductor.edad || 30),
         },
       };
 
       try {
-        this.logger.log(`[AutosCircuitBreaker] Despachando reserva a Maneja de Una (/api/v3/autos/orders/create): ${payload.vehicle_id}`);
+        this.logger.log(`[AutosCircuitBreaker] Paso 3: Despachando reserva a Maneja de Una (/api/v3/autos/orders/create): ${payload.vehicle_id}`);
         const response = await firstValueFrom(
           this.httpService.post(
             'https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders/create',
@@ -458,9 +549,10 @@ export class AutosCircuitBreakerAdapter {
             {
               headers: {
                 'Content-Type': 'application/json',
+                'idempotency-key': safeIdempotencyKey,
                 'Idempotency-Key': safeIdempotencyKey,
                 'X-Correlation-Id': cId,
-                'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+                'X-API-Key': mateoKey,
               },
               timeout: 25000,
             }
@@ -474,7 +566,7 @@ export class AutosCircuitBreakerAdapter {
           status: 'CONFIRMED',
           pnr: pnr,
           auto_id: response.data?.auto_id || response.data?.vehicle_id || payload.vehicle_id,
-          voucher_qr_data: response.data?.voucher_qr_payload || `BOOKING-CAR-${pnr}`,
+          voucher_qr_data: response.data?.voucher_qr_payload || response.data?.voucher_qr_data || `BOOKING-CAR-${pnr}`,
           raw_response: response.data,
         };
       } catch (err: any) {
@@ -491,7 +583,7 @@ export class AutosCircuitBreakerAdapter {
           type: 'https://api.booking.local/errors/bad-request',
           title: 'Datos Inválidos',
           status: HttpStatus.BAD_REQUEST,
-          detail: err.response?.data?.detail || 'No se pudo crear la orden en el proveedor de autos.',
+          detail: err.response?.data?.detail || err.response?.data?.message || 'No se pudo crear la orden en el proveedor de autos.',
         }, HttpStatus.BAD_REQUEST);
       }
     }
