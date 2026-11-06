@@ -166,6 +166,26 @@ export class ReservationRequestDto {
   @IsBoolean()
   @IsOptional()
   confirmar_duplicado?: boolean;
+
+  @ApiProperty({
+    required: false,
+    enum: ['CEDULA', 'PASAPORTE', 'RUC'],
+    example: 'CEDULA',
+    description: 'Tipo de documento del titular. Obligatorio (con documento_numero) en hoteles de socios: el hotel lo exige.',
+  })
+  @IsIn(['CEDULA', 'PASAPORTE', 'RUC'])
+  @IsOptional()
+  documento_tipo?: 'CEDULA' | 'PASAPORTE' | 'RUC';
+
+  @ApiProperty({
+    required: false,
+    example: '1710034065',
+    description: 'Número de documento del titular (cédula de 10 dígitos, pasaporte o RUC). El hotel lo valida.',
+  })
+  @IsString()
+  @Matches(/^[A-Za-z0-9]{6,13}$/, { message: 'documento_numero debe tener entre 6 y 13 letras o dígitos' })
+  @IsOptional()
+  documento_numero?: string;
 }
 
 export enum ReservationStatus {

@@ -19,6 +19,9 @@ import { SesionSupabaseService } from '../../core/auth/sesion-supabase.service';
 import { CoreModule } from '../../core/core.module';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { AlojamientosCircuitBreakerAdapter } from './acl/alojamientos-circuit-breaker.adapter';
+import { AlojamientosSociosService } from './socios/alojamientos-socios.service';
+import { AlojamientosSociosReservasService } from './socios/alojamientos-socios-reservas.service';
+import { ConfigProveedor } from '../nodes/entities/config-proveedor.entity';
 import {
   GestionAlojamientosGuard,
   ClienteAutenticadoGuard,
@@ -40,6 +43,7 @@ import {
       HuespedReserva,
       ProveedorAlojamiento,
       EventoOutboxAlojamiento,
+      ConfigProveedor,
     ]),
     TelemetryModule,
   ],
@@ -51,6 +55,8 @@ import {
     SesionSupabaseService,
     WinstonPhysicalLoggerService,
     AlojamientosCircuitBreakerAdapter,
+    AlojamientosSociosService,
+    AlojamientosSociosReservasService,
     GestionAlojamientosGuard,
     ClienteAutenticadoGuard,
     SesionOpcionalGuard,
@@ -60,6 +66,7 @@ import {
     AlojamientosService,
     AlojamientosCircuitBreakerAdapter,
     WinstonPhysicalLoggerService,
+    AlojamientosSociosReservasService,
   ],
 })
 export class AlojamientosModule {}

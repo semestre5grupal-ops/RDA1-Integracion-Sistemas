@@ -6,12 +6,14 @@ import { ReservasService } from './reservas.service';
 import { ClienteSocioMapeo } from '../../core/entities/cliente-socio-mapeo.entity';
 import { Usuario } from '../../core/entities/usuario.entity';
 import { CoreModule } from '../../core/core.module';
+import { AlojamientosModule } from '../alojamientos/alojamientos.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ClienteSocioMapeo, Usuario]),
     HttpModule,
     CoreModule,
+    AlojamientosModule,
   ],
   controllers: [ReservasController],
   providers: [ReservasService],

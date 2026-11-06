@@ -85,6 +85,8 @@ import { esAdministrador, UsuarioSupabase } from '../../core/auth/administradore
 import { TraceContextService } from '../../core/tracing/trace-context.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { AlojamientosCircuitBreakerAdapter } from './acl/alojamientos-circuit-breaker.adapter';
+import { AlojamientosSociosService } from './socios/alojamientos-socios.service';
+import { AlojamientosSociosReservasService } from './socios/alojamientos-socios-reservas.service';
 
 /** Máximo de alojamientos por petición de sincronización. */
 export const MAX_SINCRONIZACION = 100;
@@ -187,8 +189,38 @@ export class AlojamientosService implements OnModuleInit {
     private readonly inventoryService?: InventoryService,
     @Optional()
     private readonly aclAdapter?: AlojamientosCircuitBreakerAdapter,
+    @Optional()
+    private readonly socios?: AlojamientosSociosService,
+    @Optional()
+    private readonly sociosReservas?: AlojamientosSociosReservasService,
   ) {
     this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
+
+  // =========================================================================
+  // SOCIOS (agregador del API Gateway, ver socios/alojamientos-socios.service.ts)
+  // =========================================================================
+
+  /** ¿El id es de un socio (`NODE_…~id`) y el agregador está activo? */
+  private esDeSocio(id: unknown): boolean {
+    return !!this.socios && this.socios.fuente() !== 'local' && AlojamientosSociosService.esIdSocio(id);
+  }
+
+  /**
+   * ¿Se muestra este alojamiento local? Con socios, la copia local de un socio
+   * (tiene proveedor) se oculta: venderla era la causa de la sobreventa.
+   */
+  private incluirLocal(a: Alojamiento): boolean {
+    const fuente = this.socios?.fuente() ?? 'local';
+    if (fuente === 'local') return true;
+    if (fuente === 'mixto') return !a.proveedorId;
+    return false;
+  }
+
+  /** Hoteles de los socios (vacío si el agregador está apagado). */
+  private async hotelesDeSocios(): Promise<any[]> {
+    if (!this.socios || this.socios.fuente() === 'local') return [];
+    return (await this.socios.catalogo()).hoteles;
   }
 
   /**
@@ -613,7 +645,9 @@ export class AlojamientosService implements OnModuleInit {
     });
 
     const rowsCount = dto.rows || 25;
-    const catalogo = await this.alojamientoRepo.find({ where: SOLO_ACTIVOS as any, order: { createdAt: 'ASC' } });
+    const catalogo = (await this.alojamientoRepo.find({ where: SOLO_ACTIVOS as any, order: { createdAt: 'ASC' } })).filter((a) =>
+      this.incluirLocal(a),
+    );
     // Los filtros se aplican ANTES de paginar: si no, una página podía quedar
     // corta (o vacía) aunque existieran más resultados que cumplían el filtro.
     let coincidentes = coincideDestino ? catalogo.filter(coincideDestino) : catalogo;
@@ -644,25 +678,66 @@ export class AlojamientosService implements OnModuleInit {
       coincidentes = conCupo;
     }
 
-    const total = coincidentes.length;
-    const pagina = coincidentes.slice(0, rowsCount);
+    const itemsLocales = coincidentes.map((l) => {
+      const avail = disponibilidad.get(l.id);
+      const item: any = this.transformAlojamiento(l);
+      if (avail) {
+        item.disponibilidad = {
+          available_rooms: avail.available_rooms,
+          nights: calcularNoches(checkinDate!, checkoutDate!),
+          total_price: Number((Number(l.precioPorNoche) * calcularNoches(checkinDate!, checkoutDate!)).toFixed(2)),
+          currency: l.moneda || 'USD',
+        };
+      }
+      return item;
+    });
+
+    // Socios: mismos filtros sobre su catálogo en vivo y, con fechas, su cupo real.
+    let itemsSocios = await this.hotelesDeSocios();
+    if (destinoTerm) {
+      const termino = normalizarBusqueda(destinoTerm);
+      itemsSocios = itemsSocios.filter((h) => [h.destino, h.nombre, h.descripcion].some((c) => normalizarBusqueda(c).includes(termino)));
+    } else if (dto.country) {
+      itemsSocios = dto.country.toLowerCase() === 'ec' ? itemsSocios : [];
+    }
+    if (dto.filters?.tienePiscina) itemsSocios = itemsSocios.filter((h) => h.tienePiscina);
+    if (dto.filters?.precioMin !== undefined) itemsSocios = itemsSocios.filter((h) => h.precioPorNoche >= dto.filters!.precioMin!);
+    if (dto.filters?.precioMax !== undefined) itemsSocios = itemsSocios.filter((h) => h.precioPorNoche <= dto.filters!.precioMax!);
+    if (checkinDate && checkoutDate && itemsSocios.length && this.socios) {
+      const pedidas = dto.guests?.number_of_rooms || dto.habitaciones || 1;
+      const noches = calcularNoches(checkinDate, checkoutDate);
+      const conCupo: any[] = [];
+      for (let i = 0; i < itemsSocios.length; i += 6) {
+        const lote = itemsSocios.slice(i, i + 6);
+        const disp = await Promise.all(lote.map((h) => this.socios!.opciones(h.id, checkinDate, checkoutDate).catch(() => null)));
+        lote.forEach((h, j) => {
+          const d = disp[j];
+          if (!d || d.respuesta.status !== 200) return;
+          const libres = this.socios!.disponibilidadBooking(h.id, checkinDate, checkoutDate, d.opciones);
+          if (libres.available_rooms < pedidas) return;
+          const precios = d.opciones.filter((o) => o.remanentes >= pedidas && o.precioTotal !== null).map((o) => o.precioTotal as number);
+          conCupo.push({
+            ...h,
+            disponibilidad: {
+              available_rooms: libres.available_rooms,
+              nights: noches,
+              total_price: precios.length ? Math.min(...precios) : Number((h.precioPorNoche * noches).toFixed(2)),
+              currency: h.moneda || 'USD',
+            },
+          });
+        });
+      }
+      itemsSocios = conCupo;
+    }
+
+    const todos = [...itemsLocales, ...itemsSocios];
+    const total = todos.length;
+    const pagina = todos.slice(0, rowsCount);
     const nextPage = total > rowsCount ? Buffer.from(JSON.stringify({ page: 2 })).toString('base64') : null;
 
     return {
       request_id: `req-${Date.now()}`,
-      data: pagina.map((l) => {
-        const avail = disponibilidad.get(l.id);
-        const item: any = this.transformAlojamiento(l);
-        if (avail) {
-          item.disponibilidad = {
-            available_rooms: avail.available_rooms,
-            nights: calcularNoches(checkinDate!, checkoutDate!),
-            total_price: Number((Number(l.precioPorNoche) * calcularNoches(checkinDate!, checkoutDate!)).toFixed(2)),
-            currency: l.moneda || 'USD',
-          };
-        }
-        return item;
-      }),
+      data: pagina,
       metadata: {
         total_results: total,
         next_page: nextPage,
@@ -911,6 +986,28 @@ export class AlojamientosService implements OnModuleInit {
     this.logger.log(`Consultando disponibilidad de contrato para ${dto.accommodation}`);
     const accId = String(dto.accommodation);
     const nights = validarEstancia(dto.checkin, dto.checkout);
+    if (this.esDeSocio(accId)) {
+      const adultos = dto.guests?.number_of_adults || 1;
+      const ninos = dto.guests?.children?.length || 0;
+      const habitaciones = dto.guests?.number_of_rooms || 1;
+      const d = await this.socios!.opciones(accId, dto.checkin, dto.checkout, adultos);
+      if (!d) throw new NotFoundException(`El alojamiento '${accId}' no existe.`);
+      if (d.respuesta.status !== 200) {
+        throw new HttpException(`El hotel no respondió la disponibilidad (HTTP ${d.respuesta.status || 'sin respuesta'}).`, HttpStatus.BAD_GATEWAY);
+      }
+      const currency = dto.currency || 'USD';
+      return {
+        request_id: `req-avail-${Date.now()}`,
+        data: {
+          id: accId,
+          currency,
+          nights,
+          available_rooms: this.socios!.disponibilidadBooking(accId, dto.checkin, dto.checkout, d.opciones).available_rooms,
+          products: this.socios!.productosBooking(d.opciones, nights, currency, adultos, ninos, habitaciones) as any,
+          url: `/api/v1/alojamientos/${encodeURIComponent(accId)}`,
+        },
+      } as any;
+    }
     // Nunca se cotiza otro hotel en lugar del pedido: un ID inexistente es un 404.
     const local = await this.alojamientoRepo.findOne({ where: { id: accId, ...SOLO_ACTIVOS } as any });
     if (!local) {
@@ -1542,6 +1639,17 @@ export class AlojamientosService implements OnModuleInit {
     const limit = query.limit || 10;
     const page = query.page || 1;
 
+    if (this.socios && this.socios.fuente() !== 'local') {
+      const { hoteles, fuentes } = await this.socios.catalogo();
+      const locales = (await this.alojamientoRepo.find({ where: SOLO_ACTIVOS as any })).filter((a) => this.incluirLocal(a));
+      const todos = [...locales.map((l) => this.transformAlojamiento(l)), ...hoteles];
+      return {
+        data: todos.slice((page - 1) * limit, page * limit),
+        meta: { total: todos.length, limit, page },
+        fuentes,
+      };
+    }
+
     const locales = await this.alojamientoRepo.find({
       where: SOLO_ACTIVOS as any,
       take: limit,
@@ -1569,6 +1677,11 @@ export class AlojamientosService implements OnModuleInit {
 
   async findOne(id: string): Promise<any> {
     this.logger.log(`Consultando detalle de Alojamiento ID ${id}`);
+    if (this.esDeSocio(id)) {
+      const ficha = await this.socios!.detalle(id);
+      if (!ficha) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
+      return ficha;
+    }
 
     // Un alojamiento INACTIVO no existe para el público (como una propiedad
     // retirada de Booking); el panel de gestión lo ve por su propio endpoint.
@@ -1587,6 +1700,16 @@ export class AlojamientosService implements OnModuleInit {
 
   async getAvailability(id: string, date?: string, checkoutDate?: string, excluirReservaId?: string): Promise<any> {
     this.logger.log(`Consultando disponibilidad para alojamiento ${id} en ${date} - ${checkoutDate}`);
+    if (this.esDeSocio(id)) {
+      const desde = date || fechaRelativa(0);
+      const hasta = checkoutDate || new Date(new Date(desde).getTime() + 86400000).toISOString().split('T')[0];
+      const d = await this.socios!.opciones(id, desde, hasta);
+      if (!d) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
+      if (d.respuesta.status !== 200) {
+        throw new HttpException(`El hotel no respondió la disponibilidad (HTTP ${d.respuesta.status || 'sin respuesta'}).`, HttpStatus.BAD_GATEWAY);
+      }
+      return this.socios!.disponibilidadBooking(id, desde, hasta, d.opciones);
+    }
     const local = await this.alojamientoRepo.findOne({ where: { id, ...SOLO_ACTIVOS } as any });
     if (!local) {
       throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
@@ -1642,6 +1765,29 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async reservar(id: string, dto: ReservationRequestDto, idempotencyKey: string, usuario?: UsuarioSupabase | null): Promise<any> {
+    if (this.esDeSocio(id)) {
+      if (!this.sociosReservas) throw new HttpException('Reservas de socios no disponibles.', HttpStatus.SERVICE_UNAVAILABLE);
+      const checkin = dto.checkin;
+      const checkout = dto.checkout;
+      validarEstancia(checkin, checkout);
+      return this.sociosReservas.reservar({
+        idCompuesto: id,
+        checkin,
+        checkout,
+        habitaciones: Math.max(1, dto.habitaciones_count || 1),
+        adultos: dto.adultos || 1,
+        ninos: dto.ninos || 0,
+        productId: dto.tipo_habitacion_id ?? null,
+        nombre: dto.guest_name?.trim() || dto.customer_name,
+        email: (dto.customer_email || usuario?.email || '').trim(),
+        telefono: dto.phone ?? null,
+        documentoTipo: dto.documento_tipo ?? null,
+        documentoNumero: dto.documento_numero ?? null,
+        peticiones: dto.special_requests ?? null,
+        idempotencyKey,
+        usuarioId: usuario?.id ?? null,
+      });
+    }
     return this.enSerie(() => this.reservarEnSerie(id, dto, idempotencyKey, usuario));
   }
 
@@ -1789,6 +1935,8 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async cancelarReserva(reservationId: string, dto: CancelReservationRequestDto, idempotencyKey: string): Promise<any> {
+    const deSocio = await this.sociosReservas?.cancelar(reservationId, dto.reason);
+    if (deSocio) return deSocio;
     return this.enSerie(() => this.cancelarReservaEnSerie(reservationId, dto, idempotencyKey));
   }
 
@@ -1865,11 +2013,18 @@ export class AlojamientosService implements OnModuleInit {
     const alojamientos = ids.length > 0 ? await this.alojamientoRepo.find({ where: ids.map((id) => ({ id })), withDeleted: true } as any) : [];
     const alojMap = new Map(alojamientos.map((a) => [a.id, a]));
     const detalle = await this.detallesDeReservas(reservas);
-    return reservas.map((r) => this.buildReservaResponse(r, alojMap.get(r.alojamientoId), detalle(r)));
+    const propias = reservas.map((r) => this.buildReservaResponse(r, alojMap.get(r.alojamientoId), detalle(r)));
+    // Reservas hechas en hoteles de socios (copias de la reserva confirmada por el socio).
+    const deSocios = this.sociosReservas
+      ? (await this.sociosReservas.listar(usuario ? { id: usuario.id, email } : null, verTodas)).map((f) => this.sociosReservas!.respuesta(f))
+      : [];
+    return [...propias, ...deSocios].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
   async getReservaById(reservationId: string): Promise<any> {
     this.logger.log(`Consultando detalle de reserva ${reservationId}`);
+    const copia = await this.sociosReservas?.porId(reservationId);
+    if (copia) return this.sociosReservas!.respuesta(copia);
     const reserva = await this.reservaRepo.findOneBy({ id: reservationId });
     if (!reserva) throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
     const alojamiento = await this.alojamientoRepo.findOne({ where: { id: reserva.alojamientoId }, withDeleted: true } as any);
@@ -2014,6 +2169,11 @@ export class AlojamientosService implements OnModuleInit {
 
   /** Tipos a la venta de un alojamiento activo (ficha pública). */
   async tiposPublicos(id: string) {
+    if (this.esDeSocio(id)) {
+      const ficha = await this.socios!.detalle(id);
+      if (!ficha) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
+      return ficha.tipos_habitacion ?? [];
+    }
     const alojamiento = await this.alojamientoRepo.findOne({ where: { id, ...SOLO_ACTIVOS } as any });
     if (!alojamiento) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
     return (await this.tiposService.asegurarTipoBase(alojamiento)).map((t) => this.tipoPublico(t));
@@ -2186,6 +2346,10 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async getResenas(alojamientoId: string): Promise<any> {
+    // Reseñas de un socio: no se inventan (las del socio se mostrarán cuando las expongamos).
+    if (this.esDeSocio(alojamientoId)) {
+      return { resenas: [], scores: { limpieza: 0, servicio: 0, calidad: 0, general: 0 }, total: 0 };
+    }
     const alojamiento = await this.alojamientoRepo.findOneBy({ id: alojamientoId });
     if (!alojamiento) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
 

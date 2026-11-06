@@ -1,10 +1,11 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { CheckinNotificationDto } from './dto/checkin-notification.dto';
 import { SincronizarClienteDto } from './dto/sincronizar-cliente.dto';
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
+import { AlojamientosSociosReservasService } from '../alojamientos/socios/alojamientos-socios-reservas.service';
 
 @Injectable()
 export class ReservasService {
@@ -14,6 +15,7 @@ export class ReservasService {
     private readonly dataSource: DataSource,
     private readonly httpService: HttpService,
     private readonly physicalLogger: WinstonPhysicalLoggerService,
+    @Optional() private readonly alojamientosSocios?: AlojamientosSociosReservasService,
   ) {}
 
   /**
@@ -262,8 +264,19 @@ export class ReservasService {
 
     this.logger.log(`[Check-in Inbound] Procesando confirmación de asistencia para orden ${targetId} con estado ${estado}`);
 
+    // 0. Alojamientos de SOCIOS (reservas hechas desde Booking en el hotel del socio).
+    //    Va primero: las búsquedas de abajo usan LIKE y podrían coincidir por error.
+    //    Solo el socio dueño puede confirmar (su X-API-Key): 401 si no; 409 si está cancelada.
+    if (this.alojamientosSocios) {
+      const copia = await this.alojamientosSocios.marcarCheckin(targetId, apiKey, { admin: adminId, fecha: dto.fecha_checkin || null });
+      if (copia) {
+        verticalActualizada = 'ALOJAMIENTOS_SOCIO';
+        reservaActualizada = copia;
+      }
+    }
+
     // 1. Intentar actualizar en Atracciones
-    const atrUpdate = await this.dataSource.query(
+    const atrUpdate = verticalActualizada ? [] : await this.dataSource.query(
       `UPDATE schema_atracciones.atracciones_reservas 
        SET status = 'CONFIRMADO_ASISTIDO', 
            checkin_at = NOW(),
@@ -341,7 +354,7 @@ export class ReservasService {
         const aloUpdate = await this.dataSource.query(
           `UPDATE schema_alojamientos.alojamientos_reservas 
            SET estado = 'CONFIRMADO_ASISTIDO'
-           WHERE id::text = $1 OR localizador = $1
+           WHERE id::text = $1 OR codigo_reserva = $1
            RETURNING *`,
           [targetId],
         );
