@@ -45,6 +45,12 @@ const DEFAULT_IMAGES = {
   atraccion: 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=400',
 };
 
+const safeFormatearFecha = (val) => {
+  if (!val) return '';
+  const str = String(val).trim().split('T')[0].split(' ')[0];
+  return formatearFecha(str);
+};
+
 export function MisReservasPage() {
   const [reservas, setReservas] = useState([]);
   const reservasRef = useRef([]);
@@ -112,6 +118,48 @@ export function MisReservasPage() {
   const handleExecuteCheckin = async (reserva, tipoOperacion) => {
     setCheckinProcessing(true);
     setCheckinStepResult(null);
+
+    const updateCheckinState = (idOrPnr, newStatus = 'CONFIRMADO_ASISTIDO', extraData = {}) => {
+      setReservas((prev) =>
+        prev.map((r) => {
+          if (r.id === idOrPnr || (r.pnr && r.pnr === idOrPnr)) {
+            return { ...r, status: newStatus, ...extraData };
+          }
+          return r;
+        })
+      );
+      setSelectedReserva((prev) => {
+        if (!prev) return null;
+        if (prev.id === idOrPnr || (prev.pnr && prev.pnr === idOrPnr)) {
+          return { ...prev, status: newStatus, ...extraData };
+        }
+        return prev;
+      });
+
+      // Persistir de inmediato en localStorage para evitar reversión en recargas o encuestas
+      try {
+        if (reserva.tipo === 'auto') {
+          const localAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
+          const updated = localAutos.map((a) => {
+            if (a.id === idOrPnr || a.pnr === idOrPnr || a.orderId === idOrPnr || a.order_id === idOrPnr) {
+              return { ...a, status: newStatus, ...extraData };
+            }
+            return a;
+          });
+          localStorage.setItem('reservas_autos', JSON.stringify(updated));
+        } else if (reserva.tipo === 'atraccion') {
+          const localAtrac = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
+          const updated = localAtrac.map((at) => {
+            if (at.id === idOrPnr || at.pnr === idOrPnr || at.reservation_id === idOrPnr) {
+              return { ...at, status: newStatus, ...extraData };
+            }
+            return at;
+          });
+          localStorage.setItem('reservas_atracciones', JSON.stringify(updated));
+        }
+      } catch (_) {}
+    };
+
     try {
       if (reserva.tipo === 'atraccion') {
         const res = await api.post(`/atracciones/reservas/${reserva.id}/checkin`, {
@@ -129,6 +177,7 @@ export function MisReservasPage() {
           guia: res.guia_asignado || 'Carlos Villacís (Licencia MINTUR-441)',
           qr: res.voucher_digital_qr || `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=BOOKING-ATR:${reserva.pnr}`,
         });
+        updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO', { checkin: res });
       } else if (reserva.tipo === 'auto') {
         if (tipoOperacion === 'DEVOLUCION') {
           const res = await api.post(`/autos/orders/${reserva.id}/checkin-devolucion`, {
@@ -143,6 +192,7 @@ export function MisReservasPage() {
             success: true,
             mensaje: res.mensaje,
           });
+          updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO', { checkinDevolucion: res });
         } else {
           const res = await api.post(`/autos/orders/${reserva.id}/checkin-entrega`, {
             licencia_conducir: checkinLicencia,
@@ -156,6 +206,7 @@ export function MisReservasPage() {
             success: true,
             mensaje: res.mensaje,
           });
+          updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO', { checkinEntrega: res });
         }
       } else if (reserva.tipo === 'alojamiento') {
         const res = await api.post(`/v2/alojamientos/reservas/${reserva.id}/checkin`, {}).catch(() => ({
@@ -170,6 +221,7 @@ export function MisReservasPage() {
           habitacion: res.habitacion_asignada || 'Habitación 304',
           clave: res.clave_acceso_digital || 'KEY-994122',
         });
+        updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO');
       } else if (reserva.tipo === 'vuelo') {
         setCheckinStepResult({
           vertical: 'vuelo',
@@ -178,6 +230,7 @@ export function MisReservasPage() {
           asiento: '14B (Ventana)',
           pnr: reserva.pnr,
         });
+        updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO');
       }
     } finally {
       setCheckinProcessing(false);
@@ -231,23 +284,38 @@ export function MisReservasPage() {
       let vuelosItems = [];
       if (vuelosRes.status === 'fulfilled' && vuelosRes.value) {
         const respuestaVuelos = vuelosRes.value;
-        vuelosItems = (respuestaVuelos.items || []).map((r) => ({
-          id: r.bookingId,
-          pnr: r.pnr ?? '—',
-          tipo: 'vuelo',
-          servicioTexto: 'Vuelo',
-          destino: r.destination || 'Quito',
-          titulo: r.origin && r.destination ? `${r.origin} a ${r.destination}` : 'Itinerario de Vuelo',
-          fechasTexto: r.createdAt ? formatearFecha(r.createdAt.split('T')[0]) : 'Fecha programada',
-          fecha: r.createdAt ? formatearFecha(r.createdAt.split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-          rawDate: r.createdAt ? new Date(r.createdAt).getTime() : new Date().getTime(),
-          status: r.status || 'CONFIRMED',
-          totalRaw: r.grandTotal?.total || 106.50,
-          imagen: DEFAULT_IMAGES.vuelo,
-          raw: r,
-          email: (r.passengers?.[0]?.email || r.customerEmail || r.userEmail || r.email || '').trim().toLowerCase(),
-          link: `/vuelos/reservas/${r.bookingId}`,
-        }));
+        vuelosItems = (respuestaVuelos.items || []).map((r) => {
+          const paxCount = r.passengers?.length || 1;
+          const depDate = r.itineraries?.[0]?.segments?.[0]?.departure?.at
+            ? safeFormatearFecha(r.itineraries[0].segments[0].departure.at)
+            : (r.departureDate ? safeFormatearFecha(r.departureDate) : (r.flightDate ? safeFormatearFecha(r.flightDate) : (r.createdAt ? safeFormatearFecha(r.createdAt) : 'Programada')));
+          const retDate = r.itineraries?.[1]?.segments?.[0]?.departure?.at
+            ? safeFormatearFecha(r.itineraries[1].segments[0].departure.at)
+            : (r.returnDate ? safeFormatearFecha(r.returnDate) : null);
+          const fReserva = r.createdAt ? safeFormatearFecha(r.createdAt) : safeFormatearFecha(new Date().toISOString());
+          return {
+            id: r.bookingId,
+            pnr: r.pnr ?? '—',
+            tipo: 'vuelo',
+            servicioTexto: 'Vuelo',
+            destino: r.destination || 'Quito',
+            titulo: r.origin && r.destination ? `${r.origin} a ${r.destination}` : 'Itinerario de Vuelo',
+            fechasTexto: r.createdAt ? safeFormatearFecha(r.createdAt) : 'Fecha programada',
+            fecha: fReserva,
+            fechaReserva: fReserva,
+            fechaEntrega: depDate,
+            fechaDevolucion: retDate,
+            cantidad: paxCount,
+            cantidadTexto: `${paxCount} Pasajero${paxCount > 1 ? 's' : ''}`,
+            rawDate: r.createdAt ? new Date(r.createdAt).getTime() : new Date().getTime(),
+            status: r.status || 'CONFIRMED',
+            totalRaw: r.grandTotal?.total || 106.50,
+            imagen: DEFAULT_IMAGES.vuelo,
+            raw: r,
+            email: (r.passengers?.[0]?.email || r.customerEmail || r.userEmail || r.email || '').trim().toLowerCase(),
+            link: `/vuelos/reservas/${r.bookingId}`,
+          };
+        });
       }
 
       // 2. Autos API & Local
@@ -258,15 +326,19 @@ export function MisReservasPage() {
         autosItems = listaAutos.map((a) => {
           const autoModel = a.vehiculo?.modelo || a.auto_id || a.autoId || '';
           const autoMake = a.vehiculo?.marca || '';
+          const diasRenta = Number(a.dias_renta || a.diasRenta || a.dias || 3);
           const displayTitle = (autoMake || autoModel)
-            ? `Renta de ${autoMake} ${autoModel} (${a.dias_renta || a.diasRenta || 3} días)`.trim()
+            ? `Renta de ${autoMake} ${autoModel} (${diasRenta} días)`.trim()
             : 'Renta de Auto';
           const pnrReal = a.pnr || a.codigo_reserva || a.order_id || a.id || 'AUTO';
           const pickupStr = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
           const dropoffStr = a.dropoff_date || a.fecha_fin || a.dropoff || '';
-          const displayFechas = pickupStr
-            ? (dropoffStr ? `${formatearFecha(pickupStr)} – ${formatearFecha(dropoffStr)}` : `${formatearFecha(pickupStr)} (${a.dias_renta || a.diasRenta || 3} días)`)
-            : '3 días de renta';
+          const pickupFmt = pickupStr ? safeFormatearFecha(pickupStr) : '';
+          const dropoffFmt = dropoffStr ? safeFormatearFecha(dropoffStr) : '';
+          const displayFechas = pickupFmt
+            ? (dropoffFmt ? `${pickupFmt} – ${dropoffFmt}` : `${pickupFmt} (${diasRenta} días)`)
+            : `${diasRenta} días de renta`;
+          const fReserva = (a.createdAt || a.created_at) ? safeFormatearFecha(a.createdAt || a.created_at) : safeFormatearFecha(new Date().toISOString());
           return {
             id: a.order_id || a.id,
             pnr: pnrReal,
@@ -275,7 +347,13 @@ export function MisReservasPage() {
             destino: 'Quito',
             titulo: displayTitle,
             fechasTexto: displayFechas,
-            fecha: pickupStr ? formatearFecha(pickupStr) : formatearFecha(new Date().toISOString().split('T')[0]),
+            fecha: pickupFmt || safeFormatearFecha(new Date().toISOString()),
+            fechaReserva: fReserva,
+            fechaEntrega: pickupFmt || 'Por definir',
+            fechaDevolucion: dropoffFmt || 'Por definir',
+            diasRenta: diasRenta,
+            cantidad: 1,
+            cantidadTexto: `1 Vehículo (${diasRenta} días)`,
             rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
             status: a.status || 'CONFIRMED',
             placa: a.placa || a.checkin?.placa,
@@ -291,20 +369,30 @@ export function MisReservasPage() {
       const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]')
         .filter((a) => !correoSesion || (a.email || a.customer_email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase() === correoSesion);
       const autosLocalesFormatted = autosLocales.map((a) => {
+        const diasLocal = Number(a.dias || a.dias_renta || a.diasRenta || 3);
         const pickupLocal = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
         const dropoffLocal = a.dropoff_date || a.fecha_fin || a.dropoff || '';
-        const displayFechasLocal = pickupLocal
-          ? (dropoffLocal ? `${formatearFecha(pickupLocal)} – ${formatearFecha(dropoffLocal)}` : `${formatearFecha(pickupLocal)} (${a.dias || 3} días)`)
-          : '3 días de renta';
+        const pickupLocalFmt = pickupLocal ? safeFormatearFecha(pickupLocal) : '';
+        const dropoffLocalFmt = dropoffLocal ? safeFormatearFecha(dropoffLocal) : '';
+        const displayFechasLocal = pickupLocalFmt
+          ? (dropoffLocalFmt ? `${pickupLocalFmt} – ${dropoffLocalFmt}` : `${pickupLocalFmt} (${diasLocal} días)`)
+          : `${diasLocal} días de renta`;
+        const fReservaLocal = (a.createdAt || a.date) ? safeFormatearFecha(a.createdAt || a.date) : safeFormatearFecha(new Date().toISOString());
         return {
           id: a.id || a.orderId,
           pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
           tipo: 'auto',
           servicioTexto: 'Renta de auto',
           destino: 'Quito',
-          titulo: a.titulo || 'Renta de Auto (3 días)',
+          titulo: a.titulo || `Renta de Auto (${diasLocal} días)`,
           fechasTexto: displayFechasLocal,
-          fecha: pickupLocal ? formatearFecha(pickupLocal) : formatearFecha(new Date().toISOString().split('T')[0]),
+          fecha: pickupLocalFmt || safeFormatearFecha(new Date().toISOString()),
+          fechaReserva: fReservaLocal,
+          fechaEntrega: pickupLocalFmt || 'Por definir',
+          fechaDevolucion: dropoffLocalFmt || 'Por definir',
+          diasRenta: diasLocal,
+          cantidad: 1,
+          cantidadTexto: `1 Vehículo (${diasLocal} días)`,
           rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
           status: a.status || 'CONFIRMED',
           totalRaw: a.totalPrice?.total || a.total || 106.50,
@@ -323,15 +411,24 @@ export function MisReservasPage() {
         atraccionesItems = listaAtracciones.map((at) => {
           const fechaAtrac = at.date || at.fecha || at.raw?.date || at.raw?.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
           const horaAtrac = at.time || at.hora || at.raw?.time || at.raw?.hora || '10:00 a.m.';
+          const tCount = Number(at.ticket_count || at.cupos || at.personas || at.cantidad || at.quantity || at.raw?.ticket_count || 1);
+          const fechaAtracFmt = fechaAtrac ? safeFormatearFecha(fechaAtrac) : '';
+          const fReservaAtrac = (at.createdAt || at.created_at) ? safeFormatearFecha(at.createdAt || at.created_at) : safeFormatearFecha(new Date().toISOString());
           return {
             id: at.id || at.reservation_id || at.pnr,
             pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
             tipo: 'atraccion',
             servicioTexto: 'Atracción',
             destino: 'Quito',
-            titulo: at.titulo || at.atraccion_nombre || at.name || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
-            fechasTexto: fechaAtrac ? `${formatearFecha(fechaAtrac)} · ${horaAtrac}` : 'Tour guiado',
-            fecha: fechaAtrac ? formatearFecha(fechaAtrac) : formatearFecha(new Date().toISOString().split('T')[0]),
+            titulo: at.titulo || at.atraccion_nombre || at.name || `Tour / Atracción (${tCount} entradas)`,
+            fechasTexto: fechaAtracFmt ? `${fechaAtracFmt} · ${horaAtrac}` : 'Tour guiado',
+            fecha: fechaAtracFmt || safeFormatearFecha(new Date().toISOString()),
+            fechaReserva: fReservaAtrac,
+            fechaEntrega: fechaAtracFmt ? `${fechaAtracFmt} · ${horaAtrac}` : 'Por definir',
+            fechaDevolucion: null,
+            ticketCount: tCount,
+            cantidad: tCount,
+            cantidadTexto: `${tCount} Entrada${tCount > 1 ? 's' : ''} (${tCount} Persona${tCount > 1 ? 's' : ''})`,
             rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
             status: at.status || 'CONFIRMED',
             totalRaw: at.total_price?.total || at.total_price || 55.00,
@@ -349,15 +446,24 @@ export function MisReservasPage() {
       const atraccionesLocalesFormatted = atraccionesLocales.map((at) => {
         const fechaLocalAtrac = at.date || at.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
         const horaLocalAtrac = at.time || at.hora || '10:00 a.m.';
+        const tCountLocal = Number(at.ticket_count || at.cupos || at.personas || at.cantidad || 1);
+        const fechaLocalAtracFmt = fechaLocalAtrac ? safeFormatearFecha(fechaLocalAtrac) : '';
+        const fReservaLocalAtrac = (at.createdAt || at.date) ? safeFormatearFecha(at.createdAt || at.date) : safeFormatearFecha(new Date().toISOString());
         return {
           id: at.id || at.reservation_id || at.pnr,
           pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
           tipo: 'atraccion',
           servicioTexto: 'Atracción',
           destino: 'Quito',
-          titulo: at.titulo || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
-          fechasTexto: fechaLocalAtrac ? `${formatearFecha(fechaLocalAtrac)} · ${horaLocalAtrac}` : 'Tour guiado',
-          fecha: fechaLocalAtrac ? formatearFecha(fechaLocalAtrac) : formatearFecha(new Date().toISOString().split('T')[0]),
+          titulo: at.titulo || `Tour / Atracción (${tCountLocal} entradas)`,
+          fechasTexto: fechaLocalAtracFmt ? `${fechaLocalAtracFmt} · ${horaLocalAtrac}` : 'Tour guiado',
+          fecha: fechaLocalAtracFmt || safeFormatearFecha(new Date().toISOString()),
+          fechaReserva: fReservaLocalAtrac,
+          fechaEntrega: fechaLocalAtracFmt ? `${fechaLocalAtracFmt} · ${horaLocalAtrac}` : 'Por definir',
+          fechaDevolucion: null,
+          ticketCount: tCountLocal,
+          cantidad: tCountLocal,
+          cantidadTexto: `${tCountLocal} Entrada${tCountLocal > 1 ? 's' : ''} (${tCountLocal} Persona${tCountLocal > 1 ? 's' : ''})`,
           rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
           status: at.status || 'CONFIRMED',
           totalRaw: at.totalPrice?.total || at.total || 55.00,
@@ -376,8 +482,11 @@ export function MisReservasPage() {
         const respuestaAlojamientos = alojamientosRes.value;
         const listaAlojamientos = Array.isArray(respuestaAlojamientos) ? respuestaAlojamientos : (respuestaAlojamientos?.data || []);
         alojamientosApiItems = listaAlojamientos.map((al) => {
-          const checkinStr = al.checkin ? formatearFecha(al.checkin) : '10 nov.';
-          const checkoutStr = al.checkout ? formatearFecha(al.checkout) : '16 nov.';
+          const checkinStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
+          const checkoutStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
+          const huespedesNum = Number(al.huespedes || al.personas || al.raw?.passengers?.length || 1);
+          const habNum = Number(al.habitaciones_count || al.habitaciones || 1);
+          const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -386,10 +495,15 @@ export function MisReservasPage() {
             destino: al.destino || 'Quito',
             email: (al.customer_email || al.email || al.customerEmail || al.userEmail || '').trim().toLowerCase(),
             titulo: al.nombre_alojamiento
-              ? `${al.nombre_alojamiento}${al.tipo_habitacion?.nombre ? ` · ${(al.habitaciones_count || 1) > 1 ? `${al.habitaciones_count} × ` : ''}${al.tipo_habitacion.nombre}` : ''} (${al.huespedes || 1} persona${(al.huespedes || 1) > 1 ? 's' : ''})`
+              ? `${al.nombre_alojamiento}${al.tipo_habitacion?.nombre ? ` · ${habNum > 1 ? `${habNum} × ` : ''}${al.tipo_habitacion.nombre}` : ''} (${huespedesNum} persona${huespedesNum > 1 ? 's' : ''})`
               : 'Alojamiento reservado',
             fechasTexto: `${checkinStr} – ${checkoutStr}`,
             fecha: checkinStr,
+            fechaReserva: fReservaAloj,
+            fechaEntrega: checkinStr,
+            fechaDevolucion: checkoutStr,
+            cantidad: huespedesNum,
+            cantidadTexto: `${huespedesNum} Huésped${huespedesNum > 1 ? 'es' : ''}${habNum > 1 ? ` · ${habNum} Habitaciones` : ' · 1 Habitación'}`,
             rawDate: al.created_at ? new Date(al.created_at).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
             status: al.status || 'CONFIRMED',
             totalRaw: al.total_price?.total || al.total || 0,
@@ -411,8 +525,10 @@ export function MisReservasPage() {
       const alojamientosLocales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]')
         .filter((al) => !correoSesion || (al.email || '').trim().toLowerCase() === correoSesion);
       const alojamientosLocalesFormatted = alojamientosLocales.map((al) => {
-        const checkinStr = al.checkin ? formatearFecha(al.checkin) : '10 nov.';
-        const checkoutStr = al.checkout ? formatearFecha(al.checkout) : '16 nov.';
+        const checkinLocalStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
+        const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
+        const huespedesLocalNum = Number(al.huespedes || 1);
+        const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
         return {
           id: al.reservationId || al.id,
           pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
@@ -420,10 +536,15 @@ export function MisReservasPage() {
           servicioTexto: 'Alojamiento',
           destino: al.destino || 'Quito',
           titulo: al.nombreAlojamiento
-            ? `${al.nombreAlojamiento} (${al.huespedes || 1} persona${(al.huespedes || 1) > 1 ? 's' : ''})`
+            ? `${al.nombreAlojamiento} (${huespedesLocalNum} persona${huespedesLocalNum > 1 ? 's' : ''})`
             : al.titulo || 'Alojamiento reservado',
-          fechasTexto: `${checkinStr} – ${checkoutStr}`,
-          fecha: checkinStr,
+          fechasTexto: `${checkinLocalStr} – ${checkoutLocalStr}`,
+          fecha: checkinLocalStr,
+          fechaReserva: fReservaLocalAloj,
+          fechaEntrega: checkinLocalStr,
+          fechaDevolucion: checkoutLocalStr,
+          cantidad: huespedesLocalNum,
+          cantidadTexto: `${huespedesLocalNum} Huésped${huespedesLocalNum > 1 ? 'es' : ''}`,
           rawDate: al.createdAt ? new Date(al.createdAt).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
           status: al.status || 'CONFIRMED',
           totalRaw: al.totalPrice || al.total || 0,
@@ -496,6 +617,27 @@ export function MisReservasPage() {
             ((pnrVal && e.pnr === pnrVal) || (idVal && e.id === idVal))
           );
           if (existente) {
+            // Regla Monotónica de Check-in: Si el estado local ya está en CHECKED_IN o CONFIRMADO_ASISTIDO,
+            // no permitir que una respuesta rezagada del servidor lo degrade a CONFIRMED
+            const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED'];
+            if (estadosAsistidos.includes(item.status) && !estadosAsistidos.includes(existente.status)) {
+              existente.status = item.status;
+            }
+            if (item.placa && !existente.placa) {
+              existente.placa = item.placa;
+            }
+            if (item.cantidadTexto && !existente.cantidadTexto) {
+              existente.cantidadTexto = item.cantidadTexto;
+            }
+            if (item.fechaReserva && !existente.fechaReserva) {
+              existente.fechaReserva = item.fechaReserva;
+            }
+            if (item.fechaEntrega && !existente.fechaEntrega) {
+              existente.fechaEntrega = item.fechaEntrega;
+            }
+            if (item.fechaDevolucion && !existente.fechaDevolucion) {
+              existente.fechaDevolucion = item.fechaDevolucion;
+            }
             // Si el servidor devolvió un título genérico pero la local tiene el nombre real de la atracción, actualizamos
             if (item.titulo && (!existente.titulo || (typeof existente.titulo === 'string' && existente.titulo.startsWith('Tour / Atracción')))) {
               existente.titulo = item.titulo;
@@ -524,6 +666,19 @@ export function MisReservasPage() {
       // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),
       // mantenemos intacta la referencia previa para evitar cualquier re-render o parpadeo visual.
       setReservas((prev) => {
+        const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED'];
+
+        // Preservación monotónica de check-in: nunca degradar a CONFIRMED tras confirmación
+        if (prev && prev.length > 0) {
+          for (const item of listaFinal) {
+            const p = prev.find(x => x.id === item.id || (x.pnr && x.pnr === item.pnr));
+            if (p && estadosAsistidos.includes(p.status) && !estadosAsistidos.includes(item.status)) {
+              item.status = p.status;
+              if (p.placa && !item.placa) item.placa = p.placa;
+            }
+          }
+        }
+
         if (prev && prev.length === listaFinal.length) {
           let hasDiff = false;
           for (let i = 0; i < listaFinal.length; i++) {
@@ -536,7 +691,8 @@ export function MisReservasPage() {
               p.placa !== n.placa ||
               p.fechasTexto !== n.fechasTexto ||
               p.totalRaw !== n.totalRaw ||
-              p.titulo !== n.titulo
+              p.titulo !== n.titulo ||
+              p.cantidadTexto !== n.cantidadTexto
             ) {
               hasDiff = true;
               break;
@@ -551,8 +707,14 @@ export function MisReservasPage() {
       setSelectedReserva((prev) => {
         if (!prev) return null;
         const matching = listaFinal.find((r) => r.id === prev.id || (r.pnr && r.pnr === prev.pnr));
-        if (matching && (matching.status !== prev.status || matching.placa !== prev.placa)) {
-          return { ...prev, ...matching };
+        if (matching) {
+          const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED'];
+          const finalStatus = (estadosAsistidos.includes(prev.status) && !estadosAsistidos.includes(matching.status))
+            ? prev.status
+            : matching.status;
+          if (finalStatus !== prev.status || matching.placa !== prev.placa || matching.cantidadTexto !== prev.cantidadTexto) {
+            return { ...prev, ...matching, status: finalStatus };
+          }
         }
         return prev;
       });
@@ -1155,6 +1317,31 @@ export function MisReservasPage() {
                           <span>{r.destino}</span>
                           <span style={{ color: '#006ce4', fontWeight: 600 }}>({r.pnr})</span>
                         </p>
+
+                        {/* Metadatos detallados de Cantidad y Fechas */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '4px 0 6px 0', fontSize: '0.78rem' }}>
+                          {r.cantidadTexto && (
+                            <span style={{ background: '#eef2ff', color: '#3730a3', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              {r.tipo === 'auto' ? '🚗' : r.tipo === 'atraccion' ? '🎟️' : r.tipo === 'vuelo' ? '✈️' : '🏨'} {r.cantidadTexto}
+                            </span>
+                          )}
+                          {r.fechaReserva && (
+                            <span style={{ background: '#f3f4f6', color: '#4b5563', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              📅 Reservado: {r.fechaReserva}
+                            </span>
+                          )}
+                          {r.fechaEntrega && (
+                            <span style={{ background: '#ecfdf5', color: '#065f46', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              {r.tipo === 'auto' ? '🔑 Retiro' : r.tipo === 'atraccion' ? '🎟️ Visita' : r.tipo === 'vuelo' ? '🛫 Salida' : '📥 Check-in'}: {r.fechaEntrega}
+                            </span>
+                          )}
+                          {r.fechaDevolucion && (
+                            <span style={{ background: '#fffbeb', color: '#92400e', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              {r.tipo === 'auto' ? '🔄 Devolución' : r.tipo === 'alojamiento' ? '📤 Check-out' : '🛬 Retorno'}: {r.fechaDevolucion}
+                            </span>
+                          )}
+                        </div>
+
                         <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
                           {ESTADOS_ES[r.status] ?? r.status}
                         </span>
@@ -1352,11 +1539,37 @@ export function MisReservasPage() {
                       <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}>{selectedReserva.pnr}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Fecha / Estancia</div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>{selectedReserva.fechasTexto}</div>
+                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Cantidad Reservada</div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1a1a1a' }}>
+                        {selectedReserva.cantidadTexto || `${selectedReserva.cantidad || 1} unidad`}
+                      </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Destino</div>
+                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Fecha de Reserva</div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
+                        {selectedReserva.fechaReserva || selectedReserva.fecha || 'Reciente'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>
+                        {selectedReserva.tipo === 'auto' ? 'Fecha de Retiro / Entrega' : selectedReserva.tipo === 'atraccion' ? 'Fecha de Visita / Turno' : selectedReserva.tipo === 'vuelo' ? 'Fecha de Salida' : 'Fecha Check-in'}
+                      </div>
+                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
+                        {selectedReserva.fechaEntrega || selectedReserva.fechasTexto || 'Por definir'}
+                      </div>
+                    </div>
+                    {selectedReserva.fechaDevolucion && (
+                      <div>
+                        <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>
+                          {selectedReserva.tipo === 'auto' ? 'Fecha de Devolución' : selectedReserva.tipo === 'alojamiento' ? 'Fecha Check-out' : 'Fecha de Retorno'}
+                        </div>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
+                          {selectedReserva.fechaDevolucion}
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Destino / Ubicación</div>
                       <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>{selectedReserva.destino}</div>
                     </div>
                     <div>

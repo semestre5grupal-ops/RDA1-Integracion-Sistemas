@@ -66,10 +66,10 @@ export function FacturasPage() {
 
               return (
                 <div key={factura.id} style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', borderBottom: '1px solid #eee', paddingBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid #eee', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '8px' }}>
                     <strong>Factura #{factura.id.slice(0, 8).toUpperCase()}</strong>
-                    <span style={{ color: '#666' }}>
-                      {new Date(factura.created_at).toLocaleDateString()}
+                    <span style={{ color: '#4b5563', fontSize: '0.88rem', fontWeight: 600 }}>
+                      📅 Fecha de reserva / emisión: {new Date(factura.created_at).toLocaleDateString('es-EC', { year: 'numeric', month: 'short', day: 'numeric' })}
                     </span>
                   </div>
                   
@@ -87,11 +87,22 @@ export function FacturasPage() {
                   </div>
 
                   <ul style={{ paddingLeft: '1.2rem', marginBottom: '1rem' }}>
-                    {items.map((item, index) => (
-                      <li key={index}>
-                        {item.nombre_producto} ({item.tipo_producto}) - ${item.precio_unitario}
-                      </li>
-                    ))}
+                    {items.map((item, index) => {
+                      const tipo = (item.tipo_producto || '').toLowerCase();
+                      const unidadTexto = tipo === 'auto' ? 'Vehículo(s)' : tipo === 'atraccion' ? 'Entrada(s) / Persona(s)' : tipo === 'vuelo' ? 'Pasajero(s)' : 'Huésped(es) / Hab.';
+                      return (
+                        <li key={index} style={{ marginBottom: '8px' }}>
+                          <span style={{ fontWeight: 600, color: '#1a1a1a' }}>{item.nombre_producto}</span> ({item.tipo_producto})
+                          <div style={{ fontSize: '0.85rem', color: '#4b5563', marginTop: '3px' }}>
+                            <span>Cantidad: <strong>{item.cantidad} {unidadTexto}</strong></span>
+                            <span style={{ margin: '0 8px' }}>·</span>
+                            <span>Precio unitario: ${Number(item.precio_unitario).toFixed(2)}</span>
+                            <span style={{ margin: '0 8px' }}>·</span>
+                            <span>Subtotal: ${(item.cantidad * item.precio_unitario).toFixed(2)}</span>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
 
                   <div style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '1.1rem' }}>
