@@ -1552,14 +1552,30 @@ export class AutosService implements OnModuleInit {
     const moneda = order?.total_price?.currency || order?.totalPrice?.currency || order?.moneda || 'USD';
     const autoId = order?.auto_id || order?.vehicle_id || order?.autoId || 'auto-spark-01';
 
-    // 1. Devolver el auto a estado DISPONIBLE (Reverso de inventario)
+    // 1. Propagar cancelación al socio externo (Daniel / RutaLibre o Mateo / Maneja de Una)
+    // Si el socio rechaza con HTTP 409 (ej. alquiler ya iniciado o completado), se propaga el error de negocio
+    const targetCancelId = order?.pnr || order?.order_id || orderId;
+    if (targetCancelId) {
+      try {
+        await this.circuitBreakerAdapter.cancelOrder(
+          targetCancelId,
+          cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
+        );
+      } catch (err: any) {
+        if (err instanceof HttpException) {
+          throw err;
+        }
+      }
+    }
+
+    // 2. Devolver el auto a estado DISPONIBLE (Reverso de inventario)
     const auto = this.memoryFleet.find(c => c.id === autoId || (c.placa && order?.placa && c.placa === order.placa));
     if (auto) {
       auto.estado = EstadoVehiculo.DISPONIBLE;
       this.logger.log(`[Reverso Saga Autos] Vehículo ${auto.marca} ${auto.modelo} (${auto.id}) liberado a DISPONIBLE tras cancelación.`);
     }
 
-    // 2. Generar reembolso financiero formal
+    // 3. Generar reembolso financiero formal
     const refundId = `REF-AUTO-${Date.now().toString(36).toUpperCase()}`;
     const refund = {
       refund_id: refundId,
@@ -1582,17 +1598,6 @@ export class AutosService implements OnModuleInit {
     this.circuitBreakerAdapter.markOrderAsCancelled(orderId);
     if (order?.pnr) this.circuitBreakerAdapter.markOrderAsCancelled(order.pnr);
     if (order?.order_id) this.circuitBreakerAdapter.markOrderAsCancelled(order.order_id);
-
-    // 3. Propagar cancelación al socio externo (Daniel / RutaLibre o Mateo / Maneja de Una)
-    const targetCancelId = order?.pnr || order?.order_id || orderId;
-    if (targetCancelId) {
-      try {
-        await this.circuitBreakerAdapter.cancelOrder(
-          targetCancelId,
-          cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
-        );
-      } catch (_) {}
-    }
 
     this.winstonLogger.logAudit('RESERVA_AUTO_CANCELADA_COMPENSADA', {
       orderId,

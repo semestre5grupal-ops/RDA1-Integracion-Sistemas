@@ -580,6 +580,15 @@ export class AutosCircuitBreakerAdapter {
         this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a Maneja de Una: ${cleanId}`);
         return true;
       } catch (err: any) {
+        if (err.response?.status === 409) {
+          const detail = err.response.data?.detail || err.response.data?.message || 'Cancelación no permitida: El alquiler ya comenzó o no se puede cancelar.';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail: detail,
+          }, HttpStatus.CONFLICT);
+        }
         this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en Maneja de Una (${orderId}): ${err.message}`);
       }
     }
@@ -598,6 +607,15 @@ export class AutosCircuitBreakerAdapter {
         this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre (/autos/orders/...): ${cleanId}`);
         return true;
       } catch (err1: any) {
+        if (err1.response?.status === 409) {
+          const detail = err1.response.data?.detail || err1.response.data?.message || 'El alquiler ya comenzó; no se puede cancelar';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail: detail,
+          }, HttpStatus.CONFLICT);
+        }
         if (err1.response?.status === 404) {
           await firstValueFrom(
             this.httpService.post(
@@ -612,6 +630,9 @@ export class AutosCircuitBreakerAdapter {
         throw err1;
       }
     } catch (err: any) {
+      if (err instanceof HttpException) {
+        throw err;
+      }
       this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en RutaLibre (${orderId}): ${err.message}`);
 
       // Fallback resiliente: Si no era MDU pero falló en Daniel, intentar en Mateo
