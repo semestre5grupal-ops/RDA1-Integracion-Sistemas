@@ -21,15 +21,15 @@ import {
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
-  CHECKED_IN: 'Check-in realizado',
+  CONFIRMED: 'Confirmada',
+  CHECKED_IN: 'Check-in Realizado (Sí asistió)',
+  CONFIRMADO_ASISTIDO: 'Check-in Realizado (Sí asistió)',
+  ASISTIDO: 'Sí asistió',
+  PICKED_UP: 'Vehículo Entregado (En curso)',
+  ENTREGADO: 'Vehículo Entregado (En curso)',
   PENDING: 'Pendiente',
   PENDING_PAYMENT: 'Pendiente de pago',
   TICKET_ISSUING: 'Emitiendo billetes',
-  CONFIRMED: 'Confirmada',
-  CONFIRMADO_ASISTIDO: 'Check-in Realizado (Entregado)',
-  CHECKED_IN: 'Check-in Realizado',
-  PICKED_UP: 'Vehículo Entregado (En curso)',
-  ENTREGADO: 'Vehículo Entregado (En curso)',
   COMPLETADA: 'Completada',
   FAILED: 'Fallida',
   CHANGE_PENDING: 'Cambio en curso',
@@ -262,6 +262,11 @@ export function MisReservasPage() {
             ? `Renta de ${autoMake} ${autoModel} (${a.dias_renta || a.diasRenta || 3} días)`.trim()
             : 'Renta de Auto';
           const pnrReal = a.pnr || a.codigo_reserva || a.order_id || a.id || 'AUTO';
+          const pickupStr = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
+          const dropoffStr = a.dropoff_date || a.fecha_fin || a.dropoff || '';
+          const displayFechas = pickupStr
+            ? (dropoffStr ? `${formatearFecha(pickupStr)} – ${formatearFecha(dropoffStr)}` : `${formatearFecha(pickupStr)} (${a.dias_renta || a.diasRenta || 3} días)`)
+            : '3 días de renta';
           return {
             id: a.order_id || a.id,
             pnr: pnrReal,
@@ -269,8 +274,8 @@ export function MisReservasPage() {
             servicioTexto: 'Renta de auto',
             destino: 'Quito',
             titulo: displayTitle,
-            fechasTexto: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : '3 días de renta',
-            fecha: a.createdAt ? formatearFecha(String(a.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
+            fechasTexto: displayFechas,
+            fecha: pickupStr ? formatearFecha(pickupStr) : formatearFecha(new Date().toISOString().split('T')[0]),
             rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
             status: a.status || 'CONFIRMED',
             placa: a.placa || a.checkin?.placa,
@@ -285,70 +290,85 @@ export function MisReservasPage() {
 
       const autosLocales = JSON.parse(localStorage.getItem('reservas_autos') || '[]')
         .filter((a) => !correoSesion || (a.email || a.customer_email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase() === correoSesion);
-      const autosLocalesFormatted = autosLocales.map((a) => ({
-        id: a.id || a.orderId,
-        pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
-        tipo: 'auto',
-        servicioTexto: 'Renta de auto',
-        destino: 'Quito',
-        titulo: a.titulo || 'Renta de Auto (3 días)',
-        fechasTexto: a.createdAt || a.date ? formatearFecha(String(a.createdAt || a.date).split('T')[0]) : '3 días de renta',
-        fecha: a.createdAt || a.date ? formatearFecha(String(a.createdAt || a.date).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-        rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
-        status: a.status || 'CONFIRMED',
-        totalRaw: a.totalPrice?.total || a.total || 106.50,
-        imagen: a.foto_url || DEFAULT_IMAGES.auto,
-        email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
-        link: '/autos',
-        isLocal: true,
-      }));
+      const autosLocalesFormatted = autosLocales.map((a) => {
+        const pickupLocal = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
+        const dropoffLocal = a.dropoff_date || a.fecha_fin || a.dropoff || '';
+        const displayFechasLocal = pickupLocal
+          ? (dropoffLocal ? `${formatearFecha(pickupLocal)} – ${formatearFecha(dropoffLocal)}` : `${formatearFecha(pickupLocal)} (${a.dias || 3} días)`)
+          : '3 días de renta';
+        return {
+          id: a.id || a.orderId,
+          pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
+          tipo: 'auto',
+          servicioTexto: 'Renta de auto',
+          destino: 'Quito',
+          titulo: a.titulo || 'Renta de Auto (3 días)',
+          fechasTexto: displayFechasLocal,
+          fecha: pickupLocal ? formatearFecha(pickupLocal) : formatearFecha(new Date().toISOString().split('T')[0]),
+          rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
+          status: a.status || 'CONFIRMED',
+          totalRaw: a.totalPrice?.total || a.total || 106.50,
+          imagen: a.foto_url || DEFAULT_IMAGES.auto,
+          email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+          link: '/autos',
+          isLocal: true,
+        };
+      });
 
       // 3. Atracciones API & Local
       let atraccionesItems = [];
       if (atraccionesRes.status === 'fulfilled' && atraccionesRes.value) {
         const respuestaAtracciones = atraccionesRes.value;
         const listaAtracciones = Array.isArray(respuestaAtracciones) ? respuestaAtracciones : (respuestaAtracciones?.data || []);
-        atraccionesItems = listaAtracciones.map((at) => ({
-          id: at.id || at.reservation_id || at.pnr,
-          pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
-          tipo: 'atraccion',
-          servicioTexto: 'Atracción',
-          destino: 'Quito',
-          titulo: at.titulo || at.atraccion_nombre || at.name || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
-          fechasTexto: at.createdAt ? `${formatearFecha(String(at.createdAt).split('T')[0])} · ${at.time || '10:00 a.m.'}` : 'Tour guiado',
-          fecha: at.createdAt ? formatearFecha(String(at.createdAt).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-          rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
-          status: at.status || 'CONFIRMED',
-          totalRaw: at.total_price?.total || at.total_price || 55.00,
-          imagen: at.photoUrl || at.foto_url || DEFAULT_IMAGES.atraccion,
-          email: (at.customer_email || at.email || at.customer?.email || at.userEmail || '').trim().toLowerCase(),
-          documentId: (at.documentId || at.document_id || at.customer?.document_id || '').trim(),
-          link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
-          raw: at,
-        }));
+        atraccionesItems = listaAtracciones.map((at) => {
+          const fechaAtrac = at.date || at.fecha || at.raw?.date || at.raw?.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
+          const horaAtrac = at.time || at.hora || at.raw?.time || at.raw?.hora || '10:00 a.m.';
+          return {
+            id: at.id || at.reservation_id || at.pnr,
+            pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
+            tipo: 'atraccion',
+            servicioTexto: 'Atracción',
+            destino: 'Quito',
+            titulo: at.titulo || at.atraccion_nombre || at.name || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
+            fechasTexto: fechaAtrac ? `${formatearFecha(fechaAtrac)} · ${horaAtrac}` : 'Tour guiado',
+            fecha: fechaAtrac ? formatearFecha(fechaAtrac) : formatearFecha(new Date().toISOString().split('T')[0]),
+            rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
+            status: at.status || 'CONFIRMED',
+            totalRaw: at.total_price?.total || at.total_price || 55.00,
+            imagen: at.photoUrl || at.foto_url || DEFAULT_IMAGES.atraccion,
+            email: (at.customer_email || at.email || at.customer?.email || at.userEmail || '').trim().toLowerCase(),
+            documentId: (at.documentId || at.document_id || at.customer?.document_id || '').trim(),
+            link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
+            raw: at,
+          };
+        });
       }
 
       const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]')
         .filter((at) => !correoSesion || (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase() === correoSesion);
-      const atraccionesLocalesFormatted = atraccionesLocales.map((at) => ({
-        id: at.id || at.reservation_id || at.pnr,
-        pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
-        tipo: 'atraccion',
-        servicioTexto: 'Atracción',
-        destino: 'Quito',
-        titulo: at.titulo || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
-        fechasTexto: at.createdAt || at.date ? `${formatearFecha(String(at.createdAt || at.date).split('T')[0])} · ${at.time || '10:00 a.m.'}` : 'Tour guiado',
-        fecha: at.createdAt || at.date ? formatearFecha(String(at.createdAt || at.date).split('T')[0]) : formatearFecha(new Date().toISOString().split('T')[0]),
-        rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
-        status: at.status || 'CONFIRMED',
-        totalRaw: at.totalPrice?.total || at.total || 55.00,
-        imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
-        email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
-        documentId: (at.document_id || at.documentId || '').trim(),
-        link: '/',
-        isLocal: true,
-        raw: at,
-      }));
+      const atraccionesLocalesFormatted = atraccionesLocales.map((at) => {
+        const fechaLocalAtrac = at.date || at.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
+        const horaLocalAtrac = at.time || at.hora || '10:00 a.m.';
+        return {
+          id: at.id || at.reservation_id || at.pnr,
+          pnr: at.pnr || at.codigo_reserva || at.id || at.reservation_id || 'ATRAC',
+          tipo: 'atraccion',
+          servicioTexto: 'Atracción',
+          destino: 'Quito',
+          titulo: at.titulo || `Tour / Atracción (${at.ticket_count || 1} entradas)`,
+          fechasTexto: fechaLocalAtrac ? `${formatearFecha(fechaLocalAtrac)} · ${horaLocalAtrac}` : 'Tour guiado',
+          fecha: fechaLocalAtrac ? formatearFecha(fechaLocalAtrac) : formatearFecha(new Date().toISOString().split('T')[0]),
+          rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
+          status: at.status || 'CONFIRMED',
+          totalRaw: at.totalPrice?.total || at.total || 55.00,
+          imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
+          email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
+          documentId: (at.document_id || at.documentId || '').trim(),
+          link: '/',
+          isLocal: true,
+          raw: at,
+        };
+      });
 
       // 4. Alojamientos API & Local
       let alojamientosApiItems = [];
@@ -1138,9 +1158,9 @@ export function MisReservasPage() {
                         <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
                           {ESTADOS_ES[r.status] ?? r.status}
                         </span>
-                        {r.status === 'CONFIRMADO_ASISTIDO' && (
+                        {(r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN') && (
                           <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
-                            • Llaves entregadas {r.placa ? `(Placa: ${r.placa})` : ''}
+                            • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
                           </span>
                         )}
                       </div>
@@ -1319,9 +1339,9 @@ export function MisReservasPage() {
                     <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
                       {ESTADOS_ES[selectedReserva.status] ?? selectedReserva.status}
                     </span>
-                    {selectedReserva.status === 'CONFIRMADO_ASISTIDO' && (
+                    {(selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'CHECKED_IN') && (
                       <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
-                        • Llaves entregadas {selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}
+                        • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
                       </span>
                     )}
                   </div>
