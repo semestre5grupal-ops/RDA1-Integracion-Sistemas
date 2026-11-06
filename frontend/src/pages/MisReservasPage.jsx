@@ -1357,7 +1357,7 @@ export function MisReservasPage() {
                       <div className="trip-card-price">
                         {convertPrice(r.totalRaw)}
                       </div>
-                      {r.status !== 'CANCELLED' && (
+                      {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
                         <button
                           type="button"
                           className="btn-card-checkin"
@@ -1367,7 +1367,7 @@ export function MisReservasPage() {
                             setCheckinStepResult(null);
                           }}
                           style={{
-                            background: r.tipo === 'atraccion' ? '#003580' : r.tipo === 'auto' ? '#e8650a' : '#006ce4',
+                            background: '#006ce4',
                             color: '#ffffff',
                             border: 'none',
                             borderRadius: '6px',
@@ -1382,7 +1382,7 @@ export function MisReservasPage() {
                             whiteSpace: 'nowrap'
                           }}
                         >
-                          {r.tipo === 'atraccion' ? '🎟️ Check-in QR' : r.tipo === 'auto' ? '🚗 Check-in Flota' : '⚡ Check-in'}
+                          ⚡ Check-in
                         </button>
                       )}
                       <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
@@ -1397,18 +1397,20 @@ export function MisReservasPage() {
 
                         {activeMenuId === r.id && (
                           <div className="trip-dropdown-menu">
-                            <button
-                              type="button"
-                              className="trip-dropdown-item"
-                              style={{ color: '#006ce4', fontWeight: 700 }}
-                              onClick={() => {
-                                setActiveMenuId(null);
-                                setCheckinReserva(r);
-                                setCheckinStepResult(null);
-                              }}
-                            >
-                              ⚡ Realizar Check-in Digital
-                            </button>
+                            {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                              <button
+                                type="button"
+                                className="trip-dropdown-item"
+                                style={{ color: '#006ce4', fontWeight: 700 }}
+                                onClick={() => {
+                                  setActiveMenuId(null);
+                                  setCheckinReserva(r);
+                                  setCheckinStepResult(null);
+                                }}
+                              >
+                                ⚡ Realizar Check-in Digital
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="trip-dropdown-item"
@@ -1593,7 +1595,7 @@ export function MisReservasPage() {
                     </button>
                   </div>
 
-                  {selectedReserva.status !== 'CANCELLED' && (
+                  {selectedReserva.status !== 'CANCELLED' && selectedReserva.tipo !== 'auto' && selectedReserva.tipo !== 'atraccion' && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1604,7 +1606,7 @@ export function MisReservasPage() {
                         width: '100%',
                         marginTop: '10px',
                         padding: '12px',
-                        background: selectedReserva.tipo === 'atraccion' ? '#003580' : selectedReserva.tipo === 'auto' ? '#e8650a' : '#006ce4',
+                        background: '#006ce4',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: '6px',
@@ -1617,47 +1619,64 @@ export function MisReservasPage() {
                         gap: '8px'
                       }}
                     >
-                      {selectedReserva.tipo === 'atraccion'
-                        ? '🎟️ Ver Voucher & Realizar Check-in Presencial'
-                        : selectedReserva.tipo === 'auto'
-                        ? '🚗 Check-in Mostrador (Entrega / Devolución)'
-                        : '⚡ Realizar Check-in Digital'}
+                      ⚡ Realizar Check-in Digital
                     </button>
                   )}
 
-                  {selectedReserva.status !== 'CANCELLED' ? (
-                    <button
-                      type="button"
-                      id="btn-iniciar-cancelacion"
-                      onClick={() => { setModalView('cancel'); setCancelError(''); setCancelSuccess(null); }}
-                      style={{
-                        width: '100%',
-                        marginTop: '8px',
-                        padding: '11px',
-                        background: '#fff0f0',
-                        color: '#c62828',
-                        border: '1.5px solid #ef9a9a',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 700,
-                        fontSize: '0.92rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        transition: 'background 0.2s'
-                      }}
-                    >
-                      ✕ Cancelar reserva y solicitar reembolso
-                    </button>
-                  ) : (
-                    <div style={{ marginTop: '8px', padding: '12px 14px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: '6px', color: '#b71c1c', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '1.3rem' }}>ℹ️</span>
-                      <div>
-                        <strong>Esta reserva ha sido cancelada.</strong> Los cupos fueron liberados al operador y el 100% del importe ({convertPrice(selectedReserva.totalRaw)}) fue procesado para reembolso.
-                      </div>
-                    </div>
-                  )}
+                  {(() => {
+                    const s = (selectedReserva.status || '').toUpperCase();
+                    const yaAsistio = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'ENTREGADO', 'COMPLETED'].includes(s);
+                    const estaCancelada = s === 'CANCELLED';
+
+                    if (estaCancelada) {
+                      return (
+                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: '6px', color: '#b71c1c', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.3rem' }}>ℹ️</span>
+                          <div>
+                            <strong>Esta reserva ha sido cancelada.</strong> Los cupos fueron liberados al operador y el 100% del importe ({convertPrice(selectedReserva.totalRaw)}) fue procesado para reembolso.
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (yaAsistio) {
+                      return (
+                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#e8f5e9', border: '1px solid #c8e6c9', borderRadius: '6px', color: '#1b5e20', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.3rem' }}>✅</span>
+                          <div>
+                            <strong>Check-in realizado / Servicio en curso.</strong> El servicio ya fue verificado o retirado en mostrador. La cancelación no aplica una vez iniciado o completado el servicio.
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        id="btn-iniciar-cancelacion"
+                        onClick={() => { setModalView('cancel'); setCancelError(''); setCancelSuccess(null); }}
+                        style={{
+                          width: '100%',
+                          marginTop: '8px',
+                          padding: '11px',
+                          background: '#fff0f0',
+                          color: '#c62828',
+                          border: '1.5px solid #ef9a9a',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                          fontSize: '0.92rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          transition: 'background 0.2s'
+                        }}
+                      >
+                        ✕ Cancelar reserva y solicitar reembolso
+                      </button>
+                    );
+                  })()}
 
                   <button
                     type="button"

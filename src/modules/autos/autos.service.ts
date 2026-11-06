@@ -1503,20 +1503,58 @@ export class AutosService implements OnModuleInit {
     let order = this.memoryOrders.get(orderId);
     if (!order) {
       for (const val of this.memoryOrders.values()) {
-        if (val.pnr === orderId || val.order_id === orderId || (val.pnr && val.pnr.startsWith(orderId))) {
+        if (
+          val.pnr === orderId ||
+          val.order_id === orderId ||
+          val.id === orderId ||
+          (val.pnr && val.pnr.toUpperCase() === orderId.toUpperCase()) ||
+          (val.order_id && val.order_id.toLowerCase() === orderId.toLowerCase())
+        ) {
           order = val;
           break;
         }
       }
     }
 
-    const totalReembolso = order?.total_price?.total || order?.totalPrice?.total || 106.50;
-    const moneda = order?.total_price?.currency || order?.totalPrice?.currency || 'USD';
-    const autoId = order?.auto_id || order?.autoId || 'auto-spark-01';
+    // Si no está en memoria local, resolverlo consultando los pedidos remotos unificados
+    if (!order) {
+      try {
+        const remoteOrders = await this.circuitBreakerAdapter.getOrdersDirect();
+        order = remoteOrders.find(
+          (o: any) =>
+            o.id === orderId ||
+            o.order_id === orderId ||
+            o.pnr === orderId ||
+            o.codigo_reserva === orderId ||
+            (o.pnr && o.pnr.toUpperCase() === orderId.toUpperCase()) ||
+            (o.order_id && o.order_id.toLowerCase() === orderId.toLowerCase()),
+        );
+        if (order) {
+          this.memoryOrders.set(orderId, order);
+          if (order.pnr) this.memoryOrders.set(order.pnr, order);
+          if (order.order_id) this.memoryOrders.set(order.order_id, order);
+        }
+      } catch (_) {}
+    }
+
+    // Regla de Negocio: Si el servicio ya fue asistido o retirado en mostrador, no se puede cancelar
+    const currentStatus = (order?.status || order?.estado || '').toUpperCase();
+    if (['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'ENTREGADO', 'COMPLETED'].includes(currentStatus)) {
+      throw new HttpException({
+        type: 'https://api.booking.local/errors/conflict',
+        title: 'Cancelación No Permitida',
+        status: HttpStatus.CONFLICT,
+        detail: 'No es posible cancelar una reserva de auto que ya fue asistida o retirada en mostrador.',
+      }, HttpStatus.CONFLICT);
+    }
+
+    const totalReembolso = order?.total_price?.total || order?.totalPrice?.total || order?.precio_total_monto || 106.50;
+    const moneda = order?.total_price?.currency || order?.totalPrice?.currency || order?.moneda || 'USD';
+    const autoId = order?.auto_id || order?.vehicle_id || order?.autoId || 'auto-spark-01';
 
     // 1. Devolver el auto a estado DISPONIBLE (Reverso de inventario)
-    const auto = this.memoryFleet.find(c => c.id === autoId);
-    if (auto && auto.estado === EstadoVehiculo.RESERVADO) {
+    const auto = this.memoryFleet.find(c => c.id === autoId || (c.placa && order?.placa && c.placa === order.placa));
+    if (auto) {
       auto.estado = EstadoVehiculo.DISPONIBLE;
       this.logger.log(`[Reverso Saga Autos] Vehículo ${auto.marca} ${auto.modelo} (${auto.id}) liberado a DISPONIBLE tras cancelación.`);
     }
@@ -1536,11 +1574,17 @@ export class AutosService implements OnModuleInit {
 
     if (order) {
       order.status = 'CANCELLED';
+      order.estado = 'CANCELLED';
       order.refund = refund;
     }
 
-    // 3. Propagar cancelación al socio externo (RutaLibre / Daniel)
-    const targetCancelId = order?.pnr || orderId;
+    // Registrar en adapter para sincronización instantánea de inventario en getOrdersDirect
+    this.circuitBreakerAdapter.markOrderAsCancelled(orderId);
+    if (order?.pnr) this.circuitBreakerAdapter.markOrderAsCancelled(order.pnr);
+    if (order?.order_id) this.circuitBreakerAdapter.markOrderAsCancelled(order.order_id);
+
+    // 3. Propagar cancelación al socio externo (Daniel / RutaLibre o Mateo / Maneja de Una)
+    const targetCancelId = order?.pnr || order?.order_id || orderId;
     if (targetCancelId) {
       try {
         await this.circuitBreakerAdapter.cancelOrder(
