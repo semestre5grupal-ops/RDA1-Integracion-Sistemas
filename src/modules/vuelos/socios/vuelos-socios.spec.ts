@@ -183,6 +183,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       factura: jest.fn(async () => null),
       mapearClienteSocio: jest.fn(async () => undefined),
       marcarCheckin: jest.fn(async () => true),
+      registrarReferenciaPago: jest.fn(async () => undefined),
       notaCredito: jest.fn(async (d: any) => ({ numero: 'NC-20261104-000001', monto: d.monto.toFixed(2) })),
       listar: jest.fn(async (prop: string) =>
         [...copias.values()].filter((c) => c.propietarioId === prop).map((c) => ({
