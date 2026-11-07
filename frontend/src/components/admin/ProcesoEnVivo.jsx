@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
+import { ArquitecturaVuelos } from './ArquitecturaVuelos';
 
 /**
  * Flujo del proceso de vuelos EN TIEMPO REAL.
@@ -56,44 +57,7 @@ function resumenCompra(eventos) {
   return { label: `En curso · ${INFO[ultimo?.paso]?.label ?? ''}`, tono: 'neutro' };
 }
 
-function Nodo({ paso, contador, latido, seleccion }) {
-  const c = contador || { ok: 0, error: 0, aviso: 0 };
-  const total = c.ok + c.error + c.aviso;
-  const tono = seleccion ? COLOR[seleccion] : latido ? COLOR[latido] : null;
-  return (
-    <div
-      className={latido ? 'pv-latido' : undefined}
-      style={{
-        position: 'relative', minWidth: 118, flex: '1 1 0', background: tono ? tono.bg : T.surface,
-        border: `2px solid ${tono ? tono.fg : seleccion === null ? T.border : T.border}`, borderRadius: 12, padding: '10px 12px',
-        opacity: seleccion === undefined || seleccion ? 1 : 0.45, transition: 'background .3s, border-color .3s, opacity .3s',
-      }}
-      title={`${paso.label}: ${c.ok} ok · ${c.aviso} avisos · ${c.error} errores desde el arranque`}
-    >
-      <div style={{ fontSize: '1.15rem' }} aria-hidden="true">{paso.icon}</div>
-      <div style={{ fontWeight: 800, fontSize: '0.9rem', color: T.text }}>{paso.label}</div>
-      <div style={{ fontSize: '0.72rem', color: T.muted }}>{paso.sub}</div>
-      <div style={{ display: 'flex', gap: 6, marginTop: 6, fontSize: '0.74rem', fontVariantNumeric: 'tabular-nums', flexWrap: 'wrap' }}>
-        <span style={{ color: T.ok, fontWeight: 700 }}>✓ {c.ok}</span>
-        {c.aviso > 0 && <span style={{ color: T.warn, fontWeight: 700 }}>! {c.aviso}</span>}
-        <span style={{ color: c.error ? T.bad : T.muted, fontWeight: 700 }}>✕ {c.error}</span>
-        {total === 0 && <span style={{ color: T.muted }}>sin actividad</span>}
-      </div>
-    </div>
-  );
-}
-
-function Flecha({ activa }) {
-  return (
-    <div aria-hidden="true" style={{ alignSelf: 'center', width: 28, height: 4, position: 'relative', flex: '0 0 auto' }}>
-      <div style={{ position: 'absolute', inset: 0, background: activa ? T.azul : T.border, borderRadius: 2, transition: 'background .3s' }} />
-      {activa && <div className="pv-ficha" />}
-      <div style={{ position: 'absolute', right: -2, top: -4, borderLeft: `8px solid ${activa ? T.azul : T.border}`, borderTop: '6px solid transparent', borderBottom: '6px solid transparent' }} />
-    </div>
-  );
-}
-
-export function ProcesoEnVivo() {
+export function ProcesoEnVivo({ aerolineas = [] }) {
   const [eventos, setEventos] = useState([]);
   const [contadores, setContadores] = useState({});
   const [inicio, setInicio] = useState(null);
@@ -102,6 +66,8 @@ export function ProcesoEnVivo() {
   const [seleccion, setSeleccion] = useState(null);
   const [filtro, setFiltro] = useState('');
   const [latidos, setLatidos] = useState({});
+  const [busActivo, setBusActivo] = useState(false);
+  const [reproducir, setReproducir] = useState(null);
   const seqRef = useRef(0);
   const inicioRef = useRef(null);
 
@@ -122,6 +88,7 @@ export function ProcesoEnVivo() {
       inicioRef.current = data.inicio;
       setInicio(data.inicio);
       setContadores(data.contadores || {});
+      setBusActivo(!!data.bus?.rabbitmq);
       setError(null);
       if (data.eventos?.length) {
         seqRef.current = data.ultimoSeq;
@@ -193,7 +160,6 @@ export function ProcesoEnVivo() {
 
   const estadoNodo = (id) => (recorrido ? recorrido[id] ?? false : undefined);
   const latido = (id) => (recorrido ? null : latidos[id]?.resultado ?? null);
-  const flechaActiva = (a, b) => (recorrido ? !!recorrido[a] && !!recorrido[b] : !!latidos[b]);
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -227,30 +193,40 @@ export function ProcesoEnVivo() {
       </div>
       {error && <div role="alert" style={{ background: T.badBg, color: T.bad, borderRadius: 8, padding: '8px 12px', fontSize: '0.83rem' }}>⚠️ {error}</div>}
 
-      {/* ── El flujo ── */}
+      {/* ── La arquitectura con el tráfico en vivo ── */}
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: 'grid', gap: 12 }}>
-        <div style={{ fontSize: '0.82rem', color: T.text2 }}>
-          {elegida ? (
-            <>Recorrido de la compra <code style={{ background: T.fondo, padding: '1px 6px', borderRadius: 4 }}>{elegida.correlacion}</code> · los pasos que no hizo quedan atenuados.</>
-          ) : (
-            <>Cada caja late cuando ocurre ese paso; los números son el total desde que arrancó el servidor. Elige una compra abajo para ver solo su recorrido.</>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ fontSize: '0.82rem', color: T.text2, maxWidth: 720 }}>
+            {elegida ? (
+              <>Reproduciendo la compra <code style={{ background: T.fondo, padding: '1px 6px', borderRadius: 4 }}>{corto(elegida.correlacion)}</code>: cada punto es uno de sus pasos, en orden.</>
+            ) : (
+              <>Cada punto es un paso real que acaba de pasar por Booking: sale de donde empieza, recorre los componentes que toca y se apaga al terminar. Elige una compra abajo para repetir su recorrido.</>
+            )}
+          </div>
+          {elegida && (
+            <button type="button" onClick={() => setReproducir({ eventos: elegida.eventos, n: Date.now() })}
+              style={{ border: `1px solid ${T.azul}`, background: T.azul, color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+              ▶ Repetir recorrido
+            </button>
           )}
         </div>
-        <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'stretch', minWidth: 860 }}>
-            {PASOS.map((p, i) => (
-              <div key={p.id} style={{ display: 'contents' }}>
-                {i > 0 && <Flecha activa={flechaActiva(PASOS[i - 1].id, p.id)} />}
-                <Nodo paso={p} contador={contadores[p.id]} latido={latido(p.id)} seleccion={estadoNodo(p.id)} />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 12, marginTop: 12, minWidth: 860, alignItems: 'stretch' }}>
-            <div style={{ alignSelf: 'center', fontSize: '0.75rem', color: T.muted, width: 120 }}>Ramas alternativas ↳</div>
-            {RAMAS.map((p) => (
-              <Nodo key={p.id} paso={p} contador={contadores[p.id]} latido={latido(p.id)} seleccion={estadoNodo(p.id)} />
-            ))}
-          </div>
+
+        <ArquitecturaVuelos eventos={pausado ? [] : eventos} aerolineas={aerolineas} busActivo={busActivo} reproducir={reproducir} />
+
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
+          <span style={{ fontSize: '0.74rem', color: T.muted, alignSelf: 'center', marginRight: 4 }}>Total desde que arrancó el servidor:</span>
+          {[...PASOS, ...RAMAS].map((p) => {
+            const c = contadores[p.id] || { ok: 0, error: 0, aviso: 0 };
+            const lat = latido(p.id);
+            const sel = estadoNodo(p.id);
+            const tono = sel ? COLOR[sel] : lat ? COLOR[lat] : null;
+            return (
+              <span key={p.id} className={lat ? 'pv-latido' : undefined} title={p.sub}
+                style={{ fontSize: '0.74rem', borderRadius: 999, padding: '3px 9px', border: `1px solid ${tono ? tono.fg : T.border}`, background: tono ? tono.bg : T.surface, opacity: sel === false ? 0.45 : 1, fontVariantNumeric: 'tabular-nums' }}>
+                {p.icon} {p.label} <strong style={{ color: T.ok }}>✓{c.ok}</strong>{c.aviso ? <strong style={{ color: T.warn }}> !{c.aviso}</strong> : null} <strong style={{ color: c.error ? T.bad : T.muted }}>✕{c.error}</strong>
+              </span>
+            );
+          })}
         </div>
       </section>
 
@@ -285,7 +261,7 @@ export function ProcesoEnVivo() {
               <div key={c.correlacion} style={{ border: `1px solid ${abierta ? T.azul : T.border}`, borderRadius: 10, overflow: 'hidden' }}>
                 <button
                   type="button"
-                  onClick={() => setSeleccion(abierta ? null : c.correlacion)}
+                  onClick={() => { setSeleccion(abierta ? null : c.correlacion); if (!abierta) setReproducir({ eventos: c.eventos, n: Date.now() }); }}
                   aria-expanded={abierta}
                   style={{ width: '100%', textAlign: 'left', background: abierta ? '#eef3fb' : T.surface, border: 'none', padding: '10px 12px', cursor: 'pointer', display: 'grid', gap: 6 }}
                 >
