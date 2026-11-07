@@ -374,7 +374,7 @@ export function ProcesosTab({ refreshKey = 0 }) {
         ))}
       </div>
 
-      {enVivo && <ProcesoEnVivo />}
+      {enVivo && <ProcesoEnVivo aerolineas={aero} />}
 
       {!enVivo && (
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: '18px 20px', display: 'grid', gap: 14 }}>
