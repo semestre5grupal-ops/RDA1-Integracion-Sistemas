@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { createClient } from '@supabase/supabase-js';
@@ -253,23 +253,46 @@ export class AdminService {
 
   async getReservasGlobales() {
     this.logger.log('Admin: consultando reservas globales...');
-    const [vuelos, autos, atracciones] = await Promise.all([
+    const [vuelos, autos, atracciones, vuelosSocios] = await Promise.all([
       this.reservaRepo.find({ order: { fechaCreacion: 'DESC' } as any, take: 50 }).catch(() => [] as Reserva[]),
       this.orderAutoRepo.find({ order: { createdAt: 'DESC' }, take: 50 }).catch(() => [] as OrderAuto[]),
       this.reservaAtraccionRepo.find({ order: { createdAt: 'DESC' }, take: 50 }).catch(() => [] as ReservaAtraccion[]),
+      // Reservas hechas en aerolíneas socias: la reserva vive en la aerolínea y Booking guarda la copia.
+      this.dataSource.query(
+        `SELECT booking_id, codigo_nodo, pnr, status, origin, destination, grand_total, reembolsado, currency, created_at
+           FROM public.vuelos_reservas_socio ORDER BY created_at DESC LIMIT 100`,
+      ).catch(() => [] as any[]),
     ]);
     const hospedaje = await this.reservasHospedaje(50);
 
-    return {
-      vuelos: vuelos.map(r => ({
+    const listaVuelos = [
+      ...vuelosSocios.map((r: any) => ({
+        id: r.booking_id,
+        tipo: 'vuelo',
+        socio: true,
+        aerolinea: r.codigo_nodo,
+        ruta: r.origin && r.destination ? `${r.origin} → ${r.destination}` : null,
+        pnr: r.pnr || '—',
+        estado: r.status,
+        total: Number(r.grand_total || 0),
+        reembolsado: Number(r.reembolsado || 0),
+        moneda: r.currency || 'USD',
+        createdAt: r.created_at,
+      })),
+      ...vuelos.map(r => ({
         id: r.idReserva,
         tipo: 'vuelo',
+        socio: false,
         pnr: r.pnr || '—',
         estado: r.estado,
         total: Number(r.total || 0),
         moneda: r.moneda || 'USD',
         createdAt: r.fechaCreacion,
       })),
+    ].sort((a, b) => new Date(b.createdAt as any).getTime() - new Date(a.createdAt as any).getTime());
+
+    return {
+      vuelos: listaVuelos,
       autos: autos.map(o => ({
         id: o.id,
         tipo: 'auto',
@@ -494,6 +517,13 @@ export class AdminService {
       return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
     }
 
+    // Una reserva de aerolínea socia se cancela en la aerolínea (con su reembolso
+    // y nota de crédito) por POST /vuelos/bookings/{id}/cancel; marcarla aquí solo
+    // cambiaría un estado sin devolver el dinero.
+    if (tipo === 'vuelos' && id.includes('~')) {
+      throw new BadRequestException('Las reservas de aerolíneas socias se cancelan con POST /vuelos/bookings/{id}/cancel.');
+    }
+
     // Vuelos, autos y atracciones: lógica original de sus equipos, sin cambios.
     try {
       if (tipo === 'vuelos') {
@@ -543,9 +573,12 @@ export class AdminService {
     }
   }
 
+  /**
+   * No hay un servicio que reenvíe comprobantes desde aquí: se responde 501 en
+   * vez de fingir que se envió. El panel ya no muestra este botón.
+   */
   async reenviarComprobante(tipo: string, id: string) {
-    this.logger.log(`Admin: reenviando comprobante de ${tipo} ${id}`);
-    // Simularemos el reenvío por ahora
-    return { success: true, message: `Comprobante reenviado exitosamente` };
+    this.logger.warn(`Admin: reenvío de comprobante solicitado para ${tipo} ${id}, no implementado`);
+    throw new HttpException('El reenvío de comprobantes no está implementado.', HttpStatus.NOT_IMPLEMENTED);
   }
 }

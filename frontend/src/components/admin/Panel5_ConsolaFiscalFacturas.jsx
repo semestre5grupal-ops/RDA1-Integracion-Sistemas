@@ -1,161 +1,171 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
+import { mensajeError, ErrorBox } from './panelUtils';
 
-export function Panel5_ConsolaFiscalFacturas() {
-  const [facturas, setFacturas] = useState([]);
+/**
+ * Facturas emitidas (schema_facturacion.facturas_encabezado), con búsqueda,
+ * filtro por estado y detalle con líneas y notas de crédito.
+ * Todo sale de GET /facturas y GET /facturas/:id; no hay datos de ejemplo.
+ */
+const ESTADOS = [
+  ['', 'Todos'],
+  ['EMITIDA', 'Emitida'],
+  ['PAGADA', 'Pagada'],
+  ['ANULADA_POR_COMPENSACION', 'Anulada'],
+];
+const COLOR_ESTADO = { EMITIDA: '#075985', PAGADA: '#166534', ANULADA_POR_COMPENSACION: '#991b1b' };
+const usd = (n) => (n === null || n === undefined ? '—' : `$${Number(n).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const fecha = (d) => (d ? new Date(d).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+
+const th = { padding: '10px', textAlign: 'left', fontWeight: 600, color: '#003b95', whiteSpace: 'nowrap' };
+const td = { padding: '10px', verticalAlign: 'top' };
+
+export function Panel5_ConsolaFiscalFacturas({ refreshKey = 0 }) {
+  const [datos, setDatos] = useState({ items: [], total: 0, totales: null });
   const [loading, setLoading] = useState(true);
-  const [facturaSeleccionada, setFacturaSeleccionada] = useState(null);
+  const [error, setError] = useState(null);
+  const [estado, setEstado] = useState('');
+  const [q, setQ] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  const [detalle, setDetalle] = useState(null);
 
-  const fetchFacturas = async () => {
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      const res = await api.get('/facturas');
-      setFacturas(Array.isArray(res) ? res : res.data || []);
+      const { data } = await api.get('/facturas', { params: { limit: 200, ...(estado ? { estado } : {}), ...(busqueda ? { q: busqueda } : {}) } });
+      setDatos({ items: Array.isArray(data?.items) ? data.items : [], total: data?.total ?? 0, totales: data?.totales ?? null });
     } catch (e) {
-      // Mock de facturación con IVA al 15% (Ecuador)
-      setFacturas([
-        {
-          id: 'fac-uuid-001',
-          numero_factura: 'FAC-001-001-000000142',
-          cliente_nombre: 'Dilan Flores',
-          cliente_cedula: '1720000000',
-          fecha_emision: '2026-10-21T14:30:00Z',
-          subtotal: 100.0,
-          iva_15pct: 15.0, // 15%
-          total: 115.0,
-          estado: 'EMITIDA',
-          idempotency_key: 'idem-chk-998811',
-          items: [
-            { descripcion: 'Tour Volcán Cotopaxi (Adulto)', cantidad: 1, precio_unitario: 55.0, subtotal: 55.0 },
-            { descripcion: 'Alquiler Chevrolet Tracker Turbo (1 día)', cantidad: 1, precio_unitario: 45.0, subtotal: 45.0 },
-          ]
-        },
-        {
-          id: 'fac-uuid-002',
-          numero_factura: 'FAC-001-001-000000143',
-          cliente_nombre: 'Maria Benitez',
-          cliente_cedula: '1711223344',
-          fecha_emision: '2026-10-21T16:15:00Z',
-          subtotal: 160.0,
-          iva_15pct: 24.0, // 15%
-          total: 184.0,
-          estado: 'EMITIDA',
-          idempotency_key: 'idem-chk-998812',
-          items: [
-            { descripcion: 'Alojamiento Suite Dann Carlton (2 noches)', cantidad: 2, precio_unitario: 80.0, subtotal: 160.0 },
-          ]
-        }
-      ]);
+      setDatos({ items: [], total: 0, totales: null });
+      setError(mensajeError(e, 'No se pudieron leer las facturas.'));
     } finally {
       setLoading(false);
     }
+  }, [estado, busqueda]);
+
+  useEffect(() => { cargar(); }, [cargar, refreshKey]);
+
+  const abrir = async (f) => {
+    setDetalle({ cargando: true, numero: f.numero_factura });
+    try {
+      const { data } = await api.get(`/facturas/${encodeURIComponent(f.id)}`);
+      setDetalle({ factura: data });
+    } catch (e) {
+      setDetalle({ error: mensajeError(e, 'No se pudo leer el detalle de la factura.'), numero: f.numero_factura });
+    }
   };
 
-  useEffect(() => {
-    fetchFacturas();
-  }, []);
+  const t = datos.totales;
 
   return (
-    <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🧾</span> Panel 5: Consola Fiscal de Facturación e IVA 15% (RDA2)
-          </h2>
-          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-            Auditoría de comprobantes electrónicos correlativos emitidos por el integrador con desglose estricto del 15% de IVA.
-          </p>
-        </div>
-        <button 
-          onClick={fetchFacturas}
-          style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
-        >
-          🔄 Actualizar Facturas
+    <div style={{ background: '#fff', border: '1px solid #e7e7e7', borderRadius: 8, padding: 16 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <form onSubmit={(e) => { e.preventDefault(); setBusqueda(q.trim()); }} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="N.º, cliente, cédula/RUC o correo" style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid #cbd5e1', minWidth: 240, fontSize: '0.82rem' }} />
+          <button type="submit" style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid #006ce4', background: '#006ce4', color: '#fff', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}>Buscar</button>
+          {ESTADOS.map(([id, label]) => (
+            <button key={id || 'todos'} type="button" onClick={() => setEstado(id)} style={{ padding: '6px 12px', borderRadius: 20, border: `1px solid ${estado === id ? '#006ce4' : '#e7e7e7'}`, background: estado === id ? '#ebf3ff' : '#fff', color: estado === id ? '#003b95' : '#1a1a1a', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}>{label}</button>
+          ))}
+        </form>
+        <button type="button" onClick={cargar} disabled={loading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: 6, cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem' }}>
+          {loading ? 'Cargando…' : '↻ Actualizar'}
         </button>
       </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
-        <thead>
-          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-            <th style={{ padding: '12px 10px' }}>N° Factura Correlativo</th>
-            <th style={{ padding: '12px 10px' }}>Cliente / RUC</th>
-            <th style={{ padding: '12px 10px' }}>Fecha Emisión</th>
-            <th style={{ padding: '12px 10px' }}>Subtotal 0% / 15%</th>
-            <th style={{ padding: '12px 10px' }}>IVA 15%</th>
-            <th style={{ padding: '12px 10px' }}>Total Facturado</th>
-            <th style={{ padding: '12px 10px' }}>Estado</th>
-            <th style={{ padding: '12px 10px' }}>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {facturas.map((f) => (
-            <tr key={f.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-              <td style={{ padding: '12px 10px', fontWeight: 700, color: '#003580', fontFamily: 'monospace' }}>
-                {f.numero_factura}
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <strong>{f.cliente_nombre}</strong><br/>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>RUC: {f.cliente_cedula || 'Consumidor Final'}</span>
-              </td>
-              <td style={{ padding: '12px 10px', color: '#64748b' }}>
-                {new Date(f.fecha_emision).toLocaleString()}
-              </td>
-              <td style={{ padding: '12px 10px' }}>${Number(f.subtotal).toFixed(2)}</td>
-              <td style={{ padding: '12px 10px', color: '#b45309', fontWeight: 600 }}>+${Number(f.iva_15pct).toFixed(2)}</td>
-              <td style={{ padding: '12px 10px', fontWeight: 800, color: '#047857' }}>${Number(f.total).toFixed(2)}</td>
-              <td style={{ padding: '12px 10px' }}>
-                <span style={{ background: '#dcfce7', color: '#166534', padding: '3px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
-                  ✓ {f.estado}
-                </span>
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <button 
-                  onClick={() => setFacturaSeleccionada(f)}
-                  style={{ background: '#006ce4', color: '#fff', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, fontSize: '0.78rem' }}
-                >
-                  Ver Detalle
-                </button>
-              </td>
+      <ErrorBox error={error} onRetry={cargar} />
+
+      {t && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: '0.82rem', color: '#52514e', marginBottom: 10 }}>
+          <span><strong>{t.cantidad}</strong> facturas</span>
+          <span>Subtotal <strong>{usd(t.subtotal)}</strong></span>
+          <span>IVA <strong>{usd(t.iva)}</strong></span>
+          <span>Total <strong>{usd(t.total)}</strong></span>
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.83rem' }}>
+          <thead>
+            <tr style={{ background: '#ebf3ff' }}>
+              {['N.º factura', 'Cliente', 'Emitida', 'Subtotal', 'IVA', 'Total', 'Pago', 'Estado', ''].map((h) => <th key={h} style={th}>{h}</th>)}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {datos.items.map((f) => (
+              <tr key={f.id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                <td style={{ ...td, fontFamily: 'monospace', fontWeight: 700, color: '#003580', whiteSpace: 'nowrap' }}>{f.numero_factura}</td>
+                <td style={td}>
+                  <div style={{ fontWeight: 600 }}>{f.nombre_cliente || '—'}</div>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b' }}>{f.cedula_ruc_cliente || '—'}{f.email_cliente ? ` · ${f.email_cliente}` : ''}</div>
+                </td>
+                <td style={{ ...td, color: '#64748b', whiteSpace: 'nowrap' }}>{fecha(f.emitida_at)}</td>
+                <td style={td}>{usd(f.subtotal)}</td>
+                <td style={td}>{usd(f.iva_valor)} <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>({f.iva_porcentaje}%)</span></td>
+                <td style={{ ...td, fontWeight: 700 }}>{usd(f.total)}</td>
+                <td style={{ ...td, fontSize: '0.78rem' }}>{f.metodo_pago || '—'}</td>
+                <td style={td}><span style={{ color: COLOR_ESTADO[f.estado] || '#475569', fontWeight: 700, fontSize: '0.75rem' }}>{f.estado}</span></td>
+                <td style={td}><button type="button" onClick={() => abrir(f)} style={{ background: '#ebf3ff', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: '0.78rem' }}>Ver</button></td>
+              </tr>
+            ))}
+            {!loading && !error && datos.items.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>No hay facturas{estado || busqueda ? ' con este filtro' : ' emitidas todavía'}.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      {/* MODAL DETALLE DE FACTURA */}
-      {facturaSeleccionada && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', maxWidth: '500px', width: '90%', border: '1px solid #e2e8f0' }}>
-            <h3 style={{ margin: '0 0 12px 0', color: '#003580' }}>Comprobante Fiscal Electrónico</h3>
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.85rem' }}>
-              <div><strong>Secuencial:</strong> {facturaSeleccionada.numero_factura}</div>
-              <div><strong>Cliente:</strong> {facturaSeleccionada.cliente_nombre} ({facturaSeleccionada.cliente_cedula})</div>
-              <div><strong>Idempotency Key:</strong> {facturaSeleccionada.idempotency_key}</div>
+      {detalle && (
+        <div onClick={() => setDetalle(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 640, maxHeight: '88vh', overflowY: 'auto', padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Factura {detalle.factura?.numero_factura || detalle.numero}</h3>
+              <button type="button" onClick={() => setDetalle(null)} aria-label="Cerrar" style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
             </div>
-
-            <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem' }}>Líneas de Detalle:</h4>
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: '6px', marginBottom: '16px', maxHeight: '150px', overflowY: 'auto' }}>
-              {(facturaSeleccionada.items || []).map((it, idx) => (
-                <div key={idx} style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                  <span>{it.descripcion} x{it.cantidad}</span>
-                  <strong>${Number(it.subtotal).toFixed(2)}</strong>
+            {detalle.cargando && <div style={{ color: '#64748b' }}>Cargando…</div>}
+            {detalle.error && <ErrorBox error={detalle.error} />}
+            {detalle.factura && (() => {
+              const f = detalle.factura;
+              return (
+                <div style={{ fontSize: '0.85rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '8px 16px', marginBottom: 14 }}>
+                    {[['Cliente', f.nombre_cliente], ['Cédula / RUC', f.cedula_ruc_cliente], ['Correo', f.email_cliente], ['Emitida', fecha(f.emitida_at)], ['Método de pago', f.metodo_pago], ['Estado', f.estado], ['Transacción de pago', f.transaccion_pago_id]].map(([k, v]) => (
+                      <div key={k}><div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{k}</div><div style={{ wordBreak: 'break-all' }}>{v || '—'}</div></div>
+                    ))}
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
+                    <thead><tr style={{ background: '#f8fafc' }}>{['Descripción', 'Cant.', 'P. unit.', 'Subtotal'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {f.lineas.map((l, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
+                          <td style={td}>{l.descripcion}<div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{l.vertical} · {l.item_id}</div></td>
+                          <td style={td}>{l.cantidad}</td>
+                          <td style={td}>{usd(l.precio_unitario)}</td>
+                          <td style={td}>{usd(l.subtotal)}</td>
+                        </tr>
+                      ))}
+                      {f.lineas.length === 0 && <tr><td colSpan={4} style={{ ...td, color: '#64748b' }}>Esta factura no tiene líneas de detalle guardadas.</td></tr>}
+                    </tbody>
+                  </table>
+                  <div style={{ textAlign: 'right', lineHeight: 1.7 }}>
+                    <div>Subtotal: <strong>{usd(f.subtotal)}</strong></div>
+                    <div>IVA {f.iva_porcentaje}%: <strong>{usd(f.iva_valor)}</strong></div>
+                    <div style={{ fontSize: '1rem' }}>Total: <strong>{usd(f.total)}</strong></div>
+                  </div>
+                  {f.notas_credito.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>Notas de crédito</div>
+                      {f.notas_credito.map((n) => (
+                        <div key={n.numero_nota} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, borderTop: '1px solid #f1f5f9', padding: '6px 0' }}>
+                          <span style={{ fontFamily: 'monospace' }}>{n.numero_nota}</span>
+                          <span style={{ color: '#64748b', flex: 1 }}>{n.motivo || ''}</span>
+                          <span style={{ color: '#991b1b', fontWeight: 700 }}>−{usd(n.monto)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-
-            <div style={{ textAlign: 'right', fontSize: '0.9rem', marginBottom: '20px' }}>
-              <div>Subtotal: <strong>${Number(facturaSeleccionada.subtotal).toFixed(2)}</strong></div>
-              <div>IVA 15%: <strong style={{ color: '#b45309' }}>+${Number(facturaSeleccionada.iva_15pct).toFixed(2)}</strong></div>
-              <div style={{ fontSize: '1.2rem', color: '#047857', fontWeight: 800, marginTop: '4px' }}>
-                Total: ${Number(facturaSeleccionada.total).toFixed(2)} USD
-              </div>
-            </div>
-
-            <button 
-              onClick={() => setFacturaSeleccionada(null)}
-              style={{ width: '100%', background: '#334155', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}
-            >
-              Cerrar Consola
-            </button>
+              );
+            })()}
           </div>
         </div>
       )}

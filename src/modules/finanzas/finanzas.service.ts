@@ -128,8 +128,13 @@ export class FinanzasService {
       throw new HttpException('Liquidación no encontrada', HttpStatus.NOT_FOUND);
     }
 
+    // El comprobante es la prueba del pago: sin él no se marca como pagada.
+    const comprobante = String(dto?.comprobante_url ?? '').trim();
+    if (!comprobante) {
+      throw new HttpException('Indica el comprobante o la referencia de la transferencia.', HttpStatus.BAD_REQUEST);
+    }
     liquidacion.estado = 'PAGADO';
-    liquidacion.comprobanteTransferenciaUrl = dto.comprobante_url || `https://banco.local/transferencias/TRX-${Date.now()}.pdf`;
+    liquidacion.comprobanteTransferenciaUrl = comprobante.slice(0, 500);
     liquidacion.fechaPago = new Date();
     const updated = await this.liquidacionRepo.save(liquidacion);
 

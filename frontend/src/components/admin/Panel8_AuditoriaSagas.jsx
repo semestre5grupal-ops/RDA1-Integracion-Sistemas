@@ -15,11 +15,9 @@ const estadoSaga = (e) => ESTADO_SAGA[e] || { txt: e || '—', bg: '#f1f5f9', fg
 const COLOR_PASO = { SUCCESS: '#166534', FAILED: '#991b1b', COMPENSATED: '#b45309', COMPENSATION_FAILED: '#7f1d1d' };
 const fmt = (d) => (d ? new Date(d).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'medium' }) : '—');
 
-export function Panel8_AuditoriaSagas() {
+export function Panel8_AuditoriaSagas({ refreshKey = 0 }) {
   const [sagas, setSagas] = useState([]);
-  const [logs, setLogs] = useState([]);
   const [errSagas, setErrSagas] = useState(null);
-  const [errLogs, setErrLogs] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filtroEstado, setFiltroEstado] = useState('TODAS');
   const [detalle, setDetalle] = useState(null);
@@ -27,18 +25,16 @@ export function Panel8_AuditoriaSagas() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [s, l] = await Promise.allSettled([
-      api.get('/esb/sagas', { params: { limit: 50 } }),
-      api.get('/admin/auditoria', { params: { limit: 100 } }),
-    ]);
-    if (s.status === 'fulfilled') { setSagas(aLista(s.value)); setErrSagas(null); }
-    else setErrSagas(mensajeError(s.reason, 'No se pudieron leer las sagas.'));
-    if (l.status === 'fulfilled') { setLogs(aLista(l.value)); setErrLogs(null); }
-    else setErrLogs(mensajeError(l.reason, 'No se pudo leer la auditoría.'));
+    try {
+      setSagas(aLista(await api.get('/esb/sagas', { params: { limit: 50 } })));
+      setErrSagas(null);
+    } catch (e) {
+      setErrSagas(mensajeError(e, 'No se pudieron leer las sagas.'));
+    }
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData, refreshKey]);
 
   const abrirDetalle = async (correlationId) => {
     setErrDetalle(null);
@@ -61,10 +57,10 @@ export function Panel8_AuditoriaSagas() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px', gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🛡️</span> Panel 8: Auditoría de Sagas LIFO y logs de auditoría
+            Transacciones distribuidas (sagas)
           </h2>
           <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-            Transacciones de <code>schema_auditoria</code> con su journal de pasos y compensaciones, y eventos de los archivos <code>logs/audit-*.log</code>.
+            Cada compra multi-servicio queda en <code>schema_auditoria</code> con sus pasos; si un paso falla se compensan los anteriores en orden inverso. Toca una saga para ver sus pasos.
           </p>
         </div>
         <button onClick={fetchData} disabled={loading} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
@@ -113,7 +109,7 @@ export function Panel8_AuditoriaSagas() {
           </div>
         </div>
 
-        {/* DETALLE + LOGS */}
+        {/* DETALLE */}
         <div>
           <ErrorBox error={errDetalle} />
           {detalle && (
@@ -139,20 +135,6 @@ export function Panel8_AuditoriaSagas() {
             </div>
           )}
 
-          <h3 style={{ fontSize: '1rem', color: '#0f172a', marginBottom: '12px' }}>📜 Auditoría (archivos de log + eventos de negocio)</h3>
-          <ErrorBox error={errLogs} onRetry={fetchData} />
-          <div style={{ background: '#0f172a', color: '#f8fafc', padding: '14px', borderRadius: '8px', fontFamily: 'monospace', fontSize: '0.76rem', height: 380, overflowY: 'auto' }}>
-            {!errLogs && logs.length === 0 && <div style={{ color: '#94a3b8' }}>Sin registros.</div>}
-            {logs.map((l) => (
-              <div key={l.id} style={{ marginBottom: '9px', lineHeight: 1.4 }}>
-                <span style={{ color: '#94a3b8' }}>[{fmt(l.fecha)}]</span>{' '}
-                <span style={{ color: l.origen === 'ADMIN' ? '#fbbf24' : '#38bdf8' }}>{l.origen}</span>{' '}
-                <strong style={{ color: /ROLLBACK|REJECT|FAIL|CANCEL/i.test(l.accion || '') ? '#f87171' : '#4ade80' }}>{l.accion}</strong>
-                <br />
-                <span style={{ color: '#cbd5e1' }}>{l.actor} · {l.entidad}{l.detalle ? ` · ${String(l.detalle).slice(0, 140)}` : ''}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
     </div>

@@ -8,6 +8,7 @@ import { SincronizadorEventosVuelos } from './vuelos-eventos';
 import { PasoVuelo, ResultadoPaso, trazaVuelos } from './vuelos-traza';
 import { VuelosService } from '../vuelos.service';
 import { propietarioDesde } from '../vuelos.controller';
+import { esAdminPorToken } from '../../../core/auth/verificar-admin';
 
 const RUTA_VUELOS = /^\/api\/v\d+\/vuelos\/(.+)$/;
 
@@ -102,12 +103,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       return true;
     }
 
-    // ── Rutas de una reserva existente: solo el dueño ──
+    // ── Rutas de una reserva existente: solo el dueño (o un administrador verificado) ──
     if (segmentos[0] === 'bookings' && segmentos[1]) {
       const bookingId = decodeURIComponent(segmentos[1]);
       const copia = await this.reservas.obtener(bookingId);
       const propietario = propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']);
-      if (!copia || copia.propietarioId !== propietario) {
+      const permitido = !!copia && (copia.propietarioId === propietario || await esAdminPorToken(entrantes['authorization']));
+      if (!permitido) {
         this.enviar(res, problema(404, 'Reserva no encontrada', 'La reserva no existe o no pertenece a este usuario.'));
         return true;
       }

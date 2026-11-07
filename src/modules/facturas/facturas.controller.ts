@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Param,
   Post,
   Query,
   Req,
@@ -40,6 +41,15 @@ export class FacturasController {
   @ApiResponse({ status: 503, description: 'Base de datos de facturación no disponible' })
   listar(@Query('limit') limit?: string, @Query('estado') estado?: string, @Query('q') q?: string) {
     return this.facturasAdmin.listar({ limit: Number(limit), estado, q });
+  }
+
+  @Get(':id')
+  @UseGuards(SupabaseAuthGuard, RolesGuard)
+  @Roles(Rol.ADMIN)
+  @ApiOperation({ summary: 'Detalle de una factura: líneas y notas de crédito (administrador)' })
+  @ApiResponse({ status: 404, description: 'Factura no encontrada' })
+  detalle(@Param('id') id: string) {
+    return this.facturasAdmin.detalle(id);
   }
 
   @Post('enviar')

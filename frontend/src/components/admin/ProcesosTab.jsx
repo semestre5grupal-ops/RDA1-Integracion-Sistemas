@@ -3,7 +3,7 @@ import { api } from '../../services/api';
 import { ProcesoEnVivo } from './ProcesoEnVivo';
 
 /**
- * Pestaña "Procesos" del admin: el proceso de reserva de vuelos con aerolíneas
+ * Vista de Vuelos en "Servicios & Prov." del admin: el proceso de reserva con aerolíneas
  * socias visto con 4 grafos (CFG, máquina de estados, árbol de fallas y red de
  * Petri). Los grafos se dibujan con Mermaid y se alimentan con datos en vivo de
  * GET /admin/procesos/vuelos: reservas por estado y estado real de cada aerolínea.
