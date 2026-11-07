@@ -318,11 +318,19 @@ export class PagosService {
     paymentReference: string,
     access: PaymentReferenceAccess,
   ): Promise<ValidacionPagoResponse> {
-    const transaction = await this.transaccionRepo.findOne({
+    let transaction = await this.transaccionRepo.findOne({
       where: [{ id: paymentReference }, { codigoAutorizacion: paymentReference }],
     });
+    // Referencia que Booking envía a las aerolíneas socias (PAY-BKP-AAAAMMDD-NNNNNN).
+    if (!transaction && /^PAY-BKP-\d{8}-\d{6}$/.test(paymentReference)) {
+      const [ref] = await this.consultarReferenciasVuelos(
+        'SELECT transaccion_id FROM public.vuelos_referencias_pago WHERE payment_reference = $1',
+        [paymentReference],
+      );
+      if (ref) transaction = await this.transaccionRepo.findOne({ where: { id: ref.transaccion_id } });
+    }
     if (!transaction) throw new NotFoundException('No se encontró el paymentReference solicitado.');
-    this.exigirAccesoTienda(transaction, access);
+    await this.exigirAccesoTiendaOAerolinea(transaction, access);
 
     const bookings = await this.reservaRepo.find({ where: { transaccionId: transaction.id } });
     return {
@@ -416,6 +424,30 @@ export class PagosService {
       (dto.cliente_id || null) === (transaction.clienteId || null) &&
       (dto.factura_id || null) === (transaction.facturaId || null) &&
       (dto.carrito_id || null) === (transaction.carritoId || null);
+  }
+
+  /**
+   * Una aerolínea socia se autentica con una API key cuyo identificador de
+   * tienda es su código de nodo (PAGOS_STORE_API_KEYS=NODE_VUE_X=clave): solo
+   * puede leer los pagos de las ventas que Booking le hizo a ella.
+   */
+  private async exigirAccesoTiendaOAerolinea(transaction: TransaccionPago, access: PaymentReferenceAccess): Promise<void> {
+    if (access.type !== 'store' || (transaction.carritoId && transaction.carritoId === access.carritoId)) return;
+    const [venta] = await this.consultarReferenciasVuelos(
+      'SELECT 1 AS ok FROM public.vuelos_referencias_pago WHERE transaccion_id = $1 AND codigo_nodo = $2 LIMIT 1',
+      [transaction.id, access.carritoId],
+    );
+    if (!venta) this.exigirAccesoTienda(transaction, access);
+  }
+
+  /** La tabla la crea el módulo de vuelos; si aún no existe se responde como "sin datos". */
+  private async consultarReferenciasVuelos(sql: string, params: unknown[]): Promise<any[]> {
+    try {
+      const r = await this.transaccionRepo.manager?.query?.(sql, params);
+      return Array.isArray(r) ? r : [];
+    } catch {
+      return [];
+    }
   }
 
   private exigirAccesoTienda(transaction: TransaccionPago, access: PaymentReferenceAccess): void {

@@ -227,6 +227,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // contra el precio congelado: AMOUNT_MISMATCH). Así puede conciliar.
     const partnerOrderId = ordenDeReserva(idem);
     const moneda = String(hold.body?.lockedPrice?.currency ?? 'USD');
+    // La aerolínea puede validar esta referencia en GET /pagos/{paymentReference}
+    // (contrato de pagos v2) mientras procesa la reserva: se registra antes.
+    await this.reservas.registrarReferenciaPago(cobro.paymentReference!, cobro.transaccionId, nodo, monto, moneda);
     const cuerpo = {
       ...(req.body ?? {}),
       payment: {

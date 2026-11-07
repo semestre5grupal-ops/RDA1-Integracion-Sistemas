@@ -427,7 +427,12 @@ paths:
         configurado. La respuesta nunca incluye datos de tarjeta.
         
         Permite validar tanto el UUID de transacción (`transaccion_id`) como el código de autorización
-        (`AUTH-PAG-XXXXXXXX`). Responde `404 Not Found` bajo RFC 7807 si la referencia no existe.
+        (`AUTH-PAG-XXXXXXXX`) y la referencia que Booking envía a las aerolíneas socias en
+        `POST /vuelos/bookings` (`PAY-BKP-AAAAMMDD-NNNNNN`). Responde `404 Not Found` bajo RFC 7807 si la
+        referencia no existe.
+
+        **Aerolíneas socias:** su API key se registra con su código de nodo como identificador de tienda
+        (`PAGOS_STORE_API_KEYS=NODE_VUE_X=clave`) y solo permite leer los pagos de las ventas que Booking le hizo.
       operationId: validarPaymentReference
       x-source: 'src/modules/pagos/pagos.controller.ts#validarPaymentReference'
       x-status: implemented
@@ -439,7 +444,7 @@ paths:
         - name: paymentReference
           in: path
           required: true
-          description: Identificador de pago público generado por Booking (`transaccion_id` o `codigo_autorizacion`).
+          description: Identificador de pago público generado por Booking (`transaccion_id`, `codigo_autorizacion` o `PAY-BKP-AAAAMMDD-NNNNNN`).
           schema:
             type: string
             example: '9f8e7d6c-5b4a-3a2b-1c0d-9e8f7a6b5c4d'
@@ -537,7 +542,8 @@ components:
       name: X-Api-Key
       description: |
         API key de tienda mapeada a `carrito_id` mediante `PAGOS_STORE_API_KEYS`.
-        Solo permite leer y asociar reservas de los pagos de ese carrito/tienda.
+        Solo permite leer y asociar reservas de los pagos de ese carrito/tienda. Para una aerolínea socia el
+        identificador es su código de nodo (ej. `NODE_VUE_QUINDE`).
 
   schemas:
 
