@@ -29,7 +29,7 @@ describe('PagosService', () => {
   let eventBus: { publish: jest.Mock };
 
   const transaction = (overrides: Partial<TransaccionPago> = {}): TransaccionPago => ({
-    id: 'pay-1',
+    id: '0b5f2c1e-7a3d-4c2b-9e8f-1a2b3c4d5e6f',
     idempotencyKey: 'charge-1',
     facturaId: null,
     carritoId: 'store-1',

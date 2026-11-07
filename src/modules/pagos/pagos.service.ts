@@ -80,6 +80,16 @@ export interface ValidacionPagoResponse {
   bookings: string[];
 }
 
+/**
+ * `id` es una columna uuid: compararla con un texto que no es UUID (AUTH-PAG-…,
+ * PAY-BKP-…) hace fallar la consulta en Postgres (500). Solo se busca por id
+ * cuando la referencia tiene forma de UUID.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function condicionesReferencia(ref: string): Array<{ id?: string; codigoAutorizacion?: string }> {
+  return UUID.test(ref) ? [{ id: ref }, { codigoAutorizacion: ref }] : [{ codigoAutorizacion: ref }];
+}
+
 @Injectable()
 export class PagosService {
   private readonly logger = new Logger(PagosService.name);
@@ -319,7 +329,7 @@ export class PagosService {
     access: PaymentReferenceAccess,
   ): Promise<ValidacionPagoResponse> {
     let transaction = await this.transaccionRepo.findOne({
-      where: [{ id: paymentReference }, { codigoAutorizacion: paymentReference }],
+      where: condicionesReferencia(paymentReference),
     });
     // Referencia que Booking envía a las aerolíneas socias (PAY-BKP-AAAAMMDD-NNNNNN).
     if (!transaction && /^PAY-BKP-\d{8}-\d{6}$/.test(paymentReference)) {
@@ -353,7 +363,7 @@ export class PagosService {
     access: PaymentReferenceAccess,
   ): Promise<{ payment_reference: string; reserva_id: string; associated: boolean }> {
     const transaction = await this.transaccionRepo.findOne({
-      where: [{ id: paymentReference }, { codigoAutorizacion: paymentReference }],
+      where: condicionesReferencia(paymentReference),
     });
     if (!transaction) throw new NotFoundException('No se encontró el paymentReference solicitado.');
     this.exigirAccesoTienda(transaction, access);
