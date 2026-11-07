@@ -1,329 +1,153 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../services/api';
+import { mensajeError, ErrorBox } from './panelUtils';
 
-export function Panel2_GestionFlotaAutos({ refreshKey }) {
+/**
+ * Flota de autos que ve Booking (GET /autos/flota): autos de las rentadoras
+ * socias guardados en la base y la flota local del módulo de autos.
+ * Si un dato no lo informa el socio se muestra "—"; no se rellena con valores de ejemplo.
+ */
+const COLOR_ESTADO = {
+  DISPONIBLE: ['#dcfce7', '#15803d'],
+  RESERVADO: ['#ede9fe', '#6d28d9'],
+  ENTREGADO: ['#e0f2fe', '#0369a1'],
+  EN_LIMPIEZA: ['#fef3c7', '#b45309'],
+  EN_MANTENIMIENTO: ['#fee2e2', '#b91c1c'],
+};
+
+const reloj = (s) => {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+};
+const kmTxt = (n) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('es-EC')} km`);
+
+export function Panel2_GestionFlotaAutos({ refreshKey = 0 }) {
   const [flota, setFlota] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [filtroOrigen, setFiltroOrigen] = useState('TODOS');
+  const [error, setError] = useState(null);
+  const [actualizado, setActualizado] = useState(null);
+  const [proveedor, setProveedor] = useState('TODOS');
   const [busqueda, setBusqueda] = useState('');
-  const [selectedAuto, setSelectedAuto] = useState(null);
+  const [ahora, setAhora] = useState(Date.now());
 
-  const fetchFlota = async (manual = false) => {
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      if (manual) setIsRefreshing(true);
-      else setLoading(true);
-      const res = await api.get('/autos/flota');
-      setFlota(Array.isArray(res) ? res : res.data || []);
-      setLastUpdated(new Date());
+      const { data } = await api.get('/autos/flota');
+      setFlota(Array.isArray(data) ? data : []);
+      setActualizado(Date.now());
     } catch (e) {
-      // Mock con demostración del Cooldown de 2 horas y Alerta de kilometraje (Cátedra RDA2 §5)
-      setFlota([
-        {
-          id: 'auto-toyota-01',
-          marca: 'Toyota',
-          modelo: 'RAV4 4x4 Hybrid',
-          categoria: 'SUV',
-          precio_diario: 75.0,
-          estado_operativo: 'DISPONIBLE',
-          cooldown_activo: false,
-          segundos_restantes_cooldown: 0,
-          kilometraje_actual: 12450,
-          umbral_mantenimiento_km: 15000,
-          mantenimiento_requerido: false,
-          origen: 'LOCAL',
-          proveedor_nombre: 'Europcar',
-        },
-        {
-          id: 'auto-chevrolet-02',
-          marca: 'Chevrolet',
-          modelo: 'Tracker Turbo Premier',
-          categoria: 'SUV',
-          precio_diario: 58.0,
-          estado_operativo: 'EN_LIMPIEZA',
-          cooldown_activo: true,
-          segundos_restantes_cooldown: 5240, // ~1h 27m restantes
-          kilometraje_actual: 8900,
-          umbral_mantenimiento_km: 15000,
-          mantenimiento_requerido: false,
-          origen: 'LOCAL',
-          proveedor_nombre: 'Enterprise',
-        },
-        {
-          id: 'auto-kia-03',
-          marca: 'Kia',
-          modelo: 'Sportage X-Line',
-          categoria: 'SUV',
-          precio_diario: 68.0,
-          estado_operativo: 'EN_MANTENIMIENTO',
-          cooldown_activo: false,
-          segundos_restantes_cooldown: 0,
-          kilometraje_actual: 15420,
-          umbral_mantenimiento_km: 15000,
-          mantenimiento_requerido: true, // Alerta disparada
-          origen: 'LOCAL',
-          proveedor_nombre: 'Alamo',
-        },
-        {
-          id: 'auto-audi-04',
-          marca: 'Audi',
-          modelo: 'A4 Sedan Executive',
-          categoria: 'PREMIUM',
-          precio_diario: 110.0,
-          estado_operativo: 'ENTREGADO',
-          cooldown_activo: false,
-          segundos_restantes_cooldown: 0,
-          kilometraje_actual: 3400,
-          umbral_mantenimiento_km: 15000,
-          mantenimiento_requerido: false,
-          origen: 'LOCAL',
-          proveedor_nombre: 'Europcar Prestige',
-        },
-      ]);
+      setFlota([]);
+      setError(mensajeError(e, 'No se pudo leer la flota de autos.'));
     } finally {
       setLoading(false);
-      if (manual) setIsRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    fetchFlota(false);
-  }, [refreshKey]);
-
-  // Tick local cada segundo para decrementar el temporizador del Cooldown en vivo
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setFlota((prev) =>
-        prev.map((c) => {
-          if (c.cooldown_activo && c.segundos_restantes_cooldown > 0) {
-            const nextSec = c.segundos_restantes_cooldown - 1;
-            return {
-              ...c,
-              segundos_restantes_cooldown: nextSec,
-              estado_operativo: nextSec === 0 ? 'DISPONIBLE' : c.estado_operativo,
-              cooldown_activo: nextSec > 0,
-            };
-          }
-          return c;
-        }),
-      );
-    }, 1000);
-
-    return () => clearInterval(timer);
   }, []);
 
-  const formatCooldown = (segundos) => {
-    if (segundos <= 0) return '00:00:00';
-    const h = Math.floor(segundos / 3600);
-    const m = Math.floor((segundos % 3600) / 60);
-    const s = segundos % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
+  useEffect(() => { cargar(); }, [cargar, refreshKey]);
 
-  const getEstadoBadgeStyle = (estado) => {
-    switch (estado) {
-      case 'DISPONIBLE': return { bg: '#dcfce7', text: '#15803d' };
-      case 'EN_LIMPIEZA': return { bg: '#fef3c7', text: '#b45309' };
-      case 'EN_MANTENIMIENTO': return { bg: '#fee2e2', text: '#b91c1c' };
-      case 'ENTREGADO': return { bg: '#e0f2fe', text: '#0369a1' };
-      case 'RESERVADO': return { bg: '#ede9fe', text: '#6d28d9' };
-      default: return { bg: '#f1f5f9', text: '#475569' };
-    }
-  };
+  // El cronómetro de limpieza solo corre si el backend informó los segundos restantes.
+  const hayCronometro = flota.some((c) => c.estado_operativo === 'EN_LIMPIEZA' && Number(c.segundos_restantes_cooldown) > 0);
+  useEffect(() => {
+    if (!hayCronometro) return undefined;
+    const t = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [hayCronometro]);
 
-  const conteoLocal = flota.filter(c => c.origen === 'LOCAL').length;
-  const conteoDaniel = flota.filter(c => c.origen === 'PARTNER' || c.proveedor_nombre?.includes('RutaLibre')).length;
+  const proveedores = useMemo(() => {
+    const m = new Map();
+    flota.forEach((c) => {
+      const k = c.origen === 'LOCAL' ? 'LOCAL' : c.proveedor_nombre || 'Sin proveedor';
+      m.set(k, (m.get(k) || 0) + 1);
+    });
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [flota]);
 
-  const flotaFiltrada = flota.filter(c => {
-    const matchFiltro = 
-      filtroOrigen === 'TODOS' ? true :
-      filtroOrigen === 'LOCAL' ? c.origen === 'LOCAL' :
-      filtroOrigen === 'DANIEL' ? (c.origen === 'PARTNER' || c.proveedor_nombre?.includes('RutaLibre')) : true;
-
-    if (!matchFiltro) return false;
-
-    if (!busqueda.trim()) return true;
-    const q = busqueda.toLowerCase().trim();
-    return (c.marca || '').toLowerCase().includes(q)
-      || (c.modelo || '').toLowerCase().includes(q)
-      || (c.categoria || '').toLowerCase().includes(q)
-      || (c.proveedor_nombre || '').toLowerCase().includes(q);
+  const visibles = flota.filter((c) => {
+    const k = c.origen === 'LOCAL' ? 'LOCAL' : c.proveedor_nombre || 'Sin proveedor';
+    if (proveedor !== 'TODOS' && k !== proveedor) return false;
+    const q = busqueda.trim().toLowerCase();
+    return !q || [c.marca, c.modelo, c.categoria, c.proveedor_nombre].some((v) => String(v || '').toLowerCase().includes(q));
   });
 
+  const porEstado = flota.reduce((acc, c) => ({ ...acc, [c.estado_operativo || 'SIN_ESTADO']: (acc[c.estado_operativo || 'SIN_ESTADO'] || 0) + 1 }), {});
+  const conAlerta = flota.filter((c) => c.alerta_mantenimiento).length;
+
   return (
-    <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🚗</span> Panel 2: Gestión de Flota de Autos y Cooldown de 2 Horas
-          </h2>
-          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-            Máquina de estados de 6 fases, temporizador de cuarentena de limpieza y alertas por umbral de odómetro (Cátedra RDA2 §5).
-          </p>
+    <div style={{ background: '#fff', border: '1px solid #e7e7e7', borderRadius: 8, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: '0.82rem', color: '#52514e' }}>
+          <span><strong>{flota.length}</strong> autos</span>
+          {Object.entries(porEstado).map(([e, n]) => <span key={e}>{e.replace(/_/g, ' ').toLowerCase()}: <strong>{n}</strong></span>)}
+          {conAlerta > 0 && <span style={{ color: '#b91c1c' }}>con alerta de mantenimiento: <strong>{conAlerta}</strong></span>}
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {lastUpdated && (
-            <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600, background: '#dcfce7', padding: '6px 10px', borderRadius: '6px' }}>
-              ✓ Actualizado {lastUpdated.toLocaleTimeString('es-EC')}
-            </span>
-          )}
-          <button 
-            onClick={() => fetchFlota(true)}
-            disabled={isRefreshing}
-            style={{ 
-              background: isRefreshing ? '#e2e8f0' : '#f8fafc', 
-              border: '1px solid #cbd5e1', 
-              padding: '8px 14px', 
-              borderRadius: '8px', 
-              cursor: isRefreshing ? 'wait' : 'pointer', 
-              fontWeight: 600, 
-              fontSize: '0.85rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.2s',
-            }}
-          >
-            <span style={{ display: 'inline-block', animation: isRefreshing ? 'spin 0.8s linear infinite' : 'none' }}>🔄</span>
-            {isRefreshing ? 'Actualizando flota…' : '🔄 Actualizar Flota'}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {actualizado && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Actualizado {new Date(actualizado).toLocaleTimeString('es-EC')}</span>}
+          <button type="button" onClick={cargar} disabled={loading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: 6, cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem' }}>
+            {loading ? 'Cargando…' : '↻ Actualizar'}
           </button>
         </div>
       </div>
 
-      {/* BARRA DE FILTROS Y BÚSQUEDA */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: '20px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {[
-            { id: 'TODOS', label: `Todos (${flota.length})` },
-            { id: 'LOCAL', label: `🏢 Flota Local Booking (${conteoLocal})` },
-            { id: 'DANIEL', label: `🚗 RutaLibre - Daniel (${conteoDaniel})` },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setFiltroOrigen(tab.id)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                border: filtroOrigen === tab.id ? '1px solid #2563eb' : '1px solid #e2e8f0',
-                background: filtroOrigen === tab.id ? '#eff6ff' : '#ffffff',
-                color: filtroOrigen === tab.id ? '#1d4ed8' : '#475569',
-                fontWeight: 600,
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-              }}
-            >
-              {tab.label}
+      <ErrorBox error={error} onRetry={cargar} />
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[['TODOS', flota.length], ...proveedores].map(([k, n]) => (
+            <button key={k} type="button" onClick={() => setProveedor(k)} style={{ padding: '5px 12px', borderRadius: 20, border: `1px solid ${proveedor === k ? '#006ce4' : '#e7e7e7'}`, background: proveedor === k ? '#ebf3ff' : '#fff', color: proveedor === k ? '#003b95' : '#1a1a1a', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}>
+              {k === 'TODOS' ? 'Todos' : k === 'LOCAL' ? 'Flota local del módulo' : k} ({n})
             </button>
           ))}
         </div>
-        <input
-          type="text"
-          placeholder="🔍 Filtrar auto por marca o modelo..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.82rem', minWidth: '220px', outline: 'none' }}
-        />
+        <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Marca, modelo o categoría" style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid #cbd5e1', fontSize: '0.82rem', minWidth: 200 }} />
       </div>
 
-      {/* ALERTAS ACTIVAS POR KILOMETRAJE */}
-      {flota.some((c) => (c.alerta_mantenimiento ?? c.mantenimiento_requerido)) && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: '14px 18px', borderRadius: '8px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '1.5rem' }}>🚨</span>
-          <div>
-            <strong style={{ color: '#991b1b', fontSize: '0.95rem' }}>¡Alerta de Mantenimiento Preventivo Activada!</strong>
-            <p style={{ margin: '2px 0 0 0', color: '#7f1d1d', fontSize: '0.85rem' }}>
-              Uno o más vehículos han superado el umbral máximo de kilometraje ({'>'} 15,000 km) y han sido bloqueados automáticamente para alquiler hasta su servicio mecánico.
-            </p>
-          </div>
+      {proveedor === 'LOCAL' && (
+        <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 8, padding: '8px 12px', fontSize: '0.8rem', marginBottom: 12 }}>
+          La flota local está escrita en el código del módulo de autos y vive en memoria: se reinicia con cada despliegue y no pertenece a ninguna rentadora socia.
         </div>
       )}
 
-      {/* GRID DE VEHÍCULOS */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '16px' }}>
-        {flotaFiltrada.map((auto) => {
-          const badge = getEstadoBadgeStyle(auto.estado_operativo);
-          const kmRatio = Math.min(100, (auto.kilometraje_actual / auto.umbral_mantenimiento_km) * 100);
-          const isDaniel = auto.origen === 'PARTNER' || auto.proveedor_nombre?.includes('RutaLibre');
-
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+        {visibles.map((c) => {
+          const [bg, fg] = COLOR_ESTADO[c.estado_operativo] || ['#f1f5f9', '#475569'];
+          const restante = Number(c.segundos_restantes_cooldown) > 0 && actualizado
+            ? Math.max(0, Number(c.segundos_restantes_cooldown) - Math.floor((ahora - actualizado) / 1000))
+            : null;
+          const ratio = c.kilometraje_actual != null && c.umbral_mantenimiento_km ? Math.min(100, (c.kilometraje_actual / c.umbral_mantenimiento_km) * 100) : null;
           return (
-            <div 
-              key={auto.id}
-              style={{
-                border: (auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) ? '2px solid #ef4444' : '1px solid #e2e8f0',
-                borderRadius: '10px',
-                padding: '16px',
-                background: auto.estado_operativo === 'EN_LIMPIEZA' ? '#fffbeb' : '#ffffff',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span 
-                  style={{
-                    fontSize: '0.7rem',
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    background: isDaniel ? '#e0e7ff' : '#f1f5f9',
-                    color: isDaniel ? '#3730a3' : '#475569',
-                  }}
-                >
-                  {isDaniel ? '🚗 RutaLibre (Daniel)' : '🏢 Flota Local'}
+            <div key={c.id} style={{ border: c.alerta_mantenimiento ? '2px solid #ef4444' : '1px solid #e2e8f0', borderRadius: 10, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: c.origen === 'LOCAL' ? '#fff7ed' : '#e0e7ff', color: c.origen === 'LOCAL' ? '#9a3412' : '#3730a3' }}>
+                  {c.origen === 'LOCAL' ? 'Flota local (en memoria)' : c.proveedor_nombre}
                 </span>
-                <span style={{ background: badge.bg, color: badge.text, padding: '3px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 700 }}>
-                  {auto.estado_operativo}
-                </span>
+                <span style={{ background: bg, color: fg, padding: '2px 8px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 700 }}>{c.estado_operativo || 'sin estado'}</span>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <strong style={{ fontSize: '1.05rem', color: '#0f172a' }}>{auto.marca} {auto.modelo}</strong>
+              <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 4 }}>{c.marca} {c.modelo}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: 8 }}>
+                {c.categoria || '—'} · {c.precio_diario != null ? `$${Number(c.precio_diario).toFixed(2)}/día` : 'precio no informado'}
               </div>
-
-              <div style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '12px' }}>
-                Categoría: <strong>{auto.categoria}</strong> · Tarifa: <strong>${auto.precio_diario}/día</strong>
-              </div>
-
-              {/* CRONÓMETRO DE COOLDOWN DE 2 HORAS */}
-              {auto.estado_operativo === 'EN_LIMPIEZA' && (
-                <div style={{ background: '#fef3c7', border: '1px solid #fde68a', padding: '10px', borderRadius: '6px', marginBottom: '14px', textAlign: 'center' }}>
-                  <span style={{ fontSize: '0.8rem', color: '#92400e', fontWeight: 600, display: 'block' }}>
-                    ⏳ Cuarentena de Limpieza (2 Horas Obligatorias)
-                  </span>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#b45309', fontFamily: 'monospace', marginTop: '4px' }}>
-                    {formatCooldown(auto.segundos_restantes_cooldown)}
-                  </div>
-                  <span style={{ fontSize: '0.72rem', color: '#78350f' }}>No disponible para renta hasta cumplir el ciclo</span>
+              {c.estado_operativo === 'EN_LIMPIEZA' && (
+                <div style={{ background: '#fef3c7', borderRadius: 6, padding: 8, fontSize: '0.8rem', color: '#92400e', marginBottom: 8 }}>
+                  En limpieza{restante !== null ? <> · disponible en <strong style={{ fontFamily: 'monospace' }}>{reloj(restante)}</strong></> : ''}
                 </div>
               )}
-
-              {/* BARRA DE ODÓMETRO Y UMBRAL */}
-              <div style={{ marginBottom: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
-                  <span style={{ color: '#64748b' }}>Odómetro: <strong>{auto.kilometraje_actual} km</strong></span>
-                  <span style={{ color: (auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) ? '#dc2626' : '#64748b' }}>
-                    Umbral: {auto.umbral_mantenimiento_km} km
-                  </span>
-                </div>
-                <div style={{ width: '100%', height: '8px', background: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div 
-                    style={{ 
-                      width: `${kmRatio}%`, 
-                      height: '100%', 
-                      background: (auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) ? '#ef4444' : kmRatio > 80 ? '#f59e0b' : '#3b82f6',
-                      transition: 'width 0.3s'
-                    }} 
-                  />
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>
+                <span>Odómetro: <strong>{kmTxt(c.kilometraje_actual)}</strong></span>
+                <span>Umbral: {kmTxt(c.umbral_mantenimiento_km)}</span>
               </div>
-
-              {(auto.alerta_mantenimiento ?? auto.mantenimiento_requerido) && (
-                <div style={{ fontSize: '0.78rem', color: '#b91c1c', fontWeight: 600, background: '#fee2e2', padding: '6px', borderRadius: '4px', textAlign: 'center' }}>
-                  ⚠️ Requiere cambio de aceite y filtros
+              {ratio !== null && (
+                <div style={{ height: 6, background: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ width: `${ratio}%`, height: '100%', background: c.alerta_mantenimiento ? '#ef4444' : ratio > 80 ? '#f59e0b' : '#3b82f6' }} />
                 </div>
               )}
+              {c.alerta_mantenimiento && <div style={{ marginTop: 8, fontSize: '0.76rem', color: '#b91c1c', fontWeight: 600 }}>Superó el umbral de mantenimiento</div>}
             </div>
           );
         })}
+        {!loading && !error && visibles.length === 0 && <div style={{ color: '#64748b', padding: 20 }}>No hay autos con este filtro.</div>}
       </div>
     </div>
   );

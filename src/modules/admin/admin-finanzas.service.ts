@@ -6,6 +6,7 @@ import { OrderAuto } from '../autos/entities/order-auto.entity';
 import { ReservaAtraccion } from '../atracciones/entities/reserva.entity';
 import { ReservaAlojamiento } from '../alojamientos/entities/reserva.entity';
 import { AdminConfigService } from './admin-config.service';
+import { COMISION_BOOKING_PCT } from '../vuelos/socios/vuelos-facturacion';
 
 /** Estados que significan "el cliente ya pagó". */
 // CHECKED_IN (atracciones), ACTIVA/COMPLETADA (autos en renta o devueltos) y
@@ -32,6 +33,13 @@ interface Mov {
   monto: number;
   fecha: Date;
   cliente: string | null;
+  /**
+   * Comisión propia del movimiento. Las ventas en aerolíneas socias ya tienen la
+   * suya (vuelos-facturacion.ts) y se liquidan por aerolínea en
+   * schema_finanzas.liquidaciones_proveedores, no en los payouts mensuales.
+   */
+  comisionPct?: number;
+  liquidaAparte?: boolean;
 }
 
 const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -67,13 +75,24 @@ export class AdminFinanzasService {
   ) {}
 
   private async movimientos(): Promise<Mov[]> {
-    const [vuelos, autos, atracciones, hospedaje] = await Promise.all([
+    const [vuelos, autos, atracciones, hospedaje, vuelosSocios] = await Promise.all([
       this.reservaRepo.find().catch((e) => { this.logger.error(`Finanzas vuelos: ${e.message}`); return [] as Reserva[]; }),
       this.orderAutoRepo.find().catch((e) => { this.logger.error(`Finanzas autos: ${e.message}`); return [] as OrderAuto[]; }),
       this.reservaAtraccionRepo.find().catch((e) => { this.logger.error(`Finanzas atracciones: ${e.message}`); return [] as ReservaAtraccion[]; }),
       this.reservaAlojamientoRepo.find().catch((e) => { this.logger.error(`Finanzas hospedaje: ${e.message}`); return [] as ReservaAlojamiento[]; }),
+      this.dataSource
+        .query(`SELECT booking_id, pnr, status, grand_total, reembolsado, created_at FROM public.vuelos_reservas_socio`)
+        .catch((e) => { this.logger.error(`Finanzas vuelos socios: ${e.message}`); return [] as any[]; }),
     ]);
     return [
+      // Lo que realmente quedó cobrado: total menos lo ya reembolsado.
+      ...vuelosSocios.map((v: any) => ({
+        vertical: 'vuelos', id: v.booking_id, ref: v.pnr || String(v.booking_id).split('~').pop()!.slice(0, 8).toUpperCase(),
+        estado: String(v.status || '').toUpperCase(),
+        monto: Math.max(0, Number(v.grand_total || 0) - (ANULADAS.has(String(v.status || '').toUpperCase()) ? 0 : Number(v.reembolsado || 0))),
+        fecha: v.created_at, cliente: null,
+        comisionPct: COMISION_BOOKING_PCT, liquidaAparte: true,
+      })),
       ...vuelos.map((v) => ({
         vertical: 'vuelos', id: v.idReserva, ref: v.pnr || v.idReserva.slice(0, 6).toUpperCase(),
         estado: String(v.estado || '').toUpperCase(), monto: Number(v.total || 0), fecha: v.fechaCreacion, cliente: null,
@@ -109,7 +128,7 @@ export class AdminFinanzasService {
   private calcularLiquidaciones(movs: Mov[], pct: number, pagos: Awaited<ReturnType<AdminFinanzasService['pagosRegistrados']>>) {
     const grupos = new Map<string, { vertical: string; periodo: string; reservas: number; bruto: number }>();
     for (const m of movs) {
-      if (!PAGADAS.has(m.estado)) continue;
+      if (!PAGADAS.has(m.estado) || m.liquidaAparte) continue;
       const periodo = periodoDe(m.fecha);
       const k = `${m.vertical}:${periodo}`;
       const g = grupos.get(k) || { vertical: m.vertical, periodo, reservas: 0, bruto: 0 };
@@ -158,11 +177,13 @@ export class AdminFinanzasService {
     const [movs, pagos] = await Promise.all([this.movimientos(), this.pagosRegistrados()]);
 
     const sum = (f: (m: Mov) => boolean) => r2(movs.filter(f).reduce((s, m) => s + m.monto, 0));
+    const comisionDe = (m: Mov) => (PAGADAS.has(m.estado) ? m.monto * (m.comisionPct ?? pct) / 100 : 0);
+    const sumComision = (f: (m: Mov) => boolean) => r2(movs.filter(f).reduce((s, m) => s + comisionDe(m), 0));
     const cobrado = sum((m) => PAGADAS.has(m.estado));
     const porCobrar = sum((m) => PENDIENTES.has(m.estado));
     const anulado = sum((m) => ANULADAS.has(m.estado));
     const nPagadas = movs.filter((m) => PAGADAS.has(m.estado)).length;
-    const comisiones = r2(cobrado * pct / 100);
+    const comisiones = sumComision(() => true);
     const netoProveedores = r2(cobrado - comisiones);
     const ivaIncluido = r2(cobrado - cobrado / (1 + iva / 100));
 
@@ -174,14 +195,15 @@ export class AdminFinanzasService {
       .map((v) => {
         const vm = movs.filter((m) => m.vertical === v);
         const c = r2(vm.filter((m) => PAGADAS.has(m.estado)).reduce((s, m) => s + m.monto, 0));
+        const com = r2(vm.reduce((s, m) => s + comisionDe(m), 0));
         return {
           vertical: v,
           proveedor: VERTICALES[v],
           reservas: vm.length,
           pagadas: vm.filter((m) => PAGADAS.has(m.estado)).length,
           cobrado: c,
-          comision: r2(c * pct / 100),
-          neto: r2(c - c * pct / 100),
+          comision: com,
+          neto: r2(c - com),
           porCobrar: r2(vm.filter((m) => PENDIENTES.has(m.estado)).reduce((s, m) => s + m.monto, 0)),
           anulado: r2(vm.filter((m) => ANULADAS.has(m.estado)).reduce((s, m) => s + m.monto, 0)),
         };
@@ -192,8 +214,9 @@ export class AdminFinanzasService {
     const porMes = Array.from({ length: 6 }, (_, i) => {
       const d = new Date(hoy.getFullYear(), hoy.getMonth() - (5 - i), 1);
       const periodo = periodoDe(d);
-      const c = sum((m) => PAGADAS.has(m.estado) && periodoDe(m.fecha) === periodo);
-      return { periodo, cobrado: c, comision: r2(c * pct / 100) };
+      const delMes = (m: Mov) => periodoDe(m.fecha) === periodo;
+      const c = sum((m) => PAGADAS.has(m.estado) && delMes(m));
+      return { periodo, cobrado: c, comision: sumComision(delMes) };
     });
 
     const ultimosMovimientos = [...movs]
@@ -203,7 +226,7 @@ export class AdminFinanzasService {
         ...m,
         fecha: m.fecha ? new Date(m.fecha).toISOString() : null,
         monto: r2(m.monto),
-        comision: PAGADAS.has(m.estado) ? r2(m.monto * pct / 100) : 0,
+        comision: r2(comisionDe(m)),
         clase: PAGADAS.has(m.estado) ? 'cobrado' : PENDIENTES.has(m.estado) ? 'pendiente' : ANULADAS.has(m.estado) ? 'anulado' : 'otro',
       }));
 

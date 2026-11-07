@@ -952,20 +952,22 @@ export class AutosService implements OnModuleInit {
       const partnerCars = dbAutos
         .filter(da => !memoryIds.has(da.id))
         .map(da => {
+          // Solo lo que el socio informó: sin kilometraje, precio ni cooldown inventados
+          // (este listado lo usa el panel de administración).
           const isLimpieza = da.estadoOperativo === 'EN_LIMPIEZA';
-          const km = Number(da.kilometrajeActual || 12000);
-          const umbral = Number(da.umbralMantenimientoKm || 15000);
-          const alerta = Boolean(da.alertaMantenimientoActiva || km >= umbral);
+          const km = da.kilometrajeActual != null ? Number(da.kilometrajeActual) : null;
+          const umbral = da.umbralMantenimientoKm != null ? Number(da.umbralMantenimientoKm) : null;
+          const alerta = Boolean(da.alertaMantenimientoActiva || (km != null && umbral != null && km >= umbral));
           const prov = da.proveedorCodigo || 'NODE_AUT_DANIEL';
           return {
             id: da.id,
             marca: da.marca,
             modelo: da.modelo,
             categoria: da.categoria,
-            precio_diario: Number(da.precioDiario || 40),
-            estado_operativo: da.estadoOperativo || 'DISPONIBLE',
+            precio_diario: da.precioDiario != null ? Number(da.precioDiario) : null,
+            estado_operativo: da.estadoOperativo || null,
             cooldown_activo: isLimpieza,
-            segundos_restantes_cooldown: isLimpieza ? 3600 : 0,
+            segundos_restantes_cooldown: null,
             disponible_estimado_at: null,
             kilometraje_actual: km,
             umbral_mantenimiento_km: umbral,

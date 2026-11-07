@@ -43,10 +43,13 @@ export function Panel4_LiquidacionesFinanzas() {
   const totalPorPagar = liquidaciones.filter(l => l.estado === 'PENDIENTE_PAGO').reduce((acc, l) => acc + Number(l.monto_neto_proveedor_90pct || 0), 0);
 
   const handlePagar = async (liqId) => {
+    const comprobante = comprobanteUrl.trim();
+    if (!comprobante) {
+      setError('Escribe el enlace o la referencia de la transferencia antes de marcarla como pagada.');
+      return;
+    }
     try {
-      await api.post(`/finanzas/liquidaciones/${liqId}/pagar`, {
-        comprobante_url: comprobanteUrl || 'https://banco.pichincha.com/comprobante-demo.pdf',
-      });
+      await api.post(`/finanzas/liquidaciones/${liqId}/pagar`, { comprobante_url: comprobante });
       await fetchLiquidaciones();
     } catch (e) {
       setError(e?.response?.data?.detail || 'No se pudo marcar como pagada.');
@@ -61,10 +64,10 @@ export function Panel4_LiquidacionesFinanzas() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>💼</span> Panel 4: Liquidaciones Financieras y Comisión 10% (RDA2)
+            <span>💼</span> Liquidaciones por aerolínea
           </h2>
           <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-            Liquidación quincenal automática a proveedores externos reteniendo el 10% de comisión de Booking Prototipo.
+            Cada venta en una aerolínea socia suma a su liquidación de la quincena; Booking retiene el 10% y paga el resto a la aerolínea.
           </p>
         </div>
         <button 
@@ -145,20 +148,20 @@ export function Panel4_LiquidacionesFinanzas() {
               </td>
               <td style={{ padding: '12px 10px' }}>
                 {l.estado === 'PAGADO' ? (
-                  <a 
-                    href={l.comprobante_url || '#'} 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    style={{ color: '#006ce4', textDecoration: 'none', fontWeight: 600 }}
-                  >
-                    📄 Comprobante
-                  </a>
+                  /^https?:\/\//i.test(l.comprobante_url || '') ? (
+                    <a href={l.comprobante_url} target="_blank" rel="noreferrer" style={{ color: '#006ce4', textDecoration: 'none', fontWeight: 600 }}>Ver comprobante</a>
+                  ) : (
+                    <span style={{ fontSize: '0.78rem', color: '#475569', fontFamily: 'monospace' }}>{l.comprobante_url || 'Sin comprobante'}</span>
+                  )
+                ) : selectedId === l.id ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input autoFocus value={comprobanteUrl} onChange={(e) => setComprobanteUrl(e.target.value)} placeholder="Enlace o n.º de transferencia" style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.8rem', minWidth: 180 }} />
+                    <button type="button" onClick={() => handlePagar(l.id)} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontWeight: 700 }}>Confirmar</button>
+                    <button type="button" onClick={() => { setSelectedId(null); setComprobanteUrl(''); }} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: 6, cursor: 'pointer' }}>Cancelar</button>
+                  </div>
                 ) : (
-                  <button 
-                    onClick={() => handlePagar(l.id)}
-                    style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
-                  >
-                    💳 Marcar Pagado
+                  <button type="button" onClick={() => { setSelectedId(l.id); setComprobanteUrl(''); setError(null); }} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontWeight: 700 }}>
+                    Marcar pagada
                   </button>
                 )}
               </td>
