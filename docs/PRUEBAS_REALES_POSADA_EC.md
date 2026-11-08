@@ -352,3 +352,102 @@ implemente `/api/v2/clientes`.
 Posada EC, Kawsay y LuxeStays responden 404. El gateway (`reservas.service.ts`, `sincronizarClienteConSocio`)
 aplica un id de cliente de respaldo, pero el socio nunca recibe la ficha del huésped. Hay que pedírselo
 a los tres (instrucciones de cátedra, contrato v2.1).
+
+## 8. Ronda del 2026-11-08: LuxeStays, idempotencia en los 3 socios, gateway nuevo y frontend
+
+Estado de partida: la rama del agregador (`claude/hopeful-cray-sos1je`) **no está fusionada ni
+desplegada**. El gateway de Azure sigue con la copia local `pec-htl-*`.
+
+### 8.1 LuxeStays: corrigió mucho, pero falla en concurrencia y validación
+
+Desde el mensaje del 7-nov, LuxeStays ya tiene catálogo paginado, `GET /{id}/availability` (y el
+alias), acepta la X-API-Key en `orders/create`, `/clientes` funciona y sus errores ya usan los
+`code` del contrato.
+
+Batería completa (`resultados/2026-11-08T21-13-40-391Z-luxestays.md`) y repetición de lo dudoso
+con el total cotizado (`resultados/2026-11-08T21-15-22-528Z-luxestays.md`):
+
+| Prueba | Resultado | Detalle |
+|---|---|---|
+| **B01** Dos clientes por la última habitación | ❌ (2 de 2 corridas) | **Las dos reservas se confirmaron sobre una sola habitación** (sobreventa por carrera). En la prueba de carga con 6 clientes salió bien una vez: el fallo es intermitente. |
+| **B02** Doble clic (misma clave en paralelo) | ❌ (2 de 2) | Crea 2 reservas y descuenta 2 habitaciones. Con 10 clics simultáneos: **3 reservas distintas**. |
+| **B06** Recuperar por `idempotency_key` | ❌ | `GET /orders?idempotency_key=…` responde 200 pero no filtra (0 resultados). |
+| **C01** Fechas en el pasado | ❌ | **Acepta** reservas con llegada hace 10 días. |
+| **D02/D03/D04** 0 adultos, niños negativos, 0 habitaciones | ❌ | Las acepta. |
+| **E04** Correo inválido | ❌ | Lo acepta. |
+| **E05** Sin datos del huésped | ⚠️ | Lo acepta. |
+| **F02/F04/F05** Total numérico, cotización inventada, campo desconocido | ❌ | Los acepta. |
+| **H02** Check-in semanas antes de la llegada | ❌ | Lo acepta (debía ser 422 `CHECKIN_TIME_NOT_REACHED`). |
+| **J02** `orders/create` ≤ 3000 ms | ❌ | Hasta 3,6 s. |
+| **C04, C05, D05** | ⚠️ | Rechaza, pero revisa el precio **antes** que los datos y responde `PRICE_MISMATCH` en vez del error real. |
+| Precio | ⚠️ | Su disponibilidad muestra `precioTotalEstancia` **sin impuestos** ($170) y su cotización con impuestos ($199.50). |
+| B03, B04, B05, D01, E01–E03, F01, F03, G01–G03, H01, H03–H06, I04, I05, J01 | ✅ | |
+
+Todo lo creado se canceló. Queda una orden de prueba **ajena** (`35333eff-…`, creada el 2026-11-07
+19:57, antes de esta ronda) que no se tocó.
+
+### 8.2 Idempotencia y concurrencia hoy, en los 3 socios
+
+| Prueba | Posada EC | Kawsay | LuxeStays |
+|---|---|---|---|
+| B01 Carrera por la última habitación (2 clientes) | ✅ | ✅ | ❌ |
+| B02 Doble clic (2 peticiones, misma clave) | ✅ | ✅ | ❌ |
+| B03 Reintento con la misma clave | ✅ | ✅ | ✅ |
+| B04 Misma clave, otro cuerpo → 422 | ✅ | ✅ | ✅ |
+| B05 Sin clave / clave no UUID → 400 | ✅ | ✅ | ✅ |
+| B06 Recuperación por `idempotency_key` | ✅ | ✅ | ❌ |
+| H03/H04 Cancelar y cancelar dos veces | ✅ | ✅ | ✅ |
+| J02 ≤ 3 s | ✅ | ✅ | ❌ |
+| **Carga:** 10 clics simultáneos con la misma clave | ✅ 1 reserva | ✅ 1 reserva | ❌ **3 reservas** |
+| **Carga:** 6 clientes por la última habitación | ✅ 1 + 5×409 | ✅ 1 + 5×409 | ✅ 1 + 5×409 (esta vez) |
+
+Script de carga: `test/live/posada-ec/estres-socio.js`.
+
+### 8.3 Gateway NUEVO contra los socios reales (antes de desplegar)
+
+`test/live/posada-ec/gateway-socios-reales.js` ejecuta el **código real** del agregador de la rama
+contra Posada, Kawsay y LuxeStays reales. Solo la base de Booking va en memoria.
+Resultado: **28/28** (`resultados/2026-11-08T21-30-00-000Z-gateway-socios-reales.json`).
+
+| | Posada EC | Kawsay | LuxeStays |
+|---|---|---|---|
+| G0 Catálogo agregado en vivo (81 hoteles: 30 + 1 + 50) | ✅ | ✅ | ✅ |
+| G1 La reserva de Booking llega al hotel (cupo −1) | ✅ | ✅ | ✅ |
+| G2 Reintento con la misma clave → misma reserva | ✅ | ✅ | ✅ |
+| G3 10 clics simultáneos → 1 reserva | ✅ | ✅ | ✅ (el gateway lo protege aunque LuxeStays falle solo) |
+| G4 **Caso del compañero**: agotado en el hotel → Booking 409 | ✅ | ✅ | ✅ |
+| G5 6 clientes por la última habitación → 1 confirmada | ✅ | ✅ | ✅ |
+| G6 Sin documento → 400 sin llegar al hotel | ✅ | ✅ | ✅ |
+| G7 Check-in: clave ajena 401 / clave del hotel `CONFIRMADO_ASISTIDO` | ✅ | ✅ | ✅ |
+| G8 Cancelar en Booking libera la habitación en el hotel | ✅ | ✅ | ✅ |
+| G9 Una reserva con check-in no se puede cancelar (409) | ✅ | ✅ | ✅ |
+
+Limpieza: 22/22 reservas canceladas en los socios.
+
+**Límite conocido:** el gateway serializa el doble clic **dentro de una instancia**. Entre dos
+instancias de Azure, la protección final es la idempotencia del socio, y la de LuxeStays falla (B02).
+La copia de Booking nunca se duplica (`idempotency_key UNIQUE`), pero LuxeStays podría quedar con una
+orden de más.
+
+### 8.4 Frontend del Booking (navegador real, gateway DESPLEGADO)
+
+El despliegue de Vercel documentado (`rda1-integracion-sistemas.vercel.app`) responde
+`DEPLOYMENT_NOT_FOUND`. Se levantó el frontend de **`main`** en local, apuntando al gateway de Azure
+(CORS permite `localhost`), y se manejó con Playwright (`test/live/posada-ec/front-e2e.js`).
+Capturas en `resultados/front/`.
+
+| Prueba | Resultado | Detalle |
+|---|---|---|
+| U1a Reservar por el front y ver la confirmación | ✅ | 201, BKG-885359 en pantalla |
+| U1b Esa reserva llega al hotel | ❌ | Posada 8 → 8: el hotel no se enteró |
+| **U2 Caso del compañero por el front** | ❌ | Hotel agotado (8 → 0); el front mostraba 5 libres y **confirmó BKG-945326** (`u2-sobreventa.png`) |
+| U3 Doble clic real en «Completar reserva» | ✅ | Una sola petición y una sola reserva |
+| U4 Correos distintos / sin teléfono | ✅ | El formulario no avanza |
+| U5 Fechas en el pasado (URL manipulada) | ✅ | 400 «La fecha de entrada no puede estar en el pasado» |
+| Precio mostrado | ⚠️ | El front cobra $130.00 (sin impuestos); el hotel cotiza $153.50 por lo mismo |
+
+Limpieza: 4/4 canceladas. **U1b y U2 se corrigen con el agregador**, ya probado en §8.3, al desplegarlo.
+
+**Ojo al desplegar:** el frontend de la rama envía `documento_tipo` y `documento_numero`. El
+gateway viejo rechaza campos desconocidos (`forbidNonWhitelisted`), así que **frontend y backend
+nuevos deben publicarse juntos**. Si sale solo el frontend, las reservas de alojamiento darían 400.

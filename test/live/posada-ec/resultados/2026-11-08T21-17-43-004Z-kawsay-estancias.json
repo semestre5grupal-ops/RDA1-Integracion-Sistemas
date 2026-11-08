@@ -1,0 +1,486 @@
+{
+  "inicio": "2026-11-08T21:17:43.004Z",
+  "fin": "2026-11-08T21:17:53.919Z",
+  "config": {
+    "posadaBase": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2",
+    "posadaKey": "***",
+    "bookingBase": "https://booking-core-api.azurewebsites.net/api/v1",
+    "timeoutMs": 15000,
+    "maxAgotar": 8
+  },
+  "soloLectura": false,
+  "resultados": [
+    {
+      "id": "S01",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "El sistema de Kawsay Estancias está en línea",
+      "historia": "Antes de vender, Booking verifica que el hotel responde.",
+      "esperado": "GET /alojamientos/health → 200, status HEALTHY/UP y devuelve el X-Correlation-ID.",
+      "resultado": "PASA",
+      "detalle": "HEALTHY en 1169 ms y devuelve el X-Correlation-ID.",
+      "datos": [],
+      "evidencias": [
+        "Kawsay Estancias health: HTTP 200  (1169 ms) — HTTP 200"
+      ],
+      "ms": 1170
+    },
+    {
+      "id": "S02",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "El Booking desplegado está en línea",
+      "historia": "Las pruebas de doble canal necesitan nuestro propio sistema.",
+      "esperado": "GET /alojamientos → 200.",
+      "resultado": "PASA",
+      "detalle": "Responde en 603 ms.",
+      "datos": [],
+      "evidencias": [
+        "Booking GET /alojamientos: HTTP 200  (603 ms) — HTTP 200"
+      ],
+      "ms": 603
+    },
+    {
+      "id": "S03",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "Los hoteles de Kawsay Estancias aparecen en Booking",
+      "historia": "Un viajero busca en Booking un hotel que Kawsay Estancias sí ofrece.",
+      "esperado": "Cada hotel ACTIVO de Kawsay Estancias existe en Booking (emparejado por id_externo).",
+      "resultado": "FALLA",
+      "detalle": "Ningún hotel de Kawsay Estancias está en Booking: el viajero no puede encontrarlos. Las pruebas de doble canal quedan bloqueadas.",
+      "datos": [
+        [
+          "Hoteles en Kawsay Estancias",
+          1
+        ],
+        [
+          "Hoteles en Booking (todos los proveedores)",
+          30
+        ],
+        [
+          "Emparejados",
+          "0 (proveedor en Booking: —)"
+        ]
+      ],
+      "evidencias": [],
+      "ms": 1131
+    },
+    {
+      "id": "P01",
+      "grupo": "P · Reserva normal en Posada",
+      "titulo": "Camino feliz: cotizar y reservar 1 habitación",
+      "historia": "Un cliente normal reserva una habitación para dos noches.",
+      "esperado": "201 con orderId, external_order_id (ORD-HTL-…), codigoReserva (BK-HOTEL-…) y estado CONFIRMED.",
+      "resultado": "PASA",
+      "detalle": "Reserva confirmada con los tres identificadores del contrato.",
+      "datos": [
+        [
+          "Orden",
+          "c3ab0c52-9a47-4b1d-9b55-54b7539f7745 · ORD-HTL-E6C7CD5648994D18ABBD · BK-HOTEL-E6C7CD5648994D18ABBD · CONFIRMED · $280.00"
+        ]
+      ],
+      "evidencias": [
+        "Cotización POST /availability: HTTP 200  (353 ms) — HTTP 200",
+        "orders/create: HTTP 201  (493 ms) — HTTP 201"
+      ],
+      "ms": 1850
+    },
+    {
+      "id": "B01",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Dos clientes compiten por la última habitación al mismo tiempo",
+      "historia": "Queda 1 habitación; dos personas pulsan «Reservar» en el mismo segundo.",
+      "esperado": "Exactamente una reserva 201 y la otra 409 OUT_OF_STOCK.",
+      "resultado": "PASA",
+      "detalle": "Una confirmada y la otra rechazada con 409.",
+      "datos": [
+        [
+          "Hotel / tipo / libres",
+          "HTL-KAWSAY-001 · SUITE_DELUXE · 2"
+        ]
+      ],
+      "evidencias": [
+        "Kawsay Estancias orders/create habitación 1/1: HTTP 201  (431 ms) — HTTP 201",
+        "Cliente 1: HTTP 201  (388 ms) — HTTP 201",
+        "Cliente 2: HTTP 409 OUT_OF_STOCK (351 ms) — Sin habitaciones disponibles para las fechas solicitadas"
+      ],
+      "ms": 2139
+    },
+    {
+      "id": "B02",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Doble clic: la misma petición enviada dos veces a la vez",
+      "historia": "El cliente impaciente pulsa dos veces «Pagar»; el navegador manda la misma petición (misma Idempotency-Key).",
+      "esperado": "Se crea UNA sola reserva; la segunda respuesta es la misma orden (Idempotent-Replayed) o 409 IDEMPOTENCY_IN_PROGRESS.",
+      "resultado": "PASA",
+      "detalle": "Una sola reserva; la otra petición fue repetición o quedó en espera.",
+      "datos": [
+        [
+          "Libres antes → después",
+          "2 → 1"
+        ]
+      ],
+      "evidencias": [
+        "Clic 1: HTTP 201  (378 ms) — HTTP 201",
+        "Clic 2: HTTP 409 IDEMPOTENCY_IN_PROGRESS (258 ms) — Operación en curso"
+      ],
+      "ms": 1220
+    },
+    {
+      "id": "B03",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Reintento tras un corte de red (misma clave, mismo cuerpo)",
+      "historia": "Se cae el wifi justo al pagar; la app reintenta la misma petición.",
+      "esperado": "Devuelve la MISMA orden (mismo orderId), no descuenta otra habitación, con cabecera Idempotent-Replayed: true.",
+      "resultado": "PASA",
+      "detalle": "Misma orden y cabecera Idempotent-Replayed: true.",
+      "datos": [],
+      "evidencias": [
+        "Reintento: HTTP 201  (219 ms) — HTTP 201"
+      ],
+      "ms": 219
+    },
+    {
+      "id": "B04",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Misma clave de idempotencia con otro contenido",
+      "historia": "Un error del cliente reutiliza la clave de una compra anterior para una compra distinta.",
+      "esperado": "422 IDEMPOTENCY_KEY_REUSED.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 IDEMPOTENCY_KEY_REUSED — Clave reutilizada con otro cuerpo.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 IDEMPOTENCY_KEY_REUSED (215 ms) — Clave reutilizada con otro cuerpo"
+      ],
+      "ms": 216
+    },
+    {
+      "id": "B05",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Reserva sin Idempotency-Key o con una clave inválida",
+      "historia": "Un integrador mal configurado no envía la cabecera.",
+      "esperado": "400 en ambos casos (la cabecera es obligatoria y debe ser UUID).",
+      "resultado": "PASA",
+      "detalle": "Sin cabecera: Rechazado correctamente: HTTP 400 VALIDATION_FAILED — Idempotency-Key UUID v4 requerido. · Clave no UUID: Rechazado correctamente: HTTP 400 VALIDATION_FAILED — Idempotency-Key UUID v4 requerido.",
+      "datos": [],
+      "evidencias": [
+        "Sin cabecera: HTTP 400 VALIDATION_FAILED (204 ms) — Idempotency-Key UUID v4 requerido",
+        "Clave no UUID: HTTP 400 VALIDATION_FAILED (207 ms) — Idempotency-Key UUID v4 requerido"
+      ],
+      "ms": 411
+    },
+    {
+      "id": "B06",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Recuperar una reserva tras un timeout (consulta por idempotency_key)",
+      "historia": "Booking no recibió respuesta; antes de cobrar o compensar pregunta al hotel si la reserva existe.",
+      "esperado": "GET /alojamientos/orders?idempotency_key=… devuelve la orden.",
+      "resultado": "PASA",
+      "detalle": "Encuentra la orden por su clave de idempotencia.",
+      "datos": [],
+      "evidencias": [
+        "Consulta: HTTP 200  (218 ms) — HTTP 200"
+      ],
+      "ms": 219
+    },
+    {
+      "id": "H03",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Cancelar la reserva devuelve el cupo",
+      "historia": "El cliente cancela y la habitación vuelve a estar a la venta.",
+      "esperado": "200, estado CANCELLED, codigoReembolso REF-HTL-…, cuposRestaurados true y habitacionesRemanentes vuelve al valor inicial.",
+      "resultado": "PASA",
+      "detalle": "Cancelada y cupo restaurado.",
+      "datos": [
+        [
+          "Respuesta",
+          "estado CANCELLED · REF-HTL-638711987 · 100% · $280.00 · cuposRestaurados true"
+        ],
+        [
+          "Libres inicial → tras cancelar",
+          "2 → 2"
+        ]
+      ],
+      "evidencias": [
+        "cancel: HTTP 200  (321 ms) — HTTP 200"
+      ],
+      "ms": 583
+    },
+    {
+      "id": "H04",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Cancelar dos veces (el usuario pulsa «Cancelar» otra vez)",
+      "historia": "La primera cancelación tardó y el usuario vuelve a pulsar (con otra clave).",
+      "esperado": "200 con yaCancelada: true y el MISMO codigoReembolso (sin reembolsar dos veces).",
+      "resultado": "PASA",
+      "detalle": "Idempotente: yaCancelada true y mismo codigoReembolso.",
+      "datos": [],
+      "evidencias": [
+        "Segunda cancelación: HTTP 200  (231 ms) — HTTP 200"
+      ],
+      "ms": 232
+    },
+    {
+      "id": "H06",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Compensación de Saga: reembolso del 100 %",
+      "historia": "El pago de un paquete falla en otro proveedor y Booking deshace la reserva del hotel.",
+      "esperado": "cancel con solicitadoPor = SAGA_ORCHESTRATOR → 200, porcentajeReembolso 100.",
+      "resultado": "BLOQUEADO",
+      "detalle": "Depende de E03.",
+      "datos": [],
+      "evidencias": [],
+      "ms": 1
+    },
+    {
+      "id": "J02",
+      "grupo": "J · Rendimiento",
+      "titulo": "Crear una reserva tarda ≤ 3000 ms",
+      "historia": "Si el hotel tarda más de 3 s, Booking da la compra por fallida y compensa… pero el hotel sí guardó la reserva.",
+      "esperado": "Todas las orders/create exitosas de esta corrida ≤ 3000 ms.",
+      "resultado": "PASA",
+      "detalle": "Todas dentro del SLA.",
+      "datos": [
+        [
+          "Reservas medidas",
+          5
+        ],
+        [
+          "p50 / máx",
+          "388 ms / 493 ms"
+        ]
+      ],
+      "evidencias": [],
+      "ms": 0
+    }
+  ],
+  "limpieza": [
+    "Posada 109fcdb3-76f7-458c-b71d-730d955dcfa9 (B01 (dejar 1 libre)): HTTP 200",
+    "Posada 8a9c0b10-4cd6-4574-a7ab-f01c831b3b8e (B01 (carrera)): HTTP 200",
+    "Posada 25b4df54-0958-4e8b-8bde-f96d69d4c956 (B02 (doble clic)): HTTP 200"
+  ],
+  "bitacora": [
+    {
+      "t": "2026-11-08T21:17:43.006Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/health",
+      "status": 200,
+      "ms": 1169
+    },
+    {
+      "t": "2026-11-08T21:17:44.175Z",
+      "method": "GET",
+      "url": "https://booking-core-api.azurewebsites.net/api/v1/alojamientos?page=1&limit=1",
+      "status": 200,
+      "ms": 603
+    },
+    {
+      "t": "2026-11-08T21:17:44.778Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos?page=1&limit=50",
+      "status": 200,
+      "ms": 841
+    },
+    {
+      "t": "2026-11-08T21:17:45.620Z",
+      "method": "GET",
+      "url": "https://booking-core-api.azurewebsites.net/api/v1/alojamientos?page=1&limit=50",
+      "status": 200,
+      "ms": 289
+    },
+    {
+      "t": "2026-11-08T21:17:45.910Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/HTL-KAWSAY-001/availability?checkin=2027-02-01&checkout=2027-02-03&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 458
+    },
+    {
+      "t": "2026-11-08T21:17:46.368Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/HTL-KAWSAY-001/availability?checkin=2027-01-27&checkout=2027-01-29&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 270
+    },
+    {
+      "t": "2026-11-08T21:17:46.639Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 353
+    },
+    {
+      "t": "2026-11-08T21:17:46.993Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 493
+    },
+    {
+      "t": "2026-11-08T21:17:47.486Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 274
+    },
+    {
+      "t": "2026-11-08T21:17:47.761Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/HTL-KAWSAY-001/availability?checkin=2027-01-17&checkout=2027-01-19&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 266
+    },
+    {
+      "t": "2026-11-08T21:17:48.028Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 266
+    },
+    {
+      "t": "2026-11-08T21:17:48.294Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 431
+    },
+    {
+      "t": "2026-11-08T21:17:48.726Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 287
+    },
+    {
+      "t": "2026-11-08T21:17:49.013Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 388
+    },
+    {
+      "t": "2026-11-08T21:17:48.726Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 823
+    },
+    {
+      "t": "2026-11-08T21:17:49.549Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 409,
+      "ms": 351
+    },
+    {
+      "t": "2026-11-08T21:17:49.901Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/HTL-KAWSAY-001/availability?checkin=2027-01-22&checkout=2027-01-24&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 269
+    },
+    {
+      "t": "2026-11-08T21:17:50.170Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 269
+    },
+    {
+      "t": "2026-11-08T21:17:50.439Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 409,
+      "ms": 258
+    },
+    {
+      "t": "2026-11-08T21:17:50.439Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 378
+    },
+    {
+      "t": "2026-11-08T21:17:50.817Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/HTL-KAWSAY-001/availability?checkin=2027-01-22&checkout=2027-01-24&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 303
+    },
+    {
+      "t": "2026-11-08T21:17:51.121Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 219
+    },
+    {
+      "t": "2026-11-08T21:17:51.341Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 215
+    },
+    {
+      "t": "2026-11-08T21:17:51.557Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 400,
+      "ms": 204
+    },
+    {
+      "t": "2026-11-08T21:17:51.761Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 400,
+      "ms": 207
+    },
+    {
+      "t": "2026-11-08T21:17:51.969Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders?idempotency_key=75a377cf-5685-4dff-a1e9-313885239b96",
+      "status": 200,
+      "ms": 218
+    },
+    {
+      "t": "2026-11-08T21:17:52.188Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/c3ab0c52-9a47-4b1d-9b55-54b7539f7745/cancel",
+      "status": 200,
+      "ms": 321
+    },
+    {
+      "t": "2026-11-08T21:17:52.509Z",
+      "method": "GET",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/HTL-KAWSAY-001/availability?checkin=2027-01-27&checkout=2027-01-29&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 261
+    },
+    {
+      "t": "2026-11-08T21:17:52.771Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/c3ab0c52-9a47-4b1d-9b55-54b7539f7745/cancel",
+      "status": 200,
+      "ms": 231
+    },
+    {
+      "t": "2026-11-08T21:17:53.003Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/109fcdb3-76f7-458c-b71d-730d955dcfa9/cancel",
+      "status": 200,
+      "ms": 328
+    },
+    {
+      "t": "2026-11-08T21:17:53.331Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/8a9c0b10-4cd6-4574-a7ab-f01c831b3b8e/cancel",
+      "status": 200,
+      "ms": 299
+    },
+    {
+      "t": "2026-11-08T21:17:53.630Z",
+      "method": "POST",
+      "url": "https://kawsay-alo-78f5556.azurewebsites.net/api/v2/alojamientos/orders/25b4df54-0958-4e8b-8bde-f96d69d4c956/cancel",
+      "status": 200,
+      "ms": 288
+    }
+  ]
+}

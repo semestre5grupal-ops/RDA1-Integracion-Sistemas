@@ -1,0 +1,47 @@
+{
+  "fecha": "2026-11-08T21:30:38.822Z",
+  "resultados": [
+    {
+      "id": "U1a",
+      "titulo": "El usuario reserva por el front y ve su confirmación",
+      "resultado": "PASA",
+      "detalle": "POST /reservations → 201; código en pantalla BKG-885359; Booking libres 5 → 4"
+    },
+    {
+      "id": "U1b",
+      "titulo": "Esa reserva llega al hotel (Posada descuenta 1)",
+      "resultado": "FALLA",
+      "detalle": "Posada libres 8 → 8 — el hotel NO se enteró"
+    },
+    {
+      "id": "U2",
+      "titulo": "Caso del compañero por el front: agotado en el hotel → el front no debe vender",
+      "resultado": "FALLA",
+      "detalle": "hotel agotado (8 → 0); el front mostraba 5 libres; reserva por el front → 201 → SOBREVENTA (BKG-945326)"
+    },
+    {
+      "id": "U3",
+      "titulo": "Doble clic en «Completar reserva» → una sola reserva",
+      "resultado": "PASA",
+      "detalle": "peticiones enviadas 1 (claves distintas: 1); reservas creadas 1; Booking libres 5 → 4"
+    },
+    {
+      "id": "U4a",
+      "titulo": "Correos que no coinciden → el front no avanza",
+      "resultado": "PASA",
+      "detalle": "avanzó al pago: false; mensaje: «Las direcciones de e-mail no coinciden.»"
+    },
+    {
+      "id": "U4b",
+      "titulo": "Sin teléfono → el front no avanza",
+      "resultado": "PASA",
+      "detalle": "avanzó al pago: false; mensaje: «Introduce tus datos»"
+    },
+    {
+      "id": "U5",
+      "titulo": "Fechas en el pasado (URL manipulada) → se rechaza",
+      "resultado": "PASA",
+      "detalle": "POST → 400 La fecha de entrada no puede estar en el pasado."
+    }
+  ]
+}

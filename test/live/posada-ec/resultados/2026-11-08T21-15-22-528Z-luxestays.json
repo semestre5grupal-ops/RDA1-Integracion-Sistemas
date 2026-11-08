@@ -1,0 +1,862 @@
+{
+  "inicio": "2026-11-08T21:15:22.528Z",
+  "fin": "2026-11-08T21:16:20.783Z",
+  "config": {
+    "posadaBase": "https://posada-ec-alojamientos.azurewebsites.net/api/v2",
+    "posadaKey": "***",
+    "bookingBase": "https://booking-core-api.azurewebsites.net/api/v1",
+    "timeoutMs": 15000,
+    "maxAgotar": 8
+  },
+  "soloLectura": false,
+  "resultados": [
+    {
+      "id": "S01",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "El sistema de LuxeStays está en línea",
+      "historia": "Antes de vender, Booking verifica que el hotel responde.",
+      "esperado": "GET /alojamientos/health → 200, status HEALTHY/UP y devuelve el X-Correlation-ID.",
+      "resultado": "PASA",
+      "detalle": "HEALTHY en 1777 ms y devuelve el X-Correlation-ID.",
+      "datos": [],
+      "evidencias": [
+        "LuxeStays health: HTTP 200  (1777 ms) — HTTP 200"
+      ],
+      "ms": 1778
+    },
+    {
+      "id": "S02",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "El Booking desplegado está en línea",
+      "historia": "Las pruebas de doble canal necesitan nuestro propio sistema.",
+      "esperado": "GET /alojamientos → 200.",
+      "resultado": "PASA",
+      "detalle": "Responde en 941 ms.",
+      "datos": [],
+      "evidencias": [
+        "Booking GET /alojamientos: HTTP 200  (941 ms) — HTTP 200"
+      ],
+      "ms": 941
+    },
+    {
+      "id": "S03",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "Los hoteles de LuxeStays aparecen en Booking",
+      "historia": "Un viajero busca en Booking un hotel que LuxeStays sí ofrece.",
+      "esperado": "Cada hotel ACTIVO de LuxeStays existe en Booking (emparejado por id_externo).",
+      "resultado": "FALLA",
+      "detalle": "Ningún hotel de LuxeStays está en Booking: el viajero no puede encontrarlos. Las pruebas de doble canal quedan bloqueadas.",
+      "datos": [
+        [
+          "Hoteles en LuxeStays",
+          50
+        ],
+        [
+          "Hoteles en Booking (todos los proveedores)",
+          30
+        ],
+        [
+          "Emparejados",
+          "0 (proveedor en Booking: —)"
+        ]
+      ],
+      "evidencias": [],
+      "ms": 2093
+    },
+    {
+      "id": "P01",
+      "grupo": "P · Reserva normal en Posada",
+      "titulo": "Camino feliz: cotizar y reservar 1 habitación",
+      "historia": "Un cliente normal reserva una habitación para dos noches.",
+      "esperado": "201 con orderId, external_order_id (ORD-HTL-…), codigoReserva (BK-HOTEL-…) y estado CONFIRMED.",
+      "resultado": "PASA",
+      "detalle": "Reserva confirmada con los tres identificadores del contrato.",
+      "datos": [
+        [
+          "Ojo: precio de disponibilidad ≠ precio cotizado",
+          "170.00 vs 199.50"
+        ],
+        [
+          "Orden",
+          "8ee1cc2f-9617-4ef0-9423-f337ee171794 · ORD-HTL-2462 · BK-HOTEL-2462 · CONFIRMED · $199.50"
+        ]
+      ],
+      "evidencias": [
+        "Cotización POST /availability: HTTP 200  (608 ms) — HTTP 200",
+        "orders/create: HTTP 201  (2099 ms) — HTTP 201"
+      ],
+      "ms": 5082
+    },
+    {
+      "id": "B01",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Dos clientes compiten por la última habitación al mismo tiempo",
+      "historia": "Queda 1 habitación; dos personas pulsan «Reservar» en el mismo segundo.",
+      "esperado": "Exactamente una reserva 201 y la otra 409 OUT_OF_STOCK.",
+      "resultado": "FALLA",
+      "detalle": "SOBREVENTA POR CONCURRENCIA: las dos reservas se confirmaron sobre una sola habitación.",
+      "datos": [
+        [
+          "Hotel / tipo / libres",
+          "ALO-001 · SUITE_DELUXE · 3"
+        ]
+      ],
+      "evidencias": [
+        "LuxeStays orders/create ×2 habitaciones en una orden: HTTP 201  (2037 ms) — HTTP 201",
+        "Cliente 1: HTTP 201  (3032 ms) — HTTP 201",
+        "Cliente 2: HTTP 201  (2050 ms) — HTTP 201"
+      ],
+      "ms": 7578
+    },
+    {
+      "id": "B02",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Doble clic: la misma petición enviada dos veces a la vez",
+      "historia": "El cliente impaciente pulsa dos veces «Pagar»; el navegador manda la misma petición (misma Idempotency-Key).",
+      "esperado": "Se crea UNA sola reserva; la segunda respuesta es la misma orden (Idempotent-Replayed) o 409 IDEMPOTENCY_IN_PROGRESS.",
+      "resultado": "FALLA",
+      "detalle": "Se crearon 2 reservas / se descontaron 2 habitaciones por un doble clic.",
+      "datos": [
+        [
+          "Libres antes → después",
+          "3 → 1"
+        ]
+      ],
+      "evidencias": [
+        "Clic 1: HTTP 201  (2187 ms) — HTTP 201",
+        "Clic 2: HTTP 201  (3649 ms) — HTTP 201"
+      ],
+      "ms": 5934
+    },
+    {
+      "id": "B03",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Reintento tras un corte de red (misma clave, mismo cuerpo)",
+      "historia": "Se cae el wifi justo al pagar; la app reintenta la misma petición.",
+      "esperado": "Devuelve la MISMA orden (mismo orderId), no descuenta otra habitación, con cabecera Idempotent-Replayed: true.",
+      "resultado": "PASA",
+      "detalle": "Misma orden y cabecera Idempotent-Replayed: true.",
+      "datos": [],
+      "evidencias": [
+        "Reintento: HTTP 201  (348 ms) — HTTP 201"
+      ],
+      "ms": 348
+    },
+    {
+      "id": "B04",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Misma clave de idempotencia con otro contenido",
+      "historia": "Un error del cliente reutiliza la clave de una compra anterior para una compra distinta.",
+      "esperado": "422 IDEMPOTENCY_KEY_REUSED.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 IDEMPOTENCY_KEY_REUSED — La Idempotency-Key \"cb09b624-b01d-4c42-9f3d-7873e5f87e35\" ya fue procesada anteriormente con un cuerpo diferente..",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 IDEMPOTENCY_KEY_REUSED (345 ms) — La Idempotency-Key \"cb09b624-b01d-4c42-9f3d-7873e5f87e35\" ya fue procesada anteriormente con un cuerpo diferente."
+      ],
+      "ms": 346
+    },
+    {
+      "id": "B06",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Recuperar una reserva tras un timeout (consulta por idempotency_key)",
+      "historia": "Booking no recibió respuesta; antes de cobrar o compensar pregunta al hotel si la reserva existe.",
+      "esperado": "GET /alojamientos/orders?idempotency_key=… devuelve la orden.",
+      "resultado": "FALLA",
+      "detalle": "Responde 200 pero no incluye la orden 8ee1cc2f-9617-4ef0-9423-f337ee171794 (0 resultados).",
+      "datos": [],
+      "evidencias": [
+        "Consulta: HTTP 200  (343 ms) — HTTP 200"
+      ],
+      "ms": 343
+    },
+    {
+      "id": "C01",
+      "grupo": "C · Fechas",
+      "titulo": "Reservar con fechas en el pasado",
+      "historia": "Un usuario deja el calendario en una fecha que ya pasó.",
+      "esperado": "422 VALIDATION_FAILED — nunca 201.",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden 2724de3e-d141-4523-8a1f-69e958438d59). Debía rechazarlo con 422 VALIDATION_FAILED.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2075 ms) — HTTP 201"
+      ],
+      "ms": 2075
+    },
+    {
+      "id": "C02",
+      "grupo": "C · Fechas",
+      "titulo": "Salida el mismo día que la llegada (0 noches)",
+      "historia": "Elige la misma fecha de entrada y salida.",
+      "esperado": "422/400 — nunca 201.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 RESTRICTION_VIOLATED — La fecha de fin debe ser posterior a la fecha de inicio..",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 RESTRICTION_VIOLATED (357 ms) — La fecha de fin debe ser posterior a la fecha de inicio."
+      ],
+      "ms": 358
+    },
+    {
+      "id": "C03",
+      "grupo": "C · Fechas",
+      "titulo": "Salida antes de la llegada",
+      "historia": "Invierte las fechas por error.",
+      "esperado": "422/400 — nunca 201.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 RESTRICTION_VIOLATED — La fecha de fin debe ser posterior a la fecha de inicio..",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 RESTRICTION_VIOLATED (343 ms) — La fecha de fin debe ser posterior a la fecha de inicio."
+      ],
+      "ms": 343
+    },
+    {
+      "id": "C04",
+      "grupo": "C · Fechas",
+      "titulo": "Estancia de 31 noches (máximo 30)",
+      "historia": "Reserva un mes entero y un día.",
+      "esperado": "422 — nunca 201.",
+      "resultado": "AVISO",
+      "detalle": "Rechaza, pero con HTTP 409 PRICE_MISMATCH — El total a pagar enviado ($199.50) no coincide con la tarifa oficial calculada ($3092.25). (contrato: 422).",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 409 PRICE_MISMATCH (833 ms) — El total a pagar enviado ($199.50) no coincide con la tarifa oficial calculada ($3092.25)."
+      ],
+      "ms": 833
+    },
+    {
+      "id": "C05",
+      "grupo": "C · Fechas",
+      "titulo": "Fecha con formato incorrecto (dd/mm/aaaa)",
+      "historia": "Un cliente envía la fecha en formato local.",
+      "esperado": "400 VALIDATION_FAILED — nunca 201.",
+      "resultado": "AVISO",
+      "detalle": "Rechaza, pero con HTTP 422 RESTRICTION_VIOLATED — La fecha de fin debe ser posterior a la fecha de inicio. (contrato: 400 VALIDATION_FAILED).",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 RESTRICTION_VIOLATED (328 ms) — La fecha de fin debe ser posterior a la fecha de inicio."
+      ],
+      "ms": 328
+    },
+    {
+      "id": "C06",
+      "grupo": "C · Fechas",
+      "titulo": "Fecha que no existe (30 de febrero)",
+      "historia": "Un formulario sin validación permite 2027-02-30.",
+      "esperado": "400/422 — nunca 201.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 RESTRICTION_VIOLATED — La fecha de fin debe ser posterior a la fecha de inicio..",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 RESTRICTION_VIOLATED (343 ms) — La fecha de fin debe ser posterior a la fecha de inicio."
+      ],
+      "ms": 343
+    },
+    {
+      "id": "D01",
+      "grupo": "D · Ocupación y cupo",
+      "titulo": "Más personas de las que caben (20 adultos en 1 habitación)",
+      "historia": "Un grupo intenta meterse en una sola habitación.",
+      "esperado": "422 CAPACITY_EXCEEDED — nunca 201.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 CAPACITY_EXCEEDED — El número de ocupantes (20) excede la capacidad máxima (3) de 1 habitación(es) \"Habitación / Suite de Gran Hotel Plaza Grande\"..",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 CAPACITY_EXCEEDED (709 ms) — El número de ocupantes (20) excede la capacidad máxima (3) de 1 habitación(es) \"Habitación / Suite de Gran Hotel Plaza Grande\"."
+      ],
+      "ms": 709
+    },
+    {
+      "id": "D02",
+      "grupo": "D · Ocupación y cupo",
+      "titulo": "Reserva con 0 adultos",
+      "historia": "Un menor intenta reservar solo / formulario vacío.",
+      "esperado": "400/422 — nunca 201.",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden ba185d5a-c2a9-4fe0-afca-0f973e958495). Debía rechazarlo con 400/422.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2085 ms) — HTTP 201"
+      ],
+      "ms": 2086
+    },
+    {
+      "id": "D03",
+      "grupo": "D · Ocupación y cupo",
+      "titulo": "Número de niños negativo",
+      "historia": "Petición manipulada.",
+      "esperado": "400 — nunca 201.",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden d403a790-1bb9-4c78-a9b0-88a8a8c244b2). Debía rechazarlo con 400.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2063 ms) — HTTP 201"
+      ],
+      "ms": 2064
+    },
+    {
+      "id": "D04",
+      "grupo": "D · Ocupación y cupo",
+      "titulo": "0 habitaciones",
+      "historia": "Petición manipulada.",
+      "esperado": "400 — nunca 201.",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden fb30a15d-3b25-48d2-82ea-b2d74aafe04e). Debía rechazarlo con 400.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2121 ms) — HTTP 201"
+      ],
+      "ms": 2122
+    },
+    {
+      "id": "D05",
+      "grupo": "D · Ocupación y cupo",
+      "titulo": "Pedir más habitaciones de las que quedan",
+      "historia": "Quedan 3 habitaciones y una empresa pide 4.",
+      "esperado": "409 OUT_OF_STOCK (no se reserva parcialmente).",
+      "resultado": "AVISO",
+      "detalle": "Rechaza con el HTTP correcto pero el code es «PRICE_MISMATCH» (contrato: OUT_OF_STOCK).",
+      "datos": [
+        [
+          "Libres / pedidas",
+          "2 / 3"
+        ]
+      ],
+      "evidencias": [
+        "Respuesta: HTTP 409 PRICE_MISMATCH (826 ms) — El total a pagar enviado ($510.00) no coincide con la tarifa oficial calculada ($598.50)."
+      ],
+      "ms": 1658
+    },
+    {
+      "id": "E04",
+      "grupo": "E · Datos del huésped",
+      "titulo": "Correo electrónico inválido",
+      "historia": "El usuario escribe «juan@» y la confirmación nunca le llegaría.",
+      "esperado": "400 VALIDATION_FAILED.",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden b967181c-a30d-467b-8d97-7857c2cb16b8). Debía rechazarlo con 400/422 VALIDATION_FAILED.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2089 ms) — HTTP 201"
+      ],
+      "ms": 2089
+    },
+    {
+      "id": "E05",
+      "grupo": "E · Datos del huésped",
+      "titulo": "Reserva sin datos del huésped",
+      "historia": "Llega una reserva «anónima»: el hotel no sabe a quién esperar.",
+      "esperado": "Rechazo 400/422. (El contrato no marca huespedTitular como obligatorio: si se acepta se reporta como AVISO.)",
+      "resultado": "AVISO",
+      "detalle": "Aceptó una reserva sin titular. Conviene exigir huespedTitular o customer_contact en el contrato.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2258 ms) — HTTP 201"
+      ],
+      "ms": 3613
+    },
+    {
+      "id": "F02",
+      "grupo": "F · Precio, moneda y contrato",
+      "titulo": "Total enviado como número en vez de texto Money",
+      "historia": "Un integrador envía 153.5 en lugar de \"153.50\".",
+      "esperado": "400 (el contrato v2.2.0 exige Money como string).",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden 439f8241-1d1b-4dbc-81ba-61aaff500788). Debía rechazarlo con 400.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2050 ms) — HTTP 201"
+      ],
+      "ms": 2051
+    },
+    {
+      "id": "F04",
+      "grupo": "F · Precio, moneda y contrato",
+      "titulo": "Cotización inexistente o vencida",
+      "historia": "El usuario deja la pestaña abierta una hora y paga con una cotización vieja.",
+      "esperado": "409 QUOTE_EXPIRED (o 404).",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden 7835217d-d710-4023-bfb5-929df73d43ab). Debía rechazarlo con 409/404 QUOTE_EXPIRED/NOT_FOUND.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2134 ms) — HTTP 201"
+      ],
+      "ms": 2135
+    },
+    {
+      "id": "F05",
+      "grupo": "F · Precio, moneda y contrato",
+      "titulo": "Campo desconocido en el cuerpo",
+      "historia": "Un cliente envía \"descuentoVIP\": 100 esperando que se aplique.",
+      "esperado": "400 (el contrato obliga a rechazar campos desconocidos).",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 201, orden b563fe68-c287-4315-8c87-d045292bf5f0). Debía rechazarlo con 400 VALIDATION_FAILED.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 201  (2059 ms) — HTTP 201"
+      ],
+      "ms": 2059
+    },
+    {
+      "id": "H02",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Check-in antes de la hora permitida",
+      "historia": "El huésped intenta hacer check-in digital semanas antes de su llegada.",
+      "esperado": "422 CHECKIN_TIME_NOT_REACHED (si exige token de usuario, 401/403 se reporta como no evaluable).",
+      "resultado": "FALLA",
+      "detalle": "Lo aceptó (HTTP 200, orden 8ee1cc2f-9617-4ef0-9423-f337ee171794). Debía rechazarlo con 422 CHECKIN_TIME_NOT_REACHED.",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 200  (525 ms) — HTTP 200"
+      ],
+      "ms": 527
+    },
+    {
+      "id": "J02",
+      "grupo": "J · Rendimiento",
+      "titulo": "Crear una reserva tarda ≤ 3000 ms",
+      "historia": "Si el hotel tarda más de 3 s, Booking da la compra por fallida y compensa… pero el hotel sí guardó la reserva.",
+      "esperado": "Todas las orders/create exitosas de esta corrida ≤ 3000 ms.",
+      "resultado": "FALLA",
+      "detalle": "2 reserva(s) tardaron más de 3000 ms (máx 3649 ms).",
+      "datos": [
+        [
+          "Reservas medidas",
+          16
+        ],
+        [
+          "p50 / máx",
+          "2089 ms / 3649 ms"
+        ]
+      ],
+      "evidencias": [],
+      "ms": 0
+    }
+  ],
+  "limpieza": [
+    "Posada 8ee1cc2f-9617-4ef0-9423-f337ee171794 (P01 (orden base)): HTTP 200",
+    "Posada f0ce6f98-9ea2-49a2-807d-5f8bf051c43a (B01 (dejar 1 libre)): HTTP 200",
+    "Posada e9f7cf55-547a-4cd5-8434-154589a41a46 (B01 (carrera)): HTTP 200",
+    "Posada 9b4a3991-45d4-46a7-9209-dbe111677a52 (B01 (carrera)): HTTP 200",
+    "Posada 9a4fce3b-a147-45c3-9bf2-ffe1fcda89a1 (B02 (doble clic)): HTTP 200",
+    "Posada 48bf47e8-2c88-4398-a42d-1b0a19c9f523 (B02 (doble clic)): HTTP 200",
+    "Posada b563fe68-c287-4315-8c87-d045292bf5f0 (aceptada por error: F05): HTTP 200"
+  ],
+  "bitacora": [
+    {
+      "t": "2026-11-08T21:15:22.529Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/health",
+      "status": 200,
+      "ms": 1777
+    },
+    {
+      "t": "2026-11-08T21:15:24.307Z",
+      "method": "GET",
+      "url": "https://booking-core-api.azurewebsites.net/api/v1/alojamientos?page=1&limit=1",
+      "status": 200,
+      "ms": 941
+    },
+    {
+      "t": "2026-11-08T21:15:25.248Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos?page=1&limit=50",
+      "status": 200,
+      "ms": 1112
+    },
+    {
+      "t": "2026-11-08T21:15:26.360Z",
+      "method": "GET",
+      "url": "https://booking-core-api.azurewebsites.net/api/v1/alojamientos?page=1&limit=50",
+      "status": 200,
+      "ms": 981
+    },
+    {
+      "t": "2026-11-08T21:15:27.342Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/ALO-001/availability?checkin=2027-02-01&checkout=2027-02-03&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 838
+    },
+    {
+      "t": "2026-11-08T21:15:28.180Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/ALO-001/availability?checkin=2027-01-27&checkout=2027-01-29&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 838
+    },
+    {
+      "t": "2026-11-08T21:15:29.019Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 608
+    },
+    {
+      "t": "2026-11-08T21:15:29.627Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2099
+    },
+    {
+      "t": "2026-11-08T21:15:31.726Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 697
+    },
+    {
+      "t": "2026-11-08T21:15:32.423Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/ALO-001/availability?checkin=2027-01-17&checkout=2027-01-19&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 834
+    },
+    {
+      "t": "2026-11-08T21:15:33.257Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 588
+    },
+    {
+      "t": "2026-11-08T21:15:33.845Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2037
+    },
+    {
+      "t": "2026-11-08T21:15:35.883Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 589
+    },
+    {
+      "t": "2026-11-08T21:15:35.882Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 1087
+    },
+    {
+      "t": "2026-11-08T21:15:36.472Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2050
+    },
+    {
+      "t": "2026-11-08T21:15:36.969Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 3032
+    },
+    {
+      "t": "2026-11-08T21:15:40.001Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/ALO-001/availability?checkin=2027-01-22&checkout=2027-01-24&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 858
+    },
+    {
+      "t": "2026-11-08T21:15:40.860Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 581
+    },
+    {
+      "t": "2026-11-08T21:15:41.442Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2187
+    },
+    {
+      "t": "2026-11-08T21:15:41.442Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 3649
+    },
+    {
+      "t": "2026-11-08T21:15:45.092Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/ALO-001/availability?checkin=2027-01-22&checkout=2027-01-24&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 843
+    },
+    {
+      "t": "2026-11-08T21:15:45.936Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 348
+    },
+    {
+      "t": "2026-11-08T21:15:46.285Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 345
+    },
+    {
+      "t": "2026-11-08T21:15:46.631Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders?idempotency_key=cb09b624-b01d-4c42-9f3d-7873e5f87e35",
+      "status": 200,
+      "ms": 343
+    },
+    {
+      "t": "2026-11-08T21:15:46.974Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2075
+    },
+    {
+      "t": "2026-11-08T21:15:49.050Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 357
+    },
+    {
+      "t": "2026-11-08T21:15:49.407Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 343
+    },
+    {
+      "t": "2026-11-08T21:15:49.049Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/2724de3e-d141-4523-8a1f-69e958438d59/cancel",
+      "status": 200,
+      "ms": 1326
+    },
+    {
+      "t": "2026-11-08T21:15:49.750Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 409,
+      "ms": 833
+    },
+    {
+      "t": "2026-11-08T21:15:50.583Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 328
+    },
+    {
+      "t": "2026-11-08T21:15:50.911Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 343
+    },
+    {
+      "t": "2026-11-08T21:15:51.255Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 709
+    },
+    {
+      "t": "2026-11-08T21:15:51.964Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2085
+    },
+    {
+      "t": "2026-11-08T21:15:54.049Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/ba185d5a-c2a9-4fe0-afca-0f973e958495/cancel",
+      "status": 200,
+      "ms": 1355
+    },
+    {
+      "t": "2026-11-08T21:15:54.050Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2063
+    },
+    {
+      "t": "2026-11-08T21:15:56.113Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/d403a790-1bb9-4c78-a9b0-88a8a8c244b2/cancel",
+      "status": 200,
+      "ms": 1325
+    },
+    {
+      "t": "2026-11-08T21:15:56.114Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2121
+    },
+    {
+      "t": "2026-11-08T21:15:58.237Z",
+      "method": "GET",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/ALO-001/availability?checkin=2027-02-01&checkout=2027-02-03&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 831
+    },
+    {
+      "t": "2026-11-08T21:15:58.236Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/fb30a15d-3b25-48d2-82ea-b2d74aafe04e/cancel",
+      "status": 200,
+      "ms": 1330
+    },
+    {
+      "t": "2026-11-08T21:15:59.068Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 409,
+      "ms": 826
+    },
+    {
+      "t": "2026-11-08T21:15:59.894Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2089
+    },
+    {
+      "t": "2026-11-08T21:16:01.983Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/b967181c-a30d-467b-8d97-7857c2cb16b8/cancel",
+      "status": 200,
+      "ms": 1450
+    },
+    {
+      "t": "2026-11-08T21:16:01.984Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2258
+    },
+    {
+      "t": "2026-11-08T21:16:04.242Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/a7c58545-f9e3-4b0a-949b-7edc6bca5a61/cancel",
+      "status": 200,
+      "ms": 1354
+    },
+    {
+      "t": "2026-11-08T21:16:05.596Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2050
+    },
+    {
+      "t": "2026-11-08T21:16:07.646Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/439f8241-1d1b-4dbc-81ba-61aaff500788/cancel",
+      "status": 200,
+      "ms": 1323
+    },
+    {
+      "t": "2026-11-08T21:16:07.647Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2134
+    },
+    {
+      "t": "2026-11-08T21:16:09.781Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/7835217d-d710-4023-bfb5-929df73d43ab/cancel",
+      "status": 200,
+      "ms": 1338
+    },
+    {
+      "t": "2026-11-08T21:16:09.782Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 2059
+    },
+    {
+      "t": "2026-11-08T21:16:11.842Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/8ee1cc2f-9617-4ef0-9423-f337ee171794/check-in",
+      "status": 200,
+      "ms": 525
+    },
+    {
+      "t": "2026-11-08T21:16:11.841Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/b563fe68-c287-4315-8c87-d045292bf5f0/cancel",
+      "status": 200,
+      "ms": 1329
+    },
+    {
+      "t": "2026-11-08T21:16:12.369Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/8ee1cc2f-9617-4ef0-9423-f337ee171794/cancel",
+      "status": 200,
+      "ms": 1321
+    },
+    {
+      "t": "2026-11-08T21:16:12.367Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/8ee1cc2f-9617-4ef0-9423-f337ee171794/cancel",
+      "status": 200,
+      "ms": 1793
+    },
+    {
+      "t": "2026-11-08T21:16:13.690Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/f0ce6f98-9ea2-49a2-807d-5f8bf051c43a/cancel",
+      "status": 200,
+      "ms": 1323
+    },
+    {
+      "t": "2026-11-08T21:16:15.013Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/e9f7cf55-547a-4cd5-8434-154589a41a46/cancel",
+      "status": 200,
+      "ms": 1332
+    },
+    {
+      "t": "2026-11-08T21:16:16.345Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/9b4a3991-45d4-46a7-9209-dbe111677a52/cancel",
+      "status": 200,
+      "ms": 1326
+    },
+    {
+      "t": "2026-11-08T21:16:17.671Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/9a4fce3b-a147-45c3-9bf2-ffe1fcda89a1/cancel",
+      "status": 200,
+      "ms": 1327
+    },
+    {
+      "t": "2026-11-08T21:16:18.998Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/48bf47e8-2c88-4398-a42d-1b0a19c9f523/cancel",
+      "status": 200,
+      "ms": 1319
+    },
+    {
+      "t": "2026-11-08T21:16:20.317Z",
+      "method": "POST",
+      "url": "https://posada-ec-alojamientos.azurewebsites.net/api/v2/alojamientos/orders/b563fe68-c287-4315-8c87-d045292bf5f0/cancel",
+      "status": 200,
+      "ms": 466
+    }
+  ]
+}

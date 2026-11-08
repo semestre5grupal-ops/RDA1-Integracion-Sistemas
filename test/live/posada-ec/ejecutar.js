@@ -163,7 +163,9 @@ function veredictoRechazo(t, r, { estados, codigos = [], etiqueta }) {
 /** Cuerpo de orden válido sobre el hotel/tipo de referencia, con cambios. */
 function cuerpoRef(cambios = {}, n = 9) {
   const { checkin, checkout } = ventana(n);
-  const total = ctx.ref?.opcion?.precioTotal || '100.00';
+  // Total COTIZADO (con impuestos): así la prueba evalúa el dato inválido y no tropieza con
+  // PRICE_MISMATCH en socios cuya disponibilidad muestra el precio sin impuestos.
+  const total = ctx.totalRef || ctx.ref?.opcion?.precioTotal || '100.00';
   const b = posada.cuerpoOrden({ id: ctx.ref.hotel.id, codigo: ctx.ref.opcion.codigo, checkin, checkout, total });
   return { ...b, ...cambios };
 }
@@ -455,6 +457,14 @@ const ESCENARIOS = [
       const ref = registrarPosada(out.r, 'P01 (orden base)');
       if (!ref) return t.falla(`No se pudo reservar: ${resumen(out.r)}.`);
       ctx.base = { ref, body: out.body, idem, cot: out.cot, ventana: v, remAntes: opc.valor, hotel: ctx.ref.hotel, codigo: ctx.ref.opcion.codigo, r: out.r };
+      // Total cotizado de la ventana que usan las pruebas de validación (cuerpoRef, ventana 9).
+      const v9 = ventana(9);
+      const cot9 = await posada.cotizar({ id: ctx.ref.hotel.id, codigo: ctx.ref.opcion.codigo, checkin: v9.checkin, checkout: v9.checkout });
+      const c9 = cot9.body?.data && !Array.isArray(cot9.body.data) ? cot9.body.data : cot9.body || {};
+      ctx.totalRef = money(c9.precioTotalCotizado) || null;
+      if (ctx.totalRef && ctx.ref.opcion.precioTotal && ctx.totalRef !== ctx.ref.opcion.precioTotal) {
+        t.dato('Ojo: precio de disponibilidad ≠ precio cotizado', `${ctx.ref.opcion.precioTotal} vs ${ctx.totalRef}`);
+      }
       t.dato('Orden', `${ref.orderId} · ${ref.externalOrderId} · ${ref.codigoReserva} · ${ref.estado} · $${ref.total}`);
       const malos = [];
       if (!/^ORD-HTL-[A-Z0-9]{3,20}$/.test(ref.externalOrderId || '')) malos.push(`external_order_id «${ref.externalOrderId}»`);
@@ -750,7 +760,7 @@ const ESCENARIOS = [
     titulo: 'Total enviado como número en vez de texto Money',
     historia: 'Un integrador envía 153.5 en lugar de "153.50".',
     esperado: '400 (el contrato v2.2.0 exige Money como string).',
-    async run(t) { return veredictoRechazo(t, await posada.crearOrden(cuerpoRef({ totalPagar: Number(ctx.ref.opcion.precioTotal || 100) })), { estados: [400] }); },
+    async run(t) { return veredictoRechazo(t, await posada.crearOrden(cuerpoRef({ totalPagar: Number(ctx.totalRef || ctx.ref.opcion.precioTotal || 100) })), { estados: [400] }); },
   },
   {
     id: 'F03', grupo: 'F · Precio, moneda y contrato', requiere: ['posada', 'escritura', 'ref'],

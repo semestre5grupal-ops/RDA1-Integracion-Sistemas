@@ -1,0 +1,202 @@
+{
+  "fecha": "2026-11-08T21:21:50.600Z",
+  "resultados": [
+    {
+      "socio": "Todos",
+      "id": "G0",
+      "titulo": "Catálogo agregado en vivo de los 3 socios",
+      "resultado": "PASA",
+      "detalle": "81 hoteles: {\"NODE_ALO_PEC\":30,\"NODE_ALO_KAWSAY_E_FCKP\":1,\"NODE_ALO_LUXESTAY_E5K3\":50} · fuentes NODE_ALO_PEC:OK, NODE_ALO_KAWSAY_E_FCKP:OK, NODE_ALO_LUXESTAY_E5K3:OK"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G1",
+      "titulo": "Reserva por el gateway llega al hotel",
+      "resultado": "PASA",
+      "detalle": "Booking BKG-293172 (RESERVADO) ↔ hotel ORD-HTL-9ED9AAEF30C44731B454; libres 2 → 1; client_id —"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G2",
+      "titulo": "Reintento con la misma clave",
+      "resultado": "PASA",
+      "detalle": "misma reserva: true; libres 1 → 1"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G3",
+      "titulo": "Doble clic ×10 por el gateway",
+      "resultado": "PASA",
+      "detalle": "reservas distintas en Booking: 1; libres en el hotel 2 → 1; respuestas OK 10/10"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G1",
+      "titulo": "Reserva por el gateway llega al hotel",
+      "resultado": "PASA",
+      "detalle": "Booking BKG-298961 (RESERVADO) ↔ hotel ORD-HTL-29661F49; libres 8 → 7; client_id —"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G1",
+      "titulo": "Reserva por el gateway llega al hotel",
+      "resultado": "PASA",
+      "detalle": "Booking BKG-970296 (RESERVADO) ↔ hotel ORD-HTL-8263; libres 3 → 2; client_id CLI-838979"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G2",
+      "titulo": "Reintento con la misma clave",
+      "resultado": "PASA",
+      "detalle": "misma reserva: true; libres 7 → 7"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G2",
+      "titulo": "Reintento con la misma clave",
+      "resultado": "PASA",
+      "detalle": "misma reserva: true; libres 2 → 2"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G4",
+      "titulo": "Caso del compañero: agotado en la web del hotel → Booking rechaza",
+      "resultado": "PASA",
+      "detalle": "se reservaron 2 directo en el hotel (libres ahora 0); Booking respondió 409 ROOM_NO_LONGER_AVAILABLE"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G5",
+      "titulo": "Carrera ×6 por la última habitación, por el gateway",
+      "resultado": "PASA",
+      "detalle": "libres antes 1; confirmadas 1; rechazos [409,409,409,409,409]; libres al final 0"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G6",
+      "titulo": "Reserva sin documento → 400",
+      "resultado": "PASA",
+      "detalle": "400 VALIDATION_FAILED"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G7",
+      "titulo": "Check-in avisado por el hotel (Flujo 2)",
+      "resultado": "PASA",
+      "detalle": "clave ajena → 401; clave del hotel → CONFIRMADO_ASISTIDO"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G8",
+      "titulo": "Cancelar en Booking libera la habitación en el hotel",
+      "resultado": "PASA",
+      "detalle": "estado CANCELADO; reembolso REF-HTL-633306486; libres 1 → 2"
+    },
+    {
+      "socio": "Kawsay",
+      "id": "G9",
+      "titulo": "Una reserva con check-in no se puede cancelar",
+      "resultado": "PASA",
+      "detalle": "respuesta 409"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G3",
+      "titulo": "Doble clic ×10 por el gateway",
+      "resultado": "PASA",
+      "detalle": "reservas distintas en Booking: 1; libres en el hotel 8 → 7; respuestas OK 10/10"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G3",
+      "titulo": "Doble clic ×10 por el gateway",
+      "resultado": "PASA",
+      "detalle": "reservas distintas en Booking: 1; libres en el hotel 3 → 2; respuestas OK 10/10"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G4",
+      "titulo": "Caso del compañero: agotado en la web del hotel → Booking rechaza",
+      "resultado": "PASA",
+      "detalle": "se reservaron 3 directo en el hotel (libres ahora 0); Booking respondió 409 ROOM_NO_LONGER_AVAILABLE"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G4",
+      "titulo": "Caso del compañero: agotado en la web del hotel → Booking rechaza",
+      "resultado": "PASA",
+      "detalle": "se reservaron 3 directo en el hotel (libres ahora 0); Booking respondió 409 ROOM_NO_LONGER_AVAILABLE"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G5",
+      "titulo": "Carrera ×6 por la última habitación, por el gateway",
+      "resultado": "PASA",
+      "detalle": "libres antes 1; confirmadas 1; rechazos [409,409,409,409,409]; libres al final 0"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G6",
+      "titulo": "Reserva sin documento → 400",
+      "resultado": "PASA",
+      "detalle": "400 VALIDATION_FAILED"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G7",
+      "titulo": "Check-in avisado por el hotel (Flujo 2)",
+      "resultado": "PASA",
+      "detalle": "clave ajena → 401; clave del hotel → CONFIRMADO_ASISTIDO"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G5",
+      "titulo": "Carrera ×6 por la última habitación, por el gateway",
+      "resultado": "PASA",
+      "detalle": "libres antes 1; confirmadas 1; rechazos [409,409,409,409,409]; libres al final 0"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G6",
+      "titulo": "Reserva sin documento → 400",
+      "resultado": "PASA",
+      "detalle": "400 VALIDATION_FAILED"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G7",
+      "titulo": "Check-in avisado por el hotel (Flujo 2)",
+      "resultado": "PASA",
+      "detalle": "clave ajena → 401; clave del hotel → CONFIRMADO_ASISTIDO"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G8",
+      "titulo": "Cancelar en Booking libera la habitación en el hotel",
+      "resultado": "PASA",
+      "detalle": "estado CANCELADO; reembolso REF-HTL-010035; libres 7 → 8"
+    },
+    {
+      "socio": "Posada EC",
+      "id": "G9",
+      "titulo": "Una reserva con check-in no se puede cancelar",
+      "resultado": "PASA",
+      "detalle": "respuesta 409"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G8",
+      "titulo": "Cancelar en Booking libera la habitación en el hotel",
+      "resultado": "PASA",
+      "detalle": "estado CANCELADO; reembolso REF-HTL-177575; libres 2 → 3"
+    },
+    {
+      "socio": "LuxeStays",
+      "id": "G9",
+      "titulo": "Una reserva con check-in no se puede cancelar",
+      "resultado": "PASA",
+      "detalle": "respuesta 409"
+    }
+  ],
+  "limpieza": "22/22"
+}

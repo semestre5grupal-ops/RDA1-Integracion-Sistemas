@@ -1,0 +1,486 @@
+{
+  "inicio": "2026-11-08T21:17:03.597Z",
+  "fin": "2026-11-08T21:17:42.945Z",
+  "config": {
+    "posadaBase": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2",
+    "posadaKey": "***",
+    "bookingBase": "https://booking-core-api.azurewebsites.net/api/v1",
+    "timeoutMs": 15000,
+    "maxAgotar": 8
+  },
+  "soloLectura": false,
+  "resultados": [
+    {
+      "id": "S01",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "El sistema de Posada está en línea",
+      "historia": "Antes de vender, Booking verifica que el hotel responde.",
+      "esperado": "GET /alojamientos/health → 200, status HEALTHY/UP y devuelve el X-Correlation-ID.",
+      "resultado": "PASA",
+      "detalle": "HEALTHY en 9044 ms y devuelve el X-Correlation-ID.",
+      "datos": [],
+      "evidencias": [
+        "Posada health: HTTP 200  (9044 ms) — HTTP 200"
+      ],
+      "ms": 9046
+    },
+    {
+      "id": "S02",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "El Booking desplegado está en línea",
+      "historia": "Las pruebas de doble canal necesitan nuestro propio sistema.",
+      "esperado": "GET /alojamientos → 200.",
+      "resultado": "PASA",
+      "detalle": "Responde en 1249 ms.",
+      "datos": [],
+      "evidencias": [
+        "Booking GET /alojamientos: HTTP 200  (1249 ms) — HTTP 200"
+      ],
+      "ms": 1249
+    },
+    {
+      "id": "S03",
+      "grupo": "S · Salud y catálogo",
+      "titulo": "Los hoteles de Posada aparecen en Booking",
+      "historia": "Un viajero busca en Booking un hotel que Posada sí ofrece.",
+      "esperado": "Cada hotel ACTIVO de Posada existe en Booking (emparejado por id_externo).",
+      "resultado": "PASA",
+      "detalle": "Los 30 hoteles activos de Posada están en Booking.",
+      "datos": [
+        [
+          "Hoteles en Posada",
+          30
+        ],
+        [
+          "Hoteles en Booking (todos los proveedores)",
+          30
+        ],
+        [
+          "Emparejados",
+          "30 (proveedor en Booking: posada-ec)"
+        ]
+      ],
+      "evidencias": [],
+      "ms": 1735
+    },
+    {
+      "id": "P01",
+      "grupo": "P · Reserva normal en Posada",
+      "titulo": "Camino feliz: cotizar y reservar 1 habitación",
+      "historia": "Un cliente normal reserva una habitación para dos noches.",
+      "esperado": "201 con orderId, external_order_id (ORD-HTL-…), codigoReserva (BK-HOTEL-…) y estado CONFIRMED.",
+      "resultado": "PASA",
+      "detalle": "Reserva confirmada con los tres identificadores del contrato.",
+      "datos": [
+        [
+          "Orden",
+          "7cf22e30-b155-4998-a117-41bb994592b8 · ORD-HTL-C79593EE · BK-HOTEL-C79593EE · CONFIRMED · $257.00"
+        ]
+      ],
+      "evidencias": [
+        "Cotización POST /availability: HTTP 200  (966 ms) — HTTP 200",
+        "orders/create: HTTP 201  (1785 ms) — HTTP 201"
+      ],
+      "ms": 6194
+    },
+    {
+      "id": "B01",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Dos clientes compiten por la última habitación al mismo tiempo",
+      "historia": "Queda 1 habitación; dos personas pulsan «Reservar» en el mismo segundo.",
+      "esperado": "Exactamente una reserva 201 y la otra 409 OUT_OF_STOCK.",
+      "resultado": "PASA",
+      "detalle": "Una confirmada y la otra rechazada con 409.",
+      "datos": [
+        [
+          "Hotel / tipo / libres",
+          "HTL-1001 · SUITE_FAMILIAR · 3"
+        ]
+      ],
+      "evidencias": [
+        "Posada orders/create ×2 habitaciones en una orden: HTTP 201  (1634 ms) — HTTP 201",
+        "Cliente 1: HTTP 201  (1632 ms) — HTTP 201",
+        "Cliente 2: HTTP 409 OUT_OF_STOCK (1114 ms) — no hay cupo para esas fechas"
+      ],
+      "ms": 6014
+    },
+    {
+      "id": "B02",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Doble clic: la misma petición enviada dos veces a la vez",
+      "historia": "El cliente impaciente pulsa dos veces «Pagar»; el navegador manda la misma petición (misma Idempotency-Key).",
+      "esperado": "Se crea UNA sola reserva; la segunda respuesta es la misma orden (Idempotent-Replayed) o 409 IDEMPOTENCY_IN_PROGRESS.",
+      "resultado": "PASA",
+      "detalle": "Una sola reserva; la otra petición fue repetición o quedó en espera.",
+      "datos": [
+        [
+          "Libres antes → después",
+          "3 → 2"
+        ]
+      ],
+      "evidencias": [
+        "Clic 1: HTTP 201  (1673 ms) — HTTP 201",
+        "Clic 2: HTTP 409 IDEMPOTENCY_IN_PROGRESS (1134 ms) — La petición con esta Idempotency-Key aún se está procesando"
+      ],
+      "ms": 4353
+    },
+    {
+      "id": "B03",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Reintento tras un corte de red (misma clave, mismo cuerpo)",
+      "historia": "Se cae el wifi justo al pagar; la app reintenta la misma petición.",
+      "esperado": "Devuelve la MISMA orden (mismo orderId), no descuenta otra habitación, con cabecera Idempotent-Replayed: true.",
+      "resultado": "PASA",
+      "detalle": "Misma orden y cabecera Idempotent-Replayed: true.",
+      "datos": [],
+      "evidencias": [
+        "Reintento: HTTP 201  (673 ms) — HTTP 201"
+      ],
+      "ms": 673
+    },
+    {
+      "id": "B04",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Misma clave de idempotencia con otro contenido",
+      "historia": "Un error del cliente reutiliza la clave de una compra anterior para una compra distinta.",
+      "esperado": "422 IDEMPOTENCY_KEY_REUSED.",
+      "resultado": "PASA",
+      "detalle": "Rechazado correctamente: HTTP 422 IDEMPOTENCY_KEY_REUSED — La clave ya se usó con un cuerpo distinto. Genere una nueva para una nueva intención..",
+      "datos": [],
+      "evidencias": [
+        "Respuesta: HTTP 422 IDEMPOTENCY_KEY_REUSED (691 ms) — La clave ya se usó con un cuerpo distinto. Genere una nueva para una nueva intención."
+      ],
+      "ms": 691
+    },
+    {
+      "id": "B05",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Reserva sin Idempotency-Key o con una clave inválida",
+      "historia": "Un integrador mal configurado no envía la cabecera.",
+      "esperado": "400 en ambos casos (la cabecera es obligatoria y debe ser UUID).",
+      "resultado": "PASA",
+      "detalle": "Sin cabecera: Rechazado correctamente: HTTP 400 VALIDATION_FAILED — Las operaciones transaccionales exigen la cabecera Idempotency-Key (UUID). · Clave no UUID: Rechazado correctamente: HTTP 400 VALIDATION_FAILED — Idempotency-Key debe ser un UUID.",
+      "datos": [],
+      "evidencias": [
+        "Sin cabecera: HTTP 400 VALIDATION_FAILED (549 ms) — Las operaciones transaccionales exigen la cabecera Idempotency-Key (UUID)",
+        "Clave no UUID: HTTP 400 VALIDATION_FAILED (556 ms) — Idempotency-Key debe ser un UUID"
+      ],
+      "ms": 1105
+    },
+    {
+      "id": "B06",
+      "grupo": "B · Concurrencia e idempotencia",
+      "titulo": "Recuperar una reserva tras un timeout (consulta por idempotency_key)",
+      "historia": "Booking no recibió respuesta; antes de cobrar o compensar pregunta al hotel si la reserva existe.",
+      "esperado": "GET /alojamientos/orders?idempotency_key=… devuelve la orden.",
+      "resultado": "PASA",
+      "detalle": "Encuentra la orden por su clave de idempotencia.",
+      "datos": [],
+      "evidencias": [
+        "Consulta: HTTP 200  (869 ms) — HTTP 200"
+      ],
+      "ms": 870
+    },
+    {
+      "id": "H03",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Cancelar la reserva devuelve el cupo",
+      "historia": "El cliente cancela y la habitación vuelve a estar a la venta.",
+      "esperado": "200, estado CANCELLED, codigoReembolso REF-HTL-…, cuposRestaurados true y habitacionesRemanentes vuelve al valor inicial.",
+      "resultado": "PASA",
+      "detalle": "Cancelada y cupo restaurado.",
+      "datos": [
+        [
+          "Respuesta",
+          "estado CANCELLED · REF-HTL-010027 · 100% · $257.00 · cuposRestaurados true"
+        ],
+        [
+          "Libres inicial → tras cancelar",
+          "3 → 3"
+        ]
+      ],
+      "evidencias": [
+        "cancel: HTTP 200  (1393 ms) — HTTP 200"
+      ],
+      "ms": 2276
+    },
+    {
+      "id": "H04",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Cancelar dos veces (el usuario pulsa «Cancelar» otra vez)",
+      "historia": "La primera cancelación tardó y el usuario vuelve a pulsar (con otra clave).",
+      "esperado": "200 con yaCancelada: true y el MISMO codigoReembolso (sin reembolsar dos veces).",
+      "resultado": "PASA",
+      "detalle": "Idempotente: yaCancelada true y mismo codigoReembolso.",
+      "datos": [],
+      "evidencias": [
+        "Segunda cancelación: HTTP 200  (999 ms) — HTTP 200"
+      ],
+      "ms": 999
+    },
+    {
+      "id": "H06",
+      "grupo": "H · Ciclo de vida",
+      "titulo": "Compensación de Saga: reembolso del 100 %",
+      "historia": "El pago de un paquete falla en otro proveedor y Booking deshace la reserva del hotel.",
+      "esperado": "cancel con solicitadoPor = SAGA_ORCHESTRATOR → 200, porcentajeReembolso 100.",
+      "resultado": "BLOQUEADO",
+      "detalle": "Depende de E03.",
+      "datos": [],
+      "evidencias": [],
+      "ms": 1
+    },
+    {
+      "id": "J02",
+      "grupo": "J · Rendimiento",
+      "titulo": "Crear una reserva tarda ≤ 3000 ms",
+      "historia": "Si el hotel tarda más de 3 s, Booking da la compra por fallida y compensa… pero el hotel sí guardó la reserva.",
+      "esperado": "Todas las orders/create exitosas de esta corrida ≤ 3000 ms.",
+      "resultado": "PASA",
+      "detalle": "Todas dentro del SLA.",
+      "datos": [
+        [
+          "Reservas medidas",
+          5
+        ],
+        [
+          "p50 / máx",
+          "1634 ms / 1785 ms"
+        ]
+      ],
+      "evidencias": [],
+      "ms": 0
+    }
+  ],
+  "limpieza": [
+    "Posada 77eb8101-5b15-4b6b-8288-af7380507749 (B01 (dejar 1 libre)): HTTP 200",
+    "Posada 15451ed8-45f4-4a0e-bd4d-a9223c9cfd62 (B01 (carrera)): HTTP 200",
+    "Posada f69bdad9-b931-46ce-97fb-7cbca94f1c1f (B02 (doble clic)): HTTP 200"
+  ],
+  "bitacora": [
+    {
+      "t": "2026-11-08T21:17:03.599Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/health",
+      "status": 200,
+      "ms": 9044
+    },
+    {
+      "t": "2026-11-08T21:17:12.644Z",
+      "method": "GET",
+      "url": "https://booking-core-api.azurewebsites.net/api/v1/alojamientos?page=1&limit=1",
+      "status": 200,
+      "ms": 1249
+    },
+    {
+      "t": "2026-11-08T21:17:13.894Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos?page=1&limit=50",
+      "status": 200,
+      "ms": 796
+    },
+    {
+      "t": "2026-11-08T21:17:14.690Z",
+      "method": "GET",
+      "url": "https://booking-core-api.azurewebsites.net/api/v1/alojamientos?page=1&limit=50",
+      "status": 200,
+      "ms": 939
+    },
+    {
+      "t": "2026-11-08T21:17:15.630Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/HTL-1001/availability?checkin=2027-02-01&checkout=2027-02-03&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 873
+    },
+    {
+      "t": "2026-11-08T21:17:16.504Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/HTL-1001/availability?checkin=2027-01-27&checkout=2027-01-29&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 1619
+    },
+    {
+      "t": "2026-11-08T21:17:18.123Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 966
+    },
+    {
+      "t": "2026-11-08T21:17:19.090Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 1785
+    },
+    {
+      "t": "2026-11-08T21:17:20.875Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 948
+    },
+    {
+      "t": "2026-11-08T21:17:21.824Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/HTL-1001/availability?checkin=2027-01-17&checkout=2027-01-19&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 884
+    },
+    {
+      "t": "2026-11-08T21:17:22.708Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 933
+    },
+    {
+      "t": "2026-11-08T21:17:23.641Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 1634
+    },
+    {
+      "t": "2026-11-08T21:17:25.275Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 931
+    },
+    {
+      "t": "2026-11-08T21:17:25.276Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 1300
+    },
+    {
+      "t": "2026-11-08T21:17:26.576Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 409,
+      "ms": 1114
+    },
+    {
+      "t": "2026-11-08T21:17:26.206Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 1632
+    },
+    {
+      "t": "2026-11-08T21:17:27.839Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/HTL-1001/availability?checkin=2027-01-22&checkout=2027-01-24&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 870
+    },
+    {
+      "t": "2026-11-08T21:17:28.709Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/availability",
+      "status": 200,
+      "ms": 936
+    },
+    {
+      "t": "2026-11-08T21:17:29.646Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 409,
+      "ms": 1134
+    },
+    {
+      "t": "2026-11-08T21:17:29.646Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 1673
+    },
+    {
+      "t": "2026-11-08T21:17:31.319Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/HTL-1001/availability?checkin=2027-01-22&checkout=2027-01-24&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 872
+    },
+    {
+      "t": "2026-11-08T21:17:32.191Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 201,
+      "ms": 673
+    },
+    {
+      "t": "2026-11-08T21:17:32.865Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 422,
+      "ms": 691
+    },
+    {
+      "t": "2026-11-08T21:17:33.557Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 400,
+      "ms": 549
+    },
+    {
+      "t": "2026-11-08T21:17:34.106Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/create",
+      "status": 400,
+      "ms": 556
+    },
+    {
+      "t": "2026-11-08T21:17:34.663Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders?idempotency_key=a3cdab5d-ddaa-4552-8cb9-90818ae59285",
+      "status": 200,
+      "ms": 869
+    },
+    {
+      "t": "2026-11-08T21:17:35.532Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/7cf22e30-b155-4998-a117-41bb994592b8/cancel",
+      "status": 200,
+      "ms": 1393
+    },
+    {
+      "t": "2026-11-08T21:17:36.925Z",
+      "method": "GET",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/HTL-1001/availability?checkin=2027-01-27&checkout=2027-01-29&adults=1&rooms=1&adultos=1",
+      "status": 200,
+      "ms": 883
+    },
+    {
+      "t": "2026-11-08T21:17:37.808Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/7cf22e30-b155-4998-a117-41bb994592b8/cancel",
+      "status": 200,
+      "ms": 999
+    },
+    {
+      "t": "2026-11-08T21:17:38.808Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/77eb8101-5b15-4b6b-8288-af7380507749/cancel",
+      "status": 200,
+      "ms": 1369
+    },
+    {
+      "t": "2026-11-08T21:17:40.177Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/15451ed8-45f4-4a0e-bd4d-a9223c9cfd62/cancel",
+      "status": 200,
+      "ms": 1421
+    },
+    {
+      "t": "2026-11-08T21:17:41.598Z",
+      "method": "POST",
+      "url": "https://posada-alojamientos-api.thankfulglacier-a27c5a77.northcentralus.azurecontainerapps.io/api/v2/alojamientos/orders/f69bdad9-b931-46ce-97fb-7cbca94f1c1f/cancel",
+      "status": 200,
+      "ms": 1347
+    }
+  ]
+}
