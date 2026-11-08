@@ -29,7 +29,16 @@ const jwt = (sub) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, email: '
 const resultados = [];
 const creadas = [];
 
-async function llamar(metodo, ruta, { cuerpo, corr = 'corr-e2e', sub = USUARIO, cab = {} } = {}) {
+// Cada compra de la prueba lleva su propio X-Correlation-Id, como en la web:
+// así el admin (Procesos → En vivo) muestra una fila por compra.
+const RUN = Math.random().toString(36).slice(2, 7);
+let corrActual = `corr-e2e-${RUN}-busqueda`;
+function nuevaCompra(etiqueta) {
+  corrActual = `corr-e2e-${RUN}-${etiqueta}`;
+  return corrActual;
+}
+
+async function llamar(metodo, ruta, { cuerpo, corr = corrActual, sub = USUARIO, cab = {} } = {}) {
   const t = Date.now();
   const r = await fetch(API + ruta, {
     method: metodo,
@@ -96,14 +105,17 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   const precio = selecciones(oferta).map((s, i) => Number(oferta.itineraries[i].pricingOptions.find((p) => p.fareBrand === s.fareBrand && p.cabinClass === s.cabinClass).pricePerPassengerType[0].price.total)).reduce((a, b) => a + b, 0);
 
   // Hold
+  const corrCompra = nuevaCompra(`${n}-compra`);
   const h = await hold(oferta);
   caso(`${n}-02`, 'Hold con el precio de la tarifa', h.status === 201 && Math.abs(Number(h.json.lockedPrice?.total) - precio) < 0.01, `${h.json.lockedPrice?.total} vs ${precio.toFixed(2)}`);
 
   // Ida y vuelta (antes 422)
   if (ofertaVuelta) {
+    nuevaCompra(`${n}-ida-vuelta`);
     const hv = await hold(ofertaVuelta);
     caso(`${n}-03`, 'Hold ida y vuelta (una tarifa por tramo)', hv.status === 201, `HTTP ${hv.status} ${hv.json.lockedPrice?.total ?? hv.json.title ?? ''}`);
     if (hv.json.holdId) await llamar('DELETE', `/vuelos/offers/hold/${encodeURIComponent(hv.json.holdId)}`);
+    corrActual = corrCompra;
   }
 
   // Mapa de asientos
@@ -152,10 +164,14 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
     const mapa2 = await llamar('GET', `/vuelos/offers/${encodeURIComponent(oferta.offerId)}/seatmap?segmentId=${encodeURIComponent(seg.segmentId)}`);
     const a2 = (mapa2.json.cabins || []).flatMap((c) => c.rows).flatMap((x) => x.seats).find((s) => s.seatNumber === asiento);
     caso(`${n}-14`, 'El asiento comprado sale ocupado en el mapa', a2 && (a2.isAvailable === false || a2.status !== 'AVAILABLE'), `${asiento} → ${a2?.status}`);
+    nuevaCompra(`${n}-asiento-duplicado`);
     const h2 = await hold(oferta);
     const dup = await reservar(h2.json.holdId, [pasajero({ lastName: 'Duplicado', documentType: 'PASSPORT', documentNumber: 'XA9988776', documentExpiryDate: '2031-01-31', assignedSeats: [{ segmentId: seg.segmentId, seatNumber: asiento }] })]);
     caso(`${n}-15`, 'Mismo asiento dos veces: la aerolínea rechaza y se reembolsa', dup.status === 409 && /reembolsó/i.test(dup.json.detail ?? ''), `HTTP ${dup.status} ${dup.json.detail ?? ''}`.slice(0, 90));
   }
+
+  // Check-in y cancelación pertenecen a la compra principal.
+  corrActual = corrCompra;
 
   // Check-in desde Booking (solo si el vuelo es dentro de 48 h)
   const ci = await llamar('POST', `/vuelos/bookings/${bid}/check-in`, { cuerpo: {} });
@@ -179,6 +195,7 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   creadas.splice(creadas.indexOf(r.json.bookingId), 1);
 
   // Fallos controlados
+  nuevaCompra(`${n}-dato-invalido`);
   const h3 = await hold(oferta);
   // Nacionalidad de 4 letras: inválida para cualquier aerolínea (el contrato pide ISO alfa-2).
   const malo2 = await reservar(h3.json.holdId, [pasajero({ nationality: 'ZZZZ' })]);
@@ -186,6 +203,7 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   const ok = await reservar(h3.json.holdId, [pasajero({ lastName: 'Reintento' })], { 'Idempotency-Key': crypto.randomUUID() });
   caso(`${n}-19`, 'Reintento corregido después del rechazo', ok.status === 201, `HTTP ${ok.status} ${ok.json.pnr ?? ok.json.title ?? ''}`);
 
+  nuevaCompra(`${n}-hold-liberado`);
   const h4 = await hold(oferta);
   await llamar('DELETE', `/vuelos/offers/hold/${encodeURIComponent(h4.json.holdId)}`);
   const lib = await reservar(h4.json.holdId, [pasajero()]);

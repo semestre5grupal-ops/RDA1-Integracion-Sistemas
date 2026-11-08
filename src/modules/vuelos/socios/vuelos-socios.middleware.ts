@@ -429,7 +429,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
   /** Deja un paso en la traza en vivo, con el correlation ID de la compra. */
   private traza(entrantes: Record<string, any>, paso: PasoVuelo, resultado: ResultadoPaso, detalle: string, extra: { nodo?: string | null; ms?: number | null; monto?: number | null } = {}) {
     try {
-      trazaVuelos.registrar({ correlacion: String(entrantes['x-correlation-id'] || 'sin-correlacion'), paso, resultado, detalle, ...extra });
+      const huella = String(entrantes['x-device-fingerprint'] || '');
+      const cliente = emailDesdeJwt(entrantes['authorization']) || (huella ? `invitado ·${huella.slice(-6)}` : null);
+      trazaVuelos.registrar({ correlacion: String(entrantes['x-correlation-id'] || 'sin-correlacion'), paso, resultado, detalle, cliente, ...extra });
     } catch {
       /* la traza nunca debe romper una reserva */
     }
