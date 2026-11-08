@@ -36,6 +36,8 @@ export interface EventoVuelo {
   nodo?: string | null;
   ms?: number | null;
   monto?: number | null;
+  /** Quién hizo el paso: correo del cliente (token) o "invitado ·abc123" (huella del dispositivo). */
+  cliente?: string | null;
 }
 
 const MAX_EVENTOS = 500;
