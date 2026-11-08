@@ -6,6 +6,7 @@ import { FormularioReserva } from '../components/FormularioReserva';
 import { crearHold, agregarEquipaje, liberarHold } from '../services/vuelosApi';
 import { PantallaReservaConfirmada } from '../components/PantallaReservaConfirmada';
 import { formatearFecha, obtenerHuellaDispositivo } from '../services/formato';
+import { aplicarRecargoBusqueda } from '../utils/precioBooking';
 import { buscarVuelos } from '../services/vuelosApi';
 
 // Destinos nacionales de Ecuador que el API soporta
@@ -86,7 +87,8 @@ export function VuelosPage() {
 
     try {
       const respuesta = await buscarVuelos(criterios, obtenerHuellaDispositivo());
-      setResultados(respuesta);
+      // Precios finales de Booking: tarifa de la aerolínea + cargo por servicio.
+      setResultados(aplicarRecargoBusqueda(respuesta));
     } catch (fallo) {
       setResultados(null);
       // ProblemDetails del contrato: { code, title, detail, status }.

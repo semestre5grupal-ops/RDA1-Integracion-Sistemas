@@ -217,15 +217,28 @@ export function construirFacturaPdf(reserva) {
 
   doc.setFont('helvetica', 'normal');
   doc.rect(15, 144, 180, 17);
-  doc.text(sanear(pnr), 17, 151);
-  doc.text(sanear(String(cantidadNum)), 46, 151);
-  // Descripción completa con servicio y fechas
-  const descDetallada = fac?.descripcion || `${reserva.titulo} [${cantidadTexto}]${fechaEntrega ? ` · ${esAuto ? 'Retiro' : 'Fecha'}: ${fechaEntrega}` : ''}${fechaDevolucion ? ` · Dev: ${fechaDevolucion}` : ''}`;
-  const descripcion = sanear(descDetallada);
-  doc.text(doc.splitTextToSize(descripcion, 60).slice(0, 3), 62, 149);
-  doc.text(subtotal.toFixed(2), 140, 151, { align: 'right' });
-  doc.text('0.00', 165, 151, { align: 'right' });
-  doc.text(subtotal.toFixed(2), 190, 151, { align: 'right' });
+  if (Array.isArray(fac?.lineas) && fac.lineas.length > 1) {
+    // Factura de vuelo con dos líneas: boleto de la aerolínea + cargo por servicio de Booking.
+    fac.lineas.slice(0, 2).forEach((l, k) => {
+      const y = k === 0 ? 148.5 : 157.5;
+      doc.text(sanear(k === 0 ? pnr : 'SERV'), 17, y);
+      doc.text(sanear(String(l.cantidad)), 46, y);
+      doc.text(doc.splitTextToSize(sanear(l.descripcion), 60).slice(0, k === 0 ? 2 : 1), 62, y);
+      doc.text(String(l.precioUnitario), 140, y, { align: 'right' });
+      doc.text('0.00', 165, y, { align: 'right' });
+      doc.text(String(l.subtotal), 190, y, { align: 'right' });
+    });
+  } else {
+    doc.text(sanear(pnr), 17, 151);
+    doc.text(sanear(String(cantidadNum)), 46, 151);
+    // Descripción completa con servicio y fechas
+    const descDetallada = fac?.descripcion || `${reserva.titulo} [${cantidadTexto}]${fechaEntrega ? ` · ${esAuto ? 'Retiro' : 'Fecha'}: ${fechaEntrega}` : ''}${fechaDevolucion ? ` · Dev: ${fechaDevolucion}` : ''}`;
+    const descripcion = sanear(descDetallada);
+    doc.text(doc.splitTextToSize(descripcion, 60).slice(0, 3), 62, 149);
+    doc.text(subtotal.toFixed(2), 140, 151, { align: 'right' });
+    doc.text('0.00', 165, 151, { align: 'right' });
+    doc.text(subtotal.toFixed(2), 190, 151, { align: 'right' });
+  }
 
   // ── TOTALES ────────────────────────────────────────────────────────────────
   const yTotals = 164;

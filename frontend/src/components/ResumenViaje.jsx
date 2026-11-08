@@ -1,4 +1,5 @@
 import { formatearMoneda, formatearFecha, extraerHora, extraerFecha } from '../services/formato';
+import { conRecargo } from '../utils/precioBooking';
 import { useCurrency } from '../hooks/CurrencyContext';
 
 const NOMBRES_CABINA = {
@@ -71,9 +72,11 @@ export function ResumenViaje({ oferta, tarifaSeleccionada, pasajeros, onContinua
                       tipo === 'CHILD' ? pCounts.children :
                       tipo === 'INFANT' ? pCounts.infants : 0) || 0;
        
-       sum += (parseFloat(pt.price.total) * count);
+       // Se suma el precio de la aerolínea y el cargo de Booking se aplica una vez
+       // al total, como lo calcula el backend en el hold.
+       sum += (parseFloat(pt.price.airlineTotal ?? pt.price.total) * count);
     });
-    totalCalculado = sum.toFixed(2);
+    totalCalculado = (oferta._recargoPct ? conRecargo(sum, oferta._recargoPct) : sum).toFixed(2);
   }
 
   return (

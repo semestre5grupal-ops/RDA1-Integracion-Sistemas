@@ -1659,7 +1659,7 @@ function FinanzasPanel({ refreshKey }) {
       <style>{SPIN_CSS}</style>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12, fontSize: '0.8rem', color: C.gray }}>
         <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>Comisión plataforma: {fin?.config?.comisionBase}%</span>
-        <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>Aerolíneas socias: 10%</span>
+        <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>Vuelos: recargo de {fin?.config?.comisionBase}% sobre el precio de la aerolínea</span>
         <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>IVA: {fin?.config?.tasaImpuestos}%</span>
         <span>Se cambian en ⚙️ Ajustes · Calculado: {fmtDate(fin?.generadoEn)}</span>
         {loading && <Spinner color={C.blue} size={12} />}
@@ -2426,7 +2426,7 @@ function ConfiguracionTab() {
         <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px' }}>
           <SectionTitle badge="Global">Finanzas y Comisiones</SectionTitle>
           <div style={{ marginBottom: 16 }}>
-            <label htmlFor="cfg-comision" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>Comisión Base de la Plataforma (%)</label>
+            <label htmlFor="cfg-comision" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>Comisión Base de la Plataforma (%) · en vuelos es el recargo sobre el precio de la aerolínea</label>
             <input id="cfg-comision" type="number" min={0} max={100} step="0.01" inputMode="decimal" value={form.comisionBase} onChange={onComisionChange} disabled={bloqueado} aria-invalid={!!errores.comisionBase} style={inputStyle(errores.comisionBase)} />
             {errores.comisionBase
               ? <div style={errStyle}>{errores.comisionBase}</div>

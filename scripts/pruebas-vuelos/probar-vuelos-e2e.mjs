@@ -120,6 +120,18 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   caso(`${n}-05`, 'Compra: cobro, PNR y reserva CONFIRMED', r.status === 201 && !!r.json.pnr && r.json.status === 'CONFIRMED', `HTTP ${r.status} PNR ${r.json.pnr ?? r.json.title}`);
   caso(`${n}-06`, 'Nacionalidad ECU y teléfono local normalizados', r.status === 201, 'ECU→EC, 0991234567→+593991234567');
   caso(`${n}-07`, 'Factura emitida (número, subtotal + impuestos = total)', !!f && /^FAC-\d{8}-\d{6}$/.test(f.numero) && Math.abs(Number(f.subtotal) + Number(f.impuestos) - Number(f.total)) < 0.02, f ? `${f.numero} ${f.subtotal}+${f.impuestos}=${f.total}` : 'sin factura');
+  // Modelo de agencia: al cliente se le cobra el precio de la aerolínea + el cargo
+  // por servicio de Booking; la aerolínea registra solo su precio; la factura
+  // trae el boleto y el cargo como líneas separadas y el total es lo cobrado.
+  const bp = r.json.bookingPrice;
+  const precioAero = Number(h.json.lockedPrice?.total);
+  caso(`${n}-07b`, 'Cobro = precio aerolínea + cargo Booking; la aerolínea queda con su precio',
+    !!bp && Math.abs(Number(bp.airlineTotal) - precioAero) < 0.01
+      && Math.abs(Number(bp.total) - Number(bp.airlineTotal) - Number(bp.serviceFee)) < 0.01
+      && Math.abs(Number(bp.serviceFee) - Math.round(precioAero * bp.serviceFeePercentage) / 100) < 0.011
+      && Math.abs(Number(r.json.grandTotal?.total ?? precioAero) - precioAero) < 0.01
+      && !!f && Math.abs(Number(f.total) - Number(bp.total)) < 0.01 && (f.lineas ?? []).length === 2,
+    bp ? `aerolínea ${bp.airlineTotal} + servicio ${bp.serviceFee} (${bp.serviceFeePercentage}%) = ${bp.total} · factura ${f?.total} en ${(f?.lineas ?? []).length} líneas` : 'sin bookingPrice');
   caso(`${n}-08`, 'La aerolínea recibe nuestra orden (salesChannel.partnerOrderId)', /^ORD-BKP-/.test(r.json.salesChannel?.partnerOrderId ?? ''), r.json.salesChannel?.partnerOrderId ?? '');
   caso(`${n}-09`, 'Referencia de pago PAY-BKP enviada a la aerolínea', /^PAY-BKP-\d{8}-\d{6}$/.test(r.json.payment?.paymentReference ?? r.json.paymentReference ?? ''), r.json.payment?.paymentReference ?? '');
   if (r.status !== 201) return;

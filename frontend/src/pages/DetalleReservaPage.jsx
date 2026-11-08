@@ -290,7 +290,7 @@ export function DetalleReservaPage({ bookingId }) {
         <div className="detalle-total">
           <span className="modal-precio-etiqueta">Total</span>
           <span className="modal-precio-valor">
-            {formatearMoneda(reserva.grandTotal?.total, reserva.grandTotal?.currency)}
+            {formatearMoneda(reserva.bookingPrice?.total ?? reserva.grandTotal?.total, reserva.grandTotal?.currency)}
           </span>
         </div>
       </div>

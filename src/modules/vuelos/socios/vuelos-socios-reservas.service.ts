@@ -2,8 +2,10 @@ import { createHash } from 'crypto';
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { PagosService } from '../../pagos/pagos.service';
+import { AdminConfigService } from '../../admin/admin-config.service';
 import { SEPARADOR_ID } from './vuelos-socios.service';
 import {
+  COMISION_BOOKING_PCT,
   conciliacionVuelos,
   emitirFacturaVuelo,
   emitirNotaCredito,
@@ -48,7 +50,11 @@ CREATE INDEX IF NOT EXISTS ix_vuelos_reservas_socio_propietario
   ON public.vuelos_reservas_socio (propietario_id, created_at DESC);
 ALTER TABLE public.vuelos_reservas_socio
   ADD COLUMN IF NOT EXISTS checkin_at     timestamptz,
-  ADD COLUMN IF NOT EXISTS checkin_origen varchar(30);
+  ADD COLUMN IF NOT EXISTS checkin_origen varchar(30),
+  -- Modelo con recargo: grand_total = lo que pagó el cliente,
+  -- monto_aerolinea = precio de la aerolínea, cargo_servicio = recargo de Booking.
+  ADD COLUMN IF NOT EXISTS monto_aerolinea numeric(12,2),
+  ADD COLUMN IF NOT EXISTS cargo_servicio  numeric(12,2);
 -- Referencia de pago que Booking envía a la aerolínea (PAY-BKP-AAAAMMDD-NNNNNN)
 -- -> transacción de MS_PAG. Se guarda ANTES de llamar a la aerolínea para que
 -- pueda validarla con GET /pagos/{paymentReference} durante POST /bookings.
@@ -88,6 +94,9 @@ export interface ReservaSocio {
   transaccionId: string | null;
   paymentReference: string | null;
   reembolsado: number;
+  /** Modelo con recargo; null en reservas anteriores. */
+  montoAerolinea: number | null;
+  cargoServicio: number | null;
   createdAt: string;
 }
 
@@ -138,6 +147,7 @@ export class VuelosSociosReservasService implements OnModuleInit {
   constructor(
     private readonly dataSource: DataSource,
     @Optional() private readonly pagos?: PagosService,
+    @Optional() private readonly config?: AdminConfigService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -176,6 +186,17 @@ export class VuelosSociosReservasService implements OnModuleInit {
     } catch (e: any) {
       this.logger.error(`[vuelos-socios] No se pudo registrar la referencia ${ref}: ${e?.message}`);
     }
+  }
+
+  /** Recargo de Booking sobre el precio de la aerolínea: la "comisión" de Ajustes (10 % por defecto). */
+  async recargoPct(): Promise<number> {
+    try {
+      const v = Number(await this.config?.getValor('comisionBase'));
+      if (Number.isFinite(v) && v >= 0 && v <= 50) return v;
+    } catch {
+      /* sin configuración: valor por defecto */
+    }
+    return COMISION_BOOKING_PCT;
   }
 
   // ─────────────────────────── Facturación ───────────────────────────
@@ -291,6 +312,9 @@ export class VuelosSociosReservasService implements OnModuleInit {
     propietarioId: string;
     reserva: any;
     montoCobrado: number | null;
+    /** Precio de la aerolínea y recargo de Booking (montoCobrado = suma de ambos). */
+    montoAerolinea?: number | null;
+    cargo?: number | null;
     cobro?: Cobro;
   }): Promise<void> {
     if (!(await this.asegurarTabla())) return;
@@ -299,8 +323,9 @@ export class VuelosSociosReservasService implements OnModuleInit {
     await this.dataSource.query(
       `INSERT INTO public.vuelos_reservas_socio
         (booking_id, codigo_nodo, booking_id_socio, propietario_id, pnr, status, origin, destination,
-         departure_date, currency, grand_total, transaccion_id, payment_reference, detalle)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         departure_date, currency, grand_total, transaccion_id, payment_reference, detalle,
+         monto_aerolinea, cargo_servicio)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (booking_id) DO UPDATE SET
          pnr = EXCLUDED.pnr, status = EXCLUDED.status, detalle = EXCLUDED.detalle, updated_at = now()`,
       [
@@ -314,10 +339,13 @@ export class VuelosSociosReservasService implements OnModuleInit {
         r.destination,
         r.departureDate,
         r.currency,
-        r.total ?? datos.montoCobrado ?? 0,
+        // Lo que pagó el cliente (con el recargo de Booking).
+        datos.montoCobrado ?? r.total ?? 0,
         datos.cobro?.transaccionId ?? null,
         datos.cobro?.paymentReference ?? null,
         JSON.stringify(datos.reserva ?? {}),
+        datos.montoAerolinea ?? null,
+        datos.cargo ?? null,
       ],
     );
   }
@@ -447,7 +475,7 @@ export class VuelosSociosReservasService implements OnModuleInit {
 
 const SELECT_BASE = `SELECT booking_id, codigo_nodo, propietario_id, pnr, status, origin, destination,
   to_char(departure_date, 'YYYY-MM-DD') AS departure_date, currency, grand_total, transaccion_id,
-  payment_reference, reembolsado, created_at FROM public.vuelos_reservas_socio`;
+  payment_reference, reembolsado, monto_aerolinea, cargo_servicio, created_at FROM public.vuelos_reservas_socio`;
 
 function mapear(f: any): ReservaSocio {
   return {
@@ -464,6 +492,8 @@ function mapear(f: any): ReservaSocio {
     transaccionId: f.transaccion_id,
     paymentReference: f.payment_reference,
     reembolsado: Number(f.reembolsado),
+    montoAerolinea: f.monto_aerolinea != null ? Number(f.monto_aerolinea) : null,
+    cargoServicio: f.cargo_servicio != null ? Number(f.cargo_servicio) : null,
     createdAt: new Date(f.created_at).toISOString(),
   };
 }

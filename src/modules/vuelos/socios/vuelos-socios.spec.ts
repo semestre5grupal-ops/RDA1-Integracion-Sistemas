@@ -184,6 +184,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       mapearClienteSocio: jest.fn(async () => undefined),
       marcarCheckin: jest.fn(async () => true),
       registrarReferenciaPago: jest.fn(async () => undefined),
+      recargoPct: jest.fn(async () => 10),
       notaCredito: jest.fn(async (d: any) => ({ numero: 'NC-20261104-000001', monto: d.monto.toFixed(2) })),
       listar: jest.fn(async (prop: string) =>
         [...copias.values()].filter((c) => c.propietarioId === prop).map((c) => ({
@@ -248,11 +249,14 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       const datos = await r.json();
       expect(r.status).toBe(201);
       expect(datos.bookingId).toBe('NODE_VUE_KEY~BK-1');
-      expect(cobros.at(-1)).toEqual({ monto: 150, idem: 'idem-ok', propietario: DUENO });
+      // Al cliente: precio de la aerolínea (150) + recargo de Booking 10 % = 165.
+      expect(cobros.at(-1)).toEqual({ monto: 165, idem: 'idem-ok', propietario: DUENO });
       const enviada = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST')!;
       expect(enviada.body.payment.paymentReference).toBe('AUTH-777');
-      // Contrato v2: monto cobrado, quién cobró y la orden de Booking para conciliar.
+      // Contrato v2: a la aerolínea se le paga SU precio (sin el recargo de Booking).
       expect(enviada.body.payment).toMatchObject({ amount: { currency: 'USD', total: '150.00' }, provider: 'BOOKING_PROTOTIPO' });
+      expect(datos.bookingPrice).toEqual({ currency: 'USD', airlineTotal: '150.00', serviceFee: '15.00', serviceFeePercentage: 10, total: '165.00' });
+      expect(copias.get('NODE_VUE_KEY~BK-1')).toMatchObject({ montoCobrado: 165, montoAerolinea: 150, cargo: 15 });
       expect(enviada.body.salesChannel).toMatchObject({ partnerId: 'BOOKING_PROTOTIPO', partnerOrderId: expect.stringMatching(/^ORD-BKP-[0-9A-F]{10}$/) });
       expect(datos.factura).toMatchObject({ numero: 'FAC-20261104-000001' });
       expect(enviada.headers['x-user-id']).toBe(DUENO); // la aerolínea ve al mismo dueño que Booking
@@ -284,7 +288,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       });
       expect(r.status).toBe(409);
       expect((await r.json()).detail).toMatch(/reembolsó/);
-      expect(reembolsos.at(-1)).toMatchObject({ tx: 'tx-1', monto: 150 });
+      expect(reembolsos.at(-1)).toMatchObject({ tx: 'tx-1', monto: 165 }); // se devuelve todo lo cobrado
     });
 
     it('reserva: sin Idempotency-Key no se cobra', async () => {

@@ -117,7 +117,9 @@ export class SincronizadorEventosVuelos {
       }
       case 'booking.cancelled': {
         if (copia.status === 'CANCELLED') return false;
-        const pendiente = Math.max(0, copia.grandTotal - copia.reembolsado);
+        // Solo se devuelve la parte de la aerolínea: el cargo por servicio de
+        // Booking no es reembolsable (reservas antiguas: el total).
+        const pendiente = Math.max(0, (copia.montoAerolinea ?? copia.grandTotal) - copia.reembolsado);
         const informado = parseFloat(String(d.refundAmount ?? d.refund?.amount ?? ''));
         const monto = Number.isFinite(informado) && informado > 0
           ? Math.min(informado, pendiente)

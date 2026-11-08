@@ -39,6 +39,8 @@ interface Mov {
    * schema_finanzas.liquidaciones_proveedores, no en los payouts mensuales.
    */
   comisionPct?: number;
+  /** Comisión ya calculada (recargo de Booking en vuelos con aerolíneas socias). */
+  comisionMonto?: number;
   liquidaAparte?: boolean;
 }
 
@@ -81,7 +83,7 @@ export class AdminFinanzasService {
       this.reservaAtraccionRepo.find().catch((e) => { this.logger.error(`Finanzas atracciones: ${e.message}`); return [] as ReservaAtraccion[]; }),
       this.reservaAlojamientoRepo.find().catch((e) => { this.logger.error(`Finanzas hospedaje: ${e.message}`); return [] as ReservaAlojamiento[]; }),
       this.dataSource
-        .query(`SELECT booking_id, pnr, status, grand_total, reembolsado, created_at FROM public.vuelos_reservas_socio`)
+        .query(`SELECT booking_id, pnr, status, grand_total, reembolsado, cargo_servicio, created_at FROM public.vuelos_reservas_socio`)
         .catch((e) => { this.logger.error(`Finanzas vuelos socios: ${e.message}`); return [] as any[]; }),
     ]);
     return [
@@ -92,6 +94,7 @@ export class AdminFinanzasService {
         monto: Math.max(0, Number(v.grand_total || 0) - (ANULADAS.has(String(v.status || '').toUpperCase()) ? 0 : Number(v.reembolsado || 0))),
         fecha: v.created_at, cliente: null,
         comisionPct: COMISION_BOOKING_PCT, liquidaAparte: true,
+        ...(v.cargo_servicio != null ? { comisionMonto: Number(v.cargo_servicio) } : {}),
       })),
       ...vuelos.map((v) => ({
         vertical: 'vuelos', id: v.idReserva, ref: v.pnr || v.idReserva.slice(0, 6).toUpperCase(),
@@ -177,7 +180,7 @@ export class AdminFinanzasService {
     const [movs, pagos] = await Promise.all([this.movimientos(), this.pagosRegistrados()]);
 
     const sum = (f: (m: Mov) => boolean) => r2(movs.filter(f).reduce((s, m) => s + m.monto, 0));
-    const comisionDe = (m: Mov) => (PAGADAS.has(m.estado) ? m.monto * (m.comisionPct ?? pct) / 100 : 0);
+    const comisionDe = (m: Mov) => (!PAGADAS.has(m.estado) ? 0 : m.comisionMonto ?? m.monto * (m.comisionPct ?? pct) / 100);
     const sumComision = (f: (m: Mov) => boolean) => r2(movs.filter(f).reduce((s, m) => s + comisionDe(m), 0));
     const cobrado = sum((m) => PAGADAS.has(m.estado));
     const porCobrar = sum((m) => PENDIENTES.has(m.estado));

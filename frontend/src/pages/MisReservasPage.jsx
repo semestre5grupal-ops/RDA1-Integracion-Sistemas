@@ -309,7 +309,7 @@ export function MisReservasPage() {
             cantidadTexto: `${paxCount} Pasajero${paxCount > 1 ? 's' : ''}`,
             rawDate: r.createdAt ? new Date(r.createdAt).getTime() : new Date().getTime(),
             status: r.status || 'CONFIRMED',
-            totalRaw: r.grandTotal?.total || 106.50,
+            totalRaw: r.bookingPrice?.total ?? r.grandTotal?.total ?? 0,
             imagen: DEFAULT_IMAGES.vuelo,
             raw: r,
             email: (r.passengers?.[0]?.email || r.customerEmail || r.userEmail || r.email || '').trim().toLowerCase(),
