@@ -84,7 +84,9 @@ async function reservar(holdId, pax, cab = {}) {
 async function cancelar(bookingId) {
   const e = encodeURIComponent(bookingId);
   const q = await llamar('GET', `/vuelos/bookings/${e}/cancellation-quote`);
-  return llamar('POST', `/vuelos/bookings/${e}/cancel`, { cuerpo: { quoteId: q.json.quoteId, reasonCode: 'CUSTOMER_REQUEST', reason: 'Prueba automática' } });
+  const c = await llamar('POST', `/vuelos/bookings/${e}/cancel`, { cuerpo: { quoteId: q.json.quoteId, reasonCode: 'CUSTOMER_REQUEST', reason: 'Prueba automática' } });
+  c.cotizacion = q.json;
+  return c;
 }
 
 async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
@@ -139,7 +141,7 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
     const a2 = (mapa2.json.cabins || []).flatMap((c) => c.rows).flatMap((x) => x.seats).find((s) => s.seatNumber === asiento);
     caso(`${n}-14`, 'El asiento comprado sale ocupado en el mapa', a2 && (a2.isAvailable === false || a2.status !== 'AVAILABLE'), `${asiento} → ${a2?.status}`);
     const h2 = await hold(oferta);
-    const dup = await reservar(h2.json.holdId, [pasajero({ lastName: 'Duplicado', documentType: 'PASSPORT', documentNumber: 'XA9988776', assignedSeats: [{ segmentId: seg.segmentId, seatNumber: asiento }] })]);
+    const dup = await reservar(h2.json.holdId, [pasajero({ lastName: 'Duplicado', documentType: 'PASSPORT', documentNumber: 'XA9988776', documentExpiryDate: '2031-01-31', assignedSeats: [{ segmentId: seg.segmentId, seatNumber: asiento }] })]);
     caso(`${n}-15`, 'Mismo asiento dos veces: la aerolínea rechaza y se reembolsa', dup.status === 409 && /reembolsó/i.test(dup.json.detail ?? ''), `HTTP ${dup.status} ${dup.json.detail ?? ''}`.slice(0, 90));
   }
 
@@ -153,9 +155,15 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   }
 
   // Cancelación con reembolso y nota de crédito
+  // Si la tarifa no es reembolsable (cotización con refundAmount 0) lo correcto es
+  // cancelar sin devolver nada ni emitir nota de crédito.
   const c = await cancelar(r.json.bookingId);
-  caso(`${n}-17`, 'Cancelar: reembolso ejecutado por Booking + nota de crédito', c.status === 200 && c.json.status === 'CANCELLED' && /^NC-/.test(c.json.refund?.creditNote?.numero ?? ''),
-    `devuelto ${c.json.refund?.executedAmount ?? 0} ${c.json.refund?.creditNote?.numero ?? ''}`);
+  const reembolsable = Number(c.cotizacion?.refundAmount ?? 0) > 0;
+  caso(`${n}-17`, reembolsable ? 'Cancelar: reembolso ejecutado por Booking + nota de crédito' : 'Cancelar tarifa no reembolsable: sin devolución ni nota de crédito',
+    c.status === 200 && c.json.status === 'CANCELLED' && (reembolsable
+      ? /^NC-/.test(c.json.refund?.creditNote?.numero ?? '')
+      : !c.json.refund?.creditNote && Number(c.json.refund?.executedAmount ?? 0) === 0),
+    `cotizado ${c.cotizacion?.refundAmount ?? '?'} · devuelto ${c.json.refund?.executedAmount ?? 0} ${c.json.refund?.creditNote?.numero ?? ''}`);
   creadas.splice(creadas.indexOf(r.json.bookingId), 1);
 
   // Fallos controlados
