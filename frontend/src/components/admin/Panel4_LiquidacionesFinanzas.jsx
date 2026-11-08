@@ -67,7 +67,7 @@ export function Panel4_LiquidacionesFinanzas() {
             <span>💼</span> Liquidaciones por aerolínea
           </h2>
           <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-            Cada venta en una aerolínea socia suma a su liquidación de la quincena; Booking retiene el 10% y paga el resto a la aerolínea.
+            Booking compra el boleto a la aerolínea a su precio y se lo vende al cliente con su cargo por servicio. Cada venta suma a la liquidación de la quincena: la comisión es ese cargo y a la aerolínea se le paga su precio (menos lo que ella mandó devolver).
           </p>
         </div>
         <button 
@@ -88,7 +88,7 @@ export function Panel4_LiquidacionesFinanzas() {
         </div>
 
         <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '16px', borderRadius: '8px', borderTop: '4px solid #10b981' }}>
-          <span style={{ fontSize: '0.82rem', color: '#065f46', fontWeight: 600 }}>Ganancia Neta Booking (10% Comisión):</span>
+          <span style={{ fontSize: '0.82rem', color: '#065f46', fontWeight: 600 }}>Ganancia de Booking (cargo por servicio):</span>
           <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#047857', marginTop: '4px' }}>
             +${totalComision.toFixed(2)} USD
           </div>
@@ -118,7 +118,7 @@ export function Panel4_LiquidacionesFinanzas() {
             <th style={{ padding: '12px 10px' }}>Código Liquidación</th>
             <th style={{ padding: '12px 10px' }}>Proveedor / Vertical</th>
             <th style={{ padding: '12px 10px' }}>Total Venta</th>
-            <th style={{ padding: '12px 10px' }}>Comisión Booking (10%)</th>
+            <th style={{ padding: '12px 10px' }}>Comisión Booking</th>
             <th style={{ padding: '12px 10px' }}>Neto Proveedor (90%)</th>
             <th style={{ padding: '12px 10px' }}>Estado</th>
             <th style={{ padding: '12px 10px' }}>Acción</th>
@@ -257,7 +257,7 @@ function ConciliacionVuelos() {
               <th style={celda}>Reservas</th>
               <th style={celda}>Vendido</th>
               <th style={celda}>Devuelto</th>
-              <th style={celda}>Comisión Booking ({datos.comisionPct ?? 10}%)</th>
+              <th style={celda}>Comisión Booking (cargo por servicio)</th>
               <th style={celda}>A pagar a la aerolínea</th>
               <th style={celda}></th>
             </tr>

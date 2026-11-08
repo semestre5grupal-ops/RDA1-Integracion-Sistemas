@@ -7,6 +7,7 @@ import { crearReserva, obtenerMapaAsientos } from '../services/vuelosApi';
 import { obtenerHuellaDispositivo, formatearMoneda } from '../services/formato';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
+import { totalBooking } from '../utils/precioBooking';
 import { useTelemetry } from '../hooks/useTelemetry';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
@@ -493,7 +494,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           tipo: 'vuelo',
           pnr: idempotencyKey.toString().substring(0, 8).toUpperCase(),
           titulo: `Reserva de vuelo · ${hold?.itineraries?.length ?? 1} itinerario(s)`,
-          total: hold?.lockedPrice?.total,
+          total: totalBooking(hold),
           pasajeros: lista.map((p) => ({
             firstName: p.firstName,
             lastName: p.lastName,
@@ -920,8 +921,16 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             <div className="paso-pago" style={{ marginTop: '20px' }}>
               <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Pago Simulado</h3>
               <p className="modal-nota-bloque">
-                El total a pagar es de <strong>{formatearMoneda(hold.lockedPrice?.total, hold.lockedPrice?.currency)}</strong>.
+                El total a pagar es de <strong>{formatearMoneda(totalBooking(hold), hold.lockedPrice?.currency)}</strong>.
               </p>
+              {hold.bookingPrice && (
+                <dl className="modal-nota-bloque" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 16px', margin: '8px 0 0' }}>
+                  <dt>Tarifa de la aerolínea (impuestos incluidos)</dt>
+                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.airlineTotal, hold.bookingPrice.currency)}</dd>
+                  <dt>Cargo por servicio Booking ({hold.bookingPrice.serviceFeePercentage}%, no reembolsable)</dt>
+                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.serviceFee, hold.bookingPrice.currency)}</dd>
+                </dl>
+              )}
               
               <div className="tarjeta-simulada" style={{ background: '#f5f7f9', padding: '20px', borderRadius: '12px', border: '1px solid #e1e4e8', marginTop: '20px' }}>
                 <div className="campo">
@@ -953,7 +962,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           <div className="modal-precio">
               <span className="modal-precio-etiqueta">Total a pagar</span>
               <span className="modal-precio-valor">
-                {formatearMoneda(hold.lockedPrice?.total, hold.lockedPrice?.currency)}
+                {formatearMoneda(totalBooking(hold), hold.lockedPrice?.currency)}
               </span>
             </div>
           <div className="modal-acciones">
