@@ -3,7 +3,7 @@ import { FormularioBusquedaVuelos } from '../components/FormularioBusquedaVuelos
 import { VueloGroupCard } from '../components/VueloGroupCard';
 import { ResumenViaje } from '../components/ResumenViaje';
 import { FormularioReserva } from '../components/FormularioReserva';
-import { crearHold, agregarEquipaje } from '../services/vuelosApi';
+import { crearHold, agregarEquipaje, liberarHold } from '../services/vuelosApi';
 import { PantallaReservaConfirmada } from '../components/PantallaReservaConfirmada';
 import { formatearFecha, obtenerHuellaDispositivo } from '../services/formato';
 import { buscarVuelos } from '../services/vuelosApi';
@@ -175,7 +175,9 @@ export function VuelosPage() {
           cabina: selecciones[idx]?.cabinClass ?? cabina,
         })),
       );
-      setHoldActivo({ ...respuesta, offerId: oferta.offerId, tramos });
+      // La edad de cada pasajero se mide el día del primer vuelo.
+      const fechaViaje = busquedaActiva?.itineraries?.[0]?.departureDate ?? null;
+      setHoldActivo({ ...respuesta, offerId: oferta.offerId, tramos, fechaViaje });
     } catch (error) {
       const detalle = error?.response?.data?.detail ?? 'No se pudo procesar tu selección. Inténtalo de nuevo.';
       setError({ title: 'Error al continuar', detail: detalle });
@@ -188,7 +190,15 @@ export function VuelosPage() {
   // El hold se guarda en la pagina y se pasa al formulario: asi el formulario
   // sabe el `holdId`, el TTL y el precio congelado sin tener que repetir la
   // llamada ni guardarlo en `localStorage` (que ademas es PII).
-  const cerrarFormulario = useCallback(() => setHoldActivo(null), []);
+  // Si el cliente sale del formulario sin comprar, el cupo se libera en la
+  // aerolínea (DELETE /offers/hold/{holdId}) para que otro lo pueda comprar.
+  // Si el hold ya venció, la aerolínea responde 404/410 y no pasa nada.
+  const cerrarFormulario = useCallback(() => {
+    setHoldActivo((actual) => {
+      if (actual?.holdId) liberarHold(actual.holdId).catch(() => {});
+      return null;
+    });
+  }, []);
 
   /**
    * Al confirmar el pago se cambia por completo de vista. Es una navegacion
