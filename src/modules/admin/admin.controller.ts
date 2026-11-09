@@ -96,6 +96,18 @@ export class AdminController {
     return this.metricasService.getProcesoAlojamientos();
   }
 
+  @Get('procesos/autos')
+  @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de autos (estados, dinero, agencias socias)' })
+  async getProcesoAutos() {
+    return this.metricasService.getProcesoAutos();
+  }
+
+  @Get('procesos/atracciones')
+  @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de atracciones (estados, dinero, operadores socios)' })
+  async getProcesoAtracciones() {
+    return this.metricasService.getProcesoAtracciones();
+  }
+
   @Get('finanzas/vuelos/conciliacion')
   @ApiOperation({ summary: 'Conciliación con aerolíneas socias: vendido, devuelto, comisión y neto a pagar por aerolínea y por reserva' })
   @ApiQuery({ name: 'desde', required: false, example: '2026-11-01' })

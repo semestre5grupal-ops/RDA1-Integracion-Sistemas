@@ -352,6 +352,134 @@ export class AdminMetricasService {
     };
   }
 
+  /**
+   * Datos en vivo para los grafos del proceso de reserva de AUTOS con agencias
+   * socias: reservas por estado, dinero cobrado y reembolsado, y el estado real
+   * de cada agencia de renta registrada (RutaLibre, Maneja de Una, etc.).
+   */
+  async getProcesoAutos() {
+    const [estados, dinero, agencias] = await Promise.all([
+      this.seguro(
+        'estados de reservas de autos',
+        () =>
+          this.dataSource.query(
+            `SELECT estado AS status, COUNT(*)::int AS n FROM schema_autos.autos_reservas GROUP BY estado`,
+          ),
+        [] as { status: string; n: number }[],
+      ),
+      this.seguro(
+        'dinero de reservas de autos',
+        () =>
+          this.dataSource.query(
+            `SELECT COALESCE(SUM(total),0)::float AS cobrado,
+                    COALESCE(SUM(total) FILTER (WHERE estado IN ('CANCELADA', 'CANCELADO')), 0)::float AS reembolsado,
+                    COUNT(*) FILTER (WHERE estado = 'CONFIRMADO_ASISTIDO' OR estado = 'COMPLETADA')::int AS asistidos
+               FROM schema_autos.autos_reservas`,
+          ),
+        [{ cobrado: 0, reembolsado: 0, asistidos: 0 }],
+      ),
+      this.seguro(
+        'agencias de autos socias',
+        () =>
+          this.dataSource.query(
+            `SELECT codigo_nodo, nombre_proveedor, health_status, kill_switch_activo, latencia_ms, ultimo_ping_at, base_url_rest
+               FROM schema_proveedores.config_proveedor WHERE vertical = 'AUTOS' ORDER BY nombre_proveedor`,
+          ),
+        [] as any[],
+      ),
+    ]);
+    const porEstado: Record<string, number> = {};
+    for (const e of estados) porEstado[String(e.status).toUpperCase()] = Number(e.n);
+    const d = dinero[0] || {};
+    return {
+      generadoEn: new Date().toISOString(),
+      porEstado,
+      totalReservas: Object.values(porEstado).reduce((a, b) => a + b, 0),
+      cobrado: Math.round(Number(d.cobrado || 0) * 100) / 100,
+      reembolsado: Math.round(Number(d.reembolsado || 0) * 100) / 100,
+      asistidos: Number(d.asistidos || 0),
+      timeoutMs: Number(process.env.AUTOS_SOCIOS_TIMEOUT_MS) || 8000,
+      fuente: (process.env.AUTOS_FUENTE || 'socios').toLowerCase(),
+      agencias: agencias.map((a: any) => ({
+        codigo: a.codigo_nodo,
+        nombre: a.nombre_proveedor,
+        estado: a.kill_switch_activo
+          ? 'APAGADA'
+          : !/^https?:\/\//i.test(a.base_url_rest || '') || a.health_status === 'UNKNOWN'
+            ? 'SIN_VERIFICAR'
+            : a.health_status === 'DOWN'
+              ? 'CAIDA'
+              : 'EN_LINEA',
+        latenciaMs: a.latencia_ms,
+        ultimoPing: a.ultimo_ping_at,
+      })),
+    };
+  }
+
+  /**
+   * Datos en vivo para los grafos del proceso de reserva de ATRACCIONES con operadores
+   * socios: reservas por estado, dinero cobrado y reembolsado, y el estado real
+   * de cada operador registrado (Gloria ms-catalog, Ariel, Alisson, Dilan, Michael, etc.).
+   */
+  async getProcesoAtracciones() {
+    const [estados, dinero, operadores] = await Promise.all([
+      this.seguro(
+        'estados de reservas de atracciones',
+        () =>
+          this.dataSource.query(
+            `SELECT status, COUNT(*)::int AS n FROM schema_atracciones.atracciones_reservas GROUP BY status`,
+          ),
+        [] as { status: string; n: number }[],
+      ),
+      this.seguro(
+        'dinero de reservas de atracciones',
+        () =>
+          this.dataSource.query(
+            `SELECT COALESCE(SUM(total_price),0)::float AS cobrado,
+                    COALESCE(SUM(total_price) FILTER (WHERE status IN ('CANCELLED', 'CANCELADA', 'COMPENSATED')), 0)::float AS reembolsado,
+                    COUNT(*) FILTER (WHERE status IN ('CONFIRMADO_ASISTIDO', 'CHECKED_IN'))::int AS asistidos
+               FROM schema_atracciones.atracciones_reservas`,
+          ),
+        [{ cobrado: 0, reembolsado: 0, asistidos: 0 }],
+      ),
+      this.seguro(
+        'operadores de atracciones socios',
+        () =>
+          this.dataSource.query(
+            `SELECT codigo_nodo, nombre_proveedor, health_status, kill_switch_activo, latencia_ms, ultimo_ping_at, base_url_rest
+               FROM schema_proveedores.config_proveedor WHERE vertical = 'ATRACCIONES' ORDER BY nombre_proveedor`,
+          ),
+        [] as any[],
+      ),
+    ]);
+    const porEstado: Record<string, number> = {};
+    for (const e of estados) porEstado[String(e.status).toUpperCase()] = Number(e.n);
+    const d = dinero[0] || {};
+    return {
+      generadoEn: new Date().toISOString(),
+      porEstado,
+      totalReservas: Object.values(porEstado).reduce((a, b) => a + b, 0),
+      cobrado: Math.round(Number(d.cobrado || 0) * 100) / 100,
+      reembolsado: Math.round(Number(d.reembolsado || 0) * 100) / 100,
+      asistidos: Number(d.asistidos || 0),
+      timeoutMs: Number(process.env.ATRACCIONES_SOCIOS_TIMEOUT_MS) || 8000,
+      fuente: (process.env.ATRACCIONES_FUENTE || 'socios').toLowerCase(),
+      operadores: operadores.map((a: any) => ({
+        codigo: a.codigo_nodo,
+        nombre: a.nombre_proveedor,
+        estado: a.kill_switch_activo
+          ? 'APAGADA'
+          : !/^https?:\/\//i.test(a.base_url_rest || '') || a.health_status === 'UNKNOWN'
+            ? 'SIN_VERIFICAR'
+            : a.health_status === 'DOWN'
+              ? 'CAIDA'
+              : 'EN_LINEA',
+        latenciaMs: a.latencia_ms,
+        ultimoPing: a.ultimo_ping_at,
+      })),
+    };
+  }
+
   /** Estado REAL de los socios registrados (último ping guardado). */
   private async proveedores() {
     const filas = await this.seguro(
