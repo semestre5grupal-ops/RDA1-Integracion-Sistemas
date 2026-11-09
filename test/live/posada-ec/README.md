@@ -1,16 +1,25 @@
-# Pruebas reales Posada EC ⇄ Booking
+# Pruebas en vivo de alojamientos (socios ⇄ Booking)
 
-Suite de 64 escenarios que se ejecuta contra lo **desplegado** de Posada EC (Sam, `NODE_ALO_PEC`) y del Booking.
+Suite de 64 escenarios contra lo **desplegado**: un socio de alojamientos (por defecto Posada EC) y el
+Booking. Crea reservas reales y las **cancela todas al final**.
 
 ```bash
-POSADA_API_KEY=<clave> npm run test:live:posada                  # completa (crea y cancela reservas)
-POSADA_API_KEY=<clave> npm run test:live:posada -- --solo-lectura
-POSADA_API_KEY=<clave> npm run test:live:posada -- --solo=A02,A03
+POSADA_API_KEY=<clave> npm run test:live:posada                      # completa
+POSADA_API_KEY=<clave> npm run test:live:posada -- --solo-lectura    # no crea nada
+POSADA_API_KEY=<clave> npm run test:live:posada -- --solo=W01,W02    # solo algunas
 ```
 
-- `ejecutar.js`: catálogo de escenarios, ejecución, limpieza y reporte.
-- `cliente.js`: clientes HTTP de Posada y Booking, generador de cédulas válidas e inválidas y utilidades.
-- `resultados/`: un `.md` legible y un `.json` con la bitácora completa por corrida.
+Otro socio: `POSADA_BASE_URL=<url del socio>/api/v2 PRUEBAS_SOCIO="Kawsay Estancias"`.
+Otro Booking: `BOOKING_BASE_URL=<url>/api/v1`.
 
-El catálogo explicado, el criterio de cada resultado y el hallazgo previo están en
-[`docs/PRUEBAS_REALES_POSADA_EC.md`](../../../docs/PRUEBAS_REALES_POSADA_EC.md).
+| Grupo | Qué prueba |
+|---|---|
+| S | Salud y catálogo del socio en Booking |
+| A | Doble canal Booking ⇄ socio (incluye el caso «reservo en el hotel y luego en Booking») |
+| P, B | Reserva normal, concurrencia e idempotencia en el socio |
+| C, D, E, F, G | Fechas, ocupación, documento, precio y recursos inexistentes |
+| H, I, J | Ciclo de vida (cancelar, check-in, Saga), seguridad y tiempos |
+| W | **A través del gateway**: doble clic, carrera, reintento, sin documento, check-in y cancelación |
+
+Cada corrida deja un reporte `.md` y la bitácora `.json` en `resultados/`, que no se versiona.
+Explicación de la integración: [`docs/ALOJAMIENTOS_SOCIOS.md`](../../../docs/ALOJAMIENTOS_SOCIOS.md).

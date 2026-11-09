@@ -12,7 +12,7 @@
  *
  * Toda reserva que se crea se cancela al final (sección «Limpieza» del reporte).
  * El reporte queda en test/live/posada-ec/resultados/<fecha>.md y .json.
- * Catálogo y explicación: docs/PRUEBAS_REALES_POSADA_EC.md
+ * Catálogo y explicación: docs/ALOJAMIENTOS_SOCIOS.md
  */
 'use strict';
 
@@ -1247,7 +1247,7 @@ function reporteMd(resultados, limpieza, inicio, fin) {
 
 async function main() {
   if (!CONFIG.posadaKey) {
-    console.error('Falta POSADA_API_KEY (X-API-Key que Posada EC entregó al Booking). Ver docs/PRUEBAS_REALES_POSADA_EC.md');
+    console.error('Falta POSADA_API_KEY (X-API-Key que Posada EC entregó al Booking). Ver docs/ALOJAMIENTOS_SOCIOS.md');
     process.exit(2);
   }
   const inicio = new Date().toISOString();
