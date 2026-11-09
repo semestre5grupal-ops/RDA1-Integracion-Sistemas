@@ -102,7 +102,10 @@ function dividirEnCompras(eventos) {
       intentos,
       inicio: c.eventos[0],
       ultimo: c.eventos[c.eventos.length - 1],
-      cliente: c.eventos.find((e) => e.cliente)?.cliente ?? null,
+      // La búsqueda es pública (va sin token) y queda como "invitado"; el hold y
+      // el pago sí llevan la sesión: se muestra el correo si alguno lo tiene.
+      cliente: c.eventos.find((e) => e.cliente && e.cliente.includes('@'))?.cliente
+        ?? c.eventos.find((e) => e.cliente)?.cliente ?? null,
       nodo: c.eventos.find((e) => e.nodo)?.nodo ?? null,
       monto: cobro?.monto ?? c.eventos.find((e) => e.monto)?.monto ?? null,
       pnr: c.eventos.map((e) => String(e.detalle || '').match(/PNR ([A-Z0-9]{5,8})/)?.[1]).find(Boolean) ?? null,
@@ -128,6 +131,8 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
   const [latidos, setLatidos] = useState({});
   const [busActivo, setBusActivo] = useState(false);
   const [reproducir, setReproducir] = useState(null);
+  const [origen, setOrigen] = useState(null);
+  const diagramaRef = useRef(null);
   const seqRef = useRef(0);
   const inicioRef = useRef(null);
 
@@ -147,6 +152,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
       }
       inicioRef.current = data.inicio;
       setInicio(data.inicio);
+      setOrigen(data.origen || 'memoria');
       setContadores(data.contadores || {});
       setBusActivo(!!data.bus?.rabbitmq);
       setError(null);
@@ -208,6 +214,32 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
     return r;
   }, [elegida]);
 
+  /** Elige una compra y repite su recorrido; en pantallas angostas sube al diagrama. */
+  const elegir = useCallback((c) => {
+    setSeleccion(c ? c.id : null);
+    if (!c) return;
+    setReproducir({ eventos: c.eventos, n: Date.now() });
+    if (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 1199px)').matches) {
+      diagramaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
+
+  /** ↑ ↓ en la lista: pasa a la compra anterior o siguiente y la reproduce. */
+  const moverConTeclado = (ev) => {
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    const lista = comprasFiltradas.slice(0, 80);
+    if (!lista.length) return;
+    ev.preventDefault();
+    const i = lista.findIndex((c) => c.id === seleccion);
+    const j = i < 0 ? 0 : Math.min(lista.length - 1, Math.max(0, i + (ev.key === 'ArrowDown' ? 1 : -1)));
+    const c = lista[j];
+    setSeleccion(c.id);
+    setReproducir({ eventos: c.eventos, n: Date.now() });
+    const fila = ev.currentTarget.querySelector(`[data-compra="${CSS.escape(c.id)}"]`);
+    fila?.focus({ preventScroll: true });
+    fila?.scrollIntoView({ block: 'nearest' });
+  };
+
   const estadoNodo = (id) => (recorrido ? recorrido[id] ?? false : undefined);
   const latido = (id) => (recorrido ? null : latidos[id]?.resultado ?? null);
 
@@ -220,13 +252,22 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
         .pv-ficha { position: absolute; top: -3px; width: 10px; height: 10px; border-radius: 50%; background: ${T.azul}; animation: pvFicha .9s linear infinite; }
         @keyframes pvPunto { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
         @media (prefers-reduced-motion: reduce) { .pv-latido, .pv-ficha { animation: none } }
+        .pv-layout { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+        .pv-lista { display: flex; flex-direction: column; gap: 6px; }
+        .pv-lista > * { flex-shrink: 0; }
+        @media (min-width: 1200px) {
+          .pv-layout { grid-template-columns: minmax(0, 1.65fr) minmax(360px, 1fr); }
+          .pv-diagrama { position: sticky; top: 12px; }
+          .pv-lista { max-height: calc(100vh - 230px); overflow-y: auto; padding-right: 4px; }
+        }
+        .pv-fila:focus-visible { outline: 2px solid ${T.azul}; outline-offset: -2px; }
       `}</style>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: T.text2 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: error ? T.bad : pausado ? T.muted : '#d03b3b', animation: !pausado && !error ? 'pvPunto 1.2s infinite' : 'none' }} />
           <strong style={{ color: T.text }}>{error ? 'Sin conexión' : pausado ? 'En pausa' : 'En vivo'}</strong>
-          <span>· se actualiza cada 2 s · {eventos.length} pasos en pantalla{inicio ? ` · contadores desde ${hora(inicio)}` : ''}</span>
+          <span>· se actualiza cada 2 s · {eventos.length} pasos en pantalla{origen === 'base' ? ' · historial compartido (igual en todas las computadoras)' : inicio ? ` · solo memoria de este servidor desde ${hora(inicio)}` : ''}</span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" onClick={() => setPausado((p) => !p)}
@@ -243,8 +284,9 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
       </div>
       {error && <div role="alert" style={{ background: T.badBg, color: T.bad, borderRadius: 8, padding: '8px 12px', fontSize: '0.83rem' }}>⚠️ {error}</div>}
 
+      <div className="pv-layout">
       {/* ── La arquitectura con el tráfico en vivo ── */}
-      <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: 'grid', gap: 12 }}>
+      <section ref={diagramaRef} className="pv-diagrama" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ fontSize: '0.82rem', color: T.text2, maxWidth: 720 }}>
             {elegida ? (
@@ -264,7 +306,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
         <ArquitecturaVuelos eventos={pausado ? [] : eventos} aerolineas={aerolineas} busActivo={busActivo} reproducir={reproducir} />
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
-          <span style={{ fontSize: '0.74rem', color: T.muted, alignSelf: 'center', marginRight: 4 }}>Total desde que arrancó el servidor:</span>
+          <span style={{ fontSize: '0.74rem', color: T.muted, alignSelf: 'center', marginRight: 4 }}>{origen === 'base' ? 'Últimas 24 h:' : 'Total desde que arrancó el servidor:'}</span>
           {[...PASOS, ...RAMAS].map((p) => {
             const c = contadores[p.id] || { ok: 0, error: 0, aviso: 0 };
             const lat = latido(p.id);
@@ -281,11 +323,11 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
       </section>
 
       {/* ── Compras: una fila por compra (X-Correlation-Id + intento) ── */}
-      <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
+      <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, display: 'grid', gap: 10, alignContent: 'start' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div>
             <h3 style={{ margin: 0, fontSize: '1rem' }}>Compras</h3>
-            <div style={{ fontSize: '0.76rem', color: T.muted }}>Una fila por compra. Tócala para ver cada paso y repetir su recorrido en el diagrama.</div>
+            <div style={{ fontSize: '0.76rem', color: T.muted }}>Toca una compra y su recorrido se repite en el diagrama, sin moverte de aquí. Con ↑ ↓ pasas a la anterior o la siguiente.</div>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <label style={{ fontSize: '0.78rem', color: T.text2, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
@@ -299,7 +341,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
               onChange={(e) => setFiltro(e.target.value)}
               placeholder="Cliente, aerolínea, PNR o correlation ID…"
               aria-label="Buscar compra por cliente, aerolínea, PNR o correlation ID"
-              style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px', fontSize: '0.82rem', minWidth: 260 }}
+              style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px', fontSize: '0.82rem', minWidth: 220, flex: 1 }}
             />
           </div>
         </div>
@@ -312,8 +354,8 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
           </div>
         )}
 
-        <div style={{ display: 'grid', gap: 8 }}>
-          {comprasFiltradas.slice(0, 50).map((c) => {
+        <div className="pv-lista" onKeyDown={moverConTeclado}>
+          {comprasFiltradas.slice(0, 80).map((c) => {
             const abierta = seleccion === c.id;
             const tono = c.resumen.tono === 'neutro' ? { fg: T.text2, bg: T.fondo } : COLOR[c.resumen.tono];
             const resultadoDe = (paso) => {
@@ -325,32 +367,33 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
               <div key={c.id} style={{ border: `1px solid ${abierta ? T.azul : c.resumen.tono === 'error' ? '#f3c0bb' : T.border}`, borderRadius: 10, overflow: 'hidden' }}>
                 <button
                   type="button"
-                  onClick={() => { setSeleccion(abierta ? null : c.id); if (!abierta) setReproducir({ eventos: c.eventos, n: Date.now() }); }}
+                  className="pv-fila"
+                  data-compra={c.id}
+                  onClick={() => elegir(abierta ? null : c)}
                   aria-expanded={abierta}
-                  style={{ width: '100%', textAlign: 'left', background: abierta ? '#eef3fb' : T.surface, border: 'none', padding: '10px 12px', cursor: 'pointer', display: 'grid', gap: 8 }}
+                  style={{ width: '100%', textAlign: 'left', background: abierta ? '#eef3fb' : T.surface, border: 'none', padding: '8px 10px', cursor: 'pointer', display: 'grid', gap: 6 }}
                 >
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(70px,auto) minmax(160px,1.4fr) minmax(120px,1fr) auto auto', gap: 12, alignItems: 'center', fontSize: '0.82rem' }}>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text2 }}>{hora(c.inicio.ts)}</span>
-                    <span style={{ fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.cliente || ''}>👤 {c.cliente || 'sin identificar'}</span>
-                    <span style={{ color: T.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', minWidth: 0 }}>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text2, flexShrink: 0 }}>{hora(c.inicio.ts)}</span>
+                    <span style={{ fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} title={c.cliente || ''}>👤 {c.cliente || 'sin identificar'}</span>
+                    <span style={{ background: tono.bg, color: tono.fg, borderRadius: 999, padding: '2px 9px', fontWeight: 700, fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.resumen.label}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.76rem', color: T.text2, minWidth: 0 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
                       {c.nodo ? `✈️ ${nombreAerolinea[c.nodo] || c.nodo}` : '✈️ todas las aerolíneas'}{c.pnr ? ` · PNR ${c.pnr}` : ''}
                     </span>
-                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{c.monto ? usd(c.monto) : ''}</span>
-                    <span style={{ background: tono.bg, color: tono.fg, borderRadius: 999, padding: '2px 10px', fontWeight: 700, fontSize: '0.76rem', whiteSpace: 'nowrap' }}>{c.resumen.label}</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: T.text, flexShrink: 0 }}>{c.monto ? usd(c.monto) : ''}</span>
                   </div>
 
-                  {/* Barra del flujo: hasta dónde llegó la compra y dónde falló */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                    {PASOS.map((p, i) => {
+                  {/* Barra del flujo: un punto por paso (verde, ámbar, rojo o gris si no llegó) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+                    {PASOS.map((p) => {
                       const r = resultadoDe(p.id);
                       const est = r ? COLOR[r] : null;
                       return (
-                        <span key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span title={c.eventos.filter((e) => e.paso === p.id).map((e) => e.detalle).join(' · ') || 'No llegó a este paso'}
-                            style={{ fontSize: '0.72rem', borderRadius: 6, padding: '2px 7px', fontWeight: 600, background: est ? est.bg : T.fondo, color: est ? est.fg : '#b9b8b3', border: `1px solid ${est ? 'transparent' : T.border}` }}>
-                            {est ? est.icon : '·'} {p.label}
-                          </span>
-                          {i < PASOS.length - 1 && <span aria-hidden="true" style={{ color: '#c9ccd1', fontSize: '0.7rem' }}>→</span>}
+                        <span key={p.id} title={`${p.label}: ${c.eventos.filter((e) => e.paso === p.id).map((e) => e.detalle).join(' · ') || 'no llegó a este paso'}`}
+                          style={{ fontSize: '0.66rem', borderRadius: 5, padding: '1px 5px', fontWeight: 600, background: est ? est.bg : T.fondo, color: est ? est.fg : '#b9b8b3', border: `1px solid ${est ? 'transparent' : T.border}` }}>
+                          {est ? est.icon : '·'} {p.label}
                         </span>
                       );
                     })}
@@ -395,6 +438,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
           })}
         </div>
       </section>
+      </div>
     </div>
   );
 }
