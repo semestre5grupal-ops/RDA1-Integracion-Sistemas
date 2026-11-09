@@ -435,13 +435,16 @@ export class AlojamientosSociosService {
   // ───────────────────────────── Disponibilidad ─────────────────────────────
 
   /** Opciones (tipo × plan) del socio para unas fechas, con capacidades de /habitaciones. */
-  async opciones(idCompuesto: string, checkin: string, checkout: string, adultos = 1): Promise<{ nodo: ConfigProveedor; idSocio: string; opciones: OpcionSocio[]; respuesta: RespuestaSocio } | null> {
+  async opciones(idCompuesto: string, checkin: string, checkout: string, adultos = 1, habitaciones = 1): Promise<{ nodo: ConfigProveedor; idSocio: string; opciones: OpcionSocio[]; respuesta: RespuestaSocio } | null> {
     const sep = AlojamientosSociosService.separarId(idCompuesto);
     if (!sep) return null;
     const nodo = await this.nodoPorCodigo(sep.nodo);
     if (!nodo) return null;
     const id = encodeURIComponent(sep.id);
-    const q = `checkin=${checkin}&checkout=${checkout}&adults=${adultos}&rooms=1`;
+    // La ocupación se pregunta con el número real de habitaciones: un socio que filtra por
+    // capacidad no ofrece «4 adultos en 1 habitación» aunque sí «4 adultos en 4».
+    const rooms = Math.max(1, habitaciones);
+    const q = `checkin=${checkin}&checkout=${checkout}&adults=${adultos}&rooms=${rooms}`;
     const [disp, hab] = await Promise.all([
       this.llamar(nodo, 'GET', `/alojamientos/${id}/availability?${q}`),
       this.llamar(nodo, 'GET', `/alojamientos/${id}/habitaciones`),

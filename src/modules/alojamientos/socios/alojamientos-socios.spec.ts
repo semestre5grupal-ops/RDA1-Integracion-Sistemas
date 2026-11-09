@@ -53,10 +53,14 @@ class SocioFalso {
       };
     }
     if (metodo === 'GET' && p === '/alojamientos/HTL-1/availability') {
+      // Como Cozy: solo ofrece los tipos donde cabe la ocupación pedida (adultos por habitación).
+      const adultos = Number(url.searchParams.get('adults') || 1);
+      const rooms = Number(url.searchParams.get('rooms') || 1);
+      const capacidad: Record<string, number> = { HABITACION_ESTANDAR: 2, SUITE_FAMILIAR: 4 };
       return {
         status: 200,
         body: {
-          opciones: Object.keys(this.cupo).map((t) => ({
+          opciones: Object.keys(this.cupo).filter((t) => adultos <= capacidad[t] * rooms).map((t) => ({
             tipoHabitacionCodigo: t,
             nombre: t,
             estaDisponible: this.libres(t) > 0,
@@ -318,6 +322,14 @@ describe('AlojamientosSociosReservasService (Saga hacia el socio)', () => {
     const r = await reservas.reservar(datos());
     expect(r.status).toBe(ESTADO_RESERVADO);
     expect(posada.ordenes).toHaveLength(1);
+  });
+
+  it('varias habitaciones a la vez: pregunta la ocupación con el número real de habitaciones', async () => {
+    const { reservas, posada } = montar();
+    posada.cupo.HABITACION_ESTANDAR = 6;
+    const r = await reservas.reservar(datos({ habitaciones: 3, adultos: 6 }));
+    expect(r.status).toBe(ESTADO_RESERVADO);
+    expect(r.habitaciones_count).toBe(3);
   });
 
   it('sin documento del titular: 400 antes de llamar al socio', async () => {
