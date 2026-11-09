@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ResumenTab } from '../components/admin/ResumenTab';
 import { ProcesosTab } from '../components/admin/ProcesosTab';
+import { ProcesosAlojamientosTab } from '../components/admin/ProcesosAlojamientosTab';
 import { api } from '../services/api';
 import { supabase } from '../services/supabase';
 import { GestionAlojamientos } from '../components/admin/GestionAlojamientos';
@@ -2472,7 +2473,7 @@ const VERTICALES_ADMIN = [
   { id: 'vuelos', label: '✈️ Vuelos', sub: 'Proceso en vivo, grafos y liquidaciones por aerolínea' },
   { id: 'autos', label: '🚗 Autos', sub: 'Flota que ve Booking' },
   { id: 'atracciones', label: '🎡 Atracciones', sub: 'Categorías del catálogo' },
-  { id: 'alojamientos', label: '🏨 Alojamientos', sub: 'Catálogo, tipos de habitación y proveedores' },
+  { id: 'alojamientos', label: '🏨 Alojamientos', sub: 'Proceso en vivo, grafos de fallas, catálogo y tipos de habitación' },
 ];
 
 function ServiciosTab({ refreshKey }) {
@@ -2503,7 +2504,12 @@ function ServiciosTab({ refreshKey }) {
         )}
         {vertical === 'autos' && <Panel2_GestionFlotaAutos refreshKey={refreshKey} />}
         {vertical === 'atracciones' && <Panel3_ArbolCategoriasAtracciones refreshKey={refreshKey} />}
-        {vertical === 'alojamientos' && <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8 }}><GestionAlojamientos /></div>}
+        {vertical === 'alojamientos' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            <ProcesosAlojamientosTab refreshKey={refreshKey} />
+            <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8 }}><GestionAlojamientos /></div>
+          </div>
+        )}
       </div>
     </div>
   );

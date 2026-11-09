@@ -90,6 +90,12 @@ export class AdminController {
     return this.metricasService.getProcesoVuelos();
   }
 
+  @Get('procesos/alojamientos')
+  @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de alojamientos (estados, dinero, hoteles socios)' })
+  async getProcesoAlojamientos() {
+    return this.metricasService.getProcesoAlojamientos();
+  }
+
   @Get('finanzas/vuelos/conciliacion')
   @ApiOperation({ summary: 'Conciliación con aerolíneas socias: vendido, devuelto, comisión y neto a pagar por aerolínea y por reserva' })
   @ApiQuery({ name: 'desde', required: false, example: '2026-11-01' })

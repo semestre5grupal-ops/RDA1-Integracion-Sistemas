@@ -289,6 +289,69 @@ export class AdminMetricasService {
     };
   }
 
+  /**
+   * Datos en vivo para los grafos del proceso de reserva de ALOJAMIENTOS con hoteles
+   * socios: reservas por estado (RESERVADO / CONFIRMADO_ASISTIDO / CANCELADO), dinero
+   * reservado y reembolsado, y el estado real de cada hotel socio (último ping).
+   */
+  async getProcesoAlojamientos() {
+    const [estados, dinero, hoteles] = await Promise.all([
+      this.seguro(
+        'estados de reservas de alojamientos socios',
+        () =>
+          this.dataSource.query(
+            `SELECT estado AS status, COUNT(*)::int AS n FROM schema_alojamientos.alojamientos_reservas_socio GROUP BY estado`,
+          ),
+        [] as { status: string; n: number }[],
+      ),
+      this.seguro(
+        'dinero de reservas de alojamientos socios',
+        () =>
+          this.dataSource.query(
+            `SELECT COALESCE(SUM(total),0)::float AS cobrado, COALESCE(SUM(monto_reembolsado),0)::float AS reembolsado,
+                    COUNT(*) FILTER (WHERE estado = 'CONFIRMADO_ASISTIDO')::int AS asistidos
+               FROM schema_alojamientos.alojamientos_reservas_socio`,
+          ),
+        [{ cobrado: 0, reembolsado: 0, asistidos: 0 }],
+      ),
+      this.seguro(
+        'hoteles socios',
+        () =>
+          this.dataSource.query(
+            `SELECT codigo_nodo, nombre_proveedor, health_status, kill_switch_activo, latencia_ms, ultimo_ping_at, base_url_rest
+               FROM schema_proveedores.config_proveedor WHERE vertical = 'ALOJAMIENTOS' ORDER BY nombre_proveedor`,
+          ),
+        [] as any[],
+      ),
+    ]);
+    const porEstado: Record<string, number> = {};
+    for (const e of estados) porEstado[String(e.status).toUpperCase()] = Number(e.n);
+    const d = dinero[0] || {};
+    return {
+      generadoEn: new Date().toISOString(),
+      porEstado,
+      totalReservas: Object.values(porEstado).reduce((a, b) => a + b, 0),
+      cobrado: Math.round(Number(d.cobrado || 0) * 100) / 100,
+      reembolsado: Math.round(Number(d.reembolsado || 0) * 100) / 100,
+      asistidos: Number(d.asistidos || 0),
+      timeoutMs: Number(process.env.ALOJAMIENTOS_SOCIOS_TIMEOUT_MS) || 10000,
+      fuente: (process.env.ALOJAMIENTOS_FUENTE || 'socios').toLowerCase(),
+      hoteles: hoteles.map((a: any) => ({
+        codigo: a.codigo_nodo,
+        nombre: a.nombre_proveedor,
+        estado: a.kill_switch_activo
+          ? 'APAGADA'
+          : !/^https?:\/\//i.test(a.base_url_rest || '') || a.health_status === 'UNKNOWN'
+            ? 'SIN_VERIFICAR'
+            : a.health_status === 'DOWN'
+              ? 'CAIDA'
+              : 'EN_LINEA',
+        latenciaMs: a.latencia_ms,
+        ultimoPing: a.ultimo_ping_at,
+      })),
+    };
+  }
+
   /** Estado REAL de los socios registrados (último ping guardado). */
   private async proveedores() {
     const filas = await this.seguro(
