@@ -104,8 +104,10 @@ export class FinanzasService {
       where: whereClause,
       order: { createdAt: 'DESC' },
     });
+    const revisiones = await this.revisarVentasVuelos(list.map((l) => `${l.proveedorCodigo}|${l.periodo}`));
 
     return list.map(l => ({
+      revision: revisiones.get(`${l.proveedorCodigo}|${l.periodo}`) ?? null,
       id: l.id,
       numero_liquidacion: l.numeroLiquidacion,
       porcentaje_comision: Number(l.porcentajeComision ?? 10),
@@ -120,6 +122,46 @@ export class FinanzasService {
       fecha_pago: l.fechaPago,
       created_at: l.createdAt,
     }));
+  }
+
+  /**
+   * Revisa las ventas de vuelos de cada liquidación antes de pagarla:
+   *  - mezcla ventas con el modelo anterior (10 % dentro del precio) y con el
+   *    nuevo (precio de la aerolínea + cargo de servicio): el total mezclado no
+   *    se puede pagar sin revisar;
+   *  - ventas nuevas cuyo cargo de servicio no es el 10 % de su precio de aerolínea.
+   * Solo lee; no cambia ningún monto.
+   */
+  private async revisarVentasVuelos(claves: string[]): Promise<Map<string, { revisar: boolean; motivos: string[]; ventas: number }>> {
+    const salida = new Map<string, { revisar: boolean; motivos: string[]; ventas: number }>();
+    if (!claves.length) return salida;
+    let filas: any[] = [];
+    try {
+      filas = await this.liquidacionRepo.manager.query(
+        `SELECT codigo_nodo,
+                to_char(created_at AT TIME ZONE 'America/Guayaquil', 'YYYY-MM') || '-' ||
+                  CASE WHEN extract(day FROM created_at AT TIME ZONE 'America/Guayaquil') <= 15 THEN 'Q1' ELSE 'Q2' END AS periodo,
+                count(*)::int AS ventas,
+                count(*) FILTER (WHERE cargo_servicio IS NULL)::int AS antiguas,
+                count(*) FILTER (WHERE cargo_servicio IS NOT NULL)::int AS nuevas,
+                count(*) FILTER (WHERE cargo_servicio IS NOT NULL
+                  AND abs(cargo_servicio - round(monto_aerolinea * 0.10, 2)) > 0.02)::int AS cargo_distinto
+           FROM public.vuelos_reservas_socio
+          GROUP BY 1, 2`,
+      );
+    } catch (e: any) {
+      this.logger.warn(`No se pudo revisar las ventas de vuelos: ${e?.message}`);
+      return salida;
+    }
+    for (const f of filas) {
+      const k = `${f.codigo_nodo}|${f.periodo}`;
+      if (!claves.includes(k)) continue;
+      const motivos: string[] = [];
+      if (f.antiguas > 0 && f.nuevas > 0) motivos.push(`mezcla ${f.antiguas} venta(s) con el modelo anterior y ${f.nuevas} con el nuevo`);
+      if (f.cargo_distinto > 0) motivos.push(`${f.cargo_distinto} venta(s) con cargo de servicio distinto al 10 %`);
+      salida.set(k, { revisar: motivos.length > 0, motivos, ventas: Number(f.ventas) });
+    }
+    return salida;
   }
 
   async marcarLiquidacionPagada(id: string, dto: { comprobante_url: string; notas?: string }): Promise<any> {

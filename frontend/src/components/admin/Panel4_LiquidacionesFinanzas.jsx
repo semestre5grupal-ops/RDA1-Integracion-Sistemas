@@ -25,6 +25,7 @@ export function Panel4_LiquidacionesFinanzas() {
         monto_neto_proveedor_90pct: Number(l.monto_liquidar_socio_90pct ?? 0),
         estado: l.estado === 'PAGADO' ? 'PAGADO' : 'PENDIENTE_PAGO',
         comprobante_url: l.comprobante_transferencia_url,
+        revision: l.revision ?? null,
       })));
     } catch (e) {
       setLiquidaciones([]);
@@ -95,7 +96,7 @@ export function Panel4_LiquidacionesFinanzas() {
         </div>
 
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '16px', borderRadius: '8px', borderTop: '4px solid #f59e0b' }}>
-          <span style={{ fontSize: '0.82rem', color: '#92400e', fontWeight: 600 }}>Por Liquidar a Proveedores (90% Neto):</span>
+          <span style={{ fontSize: '0.82rem', color: '#92400e', fontWeight: 600 }}>Por pagar a las aerolíneas (precio de cada una):</span>
           <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#b45309', marginTop: '4px' }}>
             ${totalPorPagar.toFixed(2)} USD
           </div>
@@ -117,9 +118,9 @@ export function Panel4_LiquidacionesFinanzas() {
           <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
             <th style={{ padding: '12px 10px' }}>Código Liquidación</th>
             <th style={{ padding: '12px 10px' }}>Proveedor / Vertical</th>
-            <th style={{ padding: '12px 10px' }}>Total Venta</th>
-            <th style={{ padding: '12px 10px' }}>Comisión Booking</th>
-            <th style={{ padding: '12px 10px' }}>Neto Proveedor (90%)</th>
+            <th style={{ padding: '12px 10px' }}>Total cobrado al cliente</th>
+            <th style={{ padding: '12px 10px' }}>Cargo de Booking</th>
+            <th style={{ padding: '12px 10px' }}>A pagar a la aerolínea</th>
             <th style={{ padding: '12px 10px' }}>Estado</th>
             <th style={{ padding: '12px 10px' }}>Acción</th>
           </tr>
@@ -128,7 +129,17 @@ export function Panel4_LiquidacionesFinanzas() {
           {liquidaciones.map((l) => (
             <tr key={l.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
               <td style={{ padding: '12px 10px', fontWeight: 600, color: '#003580' }}>{l.codigo_liquidacion}</td>
-              <td style={{ padding: '12px 10px' }}>{l.proveedor_nombre}</td>
+              <td style={{ padding: '12px 10px' }}>
+                {l.proveedor_nombre}
+                {l.revision?.revisar && (
+                  <div title={l.revision.motivos.join('; ')} style={{ marginTop: 4, display: 'inline-block', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 12, padding: '2px 8px', fontSize: '0.72rem', fontWeight: 700 }}>
+                    ⚠ Revisar antes de pagar
+                  </div>
+                )}
+                {l.revision?.revisar && (
+                  <div style={{ marginTop: 3, fontSize: '0.74rem', color: '#7f1d1d' }}>{l.revision.motivos.join(' · ')}</div>
+                )}
+              </td>
               <td style={{ padding: '12px 10px' }}>${Number(l.total_ventas_bruto).toFixed(2)}</td>
               <td style={{ padding: '12px 10px', color: '#047857', fontWeight: 700 }}>+${Number(l.comision_booking_10pct).toFixed(2)}</td>
               <td style={{ padding: '12px 10px', fontWeight: 700 }}>${Number(l.monto_neto_proveedor_90pct).toFixed(2)}</td>

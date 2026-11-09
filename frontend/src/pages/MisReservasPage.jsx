@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listarReservas as listarReservasVuelos, obtenerReserva as obtenerReservaVuelo } from '../services/vuelosApi';
+import {
+  listarReservas as listarReservasVuelos,
+  obtenerReserva as obtenerReservaVuelo,
+  hacerCheckIn as hacerCheckInVuelo,
+  cotizarCancelacion as cotizarCancelacionVuelo,
+  cancelarReserva as cancelarReservaVuelo,
+} from '../services/vuelosApi';
 import { getOrdersAuto, cancelOrderAuto } from '../services/autosApi';
 import { getReservas as getReservasAtracciones, cancelarReservaAtraccion } from '../services/atraccionesApi';
 import { getReservasAlojamientos } from '../services/alojamientosApi';
@@ -110,6 +116,8 @@ export function MisReservasPage() {
   // Check-in Multivertical (Consideraciones RDA2 §4)
   const [checkinReserva, setCheckinReserva] = useState(null);
   const [checkinStepResult, setCheckinStepResult] = useState(null);
+  // Misma Idempotency-Key en los reintentos de una cancelación de vuelo (evita cancelar dos veces).
+  const claveCancelVuelo = useRef(null);
   const [checkinLicencia, setCheckinLicencia] = useState('LIC-EC-1729988');
   const [checkinKmSalida, setCheckinKmSalida] = useState(10000);
   const [checkinKmRetorno, setCheckinKmRetorno] = useState(10185);
@@ -223,14 +231,30 @@ export function MisReservasPage() {
         });
         updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO');
       } else if (reserva.tipo === 'vuelo') {
-        setCheckinStepResult({
-          vertical: 'vuelo',
-          success: true,
-          mensaje: '¡Pase de abordar emitido con éxito! Asiento de cabina asignado.',
-          asiento: '14B (Ventana)',
-          pnr: reserva.pnr,
-        });
-        updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO');
+        // Check-in real en la aerolínea (POST /vuelos/bookings/{id}/check-in).
+        // Booking guarda el estado CHECKED_IN en el servidor, así que se mantiene al recargar.
+        try {
+          const resultado = await hacerCheckInVuelo(reserva.id);
+          const asientos = (resultado?.checkedInPassengers ?? [])
+            .map((p) => p?.seatNumber)
+            .filter(Boolean);
+          setCheckinStepResult({
+            vertical: 'vuelo',
+            success: true,
+            mensaje: 'Check-in realizado en la aerolínea.',
+            asiento: asientos.length ? asientos.join(', ') : 'Asignado por la aerolínea',
+            pnr: reserva.pnr,
+          });
+          updateCheckinState(reserva.id || reserva.pnr, 'CHECKED_IN');
+          cargarTodasLasReservas(true);
+        } catch (fallo) {
+          const datos = fallo?.response?.data ?? {};
+          setCheckinStepResult({
+            vertical: 'vuelo',
+            success: false,
+            mensaje: datos.detail || datos.title || 'La aerolínea no aceptó el check-in. Inténtalo de nuevo.',
+          });
+        }
       }
     } finally {
       setCheckinProcessing(false);
@@ -865,6 +889,37 @@ export function MisReservasPage() {
         });
         localStorage.setItem('reservas_autos', JSON.stringify(updated));
 
+      } else if (selectedReserva.tipo === 'vuelo') {
+        // Cancelación real: la aerolínea cotiza y cancela; Booking devuelve al
+        // cliente lo que diga la aerolínea y guarda CANCELLED en el servidor.
+        try {
+          const cotizacion = await cotizarCancelacionVuelo(selectedReserva.id);
+          if (!claveCancelVuelo.current) claveCancelVuelo.current = crypto.randomUUID();
+          const r = await cancelarReservaVuelo(
+            selectedReserva.id,
+            { quoteId: cotizacion.quoteId, reason: motivoFinal },
+            claveCancelVuelo.current,
+          );
+          const devuelto = r?.refund?.executedAmount ?? r?.refundAmount ?? cotizacion.refundAmount ?? '0.00';
+          res = {
+            status: r?.status || 'CANCELLED',
+            message: Number(devuelto) > 0
+              ? 'Reserva cancelada en la aerolínea. El reembolso se devolvió a tu medio de pago (el cargo por servicio de Booking no es reembolsable).'
+              : 'Reserva cancelada en la aerolínea. Según su tarifa, no corresponde reembolso.',
+            refund: {
+              refund_id: r?.refund?.refundId || r?.refund?.creditNote?.numero || r?.pnr || selectedReserva.pnr,
+              amount: devuelto,
+              currency: r?.currency || cotizacion.currency || 'USD',
+              status: 'PROCESSED',
+            },
+            stock_restoration: { message: 'La aerolínea liberó los asientos.' },
+          };
+          claveCancelVuelo.current = null;
+          cargarTodasLasReservas(true);
+        } catch (fallo) {
+          const datos = fallo?.response?.data ?? {};
+          throw new Error(datos.detail || datos.title || 'La aerolínea no aceptó la cancelación. Inténtalo de nuevo.');
+        }
       } else {
         res = {
           status: 'CANCELLED',
@@ -894,14 +949,15 @@ export function MisReservasPage() {
         }
       });
 
+      const estadoFinal = res?.status === 'CANCELLATION_PENDING' ? 'CANCELLATION_PENDING' : 'CANCELLED';
       setSelectedReserva(prev => ({
         ...prev,
-        status: 'CANCELLED'
+        status: estadoFinal
       }));
 
       setReservas(prev => prev.map(r => {
         if (r.id === selectedReserva.id || r.pnr === selectedReserva.pnr) {
-          return { ...r, status: 'CANCELLED' };
+          return { ...r, status: estadoFinal };
         }
         return r;
       }));
@@ -1824,10 +1880,12 @@ export function MisReservasPage() {
                         ✓
                       </div>
                       <h4 style={{ margin: '0 0 6px', color: '#15803d', fontSize: '1.25rem', fontWeight: 800 }}>
-                        ¡Cancelación y Reembolso Exitosos!
+                        {selectedReserva?.tipo === 'vuelo' ? 'Reserva cancelada' : '¡Cancelación y Reembolso Exitosos!'}
                       </h4>
                       <p style={{ fontSize: '0.88rem', color: '#4b5563', margin: '0 0 16px' }}>
-                        Se ejecutó el protocolo de reversión Saga: tus fondos fueron devueltos y los cupos liberados.
+                        {selectedReserva?.tipo === 'vuelo'
+                          ? cancelSuccess.message
+                          : 'Se ejecutó el protocolo de reversión Saga: tus fondos fueron devueltos y los cupos liberados.'}
                       </p>
 
                       <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px', textAlign: 'left', marginBottom: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1837,7 +1895,7 @@ export function MisReservasPage() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: '#64748b' }}>Monto Reembolsado:</span>
-                          <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>{convertPrice(cancelSuccess.amount)} (100%)</strong>
+                          <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>{convertPrice(cancelSuccess.amount)}{selectedReserva?.tipo === 'vuelo' ? '' : ' (100%)'}</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: '#64748b' }}>Identificador de Reembolso:</span>
@@ -2222,13 +2280,20 @@ export function MisReservasPage() {
                       </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => handleExecuteCheckin(checkinReserva)}
-                      disabled={checkinProcessing}
-                      style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
-                    >
-                      {checkinProcessing ? 'Emitiendo Pase...' : '🎫 Emitir Pase de Abordar Digital'}
-                    </button>
+                    <>
+                      {checkinStepResult?.vertical === 'vuelo' && checkinStepResult.success === false && (
+                        <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
+                          {checkinStepResult.mensaje}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => handleExecuteCheckin(checkinReserva)}
+                        disabled={checkinProcessing}
+                        style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
+                      >
+                        {checkinProcessing ? 'Haciendo check-in…' : '🎫 Hacer check-in'}
+                      </button>
+                    </>
                   )}
                 </div>
               )}
