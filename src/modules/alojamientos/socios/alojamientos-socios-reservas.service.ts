@@ -218,7 +218,7 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     const correlationId = d.correlationId || `corr-alo-${randomUUID()}`;
 
     // 1. Disponibilidad real del socio y elección del tipo (el más barato que cabe si no se indica).
-    const disp = await this.socios.opciones(d.idCompuesto, d.checkin, d.checkout, d.adultos);
+    const disp = await this.socios.opciones(d.idCompuesto, d.checkin, d.checkout, d.adultos, d.habitaciones);
     if (!disp) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
     const { nodo, idSocio, opciones, respuesta } = disp;
     if (respuesta.status !== 200) this.errorDelSocio(respuesta, nodo, 'consultar la disponibilidad');
