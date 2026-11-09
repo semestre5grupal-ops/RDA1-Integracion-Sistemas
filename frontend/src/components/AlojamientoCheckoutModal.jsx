@@ -3,6 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { jsPDF } from 'jspdf';
 import { reservarAlojamiento } from '../services/alojamientosApi';
+
+/** Cédula ecuatoriana: 10 dígitos, provincia 01–24 (o 30) y dígito verificador módulo 10. */
+function cedulaValida(c) {
+  if (!/^\d{10}$/.test(c)) return false;
+  const provincia = Number(c.slice(0, 2));
+  if (!((provincia >= 1 && provincia <= 24) || provincia === 30) || Number(c[2]) > 5) return false;
+  let suma = 0;
+  for (let i = 0; i < 9; i++) {
+    let d = Number(c[i]) * (i % 2 === 0 ? 2 : 1);
+    if (d > 9) d -= 9;
+    suma += d;
+  }
+  return (10 - (suma % 10)) % 10 === Number(c[9]);
+}
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { formatearFecha } from '../services/formato';
@@ -79,6 +93,9 @@ export function AlojamientoCheckoutModal({
   const [pais, setPais] = useState('EC');
   const [telefonoPrefijo, setTelefonoPrefijo] = useState('+593');
   const [telefono, setTelefono] = useState(user?.user_metadata?.telefono || '');
+  // El hotel exige el documento del titular (contrato de alojamientos): cédula, pasaporte o RUC.
+  const [documentoTipo, setDocumentoTipo] = useState('CEDULA');
+  const [documentoNumero, setDocumentoNumero] = useState(user?.user_metadata?.cedula || '');
   const [confirmacionSinPapel, setConfirmacionSinPapel] = useState(true);
   const [nombreHuesped, setNombreHuesped] = useState(defaultCardHolder);
   const [deseaAuto, setDeseaAuto] = useState(false);
@@ -162,6 +179,23 @@ export function AlojamientoCheckoutModal({
     }
     if (!telefono.trim()) {
       setErrorMsg('Por favor ingresa un número de teléfono de contacto.');
+      return;
+    }
+    const doc = documentoNumero.trim();
+    if (!doc) {
+      setErrorMsg('Por favor ingresa el número de documento del titular: el hotel lo exige para registrar la reserva.');
+      return;
+    }
+    if (documentoTipo === 'CEDULA' && !cedulaValida(doc)) {
+      setErrorMsg('La cédula no es válida. Revisa los 10 dígitos.');
+      return;
+    }
+    if (documentoTipo === 'RUC' && !/^\d{13}$/.test(doc)) {
+      setErrorMsg('El RUC debe tener 13 dígitos.');
+      return;
+    }
+    if (documentoTipo === 'PASAPORTE' && !/^[A-Za-z0-9]{6,12}$/.test(doc)) {
+      setErrorMsg('El pasaporte debe tener entre 6 y 12 letras o números.');
       return;
     }
 
@@ -268,6 +302,7 @@ export function AlojamientoCheckoutModal({
       ninos: Math.max(0, parseInt(children, 10) || 0),
       ...(tipoHabitacion?.product_id ? { tipo_habitacion_id: tipoHabitacion.product_id } : {}),
       ...(telefono.trim() ? { phone: `${telefonoPrefijo} ${telefono.trim()}`.slice(0, 30) } : {}),
+      ...(documentoNumero.trim() ? { documento_tipo: documentoTipo, documento_numero: documentoNumero.trim().toUpperCase() } : {}),
       ...(peticionesEspeciales.trim() ? { special_requests: peticionesEspeciales.trim().slice(0, 1000) } : {}),
       ...(horaLlegada && horaLlegada !== 'No lo sé' ? { arrival_time: horaLlegada } : {}),
       ...(nombreHuesped.trim() && nombreHuesped.trim() !== `${nombre} ${apellidos}`.trim() ? { guest_name: nombreHuesped.trim() } : {}),
@@ -1017,6 +1052,35 @@ export function AlojamientoCheckoutModal({
                       </div>
                       <span className="bkg-input-subtext">
                         Por si el alojamiento necesita contactar contigo.
+                      </span>
+                    </div>
+
+                    <div className="bkg-input-group">
+                      <label htmlFor="chk-documento">Documento del titular *</label>
+                      <div className="bkg-phone-wrapper">
+                        <select
+                          className="bkg-phone-prefix-select"
+                          aria-label="Tipo de documento"
+                          value={documentoTipo}
+                          onChange={(e) => setDocumentoTipo(e.target.value)}
+                        >
+                          <option value="CEDULA">Cédula</option>
+                          <option value="PASAPORTE">Pasaporte</option>
+                          <option value="RUC">RUC</option>
+                        </select>
+                        <input
+                          id="chk-documento"
+                          type="text"
+                          style={{ flex: 1 }}
+                          value={documentoNumero}
+                          onChange={(e) => setDocumentoNumero(e.target.value.replace(/\s/g, ''))}
+                          placeholder={documentoTipo === 'PASAPORTE' ? 'AB123456' : documentoTipo === 'RUC' ? '1790012345001' : '1710034065'}
+                          maxLength={13}
+                          required
+                        />
+                      </div>
+                      <span className="bkg-input-subtext">
+                        El hotel lo usa para registrarte y confirmar tu llegada en recepción.
                       </span>
                     </div>
                   </div>

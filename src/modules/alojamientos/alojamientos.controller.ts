@@ -3,7 +3,6 @@ import {
   Get,
   Param,
   Query,
-  UseInterceptors,
   Header,
   Headers,
   Post,
@@ -20,7 +19,7 @@ import {
   UseGuards,
   Optional,
 } from '@nestjs/common';
-import { CacheInterceptor, CACHE_MANAGER } from '@nestjs/cache-manager';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { AlojamientosService } from './alojamientos.service';
 import {
@@ -558,7 +557,7 @@ export class AlojamientosController {
   }
 
   @Get()
-  @UseInterceptors(CacheInterceptor)
+  // Sin caché de 60 s: los alojamientos de los socios deben verse al refrescar (Flujo 1).
   @Header('X-API-Deprecation-Date', '2027-12-31')
   @ApiOperation({ summary: 'Obtener el listado de alojamientos (Caché habilitado, HATEOAS Nivel 3)' })
   @ApiResponse({ status: 200, description: 'Listado de alojamientos recuperado exitosamente.' })
@@ -594,7 +593,7 @@ export class AlojamientosController {
   }
 
   @Get(':id')
-  @UseInterceptors(CacheInterceptor)
+  // Sin caché de 60 s: los alojamientos de los socios deben verse al refrescar (Flujo 1).
   @Header('X-API-Deprecation-Date', '2027-12-31')
   @ApiOperation({ summary: 'Obtener el detalle de un alojamiento por su ID' })
   @ApiParam({ name: 'id', description: 'ID del alojamiento', type: 'string' })

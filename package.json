@@ -27,7 +27,8 @@
     "prueba:db": "npm run build && node dist/modules/vuelos/pruebas/prueba-datos.js && node dist/modules/vuelos/pruebas/prueba-gestion.js",
     "test:api:clientes": "node run_api_tests.js",
     "test:contracts": "jest --config jest-contracts.config.js --runInBand --forceExit",
-    "test:pact": "jest --config jest-pact.config.js --runInBand --forceExit"
+    "test:pact": "jest --config jest-pact.config.js --runInBand --forceExit",
+    "test:live:posada": "node test/live/posada-ec/ejecutar.js"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
