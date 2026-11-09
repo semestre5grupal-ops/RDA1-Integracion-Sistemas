@@ -436,8 +436,12 @@ export function AlojamientoDetail() {
     );
   }
 
-  const score = Number(alojamiento.ratings?.score || 8.7).toFixed(1);
-  const reviewsCount = alojamiento.ratings?.number_of_reviews || 24;
+  // Score y número de comentarios REALES del socio (no se inventan). Si el hotel no
+  // trae puntuación o no tiene reseñas, se muestra como "Nuevo" / "Sin comentarios".
+  const scoreNum = Number(alojamiento.ratings?.score);
+  const tieneScore = Number.isFinite(scoreNum) && scoreNum > 0;
+  const score = tieneScore ? scoreNum.toFixed(1) : null;
+  const reviewsCount = resenas.length || Number(alojamiento.ratings?.number_of_reviews) || 0;
 
   const availableRoomsCount = typeof cotizacion?.libres === 'number'
     ? cotizacion.libres
@@ -796,62 +800,43 @@ export function AlojamientoDetail() {
             <img src={photos[0].url} alt={alojamiento.nombre} className="dt-hero-image" />
           </div>
 
-          <div className="dt-stacked-images">
-            <div className="dt-stacked-image-wrapper" onClick={() => setLightboxIndex(1)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxIndex(1); } }}>
-              <img src={photos[1]?.url || photos[0].url} alt="Room detail" className="dt-stacked-image" />
+          {(photos[1] || photos[2]) && (
+            <div className="dt-stacked-images">
+              {photos.slice(1, 3).map((p, idx) => (
+                <div key={idx} className="dt-stacked-image-wrapper" onClick={() => setLightboxIndex(idx + 1)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxIndex(idx + 1); } }}>
+                  <img src={p.url} alt={`Foto ${idx + 2}`} className="dt-stacked-image" />
+                </div>
+              ))}
             </div>
-            <div className="dt-stacked-image-wrapper" onClick={() => setLightboxIndex(2)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxIndex(2); } }}>
-              <img src={photos[2]?.url || photos[0].url} alt="Room detail" className="dt-stacked-image" />
-            </div>
-          </div>
+          )}
         </section>
 
-        {/* Bottom 5 Thumbnails */}
-        <div className="dt-thumbnails-row">
-          {photos.slice(3, 7).map((p, idx) => (
-            <div key={idx} className="dt-thumb-wrapper" onClick={() => setLightboxIndex(idx + 3)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxIndex(idx + 3); } }}>
-              <img src={p.url} alt={`Thumbnail ${idx + 3}`} className="dt-thumb-image" />
-            </div>
-          ))}
-          <div className="dt-thumb-wrapper" onClick={() => setLightboxIndex(0)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxIndex(0); } }}>
-            <img src={photos[7]?.url || photos[0].url} alt="Más fotos" className="dt-thumb-image" />
-            <div className="dt-more-photos-overlay">+29 fotos</div>
+        {/* Miniaturas: solo las fotos REALES que envió el hotel (sin repetir). El contador
+            "+N fotos" refleja cuántas quedan fuera de la cuadrícula, o no se muestra. */}
+        {photos.length > 3 && (
+          <div className="dt-thumbnails-row">
+            {photos.slice(3, 8).map((p, idx) => {
+              const esUltima = idx === 4 && photos.length > 8;
+              return (
+                <div key={idx} className="dt-thumb-wrapper" onClick={() => setLightboxIndex(idx + 3)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightboxIndex(idx + 3); } }}>
+                  <img src={p.url} alt={`Foto ${idx + 4}`} className="dt-thumb-image" />
+                  {esUltima && <div className="dt-more-photos-overlay">+{photos.length - 8} fotos</div>}
+                </div>
+              );
+            })}
           </div>
-        </div>
+        )}
 
-        {/* Key Amenities Strip (Pills with elegant SVG icons) */}
-        <div className="dt-pills-bar">
-          <span className="dt-pill-item">
-            <ApartmentIcon size={16} /> Departamentos
-          </span>
-          <span className="dt-pill-item">
-            <WifiIcon size={16} /> WiFi gratis
-          </span>
-          <span className="dt-pill-item">
-            <CoffeeIcon size={16} /> Desayuno
-          </span>
-          <span className="dt-pill-item">
-            <ParkingIcon size={16} /> Estacionamiento privado
-          </span>
-          <span className="dt-pill-item">
-            <PetsIcon size={16} /> Se admiten mascotas
-          </span>
-          <span className="dt-pill-item">
-            <NoSmokingIcon size={16} /> Habitaciones sin humo
-          </span>
-          <span className="dt-pill-item">
-            <FamilyIcon size={16} /> Habitaciones familiares
-          </span>
-          <span className="dt-pill-item">
-            <PoolIcon size={16} /> Piscina al aire libre
-          </span>
-          <span className="dt-pill-item">
-            <ShowerIcon size={16} /> Baño privado
-          </span>
-          <span className="dt-pill-item">
-            <KitchenIcon size={16} /> Cocina
-          </span>
-        </div>
+        {/* Amenidades clave: las REALES que envía el hotel. */}
+        {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
+          <div className="dt-pills-bar">
+            {alojamiento.amenidades.map((a, i) => (
+              <span key={i} className="dt-pill-item">
+                <CheckmarkIcon size={16} /> {a}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* 2-Column Section: Overview & Property Highlights */}
         <div className="dt-overview-grid">
@@ -863,51 +848,30 @@ export function AlojamientoDetail() {
 
             <div>
               <h2 className="dt-about-heading">Sobre este alojamiento</h2>
-              <p className="dt-about-paragraph">
-                <strong>Alojamiento elegante:</strong> {alojamiento.nombre} en {alojamiento.destino || 'Quito'} ofrece departamentos elegantes con piscina de vistas panorámicas, terraza amplia y WiFi gratis.
-              </p>
-              <p className="dt-about-paragraph">
-                <strong>Comodidades confortables:</strong> Los huéspedes disfrutan de check-in y check-out privado, gimnasio, ascensor, conserjería, habitaciones familiares, seguridad 24 horas y mostrador de tours.
-              </p>
-              {showFullDesc && (
-                <p className="dt-about-paragraph">
-                  <strong>Instalaciones modernas:</strong> {alojamiento.descripcion || 'El departamento cuenta con cocina equipada, baño privado, secador de pelo, cafetera, refrigerador, zona de estar, microondas, ducha, TV de pantalla plana, hervidor eléctrico y armario.'}
+              {/* Descripción REAL que envía el hotel. */}
+              {alojamiento.descripcion ? (
+                <p className="dt-about-paragraph">{alojamiento.descripcion}</p>
+              ) : (
+                <p className="dt-about-paragraph" style={{ color: '#595959' }}>
+                  {alojamiento.nombre}{alojamiento.destino ? ` · ${alojamiento.destino}` : ''}
+                  {Number(alojamiento.estrellas) > 0 ? ` · ${alojamiento.estrellas} estrellas` : ''}.
                 </p>
               )}
-
-              <button
-                type="button"
-                className="dt-show-more-btn"
-                onClick={() => setShowFullDesc(!showFullDesc)}
-              >
-                {showFullDesc ? 'Mostrar menos' : 'Mostrar más'}
-              </button>
             </div>
 
-            {/* Most popular facilities */}
-            <div className="dt-popular-facilities-section">
-              <h3 className="dt-popular-facilities-title">Servicios más populares</h3>
-              <div className="dt-popular-facilities-grid">
-                <span className="dt-popular-facility-item green">
-                  <PoolIcon size={16} color="#008009" /> Piscina al aire libre
-                </span>
-                <span className="dt-popular-facility-item green">
-                  <NoSmokingIcon size={16} color="#008009" /> Habitaciones sin humo
-                </span>
-                <span className="dt-popular-facility-item green">
-                  <ParkingIcon size={16} color="#008009" /> Estacionamiento privado
-                </span>
-                <span className="dt-popular-facility-item green">
-                  <WifiIcon size={16} color="#008009" /> WiFi gratis
-                </span>
-                <span className="dt-popular-facility-item green">
-                  <FamilyIcon size={16} color="#008009" /> Habitaciones familiares
-                </span>
-                <span className="dt-popular-facility-item green">
-                  <CoffeeIcon size={16} color="#008009" /> Desayuno
-                </span>
+            {/* Servicios más populares: SIEMPRE las amenidades reales del hotel. */}
+            {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
+              <div className="dt-popular-facilities-section">
+                <h3 className="dt-popular-facilities-title">Servicios más populares</h3>
+                <div className="dt-popular-facilities-grid">
+                  {alojamiento.amenidades.map((a, i) => (
+                    <span key={i} className="dt-popular-facility-item green">
+                      <CheckmarkIcon size={16} color="#008009" /> {a}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Right Column (Highlights Card & Score) */}
@@ -917,20 +881,22 @@ export function AlojamientoDetail() {
               <div className="dt-score-row">
                 <div className="dt-score-text">
                   <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                    {Number(score) >= 9 ? 'Excelente' : 'Fantástico'}
+                    {!tieneScore ? 'Nuevo' : scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Muy bueno' : 'Bueno'}
                   </span>
-                  <span style={{ fontSize: '0.78rem', color: '#595959' }}>{reviewsCount} comentarios</span>
+                  <span style={{ fontSize: '0.78rem', color: '#595959' }}>
+                    {reviewsCount > 0 ? `${reviewsCount} comentario${reviewsCount === 1 ? '' : 's'}` : 'Sin comentarios aún'}
+                  </span>
                 </div>
-                <div className="dt-score-badge">{score}</div>
+                {tieneScore && <div className="dt-score-badge">{score}</div>}
               </div>
-              <div style={{ fontSize: '0.8rem', color: '#374151', borderTop: '1px solid #f0f0f0', paddingTop: '10px' }}>
-                <strong>A los clientes les encantó:</strong>
-                <ul style={{ paddingLeft: '16px', margin: '6px 0 0 0' }}>
-                  <li>WiFi gratis (Puntuación: 10/10)</li>
-                  <li>Piscina en la azotea con vistas panorámicas</li>
-                  <li>Habitaciones impecables y camas muy cómodas</li>
-                </ul>
-              </div>
+              {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
+                <div style={{ fontSize: '0.8rem', color: '#374151', borderTop: '1px solid #f0f0f0', paddingTop: '10px' }}>
+                  <strong>Servicios del alojamiento:</strong>
+                  <ul style={{ paddingLeft: '16px', margin: '6px 0 0 0' }}>
+                    {alojamiento.amenidades.slice(0, 4).map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </div>
+              )}
             </div>
 
             {/* Side Map */}
@@ -950,29 +916,35 @@ export function AlojamientoDetail() {
               </button>
             </div>
 
-            {/* Property Highlights */}
+            {/* Property Highlights: datos reales del hotel. */}
             <div className="dt-highlights-card">
               <h3 className="dt-highlights-title">Puntos fuertes del alojamiento</h3>
               <div className="dt-stay-badge">¡Ideal para una estancia de {nightsCount} noches!</div>
 
-              <div className="dt-highlight-point">
-                <PinIcon size={16} color="#006ce4" />
-                <div>
-                  <strong>Ubicación ideal:</strong> Muy valorada por huéspedes recientes ({score})
+              {(alojamiento.ubicacion?.address || alojamiento.destino) && (
+                <div className="dt-highlight-point">
+                  <PinIcon size={16} color="#006ce4" />
+                  <div>
+                    <strong>Ubicación:</strong> {alojamiento.ubicacion?.address || alojamiento.destino}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="dt-highlight-point">
-                <CoffeeIcon size={16} color="#006ce4" />
-                <div>
-                  <strong>Desayuno:</strong> Continental, buffet
+              {Number(alojamiento.estrellas) > 0 && (
+                <div className="dt-highlight-point">
+                  <CheckmarkIcon size={16} color="#006ce4" />
+                  <div><strong>Categoría:</strong> {alojamiento.estrellas} estrellas</div>
                 </div>
-              </div>
+              )}
 
-              <div className="dt-highlight-point">
-                <ParkingIcon size={16} color="#006ce4" />
-                <div>Estacionamiento privado disponible en el alojamiento</div>
-              </div>
+              {(alojamiento.politicas?.checkin_desde || alojamiento.politicas?.checkout_hasta) && (
+                <div className="dt-highlight-point">
+                  <CheckmarkIcon size={16} color="#006ce4" />
+                  <div>
+                    <strong>Horarios:</strong> check-in {alojamiento.politicas?.checkin_desde || '—'} · check-out {alojamiento.politicas?.checkout_hasta || '—'}
+                  </div>
+                </div>
+              )}
 
               <button
                 type="button"
@@ -1564,7 +1536,7 @@ export function AlojamientoDetail() {
             <div>
               <h2>Instalaciones y servicios de {alojamiento.nombre}</h2>
               <div style={{ fontSize: '0.85rem', color: '#595959' }}>
-                ¡Instalaciones fantásticas! Puntuación: {score}
+                {tieneScore ? `Puntuación de servicios: ${score}` : 'Servicios que ofrece el alojamiento'}
               </div>
             </div>
             <button
@@ -1577,151 +1549,22 @@ export function AlojamientoDetail() {
           </div>
 
           <div className="dt-facilities-full-grid">
-            <div className="dt-facility-category-block">
-              <h3>
-                <ApartmentIcon size={18} color="#003580" /> Lo más destacado
-              </h3>
-              {/* Servicios REALES que envía el alojamiento (amenidades). Solo si el socio
-                  no envió ninguno se muestra una lista genérica de ejemplo. */}
-              <ul className="dt-facility-items-list">
-                {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 ? (
-                  alojamiento.amenidades.map((a, i) => (
+            {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 ? (
+              <div className="dt-facility-category-block">
+                <h3>
+                  <ApartmentIcon size={18} color="#003580" /> Servicios del alojamiento
+                </h3>
+                <ul className="dt-facility-items-list">
+                  {alojamiento.amenidades.map((a, i) => (
                     <li key={i}><CheckmarkIcon size={14} /> {a}</li>
-                  ))
-                ) : (
-                  <>
-                    <li><CheckmarkIcon size={14} /> WiFi gratis</li>
-                    <li><CheckmarkIcon size={14} /> Cocina</li>
-                    <li><CheckmarkIcon size={14} /> Baño privado</li>
-                    <li><CheckmarkIcon size={14} /> Estacionamiento</li>
-                    <li><CheckmarkIcon size={14} /> Habitaciones para no fumadores</li>
-                  </>
-                )}
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <ParkingIcon size={18} color="#003580" /> Estacionamiento
-              </h3>
-              <p style={{ fontSize: '0.82rem', color: '#4b5563', lineHeight: 1.4 }}>
-                Hay estacionamiento privado en el establecimiento (es necesario reservar) y cuesta US$12 por día.
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p style={{ fontSize: '0.85rem', color: '#595959' }}>
+                El alojamiento todavía no detalló sus servicios.
               </p>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <WifiIcon size={18} color="#003580" /> Internet
-              </h3>
-              <p style={{ fontSize: '0.82rem', color: '#4b5563', lineHeight: 1.4 }}>
-                Hay conexión a internet Wi-Fi disponible en todo el establecimiento. Gratis.
-              </p>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <KitchenIcon size={18} color="#003580" /> Cocina
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Cafetera</li>
-                <li>Horno</li>
-                <li>Hervidor eléctrico</li>
-                <li>Utensilios de cocina</li>
-                <li>Microondas</li>
-                <li>Refrigerador</li>
-                <li>Zona de cocina</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <BedIcon size={18} color="#003580" /> Habitación
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Ropa de cama</li>
-                <li>Armario o closet</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <ShowerIcon size={18} color="#003580" /> Baño
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Papel higiénico</li>
-                <li>Toallas</li>
-                <li>Baño privado</li>
-                <li>WC</li>
-                <li>Secador de pelo</li>
-                <li>Ducha</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <ApartmentIcon size={18} color="#003580" /> Zona de estar
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Zona de estar</li>
-                <li>Zona de comedor</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <TvIcon size={18} color="#003580" /> Equipamiento audiovisual y tecnológico
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>TV de pantalla plana</li>
-                <li>Canales por cable</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <PoolIcon size={18} color="#003580" /> Piscina al aire libre (¡Gratis!)
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Abierta todo el año</li>
-                <li>Para todas las edades</li>
-                <li>Piscina con vistas</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <GymIcon size={18} color="#003580" /> Bienestar y fitness
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Gimnasio / Sala de fitness</li>
-                <li>Espacio para yoga</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <UserIcon size={18} color="#003580" /> Servicios de recepción
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Registro de entrada y salida privado</li>
-                <li>Servicio de conserjería</li>
-                <li>Información turística</li>
-                <li>Recepción 24 horas</li>
-              </ul>
-            </div>
-
-            <div className="dt-facility-category-block">
-              <h3>
-                <ShieldCheckIcon size={18} color="#003580" /> Seguridad
-              </h3>
-              <ul className="dt-facility-items-list">
-                <li>Extintores</li>
-                <li>Cámaras de seguridad en zonas comunes</li>
-                <li>Detectores de humo</li>
-                <li>Seguridad 24 horas</li>
-                <li>Caja fuerte</li>
-              </ul>
-            </div>
+            )}
           </div>
         </section>
       </div>
@@ -1734,7 +1577,7 @@ export function AlojamientoDetail() {
           <div>
             <h2>Comentarios de los huespedes</h2>
             <div style={{ fontSize: '0.85rem', color: '#595959' }}>
-              {resenas.length || reviewsCount} comentarios reales de viajeros verificados
+              {reviewsCount > 0 ? `${reviewsCount} comentario${reviewsCount === 1 ? '' : 's'} de huéspedes` : 'Este alojamiento todavía no tiene comentarios'}
             </div>
           </div>
           <button
