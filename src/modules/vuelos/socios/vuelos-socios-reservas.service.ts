@@ -350,15 +350,28 @@ export class VuelosSociosReservasService implements OnModuleInit {
     );
   }
 
+  /**
+   * Refresca la copia con lo que devuelve la aerolínea (GET /bookings/{id}).
+   * Los estados ya alcanzados no retroceden: una reserva CANCELLED sigue
+   * cancelada y un CHECKED_IN no vuelve a CONFIRMED aunque la aerolínea lo
+   * informe así. La ruta y la fecha de salida se actualizan (cambio de fecha
+   * o retraso del vuelo).
+   */
   async actualizarDesdeSocio(bookingId: string, reserva: any): Promise<void> {
     if (!(await this.asegurarTabla())) return;
     const r = resumenDeReserva(reserva);
     await this.dataSource.query(
       `UPDATE public.vuelos_reservas_socio
-          SET status = CASE WHEN status = 'CHECKED_IN' AND $2 IN ('CONFIRMED', 'TICKETED', 'TICKET_ISSUING') THEN status ELSE $2 END,
-              pnr = COALESCE($3, pnr), detalle = $4, updated_at = now()
+          SET status = CASE
+                WHEN status = 'CANCELLED' THEN status
+                WHEN status = 'CHECKED_IN' AND $2 IN ('CONFIRMED', 'TICKETED', 'TICKET_ISSUING', 'PENDING', 'PENDING_PAYMENT') THEN status
+                ELSE $2 END,
+              pnr = COALESCE($3, pnr), detalle = $4,
+              origin = COALESCE($5, origin), destination = COALESCE($6, destination),
+              departure_date = COALESCE($7::date, departure_date),
+              updated_at = now()
         WHERE booking_id = $1`,
-      [bookingId, r.status, r.pnr, JSON.stringify(reserva ?? {})],
+      [bookingId, r.status, r.pnr, JSON.stringify(reserva ?? {}), r.origin, r.destination, r.departureDate],
     );
   }
 

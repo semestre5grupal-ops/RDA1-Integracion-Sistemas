@@ -60,6 +60,8 @@ function rutaDe(e, aerolineas) {
       return desdeAerolinea
         ? [aero, 'vuelos', 'pagos', 'bd']
         : ['cliente', 'gateway', 'vuelos', aero, 'vuelos', 'pagos', 'bd'];
+    case 'cambio_fecha':
+      return [aero, 'vuelos', 'bd'];
     case 'checkin':
       return desdeAerolinea ? [aero, 'vuelos', 'bd'] : ['cliente', 'gateway', 'vuelos', aero, 'vuelos', 'bd'];
     case 'estado_vuelo':
@@ -85,7 +87,7 @@ function rutasDe(e, aerolineas) {
 const ETIQUETA_PASO = {
   busqueda: 'Búsqueda', hold: 'Hold', cobro: 'Cobro', reserva_aerolinea: 'Reserva en aerolínea', copia: 'Copia',
   factura: 'Factura', confirmada: 'Confirmada', reembolso: 'Reembolso', cancelacion: 'Cancelación',
-  checkin: 'Check-in', estado_vuelo: 'Estado de vuelo', consulta: 'Consulta',
+  checkin: 'Check-in', cambio_fecha: 'Cambio de fecha', estado_vuelo: 'Estado de vuelo', consulta: 'Consulta',
 };
 
 const ARISTAS = [

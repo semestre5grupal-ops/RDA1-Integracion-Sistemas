@@ -10,6 +10,8 @@
  *  - `booking.cancelled`: la aerolínea canceló (en su mostrador o por vuelo
  *    cancelado) → Booking devuelve al cliente lo que diga la aerolínea, emite la
  *    nota de crédito y marca CANCELLED.
+ *  - `booking.changed` (DATE_CHANGE): cambio de fecha o retraso del vuelo → se
+ *    vuelve a leer la reserva en la aerolínea y se actualiza la fecha de salida.
  *  - `booking.confirmed`: guarda con qué id conoce la aerolínea a nuestro cliente.
  *
  * Solo se tocan reservas hechas desde Booking (las que están en
@@ -137,6 +139,22 @@ export class SincronizadorEventosVuelos {
         await this.reservas.marcarEstado(bookingId, 'CANCELLED', devuelto);
         this.traza(entr, 'cancelacion', devuelto > 0 || monto === 0 ? 'ok' : 'error',
           `Cancelada en ${nodo} · reembolso ${devuelto.toFixed(2)}${monto > 0 && devuelto <= 0 ? ' (FALLÓ)' : ''}`, nodo);
+        return true;
+      }
+      case 'booking.changed': {
+        // Los retrasos se manejan como cambio de fecha (contrato v2: changeType DATE_CHANGE).
+        if (copia.status === 'CANCELLED') return false;
+        const tipoCambio = String(d.changeType ?? 'DATE_CHANGE').toUpperCase();
+        if (tipoCambio !== 'DATE_CHANGE') return false;
+        const r = await this.socios.reenviar(nodo, 'GET', ['bookings', bookingId], '', null, entr);
+        if (r.status !== 200 || !r.body || typeof r.body !== 'object') {
+          this.traza(entr, 'cambio_fecha', 'aviso', `Cambio de fecha en ${nodo} · PNR ${d.pnr ?? copia.pnr ?? '?'}: no se pudo leer la reserva (HTTP ${r.status})`, nodo);
+          return false;
+        }
+        await this.reservas.actualizarDesdeSocio(bookingId, r.body);
+        const nueva = await this.reservas.obtener(bookingId);
+        this.traza(entr, 'cambio_fecha', 'ok',
+          `Cambio de fecha en ${nodo} · PNR ${d.pnr ?? copia.pnr ?? '?'} · salida ${copia.departureDate ?? '?'} → ${nueva?.departureDate ?? '?'}`, nodo);
         return true;
       }
       case 'booking.confirmed': {
