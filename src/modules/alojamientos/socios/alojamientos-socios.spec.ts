@@ -168,7 +168,7 @@ const nodo = (codigo: string, clave: string, extra: any = {}) => ({
   ...extra,
 });
 
-function montar() {
+function montar(inventory?: any) {
   const posada = new SocioFalso('posada');
   const kawsay = new SocioFalso('kawsay');
   kawsay.hoteles = [{ id: 'KW-1', nombre: 'Kawsay', destino: 'Cuenca', precioPorNoche: '120.00', fotos: [], estado: 'ACTIVO' }];
@@ -196,7 +196,7 @@ function montar() {
     }
   }
   process.env.ALOJAMIENTOS_SOCIOS_CACHE_MS = '0';
-  const socios = new Servicio(repo);
+  const socios = new Servicio(repo, inventory);
   const db = new BaseFalsa();
   const reservas = new AlojamientosSociosReservasService(socios, db as any);
   return { posada, kawsay, socios, reservas, db, enviadas };
@@ -252,6 +252,30 @@ describe('AlojamientosSociosService (catálogo y disponibilidad en vivo)', () =>
     const d = await socios.opciones('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12');
     const b = socios.disponibilidadBooking('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12', d!.opciones);
     expect(b.tipos.find((t) => t.codigo === 'HABITACION_ESTANDAR')).toMatchObject({ total_rooms: 2, available_rooms: 1 });
+  });
+
+  it('overlay gRPC opt-in: un push de stock del socio pisa el cupo en vivo de ese tipo', async () => {
+    // El socio empuja por gRPC (InventoryStockService): service_id=nodo, item_id=hotel,
+    // date=checkin, time_slot=código de tipo, available_units=0 → agotado.
+    const inventory = {
+      getInventory: (itemId: string, date: string, serviceId: string) =>
+        itemId === 'HTL-1' && date === '2027-03-10' && serviceId === 'NODE_ALO_PEC'
+          ? [{ service_id: serviceId, item_id: itemId, date, time_slot: 'HABITACION_ESTANDAR', available_units: 0 }]
+          : [],
+    };
+    const { socios } = montar(inventory);
+    const d = await socios.opciones('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12');
+    const b = socios.disponibilidadBooking('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12', d!.opciones);
+    // En vivo el socio tenía 2 libres; el push lo deja en 0 (sin tocar el total).
+    expect(b.tipos.find((t) => t.codigo === 'HABITACION_ESTANDAR')).toMatchObject({ total_rooms: 2, available_rooms: 0 });
+  });
+
+  it('overlay gRPC: sin push, el cupo en vivo por REST queda intacto (no se inventa stock)', async () => {
+    const inventory = { getInventory: () => [] };
+    const { socios } = montar(inventory);
+    const d = await socios.opciones('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12');
+    const b = socios.disponibilidadBooking('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12', d!.opciones);
+    expect(b.tipos.find((t) => t.codigo === 'HABITACION_ESTANDAR')).toMatchObject({ total_rooms: 2, available_rooms: 2 });
   });
 
   it('ids: separa NODO~id y rechaza lo que no es un nodo', () => {

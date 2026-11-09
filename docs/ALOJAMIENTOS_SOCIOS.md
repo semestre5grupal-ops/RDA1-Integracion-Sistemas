@@ -30,11 +30,33 @@ Concurrencia: el doble clic se serializa por clave y la copia tiene `idempotency
 |---|---|
 | `src/modules/alojamientos/socios/alojamientos-socios.service.ts` | Socios, autenticación (`X-API-Key` u `oauth2:id:secreto`), catálogo, ficha y disponibilidad en vivo |
 | `src/modules/alojamientos/socios/alojamientos-socios-reservas.service.ts` | Reserva, cancelación, check-in y copia en `schema_alojamientos.alojamientos_reservas_socio` (se crea sola al arrancar) |
-| `src/modules/alojamientos/socios/alojamientos-socios.spec.ts` | 21 pruebas con un socio simulado según el contrato v2.2.0 |
+| `src/modules/alojamientos/socios/alojamientos-socios.spec.ts` | 24 pruebas con un socio simulado según el contrato v2.2.0 (incluye el overlay gRPC) |
 | `src/modules/alojamientos/alojamientos.service.ts` | Desvía al agregador todo id `NODO~id` |
 | `src/modules/reservas/reservas.service.ts` | Receptor de check-in: paso 0 para reservas de socios; la rama local usaba la columna inexistente `localizador` |
 | `frontend/src/components/AlojamientoCheckoutModal.jsx` | Pide tipo y número de documento del titular, que el hotel exige |
 | `database/migrations/20261106_alojamientos_reservas_id_default.sql` | Arregla el HTTP 500 al guardar reservas (ya aplicado en producción) |
+
+## Inventario en tiempo real por gRPC (opt-in)
+
+Además del REST en vivo, un socio de alojamientos puede empujar su stock por el canal de
+eventos gRPC del Booking (`InventoryStockService`, puerto 50051, `src/proto/inventory.proto`), el
+mismo que usa Atracciones. El agregador superpone ese stock sobre la disponibilidad que devuelve,
+**sólo cuando existe un push** para esa combinación exacta; si el socio no empuja nada, manda el
+REST en vivo (fuente de verdad), así que no hay riesgo de sobreventa por un dato cacheado.
+
+Contrato del push (`PushStockUpdate` / `StreamInventoryChanges`), metadata gRPC `x-api-key` = la
+clave del nodo:
+
+| Campo | Valor para alojamientos |
+|---|---|
+| `service_id` | Código del nodo, p. ej. `NODE_ALO_PEC` |
+| `item_id` | Id del hotel **en el socio** (la parte después de `~`), p. ej. `HTL-1` |
+| `date` | Fecha de check-in `YYYY-MM-DD` |
+| `time_slot` | Código del tipo de habitación, p. ej. `HABITACION_ESTANDAR` |
+| `available_units` | Habitaciones libres de ese tipo en esa fecha |
+
+El overlay vive en `AlojamientosSociosService.aplicarStockGrpc` y se prueba en
+`alojamientos-socios.spec.ts` (con push → pisa el cupo; sin push → intacto).
 
 Variable `ALOJAMIENTOS_FUENTE`:
 - `socios` (por defecto): sólo los hoteles de los socios; la copia local de un socio se oculta.

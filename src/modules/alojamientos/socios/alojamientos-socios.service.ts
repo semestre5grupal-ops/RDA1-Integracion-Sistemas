@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
+import { InventoryService } from '../../inventory/inventory.service';
 
 /**
  * Agregador de socios de ALOJAMIENTOS (RDA2) — mismo modelo que vuelos
@@ -97,7 +98,10 @@ export class AlojamientosSociosService {
   private cacheCatalogo: { expira: number; hoteles: any[]; fuentes: ResumenSocio[] } | null = null;
   private catalogoEnCurso: Promise<{ hoteles: any[]; fuentes: ResumenSocio[] }> | null = null;
 
-  constructor(@Optional() @InjectRepository(ConfigProveedor) private readonly nodos?: Repository<ConfigProveedor>) {}
+  constructor(
+    @Optional() @InjectRepository(ConfigProveedor) private readonly nodos?: Repository<ConfigProveedor>,
+    @Optional() private readonly inventory?: InventoryService,
+  ) {}
 
   // ───────────────────────────── Configuración ─────────────────────────────
 
@@ -482,7 +486,40 @@ export class AlojamientosSociosService {
           reembolsable: t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null,
         };
       });
+    this.aplicarStockGrpc(sep.nodo, sep.id, checkin, opciones);
     return { nodo, idSocio: sep.id, opciones, respuesta: r };
+  }
+
+  /**
+   * Overlay opt-in de inventario en tiempo real recibido por gRPC
+   * (`InventoryStockService`, puerto 50051). Un socio de alojamientos puede empujar su
+   * stock con `PushStockUpdate`/`StreamInventoryChanges` usando
+   * `service_id = <código de nodo>`, `item_id = <id del hotel del socio>`,
+   * `date = <checkin YYYY-MM-DD>` y `time_slot = <código del tipo de habitación>`.
+   *
+   * Solo pisa el cupo que vino en vivo por REST cuando existe un push para esa tupla
+   * exacta; si el socio no empuja nada, el REST en vivo (fuente de verdad) queda intacto.
+   * Esto deja evidencia de la vertical en el canal de eventos gRPC sin arriesgar sobreventa.
+   */
+  private aplicarStockGrpc(nodoCodigo: string, idSocio: string, fecha: string, opciones: OpcionSocio[]): void {
+    if (!this.inventory || opciones.length === 0) return;
+    let registros;
+    try {
+      registros = this.inventory.getInventory(idSocio, fecha, nodoCodigo);
+    } catch (e: any) {
+      this.logger.debug?.(`Overlay gRPC omitido (${nodoCodigo}~${idSocio}): ${e?.message}`);
+      return;
+    }
+    if (!registros || registros.length === 0) return;
+    const porTipo = new Map<string, number>(registros.map((s: any) => [String(s.time_slot), Number(s.available_units)]));
+    for (const o of opciones) {
+      const push = porTipo.get(o.codigo);
+      if (push === undefined || Number.isNaN(push)) continue;
+      const tope = o.totalHabitaciones ?? push;
+      o.remanentes = Math.max(0, Math.min(tope, push));
+      o.disponible = o.remanentes > 0;
+    }
+    this.logger.log(`Overlay gRPC aplicado a ${nodoCodigo}~${idSocio} (${porTipo.size} tipo(s), fecha ${fecha}).`);
   }
 
   /** Mismo formato que `AlojamientosService.getAvailability` (GET /{id}/availability). */
