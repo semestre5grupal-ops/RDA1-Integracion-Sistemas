@@ -631,4 +631,38 @@ export class AlojamientosSociosService {
     if ([404, 405, 501].includes(g.status) && [404, 405, 501].includes(p.status)) return { clientId: null, origen: 'NO_SOPORTADO' };
     return { clientId: null, origen: 'ERROR' };
   }
+
+  // ───────────────────────────── Reseñas ─────────────────────────────
+
+  /**
+   * Reseñas reales del socio (`GET /alojamientos/{id}/resenas`), mapeadas al formato que
+   * usa el frontend. No se inventan: si el socio no las expone, devuelve vacío.
+   */
+  async resenas(idCompuesto: string): Promise<{ resenas: any[]; scores: any; total: number }> {
+    const vacio = { resenas: [], scores: { limpieza: 0, servicio: 0, calidad: 0, general: 0 }, total: 0 };
+    const sep = AlojamientosSociosService.separarId(idCompuesto);
+    if (!sep) return vacio;
+    const nodo = await this.nodoPorCodigo(sep.nodo);
+    if (!nodo) return vacio;
+    const r = await this.llamar(nodo, 'GET', `/alojamientos/${encodeURIComponent(sep.id)}/resenas`);
+    if (r.status !== 200) return vacio;
+    const b: any = desempacar(r.body) || {};
+    const lista: any[] = b.resenas || b.reviews || b.data || [];
+    const resenas = lista.map((x: any) => ({
+      usuarioNombre: x.autorNombre || x.usuarioNombre || x.autor || x.author || 'Huésped',
+      usuarioPais: x.pais || x.usuarioPais || x.country || null,
+      comentario: x.comentario || x.comment || x.texto || '',
+      puntuacion: num(x.calificacionGlobal ?? x.puntuacion ?? x.calificacion ?? x.score ?? x.rating) ?? 0,
+      fecha: x.fecha || x.date || x.createdAt || null,
+      tipoHabitacion: x.tipoHabitacionAlojado || x.tipoHabitacion || null,
+      verificada: x.estadiaVerificada ?? x.verificada ?? null,
+    }));
+    const prom = num(b.scorePromedio ?? b.score ?? b.scoreCalificacion ?? b.promedio);
+    const general = prom ?? (resenas.length ? Number((resenas.reduce((a, c) => a + c.puntuacion, 0) / resenas.length).toFixed(1)) : 0);
+    return {
+      resenas,
+      scores: { limpieza: general, servicio: general, calidad: general, general },
+      total: num(b.totalResenas ?? b.total) ?? resenas.length,
+    };
+  }
 }

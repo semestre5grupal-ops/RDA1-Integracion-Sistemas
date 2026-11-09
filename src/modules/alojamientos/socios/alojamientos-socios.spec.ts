@@ -41,6 +41,19 @@ class SocioFalso {
     const p = url.pathname.replace(/^\/api\/v2/, '');
     if (metodo === 'GET' && p === '/alojamientos') return { status: 200, body: { metadata: { has_next: false }, data: this.hoteles } };
     if (metodo === 'GET' && p === '/alojamientos/HTL-1') return { status: 200, body: this.hoteles[0] };
+    if (metodo === 'GET' && p === '/alojamientos/HTL-1/resenas') {
+      return {
+        status: 200,
+        body: {
+          scorePromedio: 9,
+          totalResenas: 2,
+          resenas: [
+            { id: 'r1', autorNombre: 'ESB C.', calificacionGlobal: 9, fecha: '2026-11-03', comentario: 'Excelente atención.', estadiaVerificada: true },
+            { id: 'r2', autorNombre: 'Ana M.', calificacionGlobal: 8, fecha: '2026-10-20', comentario: 'Muy limpio.', estadiaVerificada: false },
+          ],
+        },
+      };
+    }
     if (metodo === 'GET' && p === '/alojamientos/HTL-1/habitaciones') {
       return {
         status: 200,
@@ -276,6 +289,24 @@ describe('AlojamientosSociosService (catálogo y disponibilidad en vivo)', () =>
     const d = await socios.opciones('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12');
     const b = socios.disponibilidadBooking('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12', d!.opciones);
     expect(b.tipos.find((t) => t.codigo === 'HABITACION_ESTANDAR')).toMatchObject({ total_rooms: 2, available_rooms: 2 });
+  });
+
+  it('reseñas: proxia las reales del socio y calcula el promedio', async () => {
+    const { socios } = montar();
+    const r = await socios.resenas('NODE_ALO_PEC~HTL-1');
+    expect(r.total).toBe(2);
+    expect(r.scores.general).toBe(9);
+    expect(r.resenas).toHaveLength(2);
+    expect(r.resenas[0]).toMatchObject({ usuarioNombre: 'ESB C.', puntuacion: 9, comentario: 'Excelente atención.' });
+  });
+
+  it('reseñas: si el socio no las expone, devuelve vacío (no inventa)', async () => {
+    const { socios, posada } = montar();
+    const orig = posada.atender.bind(posada);
+    posada.atender = async (m, u, h, b) => (u.pathname.endsWith('/resenas') ? { status: 404, body: {} } : orig(m, u, h, b));
+    const r = await socios.resenas('NODE_ALO_PEC~HTL-1');
+    expect(r.total).toBe(0);
+    expect(r.resenas).toHaveLength(0);
   });
 
   it('ids: separa NODO~id y rechaza lo que no es un nodo', () => {
