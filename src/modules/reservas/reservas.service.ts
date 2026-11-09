@@ -253,12 +253,12 @@ export class ReservasService {
     apiKey?: string,
     correlationId?: string,
   ): Promise<any> {
-    const targetId = id || dto.external_order_id || dto.order_id;
+    const targetId = id || dto.external_order_id || dto.order_id || (dto as any).reserva_id || (dto as any).reservation_code;
     const safeCorrId = correlationId || `corr-chk-${Date.now()}`;
-    const fechaCheckin = dto.fecha_checkin || dto.checked_in_at || new Date().toISOString();
+    const fechaCheckin = dto.fecha_checkin || dto.checked_in_at || (dto as any).hora_checkin || new Date().toISOString();
     const estado = dto.estado || dto.status || 'CONFIRMADO_ASISTIDO';
-    const adminId = dto.admin_id || dto.staff_user || 'operador-socio';
-    const docId = dto.document_id || null;
+    const adminId = dto.admin_id || dto.staff_user || (dto as any).guia_codigo || (dto as any).guia_asignado || 'operador-socio';
+    const docId = dto.document_id || (dto as any).documento_identidad || (dto as any).cedula || (dto as any).identificacion || null;
     let verticalActualizada: string | null = null;
     let reservaActualizada: any = null;
 
@@ -286,6 +286,8 @@ export class ReservasService {
           OR voucher_qr_payload LIKE '%' || $1 || '%' 
           OR idempotency_key = $1
           OR cancel_code = $1
+          OR document_id = $1
+          OR customer_email = $1
           OR ($3::text IS NOT NULL AND document_id = $3::text)
        RETURNING *`,
       [targetId, adminId, docId],
@@ -301,14 +303,25 @@ export class ReservasService {
       const autUpdate = await this.dataSource.query(
         `UPDATE schema_autos.autos_reservas 
          SET estado = 'CONFIRMADO_ASISTIDO'
-         WHERE id = $1 OR idempotency_key = $1
+         WHERE id = $1 
+            OR UPPER(id) = UPPER($1)
+            OR idempotency_key = $1
+            OR licencia_conducir = $1
+            OR ($2::text IS NOT NULL AND licencia_conducir = $2::text)
          RETURNING *`,
-        [targetId],
+        [targetId, docId],
       );
 
       if (autUpdate && autUpdate.length > 0) {
         verticalActualizada = 'AUTOS';
         reservaActualizada = autUpdate[0];
+      } else if (
+        targetId.toUpperCase().startsWith('CAR') ||
+        targetId.toUpperCase().startsWith('MDU-') ||
+        targetId.toUpperCase().startsWith('ANDES-') ||
+        targetId.toUpperCase().startsWith('PACIF-')
+      ) {
+        verticalActualizada = 'AUTOS';
       }
     }
 
@@ -377,6 +390,10 @@ export class ReservasService {
           targetId,
           JSON.stringify({
             ...dto,
+            order_id: targetId,
+            pnr: targetId,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
             vertical: verticalActualizada || 'EXTERNO_SOCIO',
             correlation_id: safeCorrId,
             api_key_autenticada: !!apiKey,

@@ -6,7 +6,7 @@ export class OrderAuto {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id: string; // e.g. RES-AUT-XXXXXX o UUID
 
-  @Column({ name: 'auto_id', type: 'uuid' })
+  @Column({ name: 'auto_id', type: 'varchar', length: 100 })
   autoId: string;
 
   @Column({ name: 'cliente_id', type: 'uuid', nullable: true })

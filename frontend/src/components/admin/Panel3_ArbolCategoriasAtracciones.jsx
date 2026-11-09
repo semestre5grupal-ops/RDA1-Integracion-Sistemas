@@ -1,245 +1,126 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
+import { mensajeError, ErrorBox } from './panelUtils';
 
-export function Panel3_ArbolCategoriasAtracciones() {
+/**
+ * Categorías de atracciones (árbol de la base: GET /atracciones/categorias/arbol)
+ * y alta de categorías o subcategorías (POST /atracciones/categorias, rol ADMIN).
+ */
+const hijosDe = (n) => n.subcategorias || n.hijos || [];
+
+function aplanar(nodos, nivel = 0, out = []) {
+  nodos.forEach((n) => {
+    out.push({ id: n.id, nombre: n.nombre, nivel });
+    aplanar(hijosDe(n), nivel + 1, out);
+  });
+  return out;
+}
+
+const VACIA = { nombre: '', parentId: '', incluye_comida: false, incluye_transporte: false, incluye_guia: false };
+
+const chip = (bg, fg) => ({ background: bg, color: fg, padding: '2px 8px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap' });
+
+export function Panel3_ArbolCategoriasAtracciones({ refreshKey = 0 }) {
   const [arbol, setArbol] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [nuevaCat, setNuevaCat] = useState({
-    nombre: '',
-    parentId: '',
-    incluye_comida: false,
-    incluye_transporte: false,
-    incluye_guia: true,
-  });
+  const [error, setError] = useState(null);
+  const [nueva, setNueva] = useState(VACIA);
   const [guardando, setGuardando] = useState(false);
+  const [aviso, setAviso] = useState(null);
 
-  const fetchArbol = async () => {
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      const res = await api.get('/atracciones/categorias/arbol');
-      setArbol(Array.isArray(res) ? res : res.data || []);
+      const { data } = await api.get('/atracciones/categorias/arbol');
+      setArbol(Array.isArray(data) ? data : []);
     } catch (e) {
-      // Mock inicial si el endpoint remoto no está disponible
-      setArbol([
-        {
-          id: 'cat-1',
-          nombre: 'Turismo y Aventura de Montaña',
-          incluye_comida: true,
-          incluye_transporte: true,
-          incluye_guia: true,
-          hijos: [
-            {
-              id: 'cat-1-1',
-              nombre: 'Ascenso a Volcanes de los Andes (Cotopaxi / Chimborazo)',
-              incluye_comida: true,
-              incluye_transporte: true,
-              incluye_guia: true,
-              hijos: []
-            },
-            {
-              id: 'cat-1-2',
-              nombre: 'Trekking en Lagunas de Altura (Quilotoa)',
-              incluye_comida: false,
-              incluye_transporte: true,
-              incluye_guia: true,
-              hijos: []
-            }
-          ]
-        },
-        {
-          id: 'cat-2',
-          nombre: 'Patrimonio Cultural y Centros Históricos',
-          incluye_comida: false,
-          incluye_transporte: false,
-          incluye_guia: true,
-          hijos: [
-            {
-              id: 'cat-2-1',
-              nombre: 'Ruta Colonial y Monasterios del Centro de Quito',
-              incluye_comida: true,
-              incluye_transporte: false,
-              incluye_guia: true,
-              hijos: []
-            }
-          ]
-        }
-      ]);
+      setArbol([]);
+      setError(mensajeError(e, 'No se pudo leer el árbol de categorías.'));
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchArbol();
   }, []);
 
-  const handleCrearCategoria = async (e) => {
-    e.preventDefault();
-    if (!nuevaCat.nombre.trim()) return;
+  useEffect(() => { cargar(); }, [cargar, refreshKey]);
 
+  const crear = async (e) => {
+    e.preventDefault();
+    if (!nueva.nombre.trim()) return;
     setGuardando(true);
+    setAviso(null);
     try {
       await api.post('/atracciones/categorias', {
-        nombre: nuevaCat.nombre.trim(),
-        parent_id: nuevaCat.parentId || null,
-        incluye_comida: nuevaCat.incluye_comida,
-        incluye_transporte: nuevaCat.incluye_transporte,
-        incluye_guia: nuevaCat.incluye_guia,
+        nombre: nueva.nombre.trim(),
+        parent_id: nueva.parentId || null,
+        incluye_comida: nueva.incluye_comida,
+        incluye_transporte: nueva.incluye_transporte,
+        incluye_guia: nueva.incluye_guia,
       });
-      setNuevaCat({ nombre: '', parentId: '', incluye_comida: false, incluye_transporte: false, incluye_guia: true });
-      await fetchArbol();
+      setAviso({ ok: true, texto: `Categoría "${nueva.nombre.trim()}" creada.` });
+      setNueva(VACIA);
+      await cargar();
     } catch (err) {
-      // Simulación local si backend no responde
-      const nuevoNodo = {
-        id: `cat-${Date.now()}`,
-        nombre: nuevaCat.nombre,
-        incluye_comida: nuevaCat.incluye_comida,
-        incluye_transporte: nuevaCat.incluye_transporte,
-        incluye_guia: nuevaCat.incluye_guia,
-        hijos: []
-      };
-      setArbol(prev => [...prev, nuevoNodo]);
-      setNuevaCat({ nombre: '', parentId: '', incluye_comida: false, incluye_transporte: false, incluye_guia: true });
+      setAviso({ ok: false, texto: mensajeError(err, 'No se pudo crear la categoría.') });
     } finally {
       setGuardando(false);
     }
   };
 
-  const renderNodo = (nodo, nivel = 0) => {
-    return (
-      <div key={nodo.id} style={{ marginLeft: `${nivel * 24}px`, marginTop: '8px' }}>
-        <div 
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            background: nivel === 0 ? '#f8fafc' : '#ffffff',
-            border: '1px solid #e2e8f0',
-            borderLeft: nivel === 0 ? '4px solid #006ce4' : '3px solid #94a3b8',
-            padding: '10px 14px',
-            borderRadius: '6px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1rem' }}>{nivel === 0 ? '📁' : '↳ 📄'}</span>
-            <strong style={{ fontSize: '0.9rem', color: '#1e293b' }}>{nodo.nombre}</strong>
-          </div>
+  const total = aplanar(arbol).length;
 
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {nodo.incluye_comida && (
-              <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
-                🍴 Comida
-              </span>
-            )}
-            {nodo.incluye_transporte && (
-              <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
-                🚌 Transporte
-              </span>
-            )}
-            {nodo.incluye_guia && (
-              <span style={{ background: '#ede9fe', color: '#6d28d9', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
-                🧭 Guía Oficial
-              </span>
-            )}
-          </div>
+  const nodo = (n, nivel = 0) => (
+    <div key={n.id} style={{ marginLeft: nivel ? 16 : 0, marginTop: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', border: '1px solid #e2e8f0', borderLeft: `4px solid ${nivel ? '#94a3b8' : '#006ce4'}`, borderRadius: 6, padding: '8px 12px', background: nivel ? '#fff' : '#f8fafc' }}>
+        <div>
+          <strong style={{ fontSize: '0.88rem' }}>{n.nombre}</strong>
+          {n.descripcion && n.descripcion !== n.nombre && <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{n.descripcion}</div>}
         </div>
-
-        {nodo.hijos && nodo.hijos.length > 0 && (
-          <div style={{ borderLeft: '1px dashed #cbd5e1', marginLeft: '12px', paddingLeft: '8px' }}>
-            {nodo.hijos.map(hijo => renderNodo(hijo, nivel + 1))}
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {n.incluye_comida && <span style={chip('#dcfce7', '#166534')}>Comida</span>}
+          {n.incluye_transporte && <span style={chip('#e0f2fe', '#0369a1')}>Transporte</span>}
+          {n.incluye_guia && <span style={chip('#ede9fe', '#6d28d9')}>Guía</span>}
+        </div>
       </div>
-    );
-  };
+      {hijosDe(n).length > 0 && <div style={{ borderLeft: '1px dashed #cbd5e1', marginLeft: 10 }}>{hijosDe(n).map((h) => nodo(h, nivel + 1))}</div>}
+    </div>
+  );
 
   return (
-    <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '1.3rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🌲</span> Panel 3: Árbol Jerárquico Recursivo de Atracciones (RDA2 §6)
-          </h2>
-          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-            Gestión de categorías multicapa con los 3 flags de inclusión obligatorios de Cátedra: Comida, Transporte y Guía turístico.
-          </p>
-        </div>
-        <button 
-          onClick={fetchArbol}
-          style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
-        >
-          🔄 Refrescar Árbol
+    <div style={{ background: '#fff', border: '1px solid #e7e7e7', borderRadius: 8, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: '0.82rem', color: '#52514e' }}><strong>{total}</strong> categorías en la base</span>
+        <button type="button" onClick={cargar} disabled={loading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: 6, cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem' }}>
+          {loading ? 'Cargando…' : '↻ Actualizar'}
         </button>
       </div>
+      <ErrorBox error={error} onRetry={cargar} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
-        {/* VISTA DEL ÁRBOL */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20, alignItems: 'start' }}>
         <div>
-          <h3 style={{ fontSize: '1rem', color: '#334155', marginBottom: '12px' }}>Jerarquía Actual de Categorías</h3>
-          {loading && arbol.length === 0 ? (
-            <div style={{ color: '#64748b', padding: '20px' }}>Cargando árbol de categorías...</div>
-          ) : (
-            <div>{arbol.map(nodo => renderNodo(nodo, 0))}</div>
-          )}
+          {arbol.map((n) => nodo(n))}
+          {!loading && !error && arbol.length === 0 && <div style={{ color: '#64748b', padding: 12 }}>No hay categorías registradas.</div>}
         </div>
 
-        {/* FORMULARIO DE NUEVA CATEGORÍA */}
-        <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '10px', border: '1px solid #e2e8f0', height: 'fit-content' }}>
-          <h3 style={{ fontSize: '1rem', color: '#0f172a', margin: '0 0 14px 0' }}>Nueva Categoría / Subcategoría</h3>
-          <form onSubmit={handleCrearCategoria}>
-            <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
-                Nombre de la Categoría:
-              </label>
-              <input 
-                type="text" 
-                value={nuevaCat.nombre} 
-                onChange={(e) => setNuevaCat({ ...nuevaCat, nombre: e.target.value })}
-                placeholder="Ej. Ecoturismo y Cascadas" 
-                style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                required
-              />
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <strong style={{ fontSize: '0.82rem', color: '#334155', display: 'block', marginBottom: '8px' }}>
-                Flags de Inclusión Requeridos:
-              </strong>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', marginBottom: '6px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={nuevaCat.incluye_comida} 
-                  onChange={(e) => setNuevaCat({ ...nuevaCat, incluye_comida: e.target.checked })}
-                />
-                🍴 Incluye Alimentos / Degustación
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', marginBottom: '6px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={nuevaCat.incluye_transporte} 
-                  onChange={(e) => setNuevaCat({ ...nuevaCat, incluye_transporte: e.target.checked })}
-                />
-                🚌 Incluye Transporte / Recogida
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', marginBottom: '6px', cursor: 'pointer' }}>
-                <input 
-                  type="checkbox" 
-                  checked={nuevaCat.incluye_guia} 
-                  onChange={(e) => setNuevaCat({ ...nuevaCat, incluye_guia: e.target.checked })}
-                />
-                🧭 Guía Turístico Oficial Certificado
-              </label>
-            </div>
-
-            <button 
-              type="submit" 
-              disabled={guardando}
-              style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' }}
-            >
-              {guardando ? 'Guardando...' : '➕ Agregar al Árbol'}
-            </button>
-          </form>
-        </div>
+        <form onSubmit={crear} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16 }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Nueva categoría</div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }} htmlFor="cat-nombre">Nombre</label>
+          <input id="cat-nombre" value={nueva.nombre} onChange={(e) => setNueva({ ...nueva, nombre: e.target.value })} required style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', marginBottom: 10 }} />
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }} htmlFor="cat-padre">Dentro de</label>
+          <select id="cat-padre" value={nueva.parentId} onChange={(e) => setNueva({ ...nueva, parentId: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1', marginBottom: 10, background: '#fff' }}>
+            <option value="">(categoría principal)</option>
+            {aplanar(arbol).map((c) => <option key={c.id} value={c.id}>{`${'— '.repeat(c.nivel)}${c.nombre}`}</option>)}
+          </select>
+          {[['incluye_comida', 'Incluye comida'], ['incluye_transporte', 'Incluye transporte'], ['incluye_guia', 'Incluye guía']].map(([k, label]) => (
+            <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.84rem', marginBottom: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={nueva[k]} onChange={(e) => setNueva({ ...nueva, [k]: e.target.checked })} /> {label}
+            </label>
+          ))}
+          {aviso && <div role="status" style={{ fontSize: '0.8rem', color: aviso.ok ? '#166534' : '#991b1b', margin: '8px 0' }}>{aviso.texto}</div>}
+          <button type="submit" disabled={guardando} style={{ width: '100%', marginTop: 6, background: '#006ce4', color: '#fff', border: 'none', padding: 9, borderRadius: 6, fontWeight: 700, cursor: guardando ? 'wait' : 'pointer' }}>
+            {guardando ? 'Guardando…' : 'Crear categoría'}
+          </button>
+        </form>
       </div>
     </div>
   );

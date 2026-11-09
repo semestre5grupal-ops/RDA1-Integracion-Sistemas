@@ -3,11 +3,12 @@ import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { RespuestaProxy, VuelosSociosService } from './vuelos-socios.service';
 import { resumenDeReserva, VuelosSociosReservasService } from './vuelos-socios-reservas.service';
-import { ordenDeReserva } from './vuelos-facturacion';
+import { ordenDeReserva, precioConRecargo } from './vuelos-facturacion';
 import { SincronizadorEventosVuelos } from './vuelos-eventos';
 import { PasoVuelo, ResultadoPaso, trazaVuelos } from './vuelos-traza';
 import { VuelosService } from '../vuelos.service';
 import { propietarioDesde } from '../vuelos.controller';
+import { esAdminPorToken } from '../../../core/auth/verificar-admin';
 
 const RUTA_VUELOS = /^\/api\/v\d+\/vuelos\/(.+)$/;
 
@@ -102,12 +103,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       return true;
     }
 
-    // ── Rutas de una reserva existente: solo el dueño ──
+    // ── Rutas de una reserva existente: solo el dueño (o un administrador verificado) ──
     if (segmentos[0] === 'bookings' && segmentos[1]) {
       const bookingId = decodeURIComponent(segmentos[1]);
       const copia = await this.reservas.obtener(bookingId);
       const propietario = propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']);
-      if (!copia || copia.propietarioId !== propietario) {
+      const permitido = !!copia && (copia.propietarioId === propietario || await esAdminPorToken(entrantes['authorization']));
+      if (!permitido) {
         this.enviar(res, problema(404, 'Reserva no encontrada', 'La reserva no existe o no pertenece a este usuario.'));
         return true;
       }
@@ -119,6 +121,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
     const t0 = Date.now();
     const rg = await this.socios.reenviar(nodo, metodo, segmentos, query, req.body, entrantes);
+    // Hold (crear o consultar): Booking agrega lo que cobrará al cliente.
+    if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && rg.status < 300 && rg.body?.lockedPrice?.total != null) {
+      const base = parseFloat(String(rg.body.lockedPrice.total));
+      if (Number.isFinite(base) && base > 0) {
+        rg.body = { ...rg.body, bookingPrice: precioBooking(precioConRecargo(base, await this.reservas.recargoPct()), rg.body.lockedPrice.currency) };
+      }
+    }
     if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && metodo === 'POST') {
       this.traza(entrantes, 'hold', rg.status < 300 ? 'ok' : 'error',
         rg.status < 300 ? `Hold creado · precio congelado ${rg.body?.lockedPrice?.total ?? '?'} ${rg.body?.lockedPrice?.currency ?? ''} · ${rg.body?.ttlMinutes ?? '?'} min` : `Hold rechazado (HTTP ${rg.status}): ${rg.body?.detail || rg.body?.title || ''}`,
@@ -157,6 +166,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     res.status(200).json({
       totalOffers: todas.length,
       offers: todas,
+      // Los precios de las ofertas son los de la aerolínea; Booking cobra además
+      // su cargo por servicio con este porcentaje (el frontend muestra el final).
+      bookingFee: { percentage: await this.reservas.recargoPct() },
       meta: {
         fuente,
         totalOffers: todas.length,
@@ -208,12 +220,18 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       req.body = { ...req.body, passengers: req.body.passengers.map(normalizarPasajero) };
     }
 
+    // 1c) Precio al cliente = precio de la aerolínea (monto) + recargo de Booking.
+    //     A la aerolínea se le envía y se le paga SOLO su precio (contrato sin cambios).
+    const precio = precioConRecargo(monto, await this.reservas.recargoPct());
+
     // 2) Cobro en MS_PAG (idempotente con la misma clave del cliente).
     const tCobro = Date.now();
-    const cobro = await this.reservas.cobrar(monto, idem, propietario);
+    const cobro = await this.reservas.cobrar(precio.total, idem, propietario);
     this.traza(entrantes, 'cobro', cobro.ok ? 'ok' : 'error',
-      cobro.ok ? `Pago aprobado · ${cobro.paymentReference}` : `Pago rechazado: ${cobro.detalle ?? cobro.estado ?? ''}`,
-      { nodo, ms: Date.now() - tCobro, monto });
+      cobro.ok
+        ? `Pago aprobado ${precio.total.toFixed(2)} (aerolínea ${precio.aerolinea.toFixed(2)} + servicio ${precio.cargo.toFixed(2)}) · ${cobro.paymentReference}`
+        : `Pago rechazado: ${cobro.detalle ?? cobro.estado ?? ''}`,
+      { nodo, ms: Date.now() - tCobro, monto: precio.total });
     if (!cobro.ok) {
       this.enviar(res, problema(cobro.status === 402 ? 402 : cobro.status ?? 502, 'Pago no aprobado', cobro.detalle ?? 'El cobro fue rechazado.'));
       return;
@@ -225,6 +243,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // contra el precio congelado: AMOUNT_MISMATCH). Así puede conciliar.
     const partnerOrderId = ordenDeReserva(idem);
     const moneda = String(hold.body?.lockedPrice?.currency ?? 'USD');
+    // La aerolínea puede validar esta referencia en GET /pagos/{paymentReference}
+    // (contrato de pagos v2) mientras procesa la reserva: se registra antes.
+    await this.reservas.registrarReferenciaPago(cobro.paymentReference!, cobro.transaccionId, nodo, monto, moneda);
     const cuerpo = {
       ...(req.body ?? {}),
       payment: {
@@ -249,9 +270,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     if (r.status < 200 || r.status >= 300 || !r.body?.bookingId) {
       let devuelto = 0;
       if (cobro.transaccionId) {
-        devuelto = await this.reservas.reembolsar(cobro.transaccionId, monto, `Aerolínea ${nodo} rechazó la reserva (HTTP ${r.status})`);
+        devuelto = await this.reservas.reembolsar(cobro.transaccionId, precio.total, `Aerolínea ${nodo} rechazó la reserva (HTTP ${r.status})`);
         this.traza(entrantes, 'reembolso', devuelto > 0 ? 'ok' : 'error',
-          devuelto > 0 ? `SAGA: se devolvieron ${devuelto.toFixed(2)}` : 'SAGA: el reembolso FALLÓ, el cliente quedó cobrado sin reserva', { nodo, monto });
+          devuelto > 0 ? `SAGA: se devolvieron ${devuelto.toFixed(2)}` : 'SAGA: el reembolso FALLÓ, el cliente quedó cobrado sin reserva', { nodo, monto: precio.total });
       }
       // Solo se dice "se reembolsó" si el reembolso de verdad se hizo.
       const aviso = devuelto > 0 || !cobro.transaccionId
@@ -263,7 +284,10 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
     // 5) Copia para Mis Reservas.
     try {
-      await this.reservas.registrar({ bookingId: r.body.bookingId, codigoNodo: nodo, propietarioId: propietario, reserva: r.body, montoCobrado: monto, cobro });
+      await this.reservas.registrar({
+        bookingId: r.body.bookingId, codigoNodo: nodo, propietarioId: propietario, reserva: r.body,
+        montoCobrado: precio.total, montoAerolinea: precio.aerolinea, cargo: precio.cargo, cobro,
+      });
       this.traza(entrantes, 'copia', 'ok', 'Copia guardada para Mis Reservas', { nodo });
     } catch (e: any) {
       this.logger.error(`[vuelos-socios] No se guardó la copia de ${r.body.bookingId}: ${e?.message}`);
@@ -287,21 +311,23 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       propietarioId: propietario,
       reserva: r.body,
       pasajeros: req.body?.passengers ?? [],
-      total: monto,
+      total: precio.total,
       moneda,
       base: lp.baseFare != null ? parseFloat(String(lp.baseFare)) : null,
       impuestos: lp.taxes != null ? parseFloat(String(lp.taxes)) : null,
+      cargo: precio.cargo,
       transaccionId: cobro.transaccionId ?? null,
       partnerOrderId,
       resumen: resumenDeReserva(r.body),
     });
     this.traza(entrantes, 'factura', factura ? 'ok' : 'error',
-      factura ? `Factura ${factura.numero} · orden ${partnerOrderId}` : 'No se pudo emitir la factura (la reserva sigue confirmada)', { nodo, monto });
-    this.traza(entrantes, 'confirmada', 'ok', `Reserva confirmada · ${r.body.bookingId}`, { nodo, monto });
+      factura ? `Factura ${factura.numero} · orden ${partnerOrderId}` : 'No se pudo emitir la factura (la reserva sigue confirmada)', { nodo, monto: precio.total });
+    this.traza(entrantes, 'confirmada', 'ok', `Reserva confirmada · ${r.body.bookingId}`, { nodo, monto: precio.total });
     r.body = {
       ...r.body,
       payment: { ...(r.body.payment ?? {}), paymentReference: cobro.paymentReference },
       salesChannel: r.body.salesChannel ?? { partnerId: 'BOOKING_PROTOTIPO', partnerOrderId },
+      bookingPrice: precioBooking(precio, moneda),
       ...(factura ? { factura } : {}),
     };
     this.enviar(res, r);
@@ -320,6 +346,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         await this.reservas.actualizarDesdeSocio(bookingId, r.body);
         const factura = await this.reservas.factura(bookingId);
         if (factura) r.body = { ...r.body, factura };
+        if (copia.cargoServicio != null && copia.montoAerolinea != null) {
+          r.body = { ...r.body, bookingPrice: precioBooking({ aerolinea: copia.montoAerolinea, cargo: copia.cargoServicio, total: copia.grandTotal, pct: copia.montoAerolinea > 0 ? Math.round((copia.cargoServicio / copia.montoAerolinea) * 10000) / 100 : 0 }, copia.currency) };
+        }
         // La aerolínea deja la reserva en CONFIRMED tras el check-in; Booking
         // muestra que el pasajero ya se presentó.
         if (copia.status === 'CHECKED_IN') r.body = { ...r.body, status: 'CHECKED_IN' };
@@ -400,7 +429,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
   /** Deja un paso en la traza en vivo, con el correlation ID de la compra. */
   private traza(entrantes: Record<string, any>, paso: PasoVuelo, resultado: ResultadoPaso, detalle: string, extra: { nodo?: string | null; ms?: number | null; monto?: number | null } = {}) {
     try {
-      trazaVuelos.registrar({ correlacion: String(entrantes['x-correlation-id'] || 'sin-correlacion'), paso, resultado, detalle, ...extra });
+      const huella = String(entrantes['x-device-fingerprint'] || '');
+      const cliente = emailDesdeJwt(entrantes['authorization']) || (huella ? `invitado ·${huella.slice(-6)}` : null);
+      trazaVuelos.registrar({ correlacion: String(entrantes['x-correlation-id'] || 'sin-correlacion'), paso, resultado, detalle, cliente, ...extra });
     } catch {
       /* la traza nunca debe romper una reserva */
     }
@@ -417,6 +448,20 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       res.status(r.status).send(r.body);
     }
   }
+}
+
+/**
+ * Desglose de lo que paga el cliente en Booking (campo propio de Booking hacia
+ * su frontend; a la aerolínea no se le envía): su precio + cargo por servicio.
+ */
+function precioBooking(p: { aerolinea: number; cargo: number; total: number; pct: number }, moneda?: string) {
+  return {
+    currency: moneda || 'USD',
+    airlineTotal: p.aerolinea.toFixed(2),
+    serviceFee: p.cargo.toFixed(2),
+    serviceFeePercentage: p.pct,
+    total: p.total.toFixed(2),
+  };
 }
 
 function problema(status: number, title: string, detail: string): RespuestaProxy {

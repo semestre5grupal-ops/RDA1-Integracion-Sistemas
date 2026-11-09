@@ -29,7 +29,7 @@ describe('PagosService', () => {
   let eventBus: { publish: jest.Mock };
 
   const transaction = (overrides: Partial<TransaccionPago> = {}): TransaccionPago => ({
-    id: 'pay-1',
+    id: '0b5f2c1e-7a3d-4c2b-9e8f-1a2b3c4d5e6f',
     idempotencyKey: 'charge-1',
     facturaId: null,
     carritoId: 'store-1',
@@ -209,6 +209,29 @@ describe('PagosService', () => {
     await expect(
       service.validarPaymentReference(existing.id, { type: 'store', carritoId: 'another-store' }),
     ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+  });
+
+  it('lets a partner airline validate the PAY-BKP reference Booking sent it, and only its own sales', async () => {
+    const vuelo = transaction({ id: '11111111-2222-4333-8444-555555555555', carritoId: null as any, montoTotal: 120 });
+    transactions.push(vuelo);
+    const referencias = [{ payment_reference: 'PAY-BKP-20261107-000123', transaccion_id: vuelo.id, codigo_nodo: 'NODE_VUE_QUINDE' }];
+    (repository as any).manager = {
+      query: jest.fn(async (sql: string, params: string[]) =>
+        sql.includes('WHERE payment_reference')
+          ? referencias.filter((r) => r.payment_reference === params[0])
+          : referencias.filter((r) => r.transaccion_id === params[0] && r.codigo_nodo === params[1]).map(() => ({ ok: 1 })),
+      ),
+    };
+
+    const ok = await service.validarPaymentReference('PAY-BKP-20261107-000123', { type: 'store', carritoId: 'NODE_VUE_QUINDE' });
+    expect(ok).toMatchObject({ payment_reference: 'PAY-BKP-20261107-000123', status: 'CAPTURED', amount: 120 });
+
+    await expect(
+      service.validarPaymentReference('PAY-BKP-20261107-000123', { type: 'store', carritoId: 'NODE_VUE_OTRA' }),
+    ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+    await expect(
+      service.validarPaymentReference('PAY-BKP-20261107-999999', { type: 'store', carritoId: 'NODE_VUE_QUINDE' }),
+    ).rejects.toMatchObject({ status: HttpStatus.NOT_FOUND });
   });
 
   it('associates a reservation idempotently and rejects unknown references', async () => {

@@ -55,6 +55,7 @@ export class AutosCircuitBreakerAdapter {
   private readonly FAILURE_THRESHOLD = 3;
   private readonly RESET_TIMEOUT_MS = 30000; // 30s
   private readonly TIMEOUT_MS = 5000;         // 5s reglamentarios (Cátedra RDA2 CE01)
+  private readonly cancelledOrderIds = new Set<string>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -131,16 +132,16 @@ export class AutosCircuitBreakerAdapter {
 
     const allCars: any[] = [];
 
-    // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo
+    // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo (limit=100 para no truncar la flota)
     const [danielRes, mateoRes] = await Promise.allSettled([
       firstValueFrom(
-        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos', {
+        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
           headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
           timeout: this.TIMEOUT_MS,
         }),
       ),
       firstValueFrom(
-        this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos', {
+        this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
           headers: { 'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=' },
           timeout: this.TIMEOUT_MS,
         }),
@@ -228,8 +229,97 @@ export class AutosCircuitBreakerAdapter {
     }
 
     if (allCars.length > 0) {
+      // 1b. Cruzar con órdenes activas para actualizar el estado del auto a RESERVADO o CONFIRMADO_ASISTIDO
+      try {
+        const activeOrders = await this.getOrdersDirect();
+        const searchPickup = searchParams?.pickup_date;
+        const searchDropoff = searchParams?.dropoff_date;
+
+        for (const car of allCars) {
+          const matchingOrders = activeOrders.filter((o: any) => {
+            const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
+            const cVid = car.vehicle_id.toLowerCase().replace(/^auto-/, '');
+            return oVid === cVid && o.status !== 'CANCELLED';
+          });
+
+          if (matchingOrders.length > 0) {
+            // Verificar si alguna orden coincide con las fechas solicitadas o si está activa
+            let isReservedForDates = false;
+            let isAssisted = false;
+
+            for (const ord of matchingOrders) {
+              const ordStatus = (ord.status || ord.estado || '').toUpperCase();
+              if (ordStatus === 'CONFIRMADO_ASISTIDO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
+                isAssisted = true;
+              }
+
+              if (searchPickup && searchDropoff) {
+                const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
+                const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
+                if (oPickup && oDropoff) {
+                  // Conflicto de fechas: solapamiento de intervalos
+                  if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
+                    isReservedForDates = true;
+                  }
+                } else {
+                  isReservedForDates = true;
+                }
+              } else {
+                // Sin fechas específicas de búsqueda: si tiene orden activa PENDING o RESERVADO
+                if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
+                  isReservedForDates = true;
+                }
+              }
+            }
+
+            if (isAssisted) {
+              car.estado = 'CONFIRMADO_ASISTIDO';
+            } else if (isReservedForDates) {
+              car.estado = 'RESERVADO';
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`[AutosCircuitBreaker] No se pudo reconciliar estados con órdenes: ${err.message}`);
+      }
+
+      // 1c. Deduplicación inteligente de modelos replicados (a menos que se pida all_units=true)
+      const allUnitsRequested = searchParams?.all_units === 'true' || searchParams?.all_units === true;
+      let finalCars = allCars;
+
+      if (!allUnitsRequested) {
+        const modelMap = new Map<string, any[]>();
+        for (const car of allCars) {
+          const modelKey = `${car.proveedor_codigo}_${car.marca}_${car.modelo}_${car.categoria}_${car.transmision}`.toUpperCase().trim();
+          if (!modelMap.has(modelKey)) {
+            modelMap.set(modelKey, []);
+          }
+          modelMap.get(modelKey)!.push(car);
+        }
+
+        const deduplicated: any[] = [];
+        for (const [_, units] of modelMap.entries()) {
+          // Priorizar una unidad que esté DISPONIBLE
+          const availUnit = units.find(u => u.estado === 'DISPONIBLE');
+          const chosen = { ...(availUnit || units[0]) };
+          const disponiblesCount = units.filter(u => u.estado === 'DISPONIBLE').length;
+
+          chosen.unidades_disponibles = disponiblesCount;
+          chosen.unidades_totales = units.length;
+          chosen.flota_unificada = true;
+          chosen.disponibilidad_resumen = `${disponiblesCount} de ${units.length} unidades disponibles`;
+
+          if (disponiblesCount === 0) {
+            chosen.estado = 'RESERVADO';
+          }
+
+          deduplicated.push(chosen);
+        }
+        finalCars = deduplicated;
+      }
+
       this.handleSuccess();
-      return allCars;
+      return finalCars;
     }
 
     // 2. Fallback secundario: Intentar obtener modelos y flota de admin de RutaLibre
@@ -341,7 +431,7 @@ export class AutosCircuitBreakerAdapter {
    */
   async getOrdersDirect(): Promise<any[]> {
     const orders: any[] = [];
-    // 1. RutaLibre
+    // 1. RutaLibre (v3/orders)
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
       const response = await firstValueFrom(
@@ -357,6 +447,56 @@ export class AutosCircuitBreakerAdapter {
       }
     } catch (_) {}
 
+    // 1b. Obtener estados de Check-in presencial en mostrador de Daniel (RutaLibre admin)
+    try {
+      const token = await this.getRutaLibreToken();
+      if (token) {
+        const adminRes = await firstValueFrom(
+          this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/admin/reservations', {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 5000,
+          })
+        );
+        if (Array.isArray(adminRes.data)) {
+          for (const r of adminRes.data) {
+            const loc = (r.locator || r.id || '').toUpperCase();
+            const existing = orders.find(o => ((o.pnr || o.order_id || o.codigo_reserva || '').toUpperCase()) === loc);
+            const isAssisted = r.rentalStatus === 'PICKED_UP' || r.rentalStatus === 'RETURNED' || r.status === 'CONFIRMADO_ASISTIDO';
+            if (existing) {
+              existing.rentalStatus = r.rentalStatus;
+              existing.rental_status = r.rentalStatus;
+              existing.plate = r.plate || existing.plate;
+              if (isAssisted) {
+                existing.status = 'CONFIRMADO_ASISTIDO';
+                existing.estado = 'CONFIRMADO_ASISTIDO';
+              }
+            } else if (r.fromBooking || loc.startsWith('CAR')) {
+              orders.push({
+                order_id: r.locator || r.id,
+                pnr: r.locator || r.id,
+                codigo_reserva: r.locator || r.id,
+                status: isAssisted ? 'CONFIRMADO_ASISTIDO' : (r.status || 'CONFIRMED'),
+                estado: isAssisted ? 'CONFIRMADO_ASISTIDO' : (r.status || 'CONFIRMED'),
+                rentalStatus: r.rentalStatus,
+                rental_status: r.rentalStatus,
+                plate: r.plate,
+                driver: {
+                  full_name: r.driver,
+                  nombre: r.driver,
+                  email: r.driverEmail || 'cliente@booking.com',
+                  license_number: r.identification || '1150029880',
+                },
+                total_price: { currency: r.currency || 'USD', total: r.totalPrice },
+                moneda: r.currency || 'USD',
+                precio_total_monto: r.totalPrice,
+                created_at: r.createdAt,
+              });
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
     // 2. Maneja de Una (Mateo)
     try {
       const mateoKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
@@ -366,20 +506,62 @@ export class AutosCircuitBreakerAdapter {
           timeout: 4000,
         })
       );
-      const mData = Array.isArray(mRes.data) ? mRes.data : (mRes.data?.items || mRes.data?.data || []);
+      const mData = Array.isArray(mRes.data)
+        ? mRes.data
+        : (mRes.data?.value || mRes.data?.items || mRes.data?.data || []);
       if (Array.isArray(mData)) {
-        orders.push(...mData);
+        for (const m of mData) {
+          const mStatus = (m.status || m.estado || '').toUpperCase();
+          if (mStatus === 'CONFIRMADO_ASISTIDO' || m.rental_status === 'PICKED_UP' || m.checkin_status === 'COMPLETED') {
+            m.status = 'CONFIRMADO_ASISTIDO';
+            m.estado = 'CONFIRMADO_ASISTIDO';
+          } else if (mStatus === 'RESERVADO' || mStatus === 'CONFIRMED') {
+            m.status = 'RESERVADO';
+            m.estado = 'RESERVADO';
+          }
+          orders.push(m);
+        }
       }
     } catch (_) {}
+
+    // Sobrescribir inmediatamente el estado a CANCELLED para órdenes canceladas registradas
+    for (const ord of orders) {
+      const id1 = ord.id ? String(ord.id).toUpperCase() : '';
+      const id2 = ord.order_id ? String(ord.order_id).toUpperCase() : '';
+      const id3 = ord.pnr ? String(ord.pnr).toUpperCase() : '';
+      const id4 = ord.codigo_reserva ? String(ord.codigo_reserva).toUpperCase() : '';
+      if (
+        this.cancelledOrderIds.has(id1) ||
+        this.cancelledOrderIds.has(id2) ||
+        this.cancelledOrderIds.has(id3) ||
+        this.cancelledOrderIds.has(id4)
+      ) {
+        ord.status = 'CANCELLED';
+        ord.estado = 'CANCELLED';
+      }
+    }
 
     return orders;
   }
 
   /**
-   * Notifica la cancelación de una orden al socio externo RutaLibre.
+   * Registra manualmente un ID de orden como cancelado para actualización inmediata de inventario.
+   */
+  markOrderAsCancelled(orderId: string): void {
+    if (!orderId) return;
+    this.cancelledOrderIds.add(orderId);
+    this.cancelledOrderIds.add(orderId.toUpperCase());
+  }
+
+  /**
+   * Notifica la cancelación de una orden al socio externo (RutaLibre o Maneja de Una) con resiliencia dual.
    */
   async cancelOrder(orderId: string, reason = 'Cancelado por el cliente'): Promise<boolean> {
     const cleanId = orderId.toUpperCase();
+    this.cancelledOrderIds.add(orderId);
+    this.cancelledOrderIds.add(cleanId);
+
+    // 1. Si coincide con formato Maneja de Una (MDU- o UUID)
     if (cleanId.startsWith('MDU-') || cleanId.length === 36) {
       try {
         await firstValueFrom(
@@ -398,24 +580,81 @@ export class AutosCircuitBreakerAdapter {
         this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a Maneja de Una: ${cleanId}`);
         return true;
       } catch (err: any) {
+        if (err.response?.status === 409) {
+          const detail = err.response.data?.detail || err.response.data?.message || 'Cancelación no permitida: El alquiler ya comenzó o no se puede cancelar.';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail: detail,
+          }, HttpStatus.CONFLICT);
+        }
         this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en Maneja de Una (${orderId}): ${err.message}`);
-        return false;
       }
     }
 
+    // 2. RutaLibre (Daniel) - Despacho con endpoint principal y fallback de ruta
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
-      await firstValueFrom(
-        this.httpService.post(
-          `https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
-          { reason },
-          { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
-        )
-      );
-      this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre: ${cleanId}`);
-      return true;
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
+            { reason },
+            { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
+          )
+        );
+        this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre (/autos/orders/...): ${cleanId}`);
+        return true;
+      } catch (err1: any) {
+        if (err1.response?.status === 409) {
+          const detail = err1.response.data?.detail || err1.response.data?.message || 'El alquiler ya comenzó; no se puede cancelar';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail: detail,
+          }, HttpStatus.CONFLICT);
+        }
+        if (err1.response?.status === 404) {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://rutalibre-autos-api.azurewebsites.net/api/v3/orders/${cleanId}/cancel`,
+              { reason },
+              { headers: { 'X-API-Key': key, 'Content-Type': 'application/json' }, timeout: 4000 }
+            )
+          );
+          this.logger.log(`[AutosCircuitBreaker] Cancelación propagada exitosamente a RutaLibre (/orders/...): ${cleanId}`);
+          return true;
+        }
+        throw err1;
+      }
     } catch (err: any) {
+      if (err instanceof HttpException) {
+        throw err;
+      }
       this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en RutaLibre (${orderId}): ${err.message}`);
+
+      // Fallback resiliente: Si no era MDU pero falló en Daniel, intentar en Mateo
+      if (!cleanId.startsWith('MDU-')) {
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders/${cleanId}/cancel`,
+              { reason },
+              {
+                headers: {
+                  'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=',
+                  'Content-Type': 'application/json',
+                },
+                timeout: 4000,
+              }
+            )
+          );
+          this.logger.log(`[AutosCircuitBreaker] Cancelación propagada como fallback a Maneja de Una: ${cleanId}`);
+          return true;
+        } catch (_) {}
+      }
       return false;
     }
   }

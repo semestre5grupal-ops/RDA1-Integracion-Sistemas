@@ -1,6 +1,7 @@
-import { BadRequestException, UseInterceptors, Controller, Get, Put, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Optional, UseInterceptors, Controller, Get, Put, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminMetricasService } from './admin-metricas.service';
 import { trazaVuelos } from '../vuelos/socios/vuelos-traza';
+import { RabbitMqEventBusService } from '../event-bus/rabbitmq/rabbitmq-event-bus.service';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { AdminErrorsInterceptor } from './admin-errors.interceptor';
@@ -28,6 +29,7 @@ export class AdminController {
     private readonly proveedoresService: AdminProveedoresService,
     private readonly connectorHealthService: ConnectorHealthService,
     private readonly metricasService: AdminMetricasService,
+    @Optional() private readonly rabbit?: RabbitMqEventBusService,
   ) {}
 
   // ── Monitor de Nodos del Ecosistema y Kill-Switches (RDA2 Brecha B-03) ───
@@ -100,7 +102,8 @@ export class AdminController {
   @Get('procesos/vuelos/en-vivo')
   @ApiOperation({ summary: 'Traza en tiempo real del proceso de vuelos, agrupable por X-Correlation-Id (eventos nuevos desde `desde`)' })
   enVivoVuelos(@Query('desde') desde?: string) {
-    return trazaVuelos.desde(Number(desde) || 0);
+    // `bus`: si los eventos de pago salen a un broker RabbitMQ real o quedan en memoria.
+    return { ...trazaVuelos.desde(Number(desde) || 0), bus: { rabbitmq: this.rabbit?.isBrokerActive?.() ?? false } };
   }
 
   // ── Usuarios ──────────────────────────────────────────────────────────────

@@ -105,7 +105,7 @@ export function PantallaReservaConfirmada({ reserva, onVolver }) {
           {!reserva.offline && (
             <p className="pnr-estado">
               Estado: <strong>{reserva.status}</strong> ·{' '}
-              {formatearMoneda(reserva.grandTotal?.total, reserva.grandTotal?.currency)}{' '}
+              {formatearMoneda(reserva.bookingPrice?.total ?? reserva.grandTotal?.total, reserva.grandTotal?.currency)}{' '}
               {reserva.grandTotal?.currency}
             </p>
           )}

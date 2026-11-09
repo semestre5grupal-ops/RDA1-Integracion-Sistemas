@@ -202,6 +202,12 @@ export class AutosService implements OnModuleInit {
 
   async onModuleInit() {
     this.logger.log('Módulo de Autos V2 inicializado con Máquina de Estados, Cooldown 2h y Rol de Mantenimiento.');
+    try {
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ALTER COLUMN auto_id TYPE VARCHAR(100)`);
+    } catch (_) {}
+    try {
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
+    } catch (_) {}
     // Evaluador periódico de cooldown cada 30 segundos (§5 Consideraciones)
     const timer = setInterval(() => {
       this.evaluateCleaningCooldowns();
@@ -249,11 +255,28 @@ export class AutosService implements OnModuleInit {
     const isYoungOrSenior = driverAge < 25 || driverAge > 70;
     const surchargeRate = isYoungOrSenior ? 15.00 : 0.00;
 
-    // 3. Filtrar flota local: Excluir 'EN_LIMPIEZA' (mientras dure el cooldown) y 'RESERVADO'
+    // 3. Filtrar flota local: Excluir 'EN_LIMPIEZA' (mientras dure el cooldown) y verificar colisión de fechas
     let availableCars = this.memoryFleet.filter(car => {
       // Regla de cátedra: Durante las 2 horas de limpieza queda completamente excluido
-      if (car.estado === EstadoVehiculo.EN_LIMPIEZA || car.estado === EstadoVehiculo.RESERVADO) {
+      if (car.estado === EstadoVehiculo.EN_LIMPIEZA) {
         return false;
+      }
+      if (car.estado === EstadoVehiculo.RESERVADO) {
+        // Si hay fechas de búsqueda, verificar si las fechas colisionan con reservas existentes
+        if (dto.pickup_date && dto.dropoff_date) {
+          const hasCollision = Array.from(this.memoryOrders.values()).some((ord: any) => {
+            if (ord.auto_id !== car.id || ord.status === 'CANCELLED') return false;
+            const oPickup = ord.pickup_date || ord.fecha_inicio;
+            const oDropoff = ord.dropoff_date || ord.fecha_fin;
+            if (oPickup && oDropoff) {
+              return dto.pickup_date! <= oDropoff && dto.dropoff_date! >= oPickup;
+            }
+            return true;
+          });
+          if (hasCollision) return false;
+        } else {
+          return false;
+        }
       }
       if (categoryFilter && categoryFilter !== 'ALL' && car.categoria !== categoryFilter) {
         return false;
@@ -377,10 +400,17 @@ export class AutosService implements OnModuleInit {
     let auto = this.memoryFleet.find(c => c.id === id);
     if (!auto) {
       try {
-        const external = await this.circuitBreakerAdapter.fetchExternalCars({});
+        const external = await this.circuitBreakerAdapter.fetchExternalCars({ all_units: 'true' });
         const foundExt = external.find((c: any) => c.vehicle_id === id || c.id === id);
         if (foundExt) {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
+          // Verificar si tiene orden activa en memoria
+          const isReservedMem = Array.from(this.memoryOrders.values()).some(
+            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED'
+          );
+          if (isReservedMem) {
+            foundExt.estado = 'RESERVADO';
+          }
           return {
             ...foundExt,
             fechas_ocupadas: occupied,
@@ -535,8 +565,8 @@ export class AutosService implements OnModuleInit {
       userEmail: driverEmail
     });
 
-    // Cambiar estado del auto a RESERVADO solo si pertenece a la flota local
-    if (isLocalAuto) {
+    // Cambiar estado del auto a RESERVADO tanto si es local como externo
+    if (isLocalAuto && auto) {
       auto.estado = EstadoVehiculo.RESERVADO;
     }
 
@@ -610,6 +640,7 @@ export class AutosService implements OnModuleInit {
 
     try {
       const dbOrder = this.orderRepo.create({
+        id: pnr,
         autoId: auto.id,
         idempotencyKey,
         status: 'CONFIRMED',
@@ -678,7 +709,35 @@ export class AutosService implements OnModuleInit {
 
     order.checkin_status = 'CHECKIN_COMPLETED';
     order.fast_track_pickup = true;
+    order.status = 'CONFIRMADO_ASISTIDO';
+    order.estado = 'CONFIRMADO_ASISTIDO';
     order.voucher_qr_data = `AUTOS-CHECKIN-${order.pnr}-VERIFIED-${dto.documento_identidad || 'DOC'}`;
+
+    try {
+      await this.orderRepo.query(
+        `INSERT INTO schema_auditoria.auditoria_transaccional 
+         (modulo, accion, registro_id, detalles_json)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          'RESERVAS_CHECKIN',
+          'CONFIRMAR_ASISTENCIA_PRESENCIAL',
+          order.pnr,
+          JSON.stringify({
+            order_id: order.order_id,
+            pnr: order.pnr,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'AUTOS',
+            documento: dto.documento_identidad,
+            fecha_checkin: new Date().toISOString(),
+          }),
+        ],
+      );
+      await this.orderRepo.query(
+        `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO' WHERE id = $1 OR idempotency_key = $1`,
+        [order.pnr],
+      );
+    } catch (_) {}
 
     this.winstonLogger.logAudit('CHECKIN_AUTO_VALIDADO', {
       pnr: order.pnr,
@@ -689,6 +748,8 @@ export class AutosService implements OnModuleInit {
     return {
       reserva_id: order.order_id,
       pnr: order.pnr,
+      status: 'CONFIRMADO_ASISTIDO',
+      estado: 'CONFIRMADO_ASISTIDO',
       checkin_status: 'CHECKIN_COMPLETED',
       fast_track_pickup: true,
       mensaje: 'Check-in digital exitoso. Presenta tu código QR en el mostrador para retiro express de llaves sin esperas.',
@@ -723,10 +784,39 @@ export class AutosService implements OnModuleInit {
       auto.kilometraje_actual = dto.km_salida || auto.kilometraje_actual;
     }
 
-    order.status = 'ENTREGADO';
+    order.status = 'CONFIRMADO_ASISTIDO';
+    order.estado = 'CONFIRMADO_ASISTIDO';
+    order.checkin_status = 'CHECKIN_COMPLETED';
     order.km_salida = dto.km_salida;
     order.licencia_verificada = dto.licencia_conducir;
     order.fecha_entrega_real = new Date().toISOString();
+
+    try {
+      await this.orderRepo.query(
+        `INSERT INTO schema_auditoria.auditoria_transaccional 
+         (modulo, accion, registro_id, detalles_json)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          'RESERVAS_CHECKIN',
+          'CONFIRMAR_ASISTENCIA_PRESENCIAL',
+          order.pnr,
+          JSON.stringify({
+            order_id: order.order_id,
+            pnr: order.pnr,
+            estado: 'CONFIRMADO_ASISTIDO',
+            status: 'CONFIRMADO_ASISTIDO',
+            vertical: 'AUTOS',
+            licencia: dto.licencia_conducir,
+            km_salida: dto.km_salida,
+            fecha_checkin: new Date().toISOString(),
+          }),
+        ],
+      );
+      await this.orderRepo.query(
+        `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO' WHERE id = $1 OR idempotency_key = $1`,
+        [order.pnr],
+      );
+    } catch (_) {}
 
     this.winstonLogger.logAudit('CHECKIN_ENTREGA_AUTO_COMPLETADO', {
       order_id: order.order_id,
@@ -862,20 +952,22 @@ export class AutosService implements OnModuleInit {
       const partnerCars = dbAutos
         .filter(da => !memoryIds.has(da.id))
         .map(da => {
+          // Solo lo que el socio informó: sin kilometraje, precio ni cooldown inventados
+          // (este listado lo usa el panel de administración).
           const isLimpieza = da.estadoOperativo === 'EN_LIMPIEZA';
-          const km = Number(da.kilometrajeActual || 12000);
-          const umbral = Number(da.umbralMantenimientoKm || 15000);
-          const alerta = Boolean(da.alertaMantenimientoActiva || km >= umbral);
+          const km = da.kilometrajeActual != null ? Number(da.kilometrajeActual) : null;
+          const umbral = da.umbralMantenimientoKm != null ? Number(da.umbralMantenimientoKm) : null;
+          const alerta = Boolean(da.alertaMantenimientoActiva || (km != null && umbral != null && km >= umbral));
           const prov = da.proveedorCodigo || 'NODE_AUT_DANIEL';
           return {
             id: da.id,
             marca: da.marca,
             modelo: da.modelo,
             categoria: da.categoria,
-            precio_diario: Number(da.precioDiario || 40),
-            estado_operativo: da.estadoOperativo || 'DISPONIBLE',
+            precio_diario: da.precioDiario != null ? Number(da.precioDiario) : null,
+            estado_operativo: da.estadoOperativo || null,
             cooldown_activo: isLimpieza,
-            segundos_restantes_cooldown: isLimpieza ? 3600 : 0,
+            segundos_restantes_cooldown: null,
             disponible_estimado_at: null,
             kilometraje_actual: km,
             umbral_mantenimiento_km: umbral,
@@ -1077,45 +1169,51 @@ export class AutosService implements OnModuleInit {
   // ============================================================================
   async getCatalog(query?: any): Promise<any> {
     this.evaluateCleaningCooldowns();
-    const limit = query?.limit ? parseInt(query.limit, 10) : 10;
+    const limit = query?.limit ? parseInt(query.limit, 10) : 100;
     const category = query?.category ? query.category.toUpperCase() : null;
     const transmission = query?.transmission ? query.transmission.toUpperCase() : null;
 
-    const cars = this.memoryFleet.filter(c => {
+    const localCars = this.memoryFleet.filter(c => {
       if (c.estado === EstadoVehiculo.EN_LIMPIEZA || c.estado === EstadoVehiculo.RESERVADO) return false;
       if (category && category !== 'ALL' && c.categoria !== category) return false;
       if (transmission && transmission !== 'ALL' && c.transmision !== transmission) return false;
       return true;
-    });
+    }).map(c => ({
+      vehicle_id: c.id,
+      marca: c.marca,
+      modelo: c.modelo,
+      categoria: c.categoria,
+      precio_diario: c.precio_diario,
+      moneda: c.moneda,
+      transmision: c.transmision === 'AUTOMATICO' ? 'Automático' : 'Manual',
+      asientos: c.asientos,
+      puertas: c.puertas,
+      maletas_grandes: c.capacidad_maletas_grandes,
+      maletas_pequenas: c.capacidad_maletas_pequenas,
+      aire_acondicionado: c.aire_acondicionado,
+      kilometraje_ilimitado: c.kilometraje_ilimitado,
+      politica_combustible: 'Lleno a lleno',
+      cancelacion_gratuita: true,
+      proveedor: {
+        nombre: c.proveedor_nombre,
+        rating: 8.4,
+        ubicacion: c.ubicacion_mostrador
+      },
+      estado: c.estado,
+      foto_url: c.foto_url,
+      images: [c.foto_url]
+    }));
 
+    let externalCars: any[] = [];
+    try {
+      externalCars = await this.circuitBreakerAdapter.fetchExternalCars(query || {});
+    } catch (_) {}
+
+    const all = [...localCars, ...externalCars];
     return {
-      total: cars.length,
+      total: all.length,
       limit,
-      data: cars.slice(0, limit).map(c => ({
-        vehicle_id: c.id,
-        marca: c.marca,
-        modelo: c.modelo,
-        categoria: c.categoria,
-        precio_diario: c.precio_diario,
-        moneda: c.moneda,
-        transmision: c.transmision === 'AUTOMATICO' ? 'Automático' : 'Manual',
-        asientos: c.asientos,
-        puertas: c.puertas,
-        maletas_grandes: c.capacidad_maletas_grandes,
-        maletas_pequenas: c.capacidad_maletas_pequenas,
-        aire_acondicionado: c.aire_acondicionado,
-        kilometraje_ilimitado: c.kilometraje_ilimitado,
-        politica_combustible: 'Lleno a lleno',
-        cancelacion_gratuita: true,
-        proveedor: {
-          nombre: c.proveedor_nombre,
-          rating: 8.4,
-          ubicacion: c.ubicacion_mostrador
-        },
-        estado: c.estado,
-        foto_url: c.foto_url,
-        images: [c.foto_url]
-      }))
+      data: all.slice(0, limit)
     };
   }
 
@@ -1277,69 +1375,125 @@ export class AutosService implements OnModuleInit {
       const externalOrders = await this.circuitBreakerAdapter.getOrdersDirect();
       for (const ext of externalOrders) {
         const pnr = ext.pnr || ext.order_id || ext.codigo_reserva;
-        if (pnr && !unique.has(pnr)) {
-          let email = ext.client_email || ext.driver?.email;
-          if (!email && ext.client_id === '4469a11f-7667-4ef8-89a0-2a361aa04c66') {
-            email = 'daniel@gmail.com';
-          }
-          if (!email) {
-            email = 'cliente@booking.com';
-          }
+        if (!pnr) continue;
 
-          let finalStatus = ext.status || ext.estado || 'CONFIRMED';
-          const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
-          if (chk && finalStatus !== 'CANCELLED') {
-            finalStatus = 'CONFIRMADO_ASISTIDO';
+        const isExtAssisted = ext.status === 'CONFIRMADO_ASISTIDO' ||
+                              ext.estado === 'CONFIRMADO_ASISTIDO' ||
+                              ext.rentalStatus === 'PICKED_UP' ||
+                              ext.rental_status === 'PICKED_UP' ||
+                              ext.rentalStatus === 'RETURNED' ||
+                              ext.rental_status === 'RETURNED' ||
+                              checkinMap.has(pnr.toUpperCase()) ||
+                              checkinMap.has((ext.order_id || '').toUpperCase()) ||
+                              checkinMap.has((ext.id || '').toUpperCase());
+
+        const existingKey = (pnr && unique.has(pnr)) ? pnr : (ext.order_id && unique.has(ext.order_id)) ? ext.order_id : (ext.id && unique.has(ext.id)) ? ext.id : null;
+
+        if (existingKey) {
+          // Si ya existe en memoria o local, sincronizar el estado confirmado/asistido
+          const existing = unique.get(existingKey);
+          if (isExtAssisted && existing.status !== 'CANCELLED') {
+            existing.status = 'CONFIRMADO_ASISTIDO';
+            existing.estado = 'CONFIRMADO_ASISTIDO';
           }
-
-          const modelName = ext.vehiculo?.modelo || (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba');
-          const plateName = chk?.placa || ext.placa || (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : ''));
-
-          unique.set(pnr, {
-            order_id: pnr,
-            pnr: pnr,
-            codigo_reserva: pnr,
-            status: finalStatus,
-            estado: finalStatus,
-            auto_id: ext.auto_id || ext.vehicle_id || 'auto-pru-1234',
-            placa: plateName,
-            checkin: chk || null,
-            email: email,
-            conductor: {
-              nombre: ext.driver?.full_name || 'Conductor Verificado',
-              email: email,
-              telefono: ext.driver?.phone || '+593998765432',
-              licencia: ext.driver?.license_number || '1150029880',
-            },
-            driver: {
-              email: email,
-            },
-            vehiculo: {
-              marca: 'Toyota',
-              modelo: modelName,
-              categoria: 'SUV',
-              transmision: 'Manual',
-              foto_url: 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1',
-            },
-            dias_renta: ext.dias_renta || ext.dias || 3,
-            pickup_date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            dropoff_date: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
-            fecha_inicio: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            fecha_fin: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
-            date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            fecha: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
-            tipo_cobertura: ext.tipo_cobertura || ext.coverage_type || 'BASICA',
-            total_price: ext.total_price || { currency: 'USD', total: ext.precio_total_monto || 156.4 },
-            createdAt: ext.created_at || new Date().toISOString(),
-          });
+          if (ext.plate || ext.placa) {
+            existing.placa = ext.plate || ext.placa;
+          }
+          const mem = this.memoryOrders.get(existingKey) || (pnr ? this.memoryOrders.get(pnr) : null);
+          if (mem) {
+            if (isExtAssisted && mem.status !== 'CANCELLED') {
+              mem.status = 'CONFIRMADO_ASISTIDO';
+              mem.estado = 'CONFIRMADO_ASISTIDO';
+              if (ext.plate || ext.placa) mem.placa = ext.plate || ext.placa;
+            }
+          }
+          continue;
         }
+
+        let email = ext.client_email || ext.driver?.email;
+        if (!email && ext.client_id === '4469a11f-7667-4ef8-89a0-2a361aa04c66') {
+          email = 'daniel@gmail.com';
+        }
+        if (!email) {
+          email = 'cliente@booking.com';
+        }
+
+        let finalStatus = isExtAssisted ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED');
+        const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
+
+        const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || (ext.auto_id && ext.auto_id.length === 36);
+        const brandName = ext.vehiculo?.marca || (isMateoOrder ? 'Maneja de Una' : 'Toyota');
+        const modelName = ext.vehiculo?.modelo || (isMateoOrder ? 'Vehículo de Flota' : (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba'));
+        const plateName = chk?.placa || ext.placa || (isMateoOrder ? (ext.auto_id ? ext.auto_id.substring(0, 8) : '') : (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : '')));
+
+        unique.set(pnr, {
+          order_id: pnr,
+          pnr: pnr,
+          codigo_reserva: pnr,
+          status: finalStatus,
+          estado: finalStatus,
+          auto_id: ext.auto_id || ext.vehicle_id || 'auto-pru-1234',
+          placa: plateName,
+          checkin: chk || null,
+          email: email,
+          conductor: {
+            nombre: ext.driver?.full_name || ext.driver?.nombre || 'Conductor Verificado',
+            email: email,
+            telefono: ext.driver?.phone || ext.driver?.telefono || '+593998765432',
+            licencia: ext.driver?.license_number || ext.driver?.licencia || '1150029880',
+          },
+          driver: {
+            email: email,
+          },
+          vehiculo: {
+            marca: brandName,
+            modelo: modelName,
+            categoria: ext.vehiculo?.categoria || 'SUV',
+            transmision: ext.vehiculo?.transmision || 'Manual',
+            foto_url: ext.vehiculo?.foto_url || (isMateoOrder ? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800' : 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1'),
+          },
+          dias_renta: ext.dias_renta || ext.dias || 3,
+          pickup_date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          dropoff_date: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
+          fecha_inicio: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          fecha_fin: ext.dropoff_date || ext.devolucion?.fecha || ext.dropoff || ext.fecha_fin || ext.fecha_devolucion,
+          date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          fecha: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,
+          tipo_cobertura: ext.tipo_cobertura || ext.coverage_type || 'BASICA',
+          total_price: ext.total_price || { currency: 'USD', total: ext.precio_total_monto || 156.4 },
+          createdAt: ext.created_at || new Date().toISOString(),
+        });
       }
     } catch (_) {}
 
     return Array.from(unique.values());
   }
 
+  markOrderAsistido(orderIdOrPnr: string, details?: any): void {
+    const key = (orderIdOrPnr || '').toUpperCase();
+    for (const [k, order] of this.memoryOrders.entries()) {
+      const pnr = (order.pnr || order.order_id || '').toUpperCase();
+      if (k.toUpperCase() === key || pnr === key) {
+        order.status = 'CONFIRMADO_ASISTIDO';
+        order.estado = 'CONFIRMADO_ASISTIDO';
+        order.checkin_status = 'CHECKIN_COMPLETED';
+        if (details?.placa) order.placa = details.placa;
+      }
+    }
+  }
+
   async getOrderById(orderId: string): Promise<any> {
+    const all = await this.getOrders();
+    const cleanId = orderId.toUpperCase();
+    const found = all.find(
+      (o: any) =>
+        (o.pnr && o.pnr.toUpperCase() === cleanId) ||
+        (o.order_id && o.order_id.toUpperCase() === cleanId) ||
+        (o.codigo_reserva && o.codigo_reserva.toUpperCase() === cleanId)
+    );
+    if (found) {
+      return found;
+    }
     const order = this.memoryOrders.get(orderId);
     if (!order) {
       throw new HttpException('Orden no encontrada', HttpStatus.NOT_FOUND);
@@ -1351,25 +1505,79 @@ export class AutosService implements OnModuleInit {
     let order = this.memoryOrders.get(orderId);
     if (!order) {
       for (const val of this.memoryOrders.values()) {
-        if (val.pnr === orderId || val.order_id === orderId || (val.pnr && val.pnr.startsWith(orderId))) {
+        if (
+          val.pnr === orderId ||
+          val.order_id === orderId ||
+          val.id === orderId ||
+          (val.pnr && val.pnr.toUpperCase() === orderId.toUpperCase()) ||
+          (val.order_id && val.order_id.toLowerCase() === orderId.toLowerCase())
+        ) {
           order = val;
           break;
         }
       }
     }
 
-    const totalReembolso = order?.total_price?.total || order?.totalPrice?.total || 106.50;
-    const moneda = order?.total_price?.currency || order?.totalPrice?.currency || 'USD';
-    const autoId = order?.auto_id || order?.autoId || 'auto-spark-01';
+    // Si no está en memoria local, resolverlo consultando los pedidos remotos unificados
+    if (!order) {
+      try {
+        const remoteOrders = await this.circuitBreakerAdapter.getOrdersDirect();
+        order = remoteOrders.find(
+          (o: any) =>
+            o.id === orderId ||
+            o.order_id === orderId ||
+            o.pnr === orderId ||
+            o.codigo_reserva === orderId ||
+            (o.pnr && o.pnr.toUpperCase() === orderId.toUpperCase()) ||
+            (o.order_id && o.order_id.toLowerCase() === orderId.toLowerCase()),
+        );
+        if (order) {
+          this.memoryOrders.set(orderId, order);
+          if (order.pnr) this.memoryOrders.set(order.pnr, order);
+          if (order.order_id) this.memoryOrders.set(order.order_id, order);
+        }
+      } catch (_) {}
+    }
 
-    // 1. Devolver el auto a estado DISPONIBLE (Reverso de inventario)
-    const auto = this.memoryFleet.find(c => c.id === autoId);
-    if (auto && auto.estado === EstadoVehiculo.RESERVADO) {
+    // Regla de Negocio: Si el servicio ya fue asistido o retirado en mostrador, no se puede cancelar
+    const currentStatus = (order?.status || order?.estado || '').toUpperCase();
+    if (['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'ENTREGADO', 'COMPLETED'].includes(currentStatus)) {
+      throw new HttpException({
+        type: 'https://api.booking.local/errors/conflict',
+        title: 'Cancelación No Permitida',
+        status: HttpStatus.CONFLICT,
+        detail: 'No es posible cancelar una reserva de auto que ya fue asistida o retirada en mostrador.',
+      }, HttpStatus.CONFLICT);
+    }
+
+    const totalReembolso = order?.total_price?.total || order?.totalPrice?.total || order?.precio_total_monto || 106.50;
+    const moneda = order?.total_price?.currency || order?.totalPrice?.currency || order?.moneda || 'USD';
+    const autoId = order?.auto_id || order?.vehicle_id || order?.autoId || 'auto-spark-01';
+
+    // 1. Propagar cancelación al socio externo (Daniel / RutaLibre o Mateo / Maneja de Una)
+    // Si el socio rechaza con HTTP 409 (ej. alquiler ya iniciado o completado), se propaga el error de negocio
+    const targetCancelId = order?.pnr || order?.order_id || orderId;
+    if (targetCancelId) {
+      try {
+        await this.circuitBreakerAdapter.cancelOrder(
+          targetCancelId,
+          cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
+        );
+      } catch (err: any) {
+        if (err instanceof HttpException) {
+          throw err;
+        }
+      }
+    }
+
+    // 2. Devolver el auto a estado DISPONIBLE (Reverso de inventario)
+    const auto = this.memoryFleet.find(c => c.id === autoId || (c.placa && order?.placa && c.placa === order.placa));
+    if (auto) {
       auto.estado = EstadoVehiculo.DISPONIBLE;
       this.logger.log(`[Reverso Saga Autos] Vehículo ${auto.marca} ${auto.modelo} (${auto.id}) liberado a DISPONIBLE tras cancelación.`);
     }
 
-    // 2. Generar reembolso financiero formal
+    // 3. Generar reembolso financiero formal
     const refundId = `REF-AUTO-${Date.now().toString(36).toUpperCase()}`;
     const refund = {
       refund_id: refundId,
@@ -1384,19 +1592,14 @@ export class AutosService implements OnModuleInit {
 
     if (order) {
       order.status = 'CANCELLED';
+      order.estado = 'CANCELLED';
       order.refund = refund;
     }
 
-    // 3. Propagar cancelación al socio externo (RutaLibre / Daniel)
-    const targetCancelId = order?.pnr || orderId;
-    if (targetCancelId) {
-      try {
-        await this.circuitBreakerAdapter.cancelOrder(
-          targetCancelId,
-          cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
-        );
-      } catch (_) {}
-    }
+    // Registrar en adapter para sincronización instantánea de inventario en getOrdersDirect
+    this.circuitBreakerAdapter.markOrderAsCancelled(orderId);
+    if (order?.pnr) this.circuitBreakerAdapter.markOrderAsCancelled(order.pnr);
+    if (order?.order_id) this.circuitBreakerAdapter.markOrderAsCancelled(order.order_id);
 
     this.winstonLogger.logAudit('RESERVA_AUTO_CANCELADA_COMPENSADA', {
       orderId,

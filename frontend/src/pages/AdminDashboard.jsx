@@ -5,15 +5,12 @@ import { api } from '../services/api';
 import { supabase } from '../services/supabase';
 import { GestionAlojamientos } from '../components/admin/GestionAlojamientos';
 
-// 8 Paneles de Administración Desacoplados (Cátedra RDA2 Brecha B-13)
-import { Panel1_NodosProveedores } from '../components/admin/Panel1_NodosProveedores';
 import { Panel2_GestionFlotaAutos } from '../components/admin/Panel2_GestionFlotaAutos';
 import { Panel3_ArbolCategoriasAtracciones } from '../components/admin/Panel3_ArbolCategoriasAtracciones';
 import { Panel4_LiquidacionesFinanzas } from '../components/admin/Panel4_LiquidacionesFinanzas';
 import { Panel5_ConsolaFiscalFacturas } from '../components/admin/Panel5_ConsolaFiscalFacturas';
-import { Panel6_SimuladorPagosSOA } from '../components/admin/Panel6_SimuladorPagosSOA';
-import { Panel7_MonitorStockGrpc } from '../components/admin/Panel7_MonitorStockGrpc';
 import { Panel8_AuditoriaSagas } from '../components/admin/Panel8_AuditoriaSagas';
+import { cotizarCancelacion, cancelarReserva as cancelarReservaVuelo } from '../services/vuelosApi';
 
 const C = {
   blue: '#006ce4', darkBlue: '#003b95', lightBlue: '#ebf3ff',
@@ -24,15 +21,16 @@ const C = {
 
 const TABS = [
   { id: 'resumen', label: '📈 Resumen', sub: 'Ventas y métricas' },
-  { id: 'procesos', label: '🧭 Procesos', sub: 'Grafos de vuelos' },
-  { id: 'paneles_rda2', label: '🚀 8 Paneles RDA2', sub: 'Arquitectura Distribuida' },
   { id: 'observabilidad', label: '📊 Observabilidad & Finanzas', sub: 'Estado en vivo y dinero' },
-  { id: 'microservicios', label: '🔬 Servicios & Prov.', sub: 'Socios conectados' },
+  { id: 'microservicios', label: '🔬 Servicios & Prov.', sub: 'Socios y cada vertical' },
   { id: 'gestion', label: '🗂️ Gestión', sub: 'Usuarios & Reservas' },
   { id: 'soporte', label: '🎧 Soporte', sub: 'Ticketing & QC' },
   { id: 'auditoria', label: '🛡️ Auditoría', sub: 'Logs de Seguridad' },
   { id: 'configuracion', label: '⚙️ Ajustes', sub: 'Global' },
 ];
+
+// Mismos estados "cobrados" que usa el backend de finanzas (admin-finanzas.service.ts).
+const ESTADOS_COBRADOS = new Set(['CONFIRMED', 'CONFIRMADA', 'PAGADA', 'PAID', 'TICKET_ISSUING', 'TICKETED', 'ISSUED', 'COMPLETED', 'CHECKED_IN', 'ACTIVA', 'COMPLETADA', 'CHECKED_OUT']);
 
 function fmt(n) { return typeof n === 'number' ? n.toLocaleString('es-EC',{minimumFractionDigits:2,maximumFractionDigits:2}) : '0.00'; }
 function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleString('es-EC',{dateStyle:'short',timeStyle:'short'}); }
@@ -103,19 +101,21 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
   return (
     <div>
       {stats?.error && <Alerta tipo="error">{stats.error}</Alerta>}
-      <SectionTitle>📈 KPIs de Negocio (Tiempo Real)</SectionTitle>
+      <SectionTitle>📈 Reservas registradas</SectionTitle>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))',gap:12}}>
         <KpiCard icon="🎫" label="Total Reservas" value={k.totalReservas??0} color={C.blue}/>
         <KpiCard icon="✈️" label="Vuelos" value={k.reservasVuelos??0} sub="reservas" color={C.darkBlue}/>
         <KpiCard icon="🚗" label="Autos" value={k.reservasAutos??0} sub="reservas" color={C.cyan}/>
         <KpiCard icon="🎡" label="Atracciones" value={k.reservasAtracciones??0} sub="reservas" color={C.green}/>
         <KpiCard icon="🏨" label="Hospedajes" value={k.reservasHospedaje??0} sub="reservas" color={'#8e44ad'}/>
-        <KpiCard icon="💵" label="Ingresos cobrados" value={`$${fmt(k.ingresosTotal)}`} sub={`USD · ${k.reservasCobradas??0} reservas pagadas`} color={C.green}/>
       </div>
-      <SectionTitle badge="Real">💰 Finanzas del Booking</SectionTitle>
+      <SectionTitle>💰 Finanzas de Booking</SectionTitle>
       <FinanzasPanel refreshKey={refreshKey}/>
 
-      <SectionTitle>🔌 Estado de Servicios</SectionTitle>
+      <SectionTitle>🧾 Facturas emitidas</SectionTitle>
+      <Panel5_ConsolaFiscalFacturas refreshKey={refreshKey}/>
+
+      <SectionTitle>🔌 Módulos de Booking (respuesta medida desde tu navegador)</SectionTitle>
       <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
         {serviceHealth.map((s)=>(<ServiceDot key={s.label} ok={s.ok} label={s.label} latency={s.latency}/>))}
         {serviceHealth.length===0 && <div style={{color:C.gray,fontSize:'0.85rem',padding:'10px 0'}}>Comprobando servicios...</div>}
@@ -213,340 +213,6 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
   );
 }
 
-function MicroserviciosTab() {
-  const [nodesData, setNodesData] = useState({ summary: {}, nodes: [] });
-  const [loading, setLoading] = useState(true);
-  const [probing, setProbing] = useState(false);
-  const [toggleLoading, setToggleLoading] = useState({});
-  const [aviso, setAviso] = useState(null);
-
-  const fetchNodes = useCallback(async (probe = false) => {
-    if (probe) setProbing(true);
-    else setLoading(true);
-    setAviso(null);
-    try {
-      const { data } = await api.get('/admin/nodes/health', { params: { probe } });
-      setNodesData(data);
-    } catch (err) {
-      // Sin respuesta del backend NO se muestran nodos inventados en verde:
-      // se avisa del error y se conserva lo último que sí llegó.
-      setAviso({ tipo: 'error', texto: `No se pudo consultar el estado de los nodos: ${err?.response?.data?.message || err?.message || 'error de red'}` });
-    } finally {
-      setLoading(false);
-      setProbing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchNodes(false);
-    const interval = setInterval(() => fetchNodes(false), 12000);
-    return () => clearInterval(interval);
-  }, [fetchNodes]);
-
-  const handleToggle = async (nodeId) => {
-    setToggleLoading(prev => ({ ...prev, [nodeId]: true }));
-    setAviso(null);
-    try {
-      const { data } = await api.post(`/admin/nodes/${nodeId}/toggle`);
-      setNodesData(prev => ({
-        ...prev,
-        nodes: prev.nodes.map(n => n.id === nodeId ? data.node : n),
-        summary: {
-          ...prev.summary,
-          disabled_switches: prev.nodes.filter(n => n.id === nodeId ? !data.node.enabled : !n.enabled).length,
-        }
-      }));
-      setAviso({
-        tipo: data.node.enabled ? 'success' : 'warning',
-        texto: data.node.enabled
-          ? `🟢 Nodo '${data.node.nombre}' reconectado al ecosistema.`
-          : `⚠️ Kill-Switch activado: Nodo '${data.node.nombre}' DESCONECTADO manualmente (Circuit Breaker ABIERTO para simular contingencia ante el docente).`
-      });
-    } catch (err) {
-      setAviso({ tipo: 'error', texto: apiErrorMsg(err, 'No se pudo conmutar el switch del nodo') });
-    } finally {
-      setToggleLoading(prev => ({ ...prev, [nodeId]: false }));
-    }
-  };
-
-  const handlePing = async (nodeId) => {
-    setToggleLoading(prev => ({ ...prev, [nodeId]: true }));
-    try {
-      const { data } = await api.post(`/admin/nodes/${nodeId}/ping`);
-      setNodesData(prev => ({
-        ...prev,
-        nodes: prev.nodes.map(n => n.id === nodeId ? data.node : n)
-      }));
-      setAviso({ tipo: 'success', texto: `⚡ Ping completado para '${data.node.nombre}': ${data.node.latency}ms (Estado: ${data.node.status}).` });
-    } catch (err) {
-      setAviso({ tipo: 'error', texto: apiErrorMsg(err, 'Error al ejecutar ping hacia el nodo') });
-    } finally {
-      setToggleLoading(prev => ({ ...prev, [nodeId]: false }));
-    }
-  };
-
-  const iconByVertical = {
-    Atracciones: '🎡',
-    Autos: '🚗',
-    Alojamientos: '🏨',
-    Vuelos: '✈️',
-    'Infraestructura Core': '⚡'
-  };
-
-  const s = nodesData.summary || {};
-  const nodes = nodesData.nodes || [];
-
-  return (
-    <div>
-      {/* Banner de Evaluación RDA2 */}
-      <div style={{ background: '#e8f5e9', border: '1px solid #4caf50', borderRadius: 8, padding: '12px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: '1.6rem' }}>🎛️</span>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1b5e20' }}>
-              Monitor de Nodos y Switches Kill-Switch (RDA2 — Brecha B-03)
-            </div>
-            <div style={{ fontSize: '0.8rem', color: '#2e7d32', marginTop: 2 }}>
-              Permite simular fallos de red y desconexiones en vivo desconectando cualquier microservicio externo. El Gateway activa sus Circuit Breakers y activa las respuestas de contingencia (fallback).
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => fetchNodes(true)}
-          disabled={probing}
-          style={{
-            background: probing ? C.gray : C.blue,
-            color: 'white',
-            border: 'none',
-            borderRadius: 6,
-            padding: '8px 16px',
-            fontSize: '0.85rem',
-            fontWeight: 700,
-            cursor: probing ? 'wait' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {probing ? '⏳ Sondeando...' : '⚡ Sondear Todos'}
-        </button>
-      </div>
-
-      {aviso && <Alerta tipo={aviso.tipo} onClose={() => setAviso(null)}>{aviso.texto}</Alerta>}
-
-      {/* Resumen de Estado */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 24 }}>
-        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', borderTop: `4px solid ${C.green}` }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.gray }}>NODOS EN LÍNEA</div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: C.green, marginTop: 4 }}>
-            {nodes.filter(n => n.enabled && n.status === 'ONLINE').length} / {nodes.length}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: C.gray, marginTop: 2 }}>Tráfico síncrono habilitado</div>
-        </div>
-
-        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', borderTop: `4px solid ${s.disabled_switches > 0 ? C.orange : C.gray}` }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.gray }}>KILL-SWITCHES ACTIVADOS</div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: s.disabled_switches > 0 ? C.orange : C.text, marginTop: 4 }}>
-            {nodes.filter(n => !n.enabled).length}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: C.gray, marginTop: 2 }}>Nodos desconectados por switch</div>
-        </div>
-
-        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', borderTop: `4px solid ${C.blue}` }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.gray }}>SOCKET gRPC INBOUND</div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: C.blue, marginTop: 4 }}>50051</div>
-          <div style={{ fontSize: '0.72rem', color: C.gray, marginTop: 2 }}>HTTP/2 Multiplexed (inventory.proto)</div>
-        </div>
-
-        <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', borderTop: `4px solid ${s.system_health === 'HEALTHY' ? C.green : C.orange}` }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.gray }}>ESTADO DEL ECOSISTEMA</div>
-          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: s.system_health === 'HEALTHY' ? C.green : C.orange, marginTop: 6 }}>
-            {s.system_health === 'HEALTHY' ? '🟢 OPERACIONAL' : s.system_health === 'PARTIAL_FALLBACK' ? '🟡 CONTINGENCIA' : s.system_health === 'UNVERIFIED' ? '⚪ SIN VERIFICAR' : '🔴 DEGRADADO'}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: C.gray, marginTop: 2 }}>Circuit Breakers listos</div>
-        </div>
-      </div>
-
-      <SectionTitle>🚦 Semáforo de Nodos y Conexiones Externas</SectionTitle>
-
-      {/* Grid de Nodos con LEDs y Switches */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, marginBottom: 28 }}>
-        {nodes.map(node => {
-          const isEnabled = node.enabled;
-          const isOnline = isEnabled && node.status === 'ONLINE';
-          const isDegraded = isEnabled && node.status === 'DEGRADED';
-          const isOffline = isEnabled && node.status === 'OFFLINE';
-          const isUnknown = isEnabled && node.status === 'UNKNOWN';
-
-          const ledColor = !isEnabled
-            ? '#757575'
-            : isUnknown
-              ? '#c3c2b7'
-              : isOnline
-              ? '#00e676'
-              : isDegraded
-                ? '#ffd600'
-                : '#ff1744';
-
-          const ledGlow = !isEnabled || isUnknown
-            ? 'none'
-            : isOnline
-              ? '0 0 10px #00e676, 0 0 4px #00e676'
-              : isDegraded
-                ? '0 0 8px #ffd600'
-                : '0 0 10px #ff1744';
-
-          return (
-            <div
-              key={node.id}
-              style={{
-                background: C.white,
-                border: `1.5px solid ${isEnabled ? (isOnline ? '#c8e6c9' : C.border) : '#ffcdd2'}`,
-                borderRadius: 10,
-                padding: '18px 20px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                boxShadow: isEnabled ? '0 2px 8px rgba(0,0,0,0.04)' : '0 2px 8px rgba(211,47,47,0.08)',
-                position: 'relative',
-                transition: 'all 0.2s',
-              }}
-            >
-              {/* Top row: Name, Icon and LED */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: '1.5rem' }}>{iconByVertical[node.vertical] || '🌐'}</span>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.98rem', color: C.text }}>{node.nombre}</div>
-                    <div style={{ fontSize: '0.75rem', color: C.gray }}>Responsable: {node.responsable}</div>
-                  </div>
-                </div>
-
-                {/* Foco LED Luminoso */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f5f5f5', padding: '4px 10px', borderRadius: 20 }}>
-                  <div
-                    style={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      background: ledColor,
-                      boxShadow: ledGlow,
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: isUnknown ? C.gray : ledColor }}>
-                    {!isEnabled ? 'DESCONECTADO' : isUnknown ? 'SIN VERIFICAR' : node.status}
-                  </span>
-                </div>
-              </div>
-
-              {/* Description */}
-              <div style={{ fontSize: '0.8rem', color: C.gray, lineHeight: 1.4 }}>
-                {node.description}
-              </div>
-
-              {/* Technical details tags */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: '0.75rem' }}>
-                <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
-                  {node.protocolo}
-                </span>
-                <span style={{ background: '#f0f0f0', color: C.text, padding: '3px 8px', borderRadius: 4, fontFamily: 'monospace' }}>
-                  {isUnknown || !node.latency ? '—' : `${node.latency} ms`}
-                </span>
-                <span style={{
-                  background: node.circuitBreaker === 'CLOSED' ? '#e8f5e9' : '#ffebee',
-                  color: node.circuitBreaker === 'CLOSED' ? '#2e7d32' : '#c62828',
-                  padding: '3px 8px',
-                  borderRadius: 4,
-                  fontWeight: 700,
-                }}>
-                  CB: {node.circuitBreaker}
-                </span>
-              </div>
-
-              {/* Bottom bar: Kill Switch & Ping Button */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                borderTop: `1px solid ${C.border}`,
-                paddingTop: 12,
-                marginTop: 4,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isEnabled}
-                    disabled={toggleLoading[node.id]}
-                    onClick={() => handleToggle(node.id)}
-                    style={{
-                      position: 'relative',
-                      width: 50,
-                      height: 26,
-                      borderRadius: 13,
-                      background: isEnabled ? '#008009' : '#d32f2f',
-                      border: 'none',
-                      cursor: toggleLoading[node.id] ? 'wait' : 'pointer',
-                      transition: 'background 0.25s',
-                      padding: 0,
-                      outline: 'none',
-                      boxShadow: isEnabled ? '0 0 6px rgba(0, 128, 9, 0.3)' : '0 0 6px rgba(211, 47, 47, 0.3)',
-                    }}
-                    title={isEnabled ? 'Click para desconectar tienda externa (Kill-Switch)' : 'Click para reconectar'}
-                  >
-                    <div style={{
-                      position: 'absolute',
-                      top: 3,
-                      left: isEnabled ? 27 : 3,
-                      width: 20,
-                      height: 20,
-                      borderRadius: '50%',
-                      background: '#ffffff',
-                      transition: 'left 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.62rem',
-                    }}>
-                      {toggleLoading[node.id] ? '⏳' : isEnabled ? '✓' : '✕'}
-                    </div>
-                  </button>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: isEnabled ? C.green : C.red }}>
-                    {isEnabled ? 'Conector Activo' : 'Kill-Switch ON'}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handlePing(node.id)}
-                  disabled={!isEnabled || toggleLoading[node.id]}
-                  style={{
-                    background: 'transparent',
-                    border: `1px solid ${C.border}`,
-                    color: isEnabled ? C.blue : C.gray,
-                    borderRadius: 6,
-                    padding: '5px 12px',
-                    fontSize: '0.78rem',
-                    fontWeight: 600,
-                    cursor: !isEnabled || toggleLoading[node.id] ? 'not-allowed' : 'pointer',
-                    opacity: !isEnabled ? 0.5 : 1,
-                  }}
-                >
-                  ⚡ Ping
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // PANEL DE PROVEEDORES — socios registrados en schema_proveedores (estado por ping real)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -601,7 +267,7 @@ function saludDesdeNodo(p) {
   };
 }
 
-function ProveedoresTab() {
+function ProveedoresTab({ refreshKey = 0 }) {
   const [proveedores, setProveedores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [health, setHealth] = useState({});
@@ -647,7 +313,7 @@ function ProveedoresTab() {
 
   useEffect(() => {
     cargarProveedores();
-  }, [cargarProveedores]);
+  }, [cargarProveedores, refreshKey]);
 
   // Ping de salud real HTTP al backend
   const checkHealth = async (prov) => {
@@ -837,7 +503,7 @@ function ProveedoresTab() {
     borderRadius: 6, fontSize: '0.88rem', outline: 'none', boxSizing: 'border-box',
   });
 
-  const TIPOS_SELECT = ['Atracciones', 'Vuelos', 'Alojamientos', 'Autos', 'Tours', 'Otro'];
+  const TIPOS_SELECT = ['Vuelos', 'Autos', 'Atracciones', 'Alojamientos'];
 
   return (
     <div>
@@ -867,7 +533,7 @@ function ProveedoresTab() {
         <KpiCard icon="✅" label="En Línea" value={onlineCount} color={C.green} />
         <KpiCard icon="❌" label="Sin Conexión / Apagados" value={offlineCount} color={C.red} />
         <KpiCard icon="⚪" label="Sin verificar" value={sinVerificarCount} color={C.gray} />
-        <KpiCard icon="📦" label="Tipos de Servicio" value={Math.max(1, tiposFiltro.length - 1)} color={C.cyan} />
+        <KpiCard icon="⛔" label="Pausados (kill-switch)" value={proveedores.filter(p => p.activo === false || p.kill_switch_activo).length} color={C.orange} />
       </div>
 
       {/* Barra de herramientas */}
@@ -1010,7 +676,7 @@ function ProveedoresTab() {
       {detalle && (
         <div style={{ position: 'fixed', top: 0, right: 0, width: 420, height: '100vh', background: 'white', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', zIndex: 1000, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
           <div style={{ background: C.darkBlue, color: 'white', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Detalle de Integración RDA2</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>Detalle del proveedor</div>
             <button onClick={() => setDetalle(null)} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
           </div>
           <div style={{ padding: '20px' }}>
@@ -1023,13 +689,14 @@ function ProveedoresTab() {
             </div>
             <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
               {[
-                ['🌐 URL Base REST (OpenAPI v2)', detalle.base_url_rest || detalle.url],
-                ['⚡ Socket Inventario gRPC', detalle.endpoint_grpc || detalle.endpointGrpc || 'grpc://100.93.143.85:50051'],
-                ['🔑 API Key (X-API-Key M2M)', detalle.api_key || detalle.apiKey || 'No configurada (usa .env fallback)'],
-                ['📧 Correo de Contacto', detalle.contacto || 'No especificado'],
-                ['🚦 Circuit Breaker', detalle.circuit_breaker_estado || 'CLOSED'],
-                ['🛡️ Kill-Switch Activo', detalle.kill_switch_activo ? 'SÍ (Bloqueado)' : 'NO (Operativo)'],
-                ['📈 Tasa de Fallos', `${detalle.tasa_fallos_pct || 0}%`],
+                ['🌐 URL base de la API', detalle.base_url_rest || detalle.url],
+                ['⚡ Endpoint gRPC', detalle.endpoint_grpc || detalle.endpointGrpc || 'No configurado'],
+                ['🔑 Credencial', detalle.api_key || detalle.apiKey || 'No configurada'],
+                ['📧 Correo de contacto', detalle.contacto || 'No especificado'],
+                ['🚦 Circuit breaker', detalle.circuit_breaker_estado || '—'],
+                ['🛡️ Kill-switch', detalle.kill_switch_activo ? 'Activo (no recibe tráfico)' : 'Apagado (recibe tráfico)'],
+                ['📈 Tasa de fallos', detalle.tasa_fallos_pct != null ? `${detalle.tasa_fallos_pct}%` : '—'],
+                ['🕒 Último ping', detalle.ultimo_ping_at ? fmtDate(detalle.ultimo_ping_at) : 'Nunca'],
               ].map(([label, val]) => (
                 <div key={label} style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: '0.75rem', color: C.gray, fontWeight: 600, marginBottom: 3 }}>{label}</div>
@@ -1065,18 +732,6 @@ function ProveedoresTab() {
                 </button>
               </div>
 
-              {/* Endpoints del Contrato */}
-              <div style={{ marginTop: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 8 }}>🔗 Endpoints Conectados (OpenAPI v2)</div>
-                {[
-                  `GET ${detalle.base_url_rest || '/api/v2'}/atracciones`,
-                  `GET ${detalle.base_url_rest || '/api/v2'}/atracciones/{id}/disponibilidad`,
-                  `POST ${detalle.base_url_rest || '/api/v2'}/atracciones/reservas`,
-                  `GET ${detalle.base_url_rest || '/api/v2'}/health`,
-                ].map(ep => (
-                  <div key={ep} style={{ fontFamily: 'monospace', fontSize: '0.74rem', color: C.blue, background: C.lightBlue, padding: '5px 10px', borderRadius: 4, marginBottom: 4, wordBreak: 'break-all' }}>{ep}</div>
-                ))}
-              </div>
             </div>
           </div>
         </div>
@@ -1093,15 +748,15 @@ function ProveedoresTab() {
             <div style={{ padding: '24px' }}>
               <div style={{ background: '#e8f5e9', border: '1px solid #4caf50', borderRadius: 6, padding: '10px 14px', marginBottom: 20, fontSize: '0.82rem', color: '#1b5e20', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>🔌</span>
-                <span><strong>Conexión Oficial RDA2:</strong> Los datos se guardan en PostgreSQL (schema_proveedores) y permitirán sincronizar catálogos y procesar reservas en vivo con la API del socio.</span>
+                <span>Se guarda en <code>schema_proveedores.config_proveedor</code>. Booking usa esta URL y esta credencial para buscar, reservar y cancelar en el sistema del socio.</span>
               </div>
               {[
                 ['nombre', 'Nombre del sistema / socio *', 'Ej: Descubre EC (Dilan Mendoza)'],
                 ['equipo', 'Nombre del equipo / Compañero', 'Ej: Grupo 2 – Dilan Mendoza'],
                 ['url', 'URL del sitio web o API *', 'https://descubreec.com'],
                 ['apiBase', 'URL base de la API REST del socio (OpenAPI v3 / v2) *', 'http://100.80.229.90:8080/api/v3'],
-                ['endpointGrpc', 'Socket gRPC de Booking (o rol Cliente)', '100.93.143.85:50051 (o CLIENTE)'],
-                ['apiKey', 'X-API-Key del socio (Autenticación M2M)', 'Ej: 40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568'],
+                ['endpointGrpc', 'Endpoint gRPC del socio (opcional)', 'host:puerto'],
+                ['apiKey', 'Credencial del socio (X-API-Key u oauth2:client_id:secret:token_url)', 'La API nunca la devuelve completa (sale enmascarada)'],
                 ['contacto', 'Email de contacto', 'dilan@universidad.edu.ec'],
               ].map(([field, label, placeholder]) => (
                 <div key={field} style={{ marginBottom: 14 }}>
@@ -1131,7 +786,7 @@ function ProveedoresTab() {
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                 <button type="button" onClick={() => setModal(null)} style={{ padding: '9px 20px', border: `1px solid ${C.border}`, borderRadius: 6, background: 'white', cursor: 'pointer', fontWeight: 600 }}>Cancelar</button>
                 <button type="button" onClick={guardar} disabled={guardando} style={{ padding: '9px 20px', background: guardando ? C.gray : C.blue, color: 'white', border: 'none', borderRadius: 6, cursor: guardando ? 'not-allowed' : 'pointer', fontWeight: 700 }}>
-                  {guardando ? '⏳ Guardando en PostgreSQL...' : modal === 'nuevo' ? '✅ Registrar en Gateway' : '✅ Guardar Cambios'}
+                  {guardando ? '⏳ Guardando…' : modal === 'nuevo' ? '✅ Registrar proveedor' : '✅ Guardar cambios'}
                 </button>
               </div>
             </div>
@@ -1380,7 +1035,7 @@ function HistorialUsuarioVista({ data }) {
   );
 }
 
-function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loadingReservas,onRefresh}) {
+function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadingUsers,loadingReservas,onRefresh}) {
   const [vista,setVista]=useState('usuarios');
   const [modal,setModal]=useState(null);
   const [confirmModal,setConfirmModal]=useState(null);
@@ -1473,56 +1128,35 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
     }
   };
 
-  const handleReservaAction = async (tipo, id, action) => {
-    // Hospedaje guardado solo en este navegador (no está en la BD)
-    if (tipo === 'hospedaje' && (reservas.hospedaje || []).find(r => r.id === id)?.local) {
-      if (action === 'cancelar') {
-        let locales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
-        locales = locales.map(r => (r.id === id || r.codigoReserva === id) ? { ...r, status: 'CANCELLED' } : r);
-        localStorage.setItem('reservas_alojamientos', JSON.stringify(locales));
-      }
-      alert(`Acción de ${action} ejecutada exitosamente.`);
+  const cancelarEnBackend = async (tipo, id) => {
+    try {
+      await api.put(`/admin/reservas/${tipo}/${id}/cancelar`);
+      alert('Reserva cancelada.');
       onRefresh();
+    } catch (e) { alert(`No se pudo cancelar: ${apiErrorMsg(e)}`); }
+  };
+
+  /**
+   * Reserva en una aerolínea socia: se cancela en la aerolínea con su
+   * cotización (el panel muestra el reembolso real antes de confirmar) y Booking
+   * ejecuta el reembolso y la nota de crédito, igual que cuando cancela el cliente.
+   */
+  const cancelarVueloSocio = async (r) => {
+    let cot;
+    try {
+      cot = await cotizarCancelacion(r.id);
+    } catch (e) {
+      alert(`La aerolínea no dio una cotización de cancelación: ${apiErrorMsg(e)}`);
       return;
     }
-    
-    // Check if it's a local auto or atraccion
-    if (tipo === 'auto' || tipo === 'autos') {
-      let locales = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
-      let index = locales.findIndex(r => (r.id === id || r.orderId === id));
-      if (index !== -1) {
-        if (action === 'cancelar') {
-          locales[index].status = 'CANCELLED';
-          localStorage.setItem('reservas_autos', JSON.stringify(locales));
-        }
-        if (action === 'reenviar') alert(`Comprobante de auto ${id} reenviado virtualmente`);
-        alert(`Acción de ${action} ejecutada exitosamente.`);
+    const devolucion = cot?.isRefundable ? `Se devolverán ${cot.refundAmount} ${cot.currency} al cliente` : 'La tarifa no es reembolsable: no se devuelve dinero';
+    requestConfirm('Cancelar reserva en la aerolínea', `${r.pnr} · ${r.aerolinea}. ${devolucion}${Number(cot?.penaltyAmount) > 0 ? ` (penalidad ${cot.penaltyAmount} ${cot.currency})` : ''}. No se puede deshacer.`, C.red, async () => {
+      try {
+        const res = await cancelarReservaVuelo(r.id, { quoteId: cot.quoteId, reason: 'Cancelada por el administrador' }, `adm-cancel-${r.id}-${cot.quoteId}`);
+        alert(`Reserva ${res?.status === 'CANCELLATION_PENDING' ? 'en proceso de cancelación' : 'cancelada'}. Reembolso: ${res?.refundAmount ?? '0.00'} ${res?.currency ?? ''}`);
         onRefresh();
-        return;
-      }
-    }
-
-    if (tipo === 'atraccion' || tipo === 'atracciones') {
-      let locales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
-      let index = locales.findIndex(r => (r.id === id || r.reservation_id === id));
-      if (index !== -1) {
-        if (action === 'cancelar') {
-          locales[index].status = 'CANCELLED';
-          localStorage.setItem('reservas_atracciones', JSON.stringify(locales));
-        }
-        if (action === 'reenviar') alert(`Comprobante de atracción ${id} reenviado virtualmente`);
-        alert(`Acción de ${action} ejecutada exitosamente.`);
-        onRefresh();
-        return;
-      }
-    }
-
-    try {
-      if (action === 'cancelar') await api.put(`/admin/reservas/${tipo}/${id}/cancelar`);
-      if (action === 'reenviar') await api.put(`/admin/reservas/${tipo}/${id}/reenviar`); // Revertido a PUT
-      alert(`Acción de ${action} ejecutada exitosamente.`);
-      onRefresh();
-    } catch(e) { alert('Error al ejecutar la acción en el backend'); }
+      } catch (e) { alert(`No se pudo cancelar: ${apiErrorMsg(e)}`); }
+    });
   };
 
   const viewHistorial = async (id, email) => {
@@ -1532,51 +1166,29 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
     } catch (e) { alert('Error al obtener historial'); }
   };
 
-  const viewDetalles = async (tipo, id) => {
-    if (tipo === 'hospedaje' && (reservas.hospedaje || []).find(r => r.id === id)?.local) {
-      const localesAloj = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
-      const reservaLocal = localesAloj.find(r => r.id === id || r.codigoReserva === id);
-      setModal({ type: 'detalles', vista: 'reserva', tipo, data: reservaLocal || { mensaje: 'No se encontró esta reserva en este navegador.' }, title: 'Detalle de la reserva', subtitulo: `${id} · guardada en este navegador` });
-      return;
-    }
-    
-    // Check if it's a local auto or atraccion
-    if (tipo === 'auto' || tipo === 'autos') {
-      const localesAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
-      const reservaLocal = localesAutos.find(r => (r.id === id || r.orderId === id));
-      if (reservaLocal) {
-        setModal({ type: 'detalles', vista: 'reserva', tipo, data: reservaLocal, title: 'Detalle de la reserva', subtitulo: `${id} · guardada en este navegador` });
-        return;
-      }
-    }
-
-    if (tipo === 'atraccion' || tipo === 'atracciones') {
-      const localesAtracciones = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
-      const reservaLocal = localesAtracciones.find(r => (r.id === id || r.reservation_id === id));
-      if (reservaLocal) {
-        setModal({ type: 'detalles', vista: 'reserva', tipo, data: reservaLocal, title: 'Detalle de la reserva', subtitulo: `${id} · guardada en este navegador` });
-        return;
-      }
-    }
-
+  const viewDetalles = async (tipo, id, socio = false) => {
     try {
+      if (socio) {
+        // Datos vivos de la aerolínea (más la factura de Booking), con permiso de administrador.
+        const { data } = await api.get(`/vuelos/bookings/${encodeURIComponent(id)}`);
+        setModal({ type: 'detalles', vista: 'reserva', tipo, data, title: 'Detalle de la reserva (aerolínea)', subtitulo: id });
+        return;
+      }
       const { data } = await api.get(`/admin/reservas/${tipo}/${id}/detalles`);
       setModal({ type: 'detalles', vista: 'reserva', tipo, data: data.data || { mensaje: 'No hay detalles guardados para esta reserva.' }, title: 'Detalle de la reserva', subtitulo: id });
     } catch (e) {
-      alert('Error al obtener detalles del backend');
+      alert(`No se pudo leer el detalle: ${apiErrorMsg(e)}`);
     }
   };
   const VISTAS=[
     {id:'usuarios',label:'👤 Usuarios',count:users.length},
-    {id:'catalogo',label:'🏨 Catálogo de alojamientos'},
     {id:'vuelos',label:'✈️ Vuelos',count:reservas.vuelos?.length||0},
     {id:'hospedaje',label:'🏨 Hospedaje',count:reservas.hospedaje?.length||0},
     {id:'autos',label:'🚗 Autos',count:reservas.autos?.length||0},
     {id:'atracciones',label:'🎡 Atracciones',count:reservas.atracciones?.length||0},
   ];
-  const isLoading=vista==='usuarios'?loadingUsers:vista==='catalogo'?false:loadingReservas;
+  const isLoading=vista==='usuarios'?loadingUsers:loadingReservas;
   const renderTable=()=>{
-    if(vista==='catalogo') return <GestionAlojamientos />;
     if(isLoading) return <div style={{padding:40,textAlign:'center',color:C.gray}}>Cargando...</div>;
     if(vista==='usuarios') {
       const admins = users.filter(u => u.rol === 'admin').length;
@@ -1654,10 +1266,11 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
     }
     const rows=reservas[vista]||[];
     const isVuelos = vista === 'vuelos';
-    const totalIngresos = rows.reduce((s, r) => s + Number(r.total), 0);
+    const totalIngresos = rows.filter((r) => ESTADOS_COBRADOS.has(String(r.estado || '').toUpperCase())).reduce((s, r) => s + Number(r.total) - Number(r.reembolsado || 0), 0);
 
     return (
       <div>
+        {reservasError && <div style={{padding:'16px 16px 0'}}><Alerta tipo="error">{reservasError}</Alerta></div>}
         {isVuelos && (
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,padding:16,background:C.bg,borderBottom:`1px solid ${C.border}`}}>
             <div style={{background:C.white,padding:12,borderRadius:8,border:`1px solid ${C.border}`}}>
@@ -1665,14 +1278,14 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
               <div style={{fontSize:'1.4rem',fontWeight:700,color:C.darkBlue}}>{rows.length}</div>
             </div>
             <div style={{background:C.white,padding:12,borderRadius:8,border:`1px solid ${C.border}`}}>
-              <div style={{fontSize:'0.8rem',color:C.gray}}>Ingresos Totales (Vuelos)</div>
+              <div style={{fontSize:'0.8rem',color:C.gray}}>Cobrado en vuelos (sin canceladas ni reembolsos)</div>
               <div style={{fontSize:'1.4rem',fontWeight:700,color:C.green}}>${fmt(totalIngresos)}</div>
             </div>
           </div>
         )}
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.85rem'}}>
           <thead><tr style={{background:C.lightBlue}}>
-            {['PNR / ID','Estado','Total (USD)',(vista==='atracciones'||vista==='hospedaje')?'Cliente':'Moneda','Fecha','Acciones'].map(h=>(<th key={h} style={{padding:'10px 14px',textAlign:'left',fontWeight:600,color:C.darkBlue}}>{h}</th>))}
+            {['PNR / ID','Estado','Total (USD)',isVuelos?'Aerolínea':(vista==='atracciones'||vista==='hospedaje')?'Cliente':'Moneda','Fecha','Acciones'].map(h=>(<th key={h} style={{padding:'10px 14px',textAlign:'left',fontWeight:600,color:C.darkBlue}}>{h}</th>))}
           </tr></thead>
           <tbody>
             {rows.map((r,i)=>(
@@ -1680,22 +1293,21 @@ function GestionTab({users,usersError,onRetryUsers,reservas,loadingUsers,loading
                 <td style={{padding:'9px 14px',fontFamily:'monospace',fontWeight:600}}>
                   {r.pnr}
                   {r.alojamiento && <div style={{fontFamily:'inherit',fontWeight:400,fontSize:'0.75rem',color:C.gray}}>🏨 {r.alojamiento}</div>}
-                  {r.local && <div title="Guardada solo en este navegador" style={{fontWeight:400,fontSize:'0.7rem',color:C.orange}}>solo en este navegador</div>}
+                  {r.ruta && <div style={{fontFamily:'inherit',fontWeight:400,fontSize:'0.75rem',color:C.gray}}>{r.ruta}</div>}
                 </td>
                 <td style={{padding:'9px 14px'}}><Badge status={r.estado}/></td>
                 <td style={{padding:'9px 14px',fontWeight:600}}>${fmt(r.total)}</td>
-                <td style={{padding:'9px 14px',color:C.gray}}>{(vista==='atracciones'||vista==='hospedaje')?(r.cliente||'—'):(r.moneda||'USD')}</td>
+                <td style={{padding:'9px 14px',color:C.gray}}>{isVuelos?(r.socio?r.aerolinea:'Inventario local'):(vista==='atracciones'||vista==='hospedaje')?(r.cliente||'—'):(r.moneda||'USD')}</td>
                 <td style={{padding:'9px 14px',color:C.gray}}>{fmtDate(r.createdAt)}</td>
                 <td style={{padding:'9px 14px',display:'flex',gap:8}}>
-                  {!['CANCELLED','CANCELADA'].includes(String(r.estado||'').toUpperCase()) && (
-                    <button onClick={()=>requestConfirm("Cancelar Reserva", `¿Seguro que deseas cancelar la reserva ${r.pnr}? Esta acción no se puede deshacer.`, C.red, ()=>handleReservaAction(vista, r.id, 'cancelar'))} title="Cancelar Reserva" style={btnStyle}>❌</button>
+                  {!['CANCELLED','CANCELADA','CANCELED','REFUNDED'].includes(String(r.estado||'').toUpperCase()) && (
+                    <button onClick={()=> r.socio ? cancelarVueloSocio(r) : requestConfirm("Cancelar reserva", vista==='hospedaje' ? `¿Cancelar la reserva ${r.pnr}? Se aplican las reglas de cancelación del módulo de alojamientos. No se puede deshacer.` : `¿Cancelar la reserva ${r.pnr}? Solo cambia su estado en Booking; no ejecuta reembolsos. No se puede deshacer.`, C.red, ()=>cancelarEnBackend(vista, r.id))} title="Cancelar reserva" style={btnStyle}>❌</button>
                   )}
-                  <button onClick={()=>requestConfirm("Reenviar Confirmación", `¿Deseas enviar el comprobante de reserva nuevamente al cliente?`, C.blue, ()=>handleReservaAction(vista, r.id, 'reenviar'))} title="Reenviar Confirmación" style={btnStyle}>📧</button>
-                  <button onClick={()=>viewDetalles(vista, r.id)} title="Ver Detalles Técnicos" style={btnStyle}>👁️</button>
+                  <button onClick={()=>viewDetalles(vista, r.id, !!r.socio)} title="Ver detalle" style={btnStyle}>👁️</button>
                 </td>
               </tr>
             ))}
-            {rows.length===0&&(<tr><td colSpan={6} style={{padding:24,textAlign:'center',color:C.gray}}>Sin registros</td></tr>)}
+            {rows.length===0&&!reservasError&&(<tr><td colSpan={6} style={{padding:24,textAlign:'center',color:C.gray}}>Sin registros</td></tr>)}
           </tbody>
         </table>
       </div>
@@ -1931,7 +1543,7 @@ function Alerta({ tipo = 'error', children, onClose }) {
 }
 
 // ── Configuración global: valores por defecto y normalización ────────────────
-const CONFIG_DEFAULTS = { comisionBase: 15, tasaImpuestos: 15, stripeEnabled: true, emailsEnabled: true, maintenanceMode: false };
+const CONFIG_DEFAULTS = { comisionBase: 10, tasaImpuestos: 15, stripeEnabled: true, emailsEnabled: true, maintenanceMode: false };
 /** Claves snake_case de la tabla `configuraciones` (clave/valor) -> campos del formulario. */
 const CONFIG_CLAVES = { comision_base: 'comisionBase', tasa_impuestos: 'tasaImpuestos', stripe_enabled: 'stripeEnabled', emails_enabled: 'emailsEnabled', maintenance_mode: 'maintenanceMode' };
 
@@ -1972,30 +1584,6 @@ function validarPorcentaje(valor, nombre) {
 // ── Finanzas (fusionado en Observabilidad) ───────────────────────────────────
 const thFin = { padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: C.darkBlue, whiteSpace: 'nowrap' };
 const tdFin = { padding: '9px 14px' };
-/**
- * Reservas de hospedaje que solo existen en el localStorage de este navegador
- * (p. ej. hechas sin conexión) y que no están ya en la BD.
- */
-function hospedajeSoloLocal(enBd = []) {
-  let locales = [];
-  try { locales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]'); } catch { locales = []; }
-  const conocidos = new Set(enBd.flatMap(r => [r.id, r.pnr].filter(Boolean).map(String)));
-  return locales
-    .filter(al => ![al.id, al.codigoReserva, al.reservationId].filter(Boolean).some(x => conocidos.has(String(x))))
-    .map(al => ({
-      id: al.id || al.codigoReserva,
-      tipo: 'hospedaje',
-      pnr: al.codigoReserva || String(al.id || 'HOTEL').substring(0, 8).toUpperCase(),
-      estado: al.status || 'CONFIRMED',
-      total: Number(al.totalPrice?.total ?? al.total ?? 0),
-      moneda: al.totalPrice?.currency || 'USD',
-      createdAt: al.createdAt || al.fecha || new Date().toISOString().split('T')[0],
-      cliente: al.email || al.huesped || '—',
-      alojamiento: al.nombreAlojamiento || null,
-      local: true,
-    }));
-}
-
 const VERTICAL_ICON = { vuelos: '✈️', autos: '🚗', atracciones: '🎡', hospedaje: '🏨' };
 const VERTICAL_NOMBRE = { vuelos: 'Aerolíneas (Vuelos)', autos: 'Rentadoras (Autos)', atracciones: 'Operadores (Atracciones)', hospedaje: 'Hoteles (Hospedaje)' };
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -2071,6 +1659,7 @@ function FinanzasPanel({ refreshKey }) {
       <style>{SPIN_CSS}</style>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12, fontSize: '0.8rem', color: C.gray }}>
         <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>Comisión plataforma: {fin?.config?.comisionBase}%</span>
+        <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>Vuelos: recargo de {fin?.config?.comisionBase}% sobre el precio de la aerolínea</span>
         <span style={{ background: C.lightBlue, color: C.darkBlue, padding: '3px 10px', borderRadius: 20, fontWeight: 600 }}>IVA: {fin?.config?.tasaImpuestos}%</span>
         <span>Se cambian en ⚙️ Ajustes · Calculado: {fmtDate(fin?.generadoEn)}</span>
         {loading && <Spinner color={C.blue} size={12} />}
@@ -2118,7 +1707,7 @@ function FinanzasPanel({ refreshKey }) {
               <tbody>
                 {(fin?.porVertical || []).map((v) => (
                   <tr key={v.vertical} style={{ borderTop: `1px solid ${C.border}` }}>
-                    <td style={tdFin}>{VERTICAL_ICON[v.vertical]} <span style={{ textTransform: 'capitalize' }}>{v.vertical}</span>{v.local && <span title="Reservas guardadas en este navegador" style={{ marginLeft: 4, fontSize: '0.65rem', color: C.gray }}>(local)</span>}</td>
+                    <td style={tdFin}>{VERTICAL_ICON[v.vertical]} <span style={{ textTransform: 'capitalize' }}>{v.vertical}</span></td>
                     <td style={tdFin}>{v.pagadas}/{v.reservas}</td>
                     <td style={{ ...tdFin, fontWeight: 600 }}>${fmt(v.cobrado)}</td>
                     <td style={{ ...tdFin, color: C.green }}>${fmt(v.comision)}</td>
@@ -2133,7 +1722,10 @@ function FinanzasPanel({ refreshKey }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-        <SectionTitle badge={nPend ? `${nPend} pendientes` : null}>🏦 Liquidaciones a proveedores (Payouts)</SectionTitle>
+        <div>
+          <SectionTitle badge={nPend ? `${nPend} pendientes` : null}>🏦 Liquidaciones a proveedores (Payouts)</SectionTitle>
+          <div style={{ fontSize: '0.78rem', color: C.gray, marginTop: -6 }}>Las ventas en aerolíneas socias se liquidan por aerolínea en Servicios &amp; Prov. › Vuelos.</div>
+        </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {[['pendientes', 'Pendientes'], ['todas', 'Todas']].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setFiltroLiq(id)} style={{ background: filtroLiq === id ? C.blue : C.white, color: filtroLiq === id ? 'white' : C.text, border: `1px solid ${filtroLiq === id ? C.blue : C.border}`, borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>{label}</button>
@@ -2371,37 +1963,41 @@ function SoporteTab() {
   const [expandedId, setExpandedId] = useState(null);
   const [resolutionText, setResolutionText] = useState({});
   const [savingId, setSavingId] = useState(null);
+  const [errorTickets, setErrorTickets] = useState(null);
 
-  useEffect(() => {
-    async function fetchTickets() {
-      try {
-        const { data, error } = await supabase.from('support_tickets').select('*').order('created_at', { ascending: false });
-        if (error) throw error;
-        setTickets(data || []);
-      } catch (err) {
-        console.error('Error fetching tickets:', err);
-      } finally {
-        setLoadingTickets(false);
-      }
+  const fetchTickets = useCallback(async () => {
+    setLoadingTickets(true);
+    setErrorTickets(null);
+    try {
+      const { data, error } = await supabase.from('support_tickets').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      setTickets(data || []);
+    } catch (err) {
+      setTickets([]);
+      setErrorTickets(err?.message || 'No se pudieron leer los tickets.');
+    } finally {
+      setLoadingTickets(false);
     }
-    fetchTickets();
   }, []);
+
+  useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
   const updateTicket = async (ticketId, status, resolution) => {
     setSavingId(ticketId);
     try {
       const updates = { status };
       if (resolution !== undefined) {
+        const { data: sesion } = await supabase.auth.getSession();
         updates.resolution = resolution;
         updates.resolved_at = new Date().toISOString();
-        updates.resolved_by = 'admin@booking.ec';
+        updates.resolved_by = sesion?.session?.user?.email || null;
       }
       const { error } = await supabase.from('support_tickets').update(updates).eq('id', ticketId);
       if (error) throw error;
       setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, ...updates } : t));
       if (status === 'RESOLVED' || status === 'REJECTED') setExpandedId(null);
     } catch (err) {
-      console.error('Error updating ticket:', err);
+      setErrorTickets(`No se pudo actualizar el ticket: ${err?.message || 'error desconocido'}`);
     } finally {
       setSavingId(null);
     }
@@ -2414,7 +2010,7 @@ function SoporteTab() {
       <div style={{ background: '#fff3e0', border: '1px solid #e65100', borderRadius: 8, padding: '10px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: '1.2rem' }}>🎧</span>
         <span style={{ fontSize: '0.85rem', color: '#e65100' }}>
-          <strong>Soporte y Moderación (QC).</strong> Gestión de tickets de clientes y aprobación de nuevos listados.
+          <strong>Soporte.</strong> Solicitudes de empresas que quieren ser proveedores y tickets que abren los clientes.
         </span>
       </div>
 
@@ -2422,10 +2018,11 @@ function SoporteTab() {
 
       <SectionTitle>🎫 Tickets de Soporte (Helpdesk)</SectionTitle>
 
+      {errorTickets && <Alerta tipo="error" onClose={() => setErrorTickets(null)}>{errorTickets} <button type="button" onClick={fetchTickets} style={{ marginLeft: 8, background: 'transparent', border: `1px solid ${C.red}`, color: C.red, borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>Reintentar</button></Alerta>}
       {loadingTickets && (
         <div style={{ textAlign: 'center', padding: '30px', color: C.gray }}>Cargando tickets...</div>
       )}
-      {!loadingTickets && tickets.length === 0 && (
+      {!loadingTickets && !errorTickets && tickets.length === 0 && (
         <div style={{ textAlign: 'center', padding: '30px', color: C.gray, background: C.white, border: `1px solid ${C.border}`, borderRadius: 8 }}>
           No hay tickets de soporte reportados aún.
         </div>
@@ -2511,7 +2108,7 @@ function SoporteTab() {
                     disabled={savingId === t.id}
                     style={{ padding: '7px 14px', background: C.green, color: 'white', border: 'none', borderRadius: 5, cursor: 'pointer', fontWeight: 700, fontSize: '0.82rem', opacity: savingId === t.id ? 0.6 : 1 }}
                   >
-                    {savingId === t.id ? 'Guardando...' : '✅ Resolver y Notificar'}
+                    {savingId === t.id ? 'Guardando...' : '✅ Marcar resuelto'}
                   </button>
                   <button
                     onClick={() => updateTicket(t.id, 'REJECTED', resolutionText[t.id] || '')}
@@ -2681,6 +2278,8 @@ function AuditoriaTab({ refreshKey }) {
           </div>
         </div>
       )}
+
+      <div style={{ marginTop: 28 }}><Panel8_AuditoriaSagas refreshKey={refreshKey} /></div>
     </div>
   );
 }
@@ -2827,7 +2426,7 @@ function ConfiguracionTab() {
         <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px' }}>
           <SectionTitle badge="Global">Finanzas y Comisiones</SectionTitle>
           <div style={{ marginBottom: 16 }}>
-            <label htmlFor="cfg-comision" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>Comisión Base de la Plataforma (%)</label>
+            <label htmlFor="cfg-comision" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>Comisión Base de la Plataforma (%) · en vuelos es el recargo sobre el precio de la aerolínea</label>
             <input id="cfg-comision" type="number" min={0} max={100} step="0.01" inputMode="decimal" value={form.comisionBase} onChange={onComisionChange} disabled={bloqueado} aria-invalid={!!errores.comisionBase} style={inputStyle(errores.comisionBase)} />
             {errores.comisionBase
               ? <div style={errStyle}>{errores.comisionBase}</div>
@@ -2843,7 +2442,7 @@ function ConfiguracionTab() {
         {/* Panel Integraciones */}
         <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px' }}>
           <SectionTitle badge="APIs">Pasarelas y Servicios</SectionTitle>
-          <ToggleAjuste titulo="Pasarela de Pagos (Stripe – Test Mode)" descripcion="Si se apaga, se avisa en toda la web que los pagos en línea están suspendidos" checked={form.stripeEnabled} onChange={onToggle('stripeEnabled')} disabled={bloqueado} />
+          <ToggleAjuste titulo="Pagos en línea habilitados" descripcion="Si se apaga, se avisa en toda la web que los pagos en línea están suspendidos" checked={form.stripeEnabled} onChange={onToggle('stripeEnabled')} disabled={bloqueado} />
           <ToggleAjuste titulo="Envío de Emails (SMTP)" descripcion="Si se apaga, el backend deja de enviar facturas/comprobantes por correo" checked={form.emailsEnabled} onChange={onToggle('emailsEnabled')} disabled={bloqueado} />
           <ToggleAjuste titulo="Modo Mantenimiento" tituloColor={C.red} color={C.red} descripcion="Muestra una pantalla de mantenimiento a todos los visitantes (los administradores siguen entrando)" checked={form.maintenanceMode} onChange={onToggle('maintenanceMode')} disabled={bloqueado} ultimo />
         </div>
@@ -2868,12 +2467,54 @@ function ConfiguracionTab() {
   );
 }
 
+// ── Servicios & Proveedores: socios de las 4 verticales + vista propia de cada una ──
+const VERTICALES_ADMIN = [
+  { id: 'vuelos', label: '✈️ Vuelos', sub: 'Proceso en vivo, grafos y liquidaciones por aerolínea' },
+  { id: 'autos', label: '🚗 Autos', sub: 'Flota que ve Booking' },
+  { id: 'atracciones', label: '🎡 Atracciones', sub: 'Categorías del catálogo' },
+  { id: 'alojamientos', label: '🏨 Alojamientos', sub: 'Catálogo, tipos de habitación y proveedores' },
+];
+
+function ServiciosTab({ refreshKey }) {
+  const [vertical, setVertical] = useState('vuelos');
+  const actual = VERTICALES_ADMIN.find((v) => v.id === vertical);
+  return (
+    <div>
+      <SectionTitle>🔗 Proveedores conectados</SectionTitle>
+      <ProveedoresTab refreshKey={refreshKey} />
+
+      <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 32, paddingTop: 8 }}>
+        <SectionTitle>Administración por vertical</SectionTitle>
+        <div role="tablist" aria-label="Vertical" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          {VERTICALES_ADMIN.map((v) => (
+            <button key={v.id} role="tab" aria-selected={vertical === v.id} type="button" onClick={() => setVertical(v.id)}
+              style={{ padding: '9px 18px', borderRadius: 8, border: `1px solid ${vertical === v.id ? C.blue : C.border}`, background: vertical === v.id ? C.blue : C.white, color: vertical === v.id ? 'white' : C.text, fontWeight: 700, fontSize: '0.88rem', cursor: 'pointer' }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: '0.8rem', color: C.gray, marginBottom: 16 }}>{actual?.sub}</div>
+
+        {vertical === 'vuelos' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            <ProcesosTab refreshKey={refreshKey} />
+            <Panel4_LiquidacionesFinanzas refreshKey={refreshKey} />
+          </div>
+        )}
+        {vertical === 'autos' && <Panel2_GestionFlotaAutos refreshKey={refreshKey} />}
+        {vertical === 'atracciones' && <Panel3_ArbolCategoriasAtracciones refreshKey={refreshKey} />}
+        {vertical === 'alojamientos' && <div style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 8 }}><GestionAlojamientos /></div>}
+      </div>
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const [activeTab,setActiveTab]=useState('resumen');
-  const [subPanelRda2, setSubPanelRda2] = useState('panel1');
   const [stats,setStats]=useState(null);
   const [users,setUsers]=useState([]);
   const [usersError,setUsersError]=useState(null);
+  const [reservasError,setReservasError]=useState(null);
   const [refreshKey,setRefreshKey]=useState(0);
   const [reservas,setReservas]=useState({vuelos:[],autos:[],atracciones:[],hospedaje:[]});
   const [serviceHealth,setServiceHealth]=useState([]);
@@ -2926,41 +2567,11 @@ export function AdminDashboard() {
   const fetchReservas=useCallback(async(silent=false)=>{
     if(!silent) setLoadingReservas(true);
     try{
+      setReservasError(null);
       const{data}=await api.get('/admin/reservas');
-
-      // Hospedaje viene de la BD; se agregan solo las reservas guardadas únicamente en este navegador
-      const hospedajeList = [...(data.hospedaje || []), ...hospedajeSoloLocal(data.hospedaje || [])];
-
-      const localesAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
-      const autosList = localesAutos.map(au => ({
-        id: au.id || au.orderId,
-        tipo: 'auto',
-        pnr: (au.id || au.orderId || 'AUTO').substring(0, 6).toUpperCase(),
-        estado: au.status || 'CONFIRMED',
-        total: au.totalPrice?.total || au.total || 0,
-        moneda: 'USD',
-        createdAt: au.createdAt || au.date || new Date().toISOString().split('T')[0],
-      }));
-
-      const localesAtracciones = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
-      const atraccionesList = localesAtracciones.map(at => ({
-        id: at.id || at.reservation_id,
-        tipo: 'atraccion',
-        pnr: (at.id || at.reservation_id || 'ATRAC').substring(0, 6).toUpperCase(),
-        estado: at.status || 'CONFIRMED',
-        total: at.totalPrice?.total || at.total || 0,
-        moneda: 'USD',
-        createdAt: at.createdAt || at.date || new Date().toISOString().split('T')[0],
-      }));
-
-      setReservas({
-        ...data, 
-        hospedaje: hospedajeList,
-        autos: [...(data.autos || []), ...autosList],
-        atracciones: [...(data.atracciones || []), ...atraccionesList]
-      });
+      setReservas({vuelos:data?.vuelos||[],autos:data?.autos||[],atracciones:data?.atracciones||[],hospedaje:data?.hospedaje||[]});
     }
-    catch{setReservas({vuelos:[],autos:[],atracciones:[],hospedaje:[]});}
+    catch(err){setReservas({vuelos:[],autos:[],atracciones:[],hospedaje:[]});setReservasError(apiErrorMsg(err,'No se pudieron cargar las reservas'));}
     finally{if(!silent) setLoadingReservas(false);}
   },[]);
 
@@ -3040,64 +2651,10 @@ export function AdminDashboard() {
         </div>
       </div>
       <div style={{maxWidth:1280,margin:'0 auto',padding:'24px'}}>
-        {activeTab==='paneles_rda2' && (
-          <div>
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '16px', marginBottom: '20px', borderBottom: `2px solid ${C.border}` }}>
-              {[
-                { id: 'panel1', label: '🚦 Panel 1: Nodos & Kill-Switches' },
-                { id: 'panel2', label: '🚗 Panel 2: Flota Autos & Cooldown 2h' },
-                { id: 'panel3', label: '🌲 Panel 3: Árbol Recursivo Atracciones' },
-                { id: 'panel4', label: '💼 Panel 4: Liquidaciones Finanzas 10%' },
-                { id: 'panel5', label: '🧾 Panel 5: Consola Fiscal Facturas' },
-                { id: 'panel6', label: '💳 Panel 6: Simulador Pagos SOA' },
-                { id: 'panel7', label: '⚡ Panel 7: Monitor Stock gRPC' },
-                { id: 'panel8', label: '🛡️ Panel 8: Auditoría Sagas LIFO' },
-              ].map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => setSubPanelRda2(p.id)}
-                  style={{
-                    padding: '10px 16px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: subPanelRda2 === p.id ? C.blue : '#fff',
-                    color: subPanelRda2 === p.id ? '#fff' : C.text,
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            {subPanelRda2 === 'panel1' && <Panel1_NodosProveedores refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel2' && <Panel2_GestionFlotaAutos refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel3' && <Panel3_ArbolCategoriasAtracciones refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel4' && <Panel4_LiquidacionesFinanzas refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel5' && <Panel5_ConsolaFiscalFacturas refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel6' && <Panel6_SimuladorPagosSOA refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel7' && <Panel7_MonitorStockGrpc refreshKey={refreshKey} />}
-            {subPanelRda2 === 'panel8' && <Panel8_AuditoriaSagas refreshKey={refreshKey} />}
-          </div>
-        )}
         {activeTab==='resumen'&&<ResumenTab refreshKey={refreshKey} onIrA={setActiveTab}/>}
-        {activeTab==='procesos'&&<ProcesosTab refreshKey={refreshKey}/>}
         {activeTab==='observabilidad'&&<ObservabilidadTab stats={stats} loadingStats={loadingStats} serviceHealth={serviceHealth} refreshKey={refreshKey}/>}
-        {activeTab==='microservicios'&&(
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
-            <MicroserviciosTab/>
-            <div style={{ borderTop: `2px dashed ${C.border}`, paddingTop: '40px' }}>
-              <SectionTitle>🔗 Gestión de Proveedores Integrados (RDA2)</SectionTitle>
-              <ProveedoresTab/>
-            </div>
-          </div>
-        )}
-        {activeTab==='gestion'&&<GestionTab users={users} usersError={usersError} onRetryUsers={()=>fetchUsers()} reservas={reservas} loadingUsers={loadingUsers} loadingReservas={loadingReservas} onRefresh={handleRefresh}/>}
+        {activeTab==='microservicios'&&<ServiciosTab refreshKey={refreshKey}/>}
+        {activeTab==='gestion'&&<GestionTab users={users} usersError={usersError} onRetryUsers={()=>fetchUsers()} reservas={reservas} reservasError={reservasError} loadingUsers={loadingUsers} loadingReservas={loadingReservas} onRefresh={handleRefresh}/>}
         {activeTab==='soporte'&&<SoporteTab/>}
         {activeTab==='auditoria'&&<AuditoriaTab refreshKey={refreshKey}/>}
         {activeTab==='configuracion'&&<ConfiguracionTab/>}

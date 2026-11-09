@@ -1,0 +1,33 @@
+<step title="BackgroundTrace" date="2026-11-06T16:34:04.976" instance="644818" url="/api/publish" method="POST" >
+  <step title="Creating temporary deployment - FetchDeploymentManager" date="2026-11-06T16:34:05.027" /><!-- duration: 2ms -->
+  <step title="Creating temporary deployment" date="2026-11-06T16:34:05.034" /><!-- duration: 53ms -->
+  <step title="Performing fetch based deployment" date="2026-11-06T16:34:05.153" >
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file /tmp/zipdeploy/08b32a30-b4cd-47e1-a37a-2abf00bcfda8.zip (1.51 MB) to /tmp/zipdeploy/extracted" date="2026-11-06T16:34:06.299" >
+      <step title="ChmodRecursive Process exited with total time taken in ms: 90" date="2026-11-06T16:34:07.039" /><!-- duration: 4ms -->
+    </step><!-- duration: 746ms -->
+    <step title="Deployment timer started" date="2026-11-06T16:34:09.053" >
+      <step title="DeploymentManager.Deploy(id:d94e4c5f-2b5e-44ab-8dfc-27c26e1ce0a3)" date="2026-11-06T16:34:09.066" >
+        <step title="Collecting changeset information" date="2026-11-06T16:34:09.078" /><!-- duration: 106ms -->
+        <step title="Updating submodules" date="2026-11-06T16:34:09.194" /><!-- duration: 1113ms -->
+        <step title="Determining deployment builder" date="2026-11-06T16:34:10.514" >
+          <step title="Builder is OneDeployBuilder" date="2026-11-06T16:34:10.522" /><!-- duration: 3ms -->
+        </step><!-- duration: 15ms -->
+        <step title="PreDeployment: context.CleanOutputPath False" date="2026-11-06T16:34:10.574" >
+          <step title="PreDeployment: context.OutputPath /home/site/wwwroot" date="2026-11-06T16:34:10.675" >
+            <step title="Building" date="2026-11-06T16:34:10.796" >
+              <step title="Executing external process" date="2026-11-06T16:34:11.191" type="process" path="starter.sh" arguments="/opt/Kudu/Scripts/parallel_rsync.sh /tmp/zipdeploy/extracted /home/site/wwwroot 8 /tmp/ False False  " /><!-- duration: 3540ms -->
+              <step title="Modified file to trigger a restart of the app container." date="2026-11-06T16:34:15.451" /><!-- duration: 5ms -->
+              <step title="Skip function trigger and logicapp sync because function is not enabled." date="2026-11-06T16:34:15.460" /><!-- duration: 3ms -->
+              <step title="Purge deployment items" date="2026-11-06T16:34:16.488" >
+                <step title="Remove 5dd271e8-, Success, received at 11/05/2026 23:58:44" date="2026-11-06T16:34:16.543" /><!-- duration: 5ms -->
+              </step><!-- duration: 64ms -->
+            </step><!-- duration: 5819ms -->
+          </step><!-- duration: 5945ms -->
+          <step title="Cleaning up temp files" date="2026-11-06T16:34:16.623" /><!-- duration: 4ms -->
+          <step title="Cleaning up temp files" date="2026-11-06T16:34:16.630" /><!-- duration: 504ms -->
+          <step title="Reloading status file with latest updates" date="2026-11-06T16:34:17.178" >
+            <step title="WebHooksManager.PublishEventAsync: PostDeployment" date="2026-11-06T16:34:17.181" /><!-- duration: 30ms -->
+          </step><!-- duration: 40ms -->
+          <step title="Cleaning up temporary deployment - fetch deployment was successful" date="2026-11-06T16:34:17.223" /><!-- duration: 3ms -->
+        </step><!-- duration: 6727ms -->
+      </step><!-- duration: 8269ms -->

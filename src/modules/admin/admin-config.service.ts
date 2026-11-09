@@ -18,7 +18,7 @@ export interface PlatformConfig {
 }
 
 export const CONFIG_DEFAULTS: PlatformConfig = {
-  comisionBase: 15,
+  comisionBase: 10, // misma comisión que fija el contrato de finanzas RDA2 (10%)
   tasaImpuestos: 15,
   stripeEnabled: true,
   emailsEnabled: true,

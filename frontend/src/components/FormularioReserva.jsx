@@ -7,6 +7,7 @@ import { crearReserva, obtenerMapaAsientos } from '../services/vuelosApi';
 import { obtenerHuellaDispositivo, formatearMoneda } from '../services/formato';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
+import { totalBooking } from '../utils/precioBooking';
 import { useTelemetry } from '../hooks/useTelemetry';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
@@ -145,14 +146,35 @@ function distribuir(tipos) {
   return lista;
 }
 
+/**
+ * Reglas de edad de Booking (las mismas que muestra el buscador), medidas el
+ * día del primer vuelo: adulto desde 15, joven 12 a 14, niño 2 a 11 y bebé
+ * menor de 2 años.
+ */
+const EDADES = {
+  ADULT: { min: 15, max: null, texto: 'Un adulto debe tener 15 años o más el día del viaje.' },
+  YOUTH: { min: 12, max: 14, texto: 'Un joven debe tener entre 12 y 14 años el día del viaje.' },
+  CHILD: { min: 2, max: 11, texto: 'Un niño debe tener entre 2 y 11 años el día del viaje.' },
+  INFANT: { min: 0, max: 1, texto: 'Un bebé debe tener menos de 2 años el día del viaje.' },
+};
+
+/** Edad cumplida en `fecha` (AAAA-MM-DD) para alguien nacido en `nacimiento`. */
+function edadEn(nacimiento, fecha) {
+  const [an, mn, dn] = nacimiento.split('-').map(Number);
+  const [af, mf, df] = fecha.split('-').map(Number);
+  return af - an - (mf < mn || (mf === mn && df < dn) ? 1 : 0);
+}
+
 /** Plantilla vacia de un pasajero. */
-function pasajeroVacio(tipo, indice, idsAdultos) {
+function pasajeroVacio(tipo, indice, idsAdultos, nroInfante = 0) {
   return {
     passengerId: `pax-${indice + 1}`,
     passengerType: tipo,
     // Un infante nace associado al primer adulto: es el caso mayoritario y
     // evita que el usuario tenga que elegirlo a mano.
-    associatedAdultId: tipo === 'INFANT' ? (idsAdultos[0] ?? null) : null,
+    // Cada bebé va con un adulto distinto (1 bebé por adulto): el primero con
+    // el adulto 1, el segundo con el adulto 2, etc.
+    associatedAdultId: tipo === 'INFANT' ? (idsAdultos[nroInfante] ?? idsAdultos[0] ?? null) : null,
     // Los NOMBRES son los del DTO, no traducciones al español. Mantenerlos
     // alineados evita toda una clase de fallos: en una version anterior de
     // este archivo el estado local usaba `nombre`/`apellido`/`documento`
@@ -219,6 +241,15 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
 
   const tipos = useMemo(() => distribuir(pasajeros), [pasajeros]);
   const [lista, setLista] = useState([]);
+  // Día del primer vuelo (para las edades); si no se conoce, hoy en Ecuador.
+  const fechaViaje = hold?.fechaViaje
+    || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(new Date());
+
+  // Salir sin comprar libera el cupo en la aerolínea: se pide confirmación
+  // para que un clic fuera del formulario no lo suelte por accidente.
+  const pedirCancelar = useCallback(() => {
+    if (window.confirm('¿Cancelar esta reserva? Se liberará el cupo que tienes bloqueado.')) onCerrar();
+  }, [onCerrar]);
   const [errores, setErrores] = useState({});
   // Mapas de asientos reales por tramo: { [segmentId]: { estado, asientos, error } }
   const [mapas, setMapas] = useState({});
@@ -227,7 +258,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const claveIdempotencia = useRef(null);
   const refContenedor = useRef(null);
 
-  useFocusTrap(abierto, onCerrar, refDialogo);
+  useFocusTrap(abierto, pedirCancelar, refDialogo);
 
   const [tiempoRestante, setTiempoRestante] = useState('');
 
@@ -271,7 +302,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     for (let i = 0; i < (tipos.filter((t) => t === 'ADULT').length || 1); i++) {
       idsAdultos.push(`pax-${i + 1}`);
     }
-    setLista(tipos.map((tipo, i) => pasajeroVacio(tipo, i, idsAdultos)));
+    let infantes = 0;
+    setLista(tipos.map((tipo, i) => pasajeroVacio(tipo, i, idsAdultos, tipo === 'INFANT' ? infantes++ : 0)));
   }, [abierto, hold, tipos]);
 
   const cambiar = useCallback((indice, campo, valor) => {
@@ -353,6 +385,21 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         nuevos[`${prefijo}.associatedAdultId`] =
           'Solo un infante puede llevar adulto asociado.';
       }
+      // Edad según el tipo de pasajero, medida el día del viaje.
+      const regla = EDADES[p.passengerType];
+      if (regla && p.birthDate && !nuevos[`${prefijo}.birthDate`]) {
+        const edad = edadEn(p.birthDate, fechaViaje);
+        if (edad < regla.min || (regla.max !== null && edad > regla.max)) {
+          nuevos[`${prefijo}.birthDate`] = `${regla.texto} Con esta fecha tendría ${Math.max(edad, 0)} año${edad === 1 ? '' : 's'}.`;
+        }
+      }
+      // Un adulto solo puede llevar a un bebé.
+      if (p.passengerType === 'INFANT' && p.associatedAdultId) {
+        const otro = lista.findIndex((o, k) => k < i && o.passengerType === 'INFANT' && o.associatedAdultId === p.associatedAdultId);
+        if (otro !== -1) {
+          nuevos[`${prefijo}.associatedAdultId`] = 'Ese adulto ya viaja con otro bebé: cada adulto puede llevar solo uno.';
+        }
+      }
       // Coherencia con el DDL: el nacimiento de un infante debe ser posterior
       // al de su adulto, y el de un nino menor que el de un adulto.
       if (p.passengerType === 'CHILD' || p.passengerType === 'INFANT') {
@@ -364,9 +411,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       }
     });
 
+    // Jóvenes, niños y bebés viajan siempre con al menos un adulto.
+    if (lista.some((p) => p.passengerType !== 'ADULT') && !lista.some((p) => p.passengerType === 'ADULT')) {
+      nuevos['p0.passengerType'] = 'Los menores deben viajar acompañados de un adulto.';
+    }
+
     setErrores(nuevos);
     return nuevos;
-  }, [lista]);
+  }, [lista, fechaViaje]);
 
   const alEnviar = useCallback(
     async (evento) => {
@@ -376,7 +428,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       if (pasoActual === 1) {
         const erroresValidacion = validar();
         if (Object.keys(erroresValidacion).length > 0) {
-          setErrorGeneral('Por favor, revisa que todos los campos obligatorios esten llenos correctamente antes de enviar.');
+          setErrorGeneral(erroresValidacion['p0.passengerType']
+            ?? 'Por favor, revisa que todos los campos obligatorios esten llenos correctamente antes de enviar.');
           return;
         }
         setErrorGeneral(null);
@@ -441,7 +494,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           tipo: 'vuelo',
           pnr: idempotencyKey.toString().substring(0, 8).toUpperCase(),
           titulo: `Reserva de vuelo · ${hold?.itineraries?.length ?? 1} itinerario(s)`,
-          total: hold?.lockedPrice?.total,
+          total: totalBooking(hold),
           pasajeros: lista.map((p) => ({
             firstName: p.firstName,
             lastName: p.lastName,
@@ -511,7 +564,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   return (
     <div
       className="modal-overlay"
-      onMouseDown={(e) => e.target === e.currentTarget && onCerrar()}
+      onMouseDown={(e) => e.target === e.currentTarget && pedirCancelar()}
     >
       <form
         className="modal modal-form"
@@ -535,7 +588,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           <button
             type="button"
             className="modal-cerrar"
-            onClick={onCerrar}
+            onClick={pedirCancelar}
             aria-label="Cerrar sin confirmar"
           >
             ✕
@@ -868,8 +921,16 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             <div className="paso-pago" style={{ marginTop: '20px' }}>
               <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Pago Simulado</h3>
               <p className="modal-nota-bloque">
-                El total a pagar es de <strong>{formatearMoneda(hold.lockedPrice?.total, hold.lockedPrice?.currency)}</strong>.
+                El total a pagar es de <strong>{formatearMoneda(totalBooking(hold), hold.lockedPrice?.currency)}</strong>.
               </p>
+              {hold.bookingPrice && (
+                <dl className="modal-nota-bloque" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 16px', margin: '8px 0 0' }}>
+                  <dt>Tarifa de la aerolínea (impuestos incluidos)</dt>
+                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.airlineTotal, hold.bookingPrice.currency)}</dd>
+                  <dt>Cargo por servicio Booking ({hold.bookingPrice.serviceFeePercentage}%, no reembolsable)</dt>
+                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.serviceFee, hold.bookingPrice.currency)}</dd>
+                </dl>
+              )}
               
               <div className="tarjeta-simulada" style={{ background: '#f5f7f9', padding: '20px', borderRadius: '12px', border: '1px solid #e1e4e8', marginTop: '20px' }}>
                 <div className="campo">
@@ -901,12 +962,12 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           <div className="modal-precio">
               <span className="modal-precio-etiqueta">Total a pagar</span>
               <span className="modal-precio-valor">
-                {formatearMoneda(hold.lockedPrice?.total, hold.lockedPrice?.currency)}
+                {formatearMoneda(totalBooking(hold), hold.lockedPrice?.currency)}
               </span>
             </div>
           <div className="modal-acciones">
               {pasoActual === 1 ? (
-                <button type="button" className="btn-secundario" onClick={onCerrar}>
+                <button type="button" className="btn-secundario" onClick={pedirCancelar}>
                   Cancelar
                 </button>
               ) : (

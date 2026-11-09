@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
+import { ArquitecturaVuelos } from './ArquitecturaVuelos';
 
 /**
  * Flujo del proceso de vuelos EN TIEMPO REAL.
@@ -42,58 +43,79 @@ const COLOR = {
 
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const usd = (n) => (n || n === 0 ? `$${Number(n).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '');
-const corto = (c) => (c?.length > 22 ? `${c.slice(0, 14)}…${c.slice(-6)}` : c);
 
-/** Estado final de una compra según sus pasos. */
+/**
+ * Cómo terminó una compra y, si falló, en qué paso y por qué.
+ * `motivo` es el detalle del primer paso que falló.
+ */
 function resumenCompra(eventos) {
   const pasos = new Set(eventos.map((e) => e.paso));
   const ultimo = eventos[eventos.length - 1];
-  if (eventos.some((e) => e.paso === 'reembolso' && e.resultado === 'error')) return { label: 'Cobrado sin reserva', tono: 'error' };
-  if (pasos.has('cancelacion')) return { label: 'Cancelada', tono: 'aviso' };
-  if (pasos.has('confirmada')) return { label: 'Confirmada', tono: 'ok' };
-  if (eventos.some((e) => e.paso === 'reembolso' && e.resultado === 'ok')) return { label: 'Reembolsada', tono: 'aviso' };
-  if (ultimo?.resultado === 'error') return { label: `Falló en ${INFO[ultimo.paso]?.label ?? ultimo.paso}`, tono: 'error' };
-  return { label: `En curso · ${INFO[ultimo?.paso]?.label ?? ''}`, tono: 'neutro' };
+  const fallo = eventos.find((e) => e.resultado === 'error');
+  const conMotivo = (r) => ({ ...r, motivo: fallo?.detalle ?? null, pasoFallo: fallo?.paso ?? null });
+  if (eventos.some((e) => e.paso === 'reembolso' && e.resultado === 'error')) return conMotivo({ label: 'Cobrado sin reserva', tono: 'error' });
+  if (pasos.has('cancelacion')) return conMotivo({ label: 'Cancelada', tono: 'aviso' });
+  if (pasos.has('confirmada')) return conMotivo({ label: 'Completada', tono: 'ok' });
+  if (fallo) {
+    const devuelto = eventos.some((e) => e.paso === 'reembolso' && e.resultado === 'ok');
+    return conMotivo({ label: `Falló en ${INFO[fallo.paso]?.label ?? fallo.paso}${devuelto ? ' · cobro devuelto' : ''}`, tono: 'error' });
+  }
+  if (pasos.has('reembolso')) return conMotivo({ label: 'Reembolsada', tono: 'aviso' });
+  if (!pasos.has('hold')) return conMotivo({ label: 'Solo búsqueda', tono: 'neutro' });
+  return conMotivo({ label: `En curso · ${INFO[ultimo?.paso]?.label ?? ''}`, tono: 'neutro' });
 }
 
-function Nodo({ paso, contador, latido, seleccion }) {
-  const c = contador || { ok: 0, error: 0, aviso: 0 };
-  const total = c.ok + c.error + c.aviso;
-  const tono = seleccion ? COLOR[seleccion] : latido ? COLOR[latido] : null;
-  return (
-    <div
-      className={latido ? 'pv-latido' : undefined}
-      style={{
-        position: 'relative', minWidth: 118, flex: '1 1 0', background: tono ? tono.bg : T.surface,
-        border: `2px solid ${tono ? tono.fg : seleccion === null ? T.border : T.border}`, borderRadius: 12, padding: '10px 12px',
-        opacity: seleccion === undefined || seleccion ? 1 : 0.45, transition: 'background .3s, border-color .3s, opacity .3s',
-      }}
-      title={`${paso.label}: ${c.ok} ok · ${c.aviso} avisos · ${c.error} errores desde el arranque`}
-    >
-      <div style={{ fontSize: '1.15rem' }} aria-hidden="true">{paso.icon}</div>
-      <div style={{ fontWeight: 800, fontSize: '0.9rem', color: T.text }}>{paso.label}</div>
-      <div style={{ fontSize: '0.72rem', color: T.muted }}>{paso.sub}</div>
-      <div style={{ display: 'flex', gap: 6, marginTop: 6, fontSize: '0.74rem', fontVariantNumeric: 'tabular-nums', flexWrap: 'wrap' }}>
-        <span style={{ color: T.ok, fontWeight: 700 }}>✓ {c.ok}</span>
-        {c.aviso > 0 && <span style={{ color: T.warn, fontWeight: 700 }}>! {c.aviso}</span>}
-        <span style={{ color: c.error ? T.bad : T.muted, fontWeight: 700 }}>✕ {c.error}</span>
-        {total === 0 && <span style={{ color: T.muted }}>sin actividad</span>}
-      </div>
-    </div>
-  );
+/**
+ * Separa los pasos en compras. Normalmente cada compra trae su propio
+ * X-Correlation-Id; si un mismo id tuvo varios intentos (p. ej. reintentar
+ * después de un fallo) cada nuevo hold empieza un intento distinto. Las
+ * búsquedas previas al primer hold van con el primer intento; la cancelación o
+ * el check-in posteriores quedan con el intento al que pertenecen.
+ */
+function dividirEnCompras(eventos) {
+  const porCorrelacion = new Map();
+  for (const e of eventos) {
+    if (!porCorrelacion.has(e.correlacion)) porCorrelacion.set(e.correlacion, []);
+    porCorrelacion.get(e.correlacion).push(e);
+  }
+  const compras = [];
+  for (const [correlacion, evs] of porCorrelacion) {
+    const previos = [];
+    let actual = null;
+    let intento = 0;
+    for (const e of evs) {
+      if (e.paso === 'hold' && (!actual || actual.eventos.some((x) => x.paso === 'hold'))) {
+        intento += 1;
+        actual = { id: `${correlacion}#${intento}`, correlacion, intento, eventos: intento === 1 ? [...previos] : [] };
+        compras.push(actual);
+      }
+      if (actual) actual.eventos.push(e); else previos.push(e);
+    }
+    if (!actual) compras.push({ id: `${correlacion}#0`, correlacion, intento: 0, eventos: previos });
+  }
+  return compras.map((c) => {
+    const intentos = compras.filter((x) => x.correlacion === c.correlacion && x.intento > 0).length;
+    const cobro = c.eventos.find((e) => e.paso === 'cobro' && e.monto);
+    return {
+      ...c,
+      intentos,
+      inicio: c.eventos[0],
+      ultimo: c.eventos[c.eventos.length - 1],
+      cliente: c.eventos.find((e) => e.cliente)?.cliente ?? null,
+      nodo: c.eventos.find((e) => e.nodo)?.nodo ?? null,
+      monto: cobro?.monto ?? c.eventos.find((e) => e.monto)?.monto ?? null,
+      pnr: c.eventos.map((e) => String(e.detalle || '').match(/PNR ([A-Z0-9]{5,8})/)?.[1]).find(Boolean) ?? null,
+      resumen: resumenCompra(c.eventos),
+    };
+  }).sort((a, b) => b.ultimo.seq - a.ultimo.seq);
 }
 
-function Flecha({ activa }) {
-  return (
-    <div aria-hidden="true" style={{ alignSelf: 'center', width: 28, height: 4, position: 'relative', flex: '0 0 auto' }}>
-      <div style={{ position: 'absolute', inset: 0, background: activa ? T.azul : T.border, borderRadius: 2, transition: 'background .3s' }} />
-      {activa && <div className="pv-ficha" />}
-      <div style={{ position: 'absolute', right: -2, top: -4, borderLeft: `8px solid ${activa ? T.azul : T.border}`, borderTop: '6px solid transparent', borderBottom: '6px solid transparent' }} />
-    </div>
-  );
-}
+const duracion = (a, b) => {
+  const s = Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+};
 
-export function ProcesoEnVivo() {
+export function ProcesoEnVivo({ aerolineas = [] }) {
   const [eventos, setEventos] = useState([]);
   const [contadores, setContadores] = useState({});
   const [inicio, setInicio] = useState(null);
@@ -101,7 +123,10 @@ export function ProcesoEnVivo() {
   const [error, setError] = useState(null);
   const [seleccion, setSeleccion] = useState(null);
   const [filtro, setFiltro] = useState('');
+  const [verBusquedas, setVerBusquedas] = useState(false);
   const [latidos, setLatidos] = useState({});
+  const [busActivo, setBusActivo] = useState(false);
+  const [reproducir, setReproducir] = useState(null);
   const seqRef = useRef(0);
   const inicioRef = useRef(null);
 
@@ -122,6 +147,7 @@ export function ProcesoEnVivo() {
       inicioRef.current = data.inicio;
       setInicio(data.inicio);
       setContadores(data.contadores || {});
+      setBusActivo(!!data.bus?.rabbitmq);
       setError(null);
       if (data.eventos?.length) {
         seqRef.current = data.ultimoSeq;
@@ -160,28 +186,18 @@ export function ProcesoEnVivo() {
     return () => clearInterval(id);
   }, []);
 
-  const compras = useMemo(() => {
-    const mapa = new Map();
-    for (const e of eventos) {
-      if (!mapa.has(e.correlacion)) mapa.set(e.correlacion, []);
-      mapa.get(e.correlacion).push(e);
-    }
-    return [...mapa.entries()]
-      .map(([correlacion, evs]) => ({
-        correlacion,
-        eventos: evs,
-        ultimo: evs[evs.length - 1],
-        nodo: evs.find((e) => e.nodo)?.nodo ?? null,
-        monto: evs.find((e) => e.monto)?.monto ?? null,
-        resumen: resumenCompra(evs),
-      }))
-      .sort((a, b) => b.ultimo.seq - a.ultimo.seq);
-  }, [eventos]);
+  const nombreAerolinea = useMemo(() => Object.fromEntries(aerolineas.map((a) => [a.codigo, a.nombre || a.codigo])), [aerolineas]);
+  const compras = useMemo(() => dividirEnCompras(eventos), [eventos]);
+  const soloBusquedas = compras.filter((c) => c.intento === 0).length;
 
-  const comprasFiltradas = filtro.trim()
-    ? compras.filter((c) => c.correlacion.toLowerCase().includes(filtro.trim().toLowerCase()) || (c.nodo || '').toLowerCase().includes(filtro.trim().toLowerCase()))
-    : compras;
-  const elegida = compras.find((c) => c.correlacion === seleccion) || null;
+  const q = filtro.trim().toLowerCase();
+  const comprasFiltradas = compras.filter((c) => {
+    if (!verBusquedas && c.intento === 0) return false;
+    if (!q) return true;
+    return [c.correlacion, c.cliente, c.nodo, nombreAerolinea[c.nodo], c.pnr, ...c.eventos.map((e) => e.detalle)]
+      .some((v) => String(v || '').toLowerCase().includes(q));
+  });
+  const elegida = compras.find((c) => c.id === seleccion) || null;
 
   // Pasos de la compra elegida -> resultado por paso (para pintar su recorrido).
   const recorrido = useMemo(() => {
@@ -193,7 +209,6 @@ export function ProcesoEnVivo() {
 
   const estadoNodo = (id) => (recorrido ? recorrido[id] ?? false : undefined);
   const latido = (id) => (recorrido ? null : latidos[id]?.resultado ?? null);
-  const flechaActiva = (a, b) => (recorrido ? !!recorrido[a] && !!recorrido[b] : !!latidos[b]);
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -227,98 +242,152 @@ export function ProcesoEnVivo() {
       </div>
       {error && <div role="alert" style={{ background: T.badBg, color: T.bad, borderRadius: 8, padding: '8px 12px', fontSize: '0.83rem' }}>⚠️ {error}</div>}
 
-      {/* ── El flujo ── */}
+      {/* ── La arquitectura con el tráfico en vivo ── */}
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: 'grid', gap: 12 }}>
-        <div style={{ fontSize: '0.82rem', color: T.text2 }}>
-          {elegida ? (
-            <>Recorrido de la compra <code style={{ background: T.fondo, padding: '1px 6px', borderRadius: 4 }}>{elegida.correlacion}</code> · los pasos que no hizo quedan atenuados.</>
-          ) : (
-            <>Cada caja late cuando ocurre ese paso; los números son el total desde que arrancó el servidor. Elige una compra abajo para ver solo su recorrido.</>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ fontSize: '0.82rem', color: T.text2, maxWidth: 720 }}>
+            {elegida ? (
+              <>Reproduciendo la compra de <strong>{elegida.cliente || 'cliente sin identificar'}</strong>{elegida.nodo ? ` en ${nombreAerolinea[elegida.nodo] || elegida.nodo}` : ''} ({hora(elegida.inicio.ts)}): cada punto es uno de sus pasos, en orden.</>
+            ) : (
+              <>Cada punto es un paso real que acaba de pasar por Booking: sale de donde empieza, recorre los componentes que toca y se apaga al terminar. Elige una compra abajo para repetir su recorrido.</>
+            )}
+          </div>
+          {elegida && (
+            <button type="button" onClick={() => setReproducir({ eventos: elegida.eventos, n: Date.now() })}
+              style={{ border: `1px solid ${T.azul}`, background: T.azul, color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+              ▶ Repetir recorrido
+            </button>
           )}
         </div>
-        <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'stretch', minWidth: 860 }}>
-            {PASOS.map((p, i) => (
-              <div key={p.id} style={{ display: 'contents' }}>
-                {i > 0 && <Flecha activa={flechaActiva(PASOS[i - 1].id, p.id)} />}
-                <Nodo paso={p} contador={contadores[p.id]} latido={latido(p.id)} seleccion={estadoNodo(p.id)} />
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 12, marginTop: 12, minWidth: 860, alignItems: 'stretch' }}>
-            <div style={{ alignSelf: 'center', fontSize: '0.75rem', color: T.muted, width: 120 }}>Ramas alternativas ↳</div>
-            {RAMAS.map((p) => (
-              <Nodo key={p.id} paso={p} contador={contadores[p.id]} latido={latido(p.id)} seleccion={estadoNodo(p.id)} />
-            ))}
-          </div>
+
+        <ArquitecturaVuelos eventos={pausado ? [] : eventos} aerolineas={aerolineas} busActivo={busActivo} reproducir={reproducir} />
+
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
+          <span style={{ fontSize: '0.74rem', color: T.muted, alignSelf: 'center', marginRight: 4 }}>Total desde que arrancó el servidor:</span>
+          {[...PASOS, ...RAMAS].map((p) => {
+            const c = contadores[p.id] || { ok: 0, error: 0, aviso: 0 };
+            const lat = latido(p.id);
+            const sel = estadoNodo(p.id);
+            const tono = sel ? COLOR[sel] : lat ? COLOR[lat] : null;
+            return (
+              <span key={p.id} className={lat ? 'pv-latido' : undefined} title={p.sub}
+                style={{ fontSize: '0.74rem', borderRadius: 999, padding: '3px 9px', border: `1px solid ${tono ? tono.fg : T.border}`, background: tono ? tono.bg : T.surface, opacity: sel === false ? 0.45 : 1, fontVariantNumeric: 'tabular-nums' }}>
+                {p.icon} {p.label} <strong style={{ color: T.ok }}>✓{c.ok}</strong>{c.aviso ? <strong style={{ color: T.warn }}> !{c.aviso}</strong> : null} <strong style={{ color: c.error ? T.bad : T.muted }}>✕{c.error}</strong>
+              </span>
+            );
+          })}
         </div>
       </section>
 
-      {/* ── Compras por correlation ID ── */}
+      {/* ── Compras: una fila por compra (X-Correlation-Id + intento) ── */}
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 16, display: 'grid', gap: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <h3 style={{ margin: 0, fontSize: '1rem' }}>Compras por X-Correlation-Id</h3>
-          <input
-            id="pv-filtro"
-            type="search"
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-            placeholder="Pega un correlation ID o una aerolínea…"
-            aria-label="Buscar por correlation ID o aerolínea"
-            style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px', fontSize: '0.82rem', minWidth: 260 }}
-          />
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1rem' }}>Compras</h3>
+            <div style={{ fontSize: '0.76rem', color: T.muted }}>Una fila por compra. Tócala para ver cada paso y repetir su recorrido en el diagrama.</div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ fontSize: '0.78rem', color: T.text2, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={verBusquedas} onChange={(e) => setVerBusquedas(e.target.checked)} />
+              Mostrar búsquedas sin compra ({soloBusquedas})
+            </label>
+            <input
+              id="pv-filtro"
+              type="search"
+              value={filtro}
+              onChange={(e) => setFiltro(e.target.value)}
+              placeholder="Cliente, aerolínea, PNR o correlation ID…"
+              aria-label="Buscar compra por cliente, aerolínea, PNR o correlation ID"
+              style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px', fontSize: '0.82rem', minWidth: 260 }}
+            />
+          </div>
         </div>
 
         {comprasFiltradas.length === 0 && (
           <div style={{ padding: '22px 10px', textAlign: 'center', color: T.muted, fontSize: '0.86rem' }}>
             {eventos.length === 0
               ? 'Todavía no pasa nada. Haz una búsqueda de vuelos en el sitio y la verás aparecer aquí en 2 segundos.'
-              : 'Ninguna compra coincide con la búsqueda.'}
+              : q ? 'Ninguna compra coincide con la búsqueda.' : 'Todavía no hay compras; solo búsquedas.'}
           </div>
         )}
 
         <div style={{ display: 'grid', gap: 8 }}>
-          {comprasFiltradas.slice(0, 40).map((c) => {
-            const abierta = seleccion === c.correlacion;
+          {comprasFiltradas.slice(0, 50).map((c) => {
+            const abierta = seleccion === c.id;
             const tono = c.resumen.tono === 'neutro' ? { fg: T.text2, bg: T.fondo } : COLOR[c.resumen.tono];
+            const resultadoDe = (paso) => {
+              const evs = c.eventos.filter((e) => e.paso === paso);
+              return evs.length ? evs[evs.length - 1].resultado : null;
+            };
+            const ramas = RAMAS.filter((r) => r.id !== 'estado_vuelo' && c.eventos.some((e) => e.paso === r.id));
             return (
-              <div key={c.correlacion} style={{ border: `1px solid ${abierta ? T.azul : T.border}`, borderRadius: 10, overflow: 'hidden' }}>
+              <div key={c.id} style={{ border: `1px solid ${abierta ? T.azul : c.resumen.tono === 'error' ? '#f3c0bb' : T.border}`, borderRadius: 10, overflow: 'hidden' }}>
                 <button
                   type="button"
-                  onClick={() => setSeleccion(abierta ? null : c.correlacion)}
+                  onClick={() => { setSeleccion(abierta ? null : c.id); if (!abierta) setReproducir({ eventos: c.eventos, n: Date.now() }); }}
                   aria-expanded={abierta}
-                  style={{ width: '100%', textAlign: 'left', background: abierta ? '#eef3fb' : T.surface, border: 'none', padding: '10px 12px', cursor: 'pointer', display: 'grid', gap: 6 }}
+                  style={{ width: '100%', textAlign: 'left', background: abierta ? '#eef3fb' : T.surface, border: 'none', padding: '10px 12px', cursor: 'pointer', display: 'grid', gap: 8 }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: T.text }} title={c.correlacion}>{corto(c.correlacion)}</span>
-                    <span style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.76rem', color: T.muted }}>
-                      {c.nodo && <span>✈️ {c.nodo}</span>}
-                      {c.monto ? <span>{usd(c.monto)}</span> : null}
-                      <span>{hora(c.ultimo.ts)}</span>
-                      <span style={{ background: tono.bg, color: tono.fg, borderRadius: 999, padding: '2px 8px', fontWeight: 700 }}>{c.resumen.label}</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(70px,auto) minmax(160px,1.4fr) minmax(120px,1fr) auto auto', gap: 12, alignItems: 'center', fontSize: '0.82rem' }}>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text2 }}>{hora(c.inicio.ts)}</span>
+                    <span style={{ fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.cliente || ''}>👤 {c.cliente || 'sin identificar'}</span>
+                    <span style={{ color: T.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.nodo ? `✈️ ${nombreAerolinea[c.nodo] || c.nodo}` : '✈️ todas las aerolíneas'}{c.pnr ? ` · PNR ${c.pnr}` : ''}
                     </span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{c.monto ? usd(c.monto) : ''}</span>
+                    <span style={{ background: tono.bg, color: tono.fg, borderRadius: 999, padding: '2px 10px', fontWeight: 700, fontSize: '0.76rem', whiteSpace: 'nowrap' }}>{c.resumen.label}</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {c.eventos.map((e) => (
-                      <span key={e.seq} title={e.detalle}
-                        style={{ fontSize: '0.72rem', borderRadius: 6, padding: '2px 7px', background: COLOR[e.resultado].bg, color: COLOR[e.resultado].fg, fontWeight: 600 }}>
-                        {COLOR[e.resultado].icon} {INFO[e.paso]?.label ?? e.paso}
-                      </span>
-                    ))}
+
+                  {/* Barra del flujo: hasta dónde llegó la compra y dónde falló */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    {PASOS.map((p, i) => {
+                      const r = resultadoDe(p.id);
+                      const est = r ? COLOR[r] : null;
+                      return (
+                        <span key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span title={c.eventos.filter((e) => e.paso === p.id).map((e) => e.detalle).join(' · ') || 'No llegó a este paso'}
+                            style={{ fontSize: '0.72rem', borderRadius: 6, padding: '2px 7px', fontWeight: 600, background: est ? est.bg : T.fondo, color: est ? est.fg : '#b9b8b3', border: `1px solid ${est ? 'transparent' : T.border}` }}>
+                            {est ? est.icon : '·'} {p.label}
+                          </span>
+                          {i < PASOS.length - 1 && <span aria-hidden="true" style={{ color: '#c9ccd1', fontSize: '0.7rem' }}>→</span>}
+                        </span>
+                      );
+                    })}
+                    {ramas.map((r) => {
+                      const est = COLOR[resultadoDe(r.id)];
+                      return (
+                        <span key={r.id} style={{ fontSize: '0.72rem', borderRadius: 6, padding: '2px 7px', fontWeight: 600, background: est.bg, color: est.fg, marginLeft: 6 }}>
+                          {est.icon} {r.label}
+                        </span>
+                      );
+                    })}
                   </div>
+
+                  {c.resumen.tono === 'error' && c.resumen.motivo && (
+                    <div style={{ fontSize: '0.78rem', color: T.bad }}>Motivo: {c.resumen.motivo}</div>
+                  )}
                 </button>
                 {abierta && (
-                  <ol style={{ margin: 0, padding: '8px 12px 12px 34px', borderTop: `1px solid ${T.border}`, display: 'grid', gap: 6, fontSize: '0.8rem', background: T.surface }}>
-                    {c.eventos.map((e) => (
-                      <li key={e.seq}>
-                        <span style={{ color: T.muted, fontVariantNumeric: 'tabular-nums' }}>{hora(e.ts)}</span>{' '}
-                        <strong style={{ color: COLOR[e.resultado].fg }}>{INFO[e.paso]?.label ?? e.paso}</strong>
-                        {e.nodo ? <span style={{ color: T.muted }}> · {e.nodo}</span> : null}
-                        {e.ms != null ? <span style={{ color: T.muted }}> · {e.ms} ms</span> : null}
-                        <div style={{ color: T.text2 }}>{e.detalle}</div>
-                      </li>
-                    ))}
-                  </ol>
+                  <div style={{ borderTop: `1px solid ${T.border}`, padding: '10px 12px 12px', background: T.surface, display: 'grid', gap: 8 }}>
+                    <div style={{ fontSize: '0.76rem', color: T.muted, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                      <span>Correlation ID: <code style={{ color: T.text }}>{c.correlacion}</code></span>
+                      {c.intentos > 1 && <span>Intento {c.intento} de {c.intentos} con este ID</span>}
+                      <span>Duración: {duracion(c.inicio.ts, c.ultimo.ts)}</span>
+                      <span>{c.eventos.length} pasos</span>
+                    </div>
+                    <ol style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 6, fontSize: '0.8rem' }}>
+                      {c.eventos.map((e) => (
+                        <li key={e.seq}>
+                          <span style={{ color: T.muted, fontVariantNumeric: 'tabular-nums' }}>{hora(e.ts)}</span>{' '}
+                          <strong style={{ color: COLOR[e.resultado].fg }}>{COLOR[e.resultado].icon} {INFO[e.paso]?.label ?? e.paso}</strong>
+                          {e.nodo ? <span style={{ color: T.muted }}> · {nombreAerolinea[e.nodo] || e.nodo}</span> : null}
+                          {e.ms != null ? <span style={{ color: T.muted }}> · {e.ms} ms</span> : null}
+                          {e.monto ? <span style={{ color: T.muted }}> · {usd(e.monto)}</span> : null}
+                          <div style={{ color: T.text2 }}>{e.detalle}</div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
                 )}
               </div>
             );

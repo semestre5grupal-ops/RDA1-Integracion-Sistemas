@@ -1,41 +1,24 @@
-const fs = require('fs');
+const https = require('https');
 
-async function main() {
-  const urls = [
-    'http://100.64.117.64:3000/api/docs-json',
-    'http://100.64.117.64:3000/api/docs-yaml',
-    'http://100.64.117.64:3000/api/docs',
-    'http://100.64.117.64:3000/api/docs/swagger-ui-init.js'
-  ];
+async function test() {
+  const loginData = JSON.stringify({ email: 'admin@booking.com', password: 'NuevaClave#2026Segura' });
+  const loginRes = await fetch('https://ms-identity.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: loginData
+  });
+  const { access_token } = await loginRes.json();
 
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-      console.log(`${url} -> HTTP ${res.status}`);
-      const text = await res.text();
-      if (res.status === 200) {
-        if (text.trim().startsWith('{')) {
-          const doc = JSON.parse(text);
-          console.log('INFO:', doc.info);
-          console.log('PATHS:', Object.keys(doc.paths || {}));
-        } else if (url.includes('swagger-ui-init.js')) {
-          console.log('--- swagger-ui-init.js (first 500 chars) ---');
-          console.log(text.slice(0, 500));
-          // search for swaggerDoc
-          const idx = text.indexOf('"paths":');
-          if (idx !== -1) {
-            console.log('--- Found paths in swagger-ui-init.js ---');
-            console.log(text.slice(idx, idx + 600));
-          }
-        } else if (url.endsWith('/api/docs')) {
-          console.log('--- Swagger HTML (first 500 chars) ---');
-          console.log(text.slice(0, 500));
-        }
-      }
-    } catch (e) {
-      console.log(`${url} -> error: ${e.message}`);
-    }
-  }
+  const res = await fetch('https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/atracciones/admin/reservas?limit=10&page=1', {
+    headers: { 'Authorization': `Bearer ${access_token}` }
+  });
+
+  console.log('Status:', res.status);
+  const data = await res.json();
+  console.log('Total reservas in Gloria:', data.total || data.items?.length || data.length);
+  const items = data.items || data;
+  console.log('Last 3 reservations in Gloria:');
+  console.log(JSON.stringify(items.slice(0, 3), null, 2));
 }
 
-main();
+test().catch(console.error);

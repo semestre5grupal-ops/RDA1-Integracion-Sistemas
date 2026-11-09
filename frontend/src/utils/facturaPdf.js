@@ -69,7 +69,37 @@ export function construirFacturaPdf(reserva) {
     : reserva.raw?.createdAt
     ? new Date(reserva.raw.createdAt).toLocaleDateString('es-EC')
     : new Date().toLocaleDateString('es-EC');
-  const cantidadPasajeros = reserva.raw?.passengers?.length || 1;
+
+  // Identificación y cálculo detallado de cantidades por vertical
+  const esAuto = reserva.tipo === 'auto' || /auto|vehículo|vehiculo|renta/i.test(reserva.titulo || '');
+  const esAtraccion = reserva.tipo === 'atraccion' || /tour|atraccion|atracción|entrada/i.test(reserva.titulo || '');
+  const esAlojamiento = reserva.tipo === 'alojamiento' || /hotel|habitación|habitacion|hospedaje/i.test(reserva.titulo || '');
+
+  let cantidadNum = 1;
+  let cantidadTexto = '1 unidad';
+
+  if (esAuto) {
+    const dias = reserva.diasRenta || reserva.raw?.dias_renta || reserva.raw?.dias || 3;
+    cantidadNum = 1;
+    cantidadTexto = `1 Vehículo (${dias} días)`;
+  } else if (esAtraccion) {
+    const cupos = reserva.ticketCount || reserva.cantidad || reserva.raw?.ticket_count || reserva.raw?.cupos || reserva.raw?.personas || 1;
+    cantidadNum = Number(cupos);
+    cantidadTexto = `${cupos} ${cupos > 1 ? 'Entradas/Personas' : 'Entrada/Persona'}`;
+  } else if (esAlojamiento) {
+    const huespedes = reserva.cantidad || reserva.raw?.huespedes || 1;
+    cantidadNum = Number(huespedes);
+    cantidadTexto = `${huespedes} ${huespedes > 1 ? 'Huéspedes' : 'Huésped'}`;
+  } else {
+    const pasajeros = reserva.raw?.passengers?.length || reserva.cantidad || 1;
+    cantidadNum = Number(pasajeros);
+    cantidadTexto = `${pasajeros} ${pasajeros > 1 ? 'Pasajeros' : 'Pasajero'}`;
+  }
+
+  // Fechas operativas detalladas
+  const fechaReserva = reserva.fechaReserva || fechaCreacion;
+  const fechaEntrega = reserva.fechaEntrega || reserva.raw?.pickup_date || reserva.raw?.retiro?.fecha || reserva.raw?.pickupAt || reserva.raw?.checkin || reserva.raw?.date || reserva.raw?.fecha || reserva.fecha || '';
+  const fechaDevolucion = reserva.fechaDevolucion || reserva.raw?.dropoff_date || reserva.raw?.devolucion?.fecha || reserva.raw?.dropoffAt || reserva.raw?.checkout || '';
 
   // El total llega como `number` desde los endpoints, pero desde el totalizador
   // local puede venir como texto con símbolo de moneda: `parseFloat` deja el
@@ -145,43 +175,73 @@ export function construirFacturaPdf(reserva) {
   doc.setFontSize(9);
 
   // ── CLIENTE ────────────────────────────────────────────────────────────────
-  doc.roundedRect(15, 105, 180, 25, 3, 3);
+  doc.roundedRect(15, 103, 180, 29, 3, 3);
 
-  doc.text(sanear('Razón Social / Nombres y Apellidos:'), 18, 112);
-  doc.text(nombreCliente, 80, 112);
+  doc.text(sanear('Razón Social / Nombres y Apellidos:'), 18, 109);
+  doc.text(nombreCliente, 80, 109);
 
-  doc.text(sanear('Identificación:'), 18, 118);
-  doc.text(sanear(identificacion), 50, 118);
+  doc.text(sanear('Identificación:'), 18, 115);
+  doc.text(sanear(identificacion), 50, 115);
 
-  doc.text(sanear('Fecha:'), 18, 124);
-  doc.text(sanear(fechaCreacion), 50, 124);
+  doc.text(sanear('Fecha Reserva / Emisión:'), 18, 121);
+  doc.text(sanear(fechaReserva), 62, 121);
+
+  doc.text(sanear('Cantidad Reservada:'), 115, 121);
+  doc.setFont('helvetica', 'bold');
+  doc.text(sanear(cantidadTexto), 150, 121);
+  doc.setFont('helvetica', 'normal');
+
+  let fechasOperativas = '';
+  if (esAuto) {
+    fechasOperativas = `Fecha Entrega/Retiro: ${fechaEntrega || 'Por definir'}   |   Fecha Devolución: ${fechaDevolucion || 'Por definir'}`;
+  } else if (esAlojamiento) {
+    fechasOperativas = `Fecha Check-in: ${fechaEntrega || 'Por definir'}   |   Fecha Check-out: ${fechaDevolucion || 'Por definir'}`;
+  } else if (esAtraccion) {
+    fechasOperativas = `Fecha de Visita / Turno: ${fechaEntrega || 'Por definir'}`;
+  } else {
+    fechasOperativas = `Fecha de Salida: ${fechaEntrega || 'Por definir'}${fechaDevolucion ? `   |   Fecha Retorno: ${fechaDevolucion}` : ''}`;
+  }
+  doc.text(sanear(fechasOperativas), 18, 128);
 
   // ── DETALLE ────────────────────────────────────────────────────────────────
   doc.setDrawColor(0, 0, 0);
-  doc.rect(15, 135, 180, 10);
+  doc.rect(15, 135, 180, 9);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.text('Cod. Principal', 17, 141);
-  doc.text('Cant', 45, 141);
-  doc.text(sanear('Descripción'), 60, 141);
+  doc.text('Cant', 43, 141);
+  doc.text(sanear('Descripción'), 62, 141);
   doc.text(sanear('Precio Unitario'), 125, 141);
   doc.text(sanear('Descuento'), 155, 141);
   doc.text(sanear('Precio Total'), 175, 141);
 
   doc.setFont('helvetica', 'normal');
-  doc.rect(15, 145, 180, 15);
-  doc.text(sanear(pnr), 17, 152);
-  doc.text(sanear(cantidadPasajeros), 46, 152);
-  // Descripción de la factura emitida (vuelos, PNR, pasajeros) en varias líneas
-  // para que no invada las columnas de precio.
-  const descripcion = sanear(fac?.descripcion || reserva.titulo);
-  doc.text(doc.splitTextToSize(descripcion, 62).slice(0, 3), 60, 152);
-  doc.text(subtotal.toFixed(2), 140, 152, { align: 'right' });
-  doc.text('0.00', 165, 152, { align: 'right' });
-  doc.text(subtotal.toFixed(2), 190, 152, { align: 'right' });
+  doc.rect(15, 144, 180, 17);
+  if (Array.isArray(fac?.lineas) && fac.lineas.length > 1) {
+    // Factura de vuelo con dos líneas: boleto de la aerolínea + cargo por servicio de Booking.
+    fac.lineas.slice(0, 2).forEach((l, k) => {
+      const y = k === 0 ? 148.5 : 157.5;
+      doc.text(sanear(k === 0 ? pnr : 'SERV'), 17, y);
+      doc.text(sanear(String(l.cantidad)), 46, y);
+      doc.text(doc.splitTextToSize(sanear(l.descripcion), 60).slice(0, k === 0 ? 2 : 1), 62, y);
+      doc.text(String(l.precioUnitario), 140, y, { align: 'right' });
+      doc.text('0.00', 165, y, { align: 'right' });
+      doc.text(String(l.subtotal), 190, y, { align: 'right' });
+    });
+  } else {
+    doc.text(sanear(pnr), 17, 151);
+    doc.text(sanear(String(cantidadNum)), 46, 151);
+    // Descripción completa con servicio y fechas
+    const descDetallada = fac?.descripcion || `${reserva.titulo} [${cantidadTexto}]${fechaEntrega ? ` · ${esAuto ? 'Retiro' : 'Fecha'}: ${fechaEntrega}` : ''}${fechaDevolucion ? ` · Dev: ${fechaDevolucion}` : ''}`;
+    const descripcion = sanear(descDetallada);
+    doc.text(doc.splitTextToSize(descripcion, 60).slice(0, 3), 62, 149);
+    doc.text(subtotal.toFixed(2), 140, 151, { align: 'right' });
+    doc.text('0.00', 165, 151, { align: 'right' });
+    doc.text(subtotal.toFixed(2), 190, 151, { align: 'right' });
+  }
 
   // ── TOTALES ────────────────────────────────────────────────────────────────
-  const yTotals = 165;
+  const yTotals = 164;
   doc.rect(125, yTotals, 70, 50);
 
   const lineas = [
