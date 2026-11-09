@@ -114,9 +114,10 @@ export class AdminController {
 
   @Get('procesos/vuelos/en-vivo')
   @ApiOperation({ summary: 'Traza en tiempo real del proceso de vuelos, agrupable por X-Correlation-Id (eventos nuevos desde `desde`)' })
-  enVivoVuelos(@Query('desde') desde?: string) {
+  async enVivoVuelos(@Query('desde') desde?: string) {
     // `bus`: si los eventos de pago salen a un broker RabbitMQ real o quedan en memoria.
-    return { ...trazaVuelos.desde(Number(desde) || 0), bus: { rabbitmq: this.rabbit?.isBrokerActive?.() ?? false } };
+    // La traza sale de Postgres (compartida por todas las instancias y computadoras).
+    return { ...(await trazaVuelos.consultar(Number(desde) || 0)), bus: { rabbitmq: this.rabbit?.isBrokerActive?.() ?? false } };
   }
 
   // ── Usuarios ──────────────────────────────────────────────────────────────

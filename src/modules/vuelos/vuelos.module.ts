@@ -129,10 +129,12 @@ const ENTIDADES = [
   EventoError,
 ];
 
+import { VuelosTrazaPersistencia } from './socios/vuelos-traza-persistencia';
+
 @Module({
   imports: [CommonModule, PagosModule, TypeOrmModule.forFeature([...ENTIDADES, ConfigProveedor])],
   controllers: [VuelosController],
-  providers: [VuelosService, SupabaseOrquestadorService, VuelosSociosService, VuelosSociosReservasService, VuelosSociosMiddleware],
+  providers: [VuelosService, SupabaseOrquestadorService, VuelosSociosService, VuelosSociosReservasService, VuelosSociosMiddleware, VuelosTrazaPersistencia],
   exports: [SupabaseOrquestadorService, VuelosSociosService, VuelosSociosMiddleware],
 })
 export class VuelosModule {}
