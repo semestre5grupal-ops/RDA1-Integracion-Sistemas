@@ -22,9 +22,12 @@ import { EventBusModule } from './modules/event-bus/event-bus.module';
 import { GraphqlBffModule } from './modules/graphql/graphql-bff.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { TraceContextMiddleware } from './core/tracing/trace-context.middleware';
+import { IpAccessControlMiddleware } from './core/security/ip-access-control.middleware';
+import { EdgeRateLimitMiddleware } from './core/security/edge-rate-limit.middleware';
 import { SecurityModule } from './core/security/security.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
+import { ClientesModule } from './modules/clientes/clientes.module';
 
 @Module({
   imports: [
@@ -109,6 +112,7 @@ import { ReservasModule } from './modules/reservas/reservas.module';
     // Catálogo formal de contratos por microservicio (RDA2)
     ContractsModule,
     ReservasModule,
+    ClientesModule,
   ],
   controllers: [],
   providers: [TraceContextMiddleware],
@@ -116,7 +120,7 @@ import { ReservasModule } from './modules/reservas/reservas.module';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
-      .apply(TraceContextMiddleware)
+      .apply(IpAccessControlMiddleware, EdgeRateLimitMiddleware, TraceContextMiddleware)
       .forRoutes({ path: '*', method: RequestMethod.ALL });
   }
 }

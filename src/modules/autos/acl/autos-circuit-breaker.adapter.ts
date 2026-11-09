@@ -705,11 +705,12 @@ export class AutosCircuitBreakerAdapter {
       const mateoKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
       const mateoBase = 'https://maneja-de-una-autos-api.azurewebsites.net/api/v3';
 
-      // 1. Consultar si el cliente existe mediante GET /api/v3/clientes?email=...&identificacion=...
+      // 1. Consultar si el cliente existe en Mateo priorizando IDENTIFICACIÓN (Resolución JIT)
       let clientExists = false;
+      let mateoEmail = clientEmail;
       try {
-        const checkUrl = `${mateoBase}/clientes?email=${encodeURIComponent(clientEmail)}&identificacion=${encodeURIComponent(clientDoc)}`;
-        this.logger.log(`[Autos Mateo] Paso 1: Consultando existencia de cliente: ${checkUrl}`);
+        const checkUrl = `${mateoBase}/clientes?identificacion=${encodeURIComponent(clientDoc)}`;
+        this.logger.log(`[Autos Mateo] Paso 1: Consultando existencia de cliente por identificación: ${checkUrl}`);
         const checkRes = await firstValueFrom(
           this.httpService.get(checkUrl, {
             headers: { 'X-API-Key': mateoKey },
@@ -717,11 +718,31 @@ export class AutosCircuitBreakerAdapter {
           })
         );
         if (checkRes.status === 200 && checkRes.data) {
-          clientExists = true;
-          this.logger.log(`[Autos Mateo] Cliente ya existe en Maneja de Una: ${JSON.stringify(checkRes.data)}`);
+          const d = Array.isArray(checkRes.data) ? checkRes.data[0] : checkRes.data;
+          if (d && (d.client_id || d.id || d.identificacion)) {
+            clientExists = true;
+            if (d.email) mateoEmail = d.email; // Aliasing
+            this.logger.log(`[Autos Mateo JIT] Cliente ya existe en Maneja de Una. Email socio: ${mateoEmail}`);
+          }
         }
       } catch (err: any) {
-        this.logger.debug(`[Autos Mateo] Cliente no encontrado aún (${err.response?.status || err.message}). Procediendo a registrar.`);
+        this.logger.debug(`[Autos Mateo] Búsqueda por identificación retornó: ${err.response?.status || err.message}`);
+      }
+
+      // Si no se encontró por identificación, probar por email
+      if (!clientExists) {
+        try {
+          const checkEmailUrl = `${mateoBase}/clientes?email=${encodeURIComponent(clientEmail)}`;
+          const checkEmailRes = await firstValueFrom(
+            this.httpService.get(checkEmailUrl, {
+              headers: { 'X-API-Key': mateoKey },
+              timeout: 4000,
+            })
+          );
+          if (checkEmailRes.status === 200 && checkEmailRes.data) {
+            clientExists = true;
+          }
+        } catch (_) {}
       }
 
       // 2. Si no existe, registrarlo mediante POST /api/v3/clientes
@@ -772,7 +793,7 @@ export class AutosCircuitBreakerAdapter {
         coverage_type: coverageType,
         driver: {
           full_name: clientName,
-          email: clientEmail,
+          email: mateoEmail || clientEmail,
           phone: clientPhone,
           license_number: clientDoc,
           age: Number(payload.conductor.edad || 30),
@@ -827,28 +848,49 @@ export class AutosCircuitBreakerAdapter {
       }
     }
 
-    // Sincronizar conductor con microservicio de clientes en RutaLibre (Fase 1 Cross-Platform)
+    // Sincronizar conductor con microservicio de clientes en RutaLibre (Fase 1 Cross-Platform con Resolución JIT)
+    let rutaLibreEmail = payload.conductor.email || 'conductor@booking.com';
+    const rutaLibreDoc = payload.conductor.licencia || '1723456789';
     try {
-      await firstValueFrom(
-        this.httpService.post(
-          'https://rutalibre-autos-api.azurewebsites.net/api/v3/clientes',
+      const checkRes = await firstValueFrom(
+        this.httpService.get(
+          `https://rutalibre-autos-api.azurewebsites.net/api/v3/clientes?identificacion=${encodeURIComponent(rutaLibreDoc)}`,
           {
-            nombre: payload.conductor.nombre,
-            email: payload.conductor.email,
-            identificacion: payload.conductor.licencia || '1723456789',
-            telefono: normalizedPhone,
-            licencia: payload.conductor.licencia || '1723456789',
-          },
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'X-API-Key': key,
-            },
+            headers: { 'X-API-Key': key },
             timeout: 3000,
-          }
-        )
+          },
+        ),
       );
-    } catch (_) {}
+      if (checkRes.status === 200 && checkRes.data) {
+        const d = Array.isArray(checkRes.data) ? checkRes.data[0] : checkRes.data;
+        if (d && d.email) {
+          rutaLibreEmail = d.email; // Aliasing
+          this.logger.log(`[Autos RutaLibre JIT] Cliente existente por identificación en Daniel: email ${rutaLibreEmail}`);
+        }
+      }
+    } catch (_) {
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            'https://rutalibre-autos-api.azurewebsites.net/api/v3/clientes',
+            {
+              nombre: payload.conductor.nombre,
+              email: payload.conductor.email,
+              identificacion: rutaLibreDoc,
+              telefono: normalizedPhone,
+              licencia: rutaLibreDoc,
+            },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': key,
+              },
+              timeout: 3000,
+            },
+          ),
+        );
+      } catch (_) {}
+    }
 
     // Despachar orden canónica a RutaLibre v3: POST /api/v3/orders
     const requestPayload = {
@@ -859,9 +901,9 @@ export class AutosCircuitBreakerAdapter {
       dropoff_location: payload.dropoff_location || 'Quito Aeropuerto',
       driver: {
         full_name: payload.conductor.nombre || 'Conductor Booking',
-        email: payload.conductor.email || 'conductor@booking.com',
+        email: rutaLibreEmail,
         phone: normalizedPhone,
-        license_number: payload.conductor.licencia || '1723456789',
+        license_number: rutaLibreDoc,
         age: payload.conductor.edad || 30,
       },
     };

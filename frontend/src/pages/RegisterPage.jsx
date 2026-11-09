@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase, supabaseAdmin } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { api } from '../services/api';
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [nombre, setNombre] = useState('');
   const [apellido, setApellido] = useState('');
+  const [tipoDocumento, setTipoDocumento] = useState('CEDULA'); // 'CEDULA' o 'PASAPORTE'
   const [cedula, setCedula] = useState('');
   const [telefono, setTelefono] = useState('');
   const [email, setEmail] = useState('');
@@ -85,9 +87,16 @@ export function RegisterPage() {
       newErrors.apellido = 'El apellido debe tener al menos 3 letras.';
       hasError = true;
     }
-    if (!validarCedulaEcuatoriana(cedula)) {
-      newErrors.cedula = 'La cédula es inválida (verifique los 10 dígitos).';
-      hasError = true;
+    if (tipoDocumento === 'PASAPORTE') {
+      if (!/^[A-Za-z0-9]{6,15}$/.test(cedula.trim())) {
+        newErrors.cedula = 'El pasaporte debe ser alfanumérico y tener entre 6 y 15 caracteres.';
+        hasError = true;
+      }
+    } else {
+      if (!validarCedulaEcuatoriana(cedula)) {
+        newErrors.cedula = 'La cédula es inválida (verifique los 10 dígitos).';
+        hasError = true;
+      }
     }
     if (telefono.length < 10 || !telefono.startsWith('09') || /^09(\d)\1{7}$/.test(telefono)) {
       newErrors.telefono = 'El celular debe ser válido (10 dígitos, iniciar con 09).';
@@ -108,6 +117,26 @@ export function RegisterPage() {
     if (hasError) return;
 
     setLoading(true);
+
+    // Verificar si la identificación ya se encuentra registrada en Booking Central
+    try {
+      const { data: checkData } = await api.post('/clientes/validar-identificacion', {
+        identificacion: cedula.trim(),
+        tipo: tipoDocumento
+      });
+      if (checkData && checkData.registrado) {
+        setErrors(prev => ({
+          ...prev,
+          cedula: `Esta identificación ya se encuentra registrada en Booking Central (${checkData.cliente_existente?.email_enmascarado || 'cuenta existente'}). Por favor inicia sesión o recupera tu cuenta.`
+        }));
+        triggerFlash('cedula');
+        setLoading(false);
+        return;
+      }
+    } catch (_) {
+      // Si la API no responde, continúa con la validación de Supabase
+    }
+
     let sessionEstablished = false;
 
     const userMeta = {
@@ -115,7 +144,8 @@ export function RegisterPage() {
       apellido: apellido.trim(),
       name: `${nombre.trim()} ${apellido.trim()}`,
       full_name: `${nombre.trim()} ${apellido.trim()}`,
-      cedula,
+      cedula: cedula.trim(),
+      tipo_documento: tipoDocumento,
       telefono
     };
 
@@ -260,16 +290,45 @@ export function RegisterPage() {
 
   const handleCedulaChange = (e) => {
     const rawValue = e.target.value;
-    const hasInvalid = /\D/.test(rawValue);
-    const val = rawValue.replace(/\D/g, '');
+    if (tipoDocumento === 'PASAPORTE') {
+      const sanitized = rawValue.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      let errorMsg = '';
+      if (/[^A-Za-z0-9]/.test(rawValue)) {
+        errorMsg = 'El pasaporte solo puede contener letras y números.';
+      }
+      setErrors(prev => ({ ...prev, cedula: errorMsg, general: '' }));
+      if (sanitized.length <= 15) setCedula(sanitized);
+    } else {
+      const hasInvalid = /\D/.test(rawValue);
+      const val = rawValue.replace(/\D/g, '');
 
-    let errorMsg = '';
-    if (hasInvalid) {
-      errorMsg = 'La cédula solo puede contener números.';
+      let errorMsg = '';
+      if (hasInvalid) {
+        errorMsg = 'La cédula solo puede contener números.';
+      }
+
+      setErrors(prev => ({ ...prev, cedula: errorMsg, general: '' }));
+      if (val.length <= 10) setCedula(val);
     }
+  };
 
-    setErrors(prev => ({ ...prev, cedula: errorMsg, general: '' }));
-    if (val.length <= 10) setCedula(val);
+  const handleCedulaBlur = async () => {
+    if (!cedula || cedula.length < 6) return;
+    try {
+      const { data: valData } = await api.post('/clientes/validar-identificacion', {
+        identificacion: cedula.trim(),
+        tipo: tipoDocumento
+      });
+      if (valData && !valData.valido) {
+        setErrors(prev => ({ ...prev, cedula: valData.razon || 'Identificación inválida.', general: '' }));
+      } else if (valData && valData.registrado) {
+        setErrors(prev => ({
+          ...prev,
+          cedula: `Esta identificación ya se encuentra registrada en Booking Central (${valData.cliente_existente?.email_enmascarado || 'cuenta existente'}). Por favor inicia sesión.`,
+          general: ''
+        }));
+      }
+    } catch (_) {}
   };
 
   const handleTelefonoChange = (e) => {
@@ -371,7 +430,31 @@ export function RegisterPage() {
           </div>
           
           <div>
-            <label htmlFor="reg-cedula" style={labelStyle}>Cédula</label>
+            <label htmlFor="reg-tipo-doc" style={labelStyle}>Tipo de Identificación</label>
+            <select
+              id="reg-tipo-doc"
+              value={tipoDocumento}
+              onChange={(e) => {
+                setTipoDocumento(e.target.value);
+                setCedula('');
+                setErrors(prev => ({ ...prev, cedula: '', general: '' }));
+              }}
+              style={{
+                ...inputStyle(false),
+                cursor: 'pointer',
+                backgroundColor: '#ffffff',
+                fontWeight: '600'
+              }}
+            >
+              <option value="CEDULA">🇪🇨 Cédula Ecuatoriana (10 dígitos)</option>
+              <option value="PASAPORTE">🌐 Pasaporte Extranjero</option>
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="reg-cedula" style={labelStyle}>
+              {tipoDocumento === 'PASAPORTE' ? 'Número de Pasaporte' : 'Cédula de Identidad'}
+            </label>
             <input 
               id="reg-cedula"
               type="text" 
@@ -379,7 +462,8 @@ export function RegisterPage() {
               autoComplete="off"
               value={cedula} 
               onChange={handleCedulaChange}
-              placeholder="10 dígitos"
+              onBlur={handleCedulaBlur}
+              placeholder={tipoDocumento === 'PASAPORTE' ? 'Ej. A12345678 (6 a 15 caracteres)' : '10 dígitos numéricos'}
               style={inputStyle(errors.cedula)}
             />
             {errors.cedula && <div style={errorMsgStyle}>{errors.cedula}</div>}
