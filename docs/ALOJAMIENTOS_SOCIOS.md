@@ -72,3 +72,19 @@ Variable `ALOJAMIENTOS_FUENTE`:
 - API keys de socios escritas en el código (`atracciones.service.ts`, `reservas.service.ts`) y la
   contraseña de Supabase en `database/migrate_alojamientos.js`: hay que rotarlas.
 - Atracciones confirma la reserva aunque el socio la rechace: tiene el mismo riesgo de sobreventa.
+
+## Despliegue (sin cortar el servicio)
+
+El frontend nuevo envía `documento_tipo` y `documento_numero`, que el backend viejo rechaza. A su
+vez, el backend nuevo exige el documento en los hoteles de socios, y el frontend viejo no lo envía.
+Por eso se despliega en este orden:
+
+1. **Backend** (App Service `booking-core-api`) con `ALOJAMIENTOS_FUENTE=local`: se comporta como
+   antes y ya acepta los campos nuevos.
+2. **Frontend** con el formulario nuevo.
+3. Cambiar `ALOJAMIENTOS_FUENTE=socios` y reiniciar. Así se activa el agregador.
+
+Volver atrás sin redesplegar: `ALOJAMIENTOS_FUENTE=local` y reiniciar.
+
+Comprobación: `GET /api/v1/alojamientos?limit=3` devuelve ids `NODE_…~…`, y luego
+`POSADA_API_KEY=… npm run test:live:posada -- --solo=W01,W02,W03,W04,W05,W06`.
