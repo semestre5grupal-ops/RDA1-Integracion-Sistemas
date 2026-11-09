@@ -67,6 +67,14 @@ export class CheckinNotificationDto {
   @IsOptional()
   asistentes_reales?: number;
 
+  @ApiPropertyOptional({
+    description: 'Alias de asistentes_reales con el nombre que la cátedra indicó a los socios de alojamientos',
+    example: 1,
+  })
+  @IsNumber()
+  @IsOptional()
+  huespedes_reales?: number;
+
   @ApiPropertyOptional({ description: 'Identificador del operador, guía o recepcionista que procesó la llegada', example: 'operador-01' })
   @IsString()
   @IsOptional()

@@ -96,6 +96,10 @@ export function AlojamientoCheckoutModal({
   // El hotel exige el documento del titular (contrato de alojamientos): cédula, pasaporte o RUC.
   const [documentoTipo, setDocumentoTipo] = useState('CEDULA');
   const [documentoNumero, setDocumentoNumero] = useState(user?.user_metadata?.cedula || '');
+  // Solo los hoteles de socios (id `NODE_…~…`, agregador del gateway) exigen el documento.
+  // Para un alojamiento local no se pide ni se envía: así el formulario funciona con un
+  // backend que todavía no conoce estos campos (forbidNonWhitelisted → 400).
+  const esDeSocio = String(alojamiento?.id || '').includes('~');
   const [confirmacionSinPapel, setConfirmacionSinPapel] = useState(true);
   const [nombreHuesped, setNombreHuesped] = useState(defaultCardHolder);
   const [deseaAuto, setDeseaAuto] = useState(false);
@@ -182,19 +186,19 @@ export function AlojamientoCheckoutModal({
       return;
     }
     const doc = documentoNumero.trim();
-    if (!doc) {
+    if (esDeSocio && !doc) {
       setErrorMsg('Por favor ingresa el número de documento del titular: el hotel lo exige para registrar la reserva.');
       return;
     }
-    if (documentoTipo === 'CEDULA' && !cedulaValida(doc)) {
+    if (esDeSocio && documentoTipo === 'CEDULA' && !cedulaValida(doc)) {
       setErrorMsg('La cédula no es válida. Revisa los 10 dígitos.');
       return;
     }
-    if (documentoTipo === 'RUC' && !/^\d{13}$/.test(doc)) {
+    if (esDeSocio && documentoTipo === 'RUC' && !/^\d{13}$/.test(doc)) {
       setErrorMsg('El RUC debe tener 13 dígitos.');
       return;
     }
-    if (documentoTipo === 'PASAPORTE' && !/^[A-Za-z0-9]{6,12}$/.test(doc)) {
+    if (esDeSocio && documentoTipo === 'PASAPORTE' && !/^[A-Za-z0-9]{6,12}$/.test(doc)) {
       setErrorMsg('El pasaporte debe tener entre 6 y 12 letras o números.');
       return;
     }
@@ -302,7 +306,7 @@ export function AlojamientoCheckoutModal({
       ninos: Math.max(0, parseInt(children, 10) || 0),
       ...(tipoHabitacion?.product_id ? { tipo_habitacion_id: tipoHabitacion.product_id } : {}),
       ...(telefono.trim() ? { phone: `${telefonoPrefijo} ${telefono.trim()}`.slice(0, 30) } : {}),
-      ...(documentoNumero.trim() ? { documento_tipo: documentoTipo, documento_numero: documentoNumero.trim().toUpperCase() } : {}),
+      ...(esDeSocio && documentoNumero.trim() ? { documento_tipo: documentoTipo, documento_numero: documentoNumero.trim().toUpperCase() } : {}),
       ...(peticionesEspeciales.trim() ? { special_requests: peticionesEspeciales.trim().slice(0, 1000) } : {}),
       ...(horaLlegada && horaLlegada !== 'No lo sé' ? { arrival_time: horaLlegada } : {}),
       ...(nombreHuesped.trim() && nombreHuesped.trim() !== `${nombre} ${apellidos}`.trim() ? { guest_name: nombreHuesped.trim() } : {}),
@@ -1055,6 +1059,7 @@ export function AlojamientoCheckoutModal({
                       </span>
                     </div>
 
+                    {esDeSocio && (
                     <div className="bkg-input-group">
                       <label htmlFor="chk-documento">Documento del titular *</label>
                       <div className="bkg-phone-wrapper">
@@ -1083,6 +1088,7 @@ export function AlojamientoCheckoutModal({
                         El hotel lo usa para registrarte y confirmar tu llegada en recepción.
                       </span>
                     </div>
+                    )}
                   </div>
 
                   {/* Checkbox confirmacion sin papel */}
