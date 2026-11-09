@@ -73,16 +73,15 @@ Variable `ALOJAMIENTOS_FUENTE`:
   contraseña de Supabase en `database/migrate_alojamientos.js`: hay que rotarlas.
 - Atracciones confirma la reserva aunque el socio la rechace: tiene el mismo riesgo de sobreventa.
 
-## Despliegue (sin cortar el servicio)
+## Despliegue
 
-El frontend nuevo envía `documento_tipo` y `documento_numero`, que el backend viejo rechaza. A su
-vez, el backend nuevo exige el documento en los hoteles de socios, y el frontend viejo no lo envía.
-Por eso se despliega en este orden:
+El checkout pide y envía el documento del titular **solo para hoteles de socios** (id `NODO~id`).
+Así el frontend funciona con el backend viejo (no hay ids de socio, no envía campos nuevos) y con el
+nuevo. **Frontend y backend se pueden desplegar en cualquier orden.**
 
-1. **Backend** (App Service `booking-core-api`) con `ALOJAMIENTOS_FUENTE=local`: se comporta como
-   antes y ya acepta los campos nuevos.
-2. **Frontend** con el formulario nuevo.
-3. Cambiar `ALOJAMIENTOS_FUENTE=socios` y reiniciar. Así se activa el agregador.
+1. Backend (App Service `booking-core-api`) desde `main`. Coordinar con quien despliega vuelos: el
+   reinicio corta 1–3 minutos.
+2. `ALOJAMIENTOS_FUENTE=socios` (es el valor por defecto) y reiniciar.
 
 Volver atrás sin redesplegar: `ALOJAMIENTOS_FUENTE=local` y reiniciar.
 
