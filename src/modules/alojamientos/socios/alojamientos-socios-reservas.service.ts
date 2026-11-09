@@ -107,6 +107,11 @@ const dinero = (v: unknown): string | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n.toFixed(2) : null;
 };
+/**
+ * En Postgres, TypeORM devuelve `[filas, cantidad]` para UPDATE/DELETE y solo `filas` para
+ * SELECT/INSERT. Devuelve la primera fila en ambos casos.
+ */
+export const primeraFila = (r: any): any => (Array.isArray(r) && Array.isArray(r[0]) ? r[0][0] : Array.isArray(r) ? r[0] : undefined);
 const fecha = (v: any): string => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
 
 @Injectable()
@@ -453,14 +458,14 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       this.errorDelSocio(r, nodo, 'cancelar');
     }
     const b = desempacar(r.body) || {};
-    const [act] = await this.q(
+    const act = primeraFila(await this.q(
       `UPDATE ${TABLA}
           SET estado = $2, motivo_cancelacion = $3, cancelada_en = now(), actualizado_en = now(),
               codigo_reembolso = $4, monto_reembolsado = $5
         WHERE id = $1
         RETURNING *`,
       [fila.id, ESTADO_CANCELADO, motivo || null, b.codigoReembolso ?? null, dinero(b.montoReembolsado)],
-    );
+    ));
     this.socios.invalidarCatalogo();
     return this.respuesta(act);
   }
@@ -490,13 +495,13 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       throw conflicto(CodigoProblema.CHECK_IN_NOT_AVAILABLE, 'La reserva está cancelada: no admite check-in.');
     }
     if (fila.estado === ESTADO_ASISTIDO) return { ...fila, ya_registrado: true };
-    const [act] = await this.dataSource!.query(
+    const act = primeraFila(await this.dataSource!.query(
       `UPDATE ${TABLA}
           SET estado = $2, checkin_at = COALESCE($3::timestamptz, now()), checkin_admin = $4, actualizado_en = now()
         WHERE id = $1
         RETURNING *`,
       [fila.id, ESTADO_ASISTIDO, datos.fecha || null, datos.admin || null],
-    );
+    ));
     return act;
   }
 

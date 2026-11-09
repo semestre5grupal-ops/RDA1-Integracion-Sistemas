@@ -141,12 +141,12 @@ class BaseFalsa {
     if (s.startsWith('UPDATE') && s.includes('motivo_cancelacion')) {
       const f = this.filas.find((x) => x.id === p[0]);
       Object.assign(f, { estado: p[1], motivo_cancelacion: p[2], codigo_reembolso: p[3], monto_reembolsado: p[4], cancelada_en: new Date() });
-      return [f];
+      return [[f], 1]; // como Postgres: UPDATE devuelve [filas, cantidad]
     }
     if (s.startsWith('UPDATE') && s.includes('checkin_at')) {
       const f = this.filas.find((x) => x.id === p[0]);
       Object.assign(f, { estado: p[1], checkin_at: p[2] || new Date(), checkin_admin: p[3] });
-      return [f];
+      return [[f], 1];
     }
     if (s.includes('ORDER BY creado_en DESC')) return [...this.filas].reverse();
     throw new Error(`Consulta no simulada: ${s.slice(0, 80)}`);
