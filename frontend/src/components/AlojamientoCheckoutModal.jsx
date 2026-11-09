@@ -119,11 +119,11 @@ export function AlojamientoCheckoutModal({
 
   // Step 2 Form state (Payment)
   const [titularTarjeta, setTitularTarjeta] = useState(defaultCardHolder);
-  // La tarjeta nunca se precarga: no hay tarjetas guardadas en la cuenta, y
-  // rellenar una inventada hacía "pagar" sin que la persona escribiera nada.
-  const [numeroTarjeta, setNumeroTarjeta] = useState('');
-  const [fechaCaducidad, setFechaCaducidad] = useState('');
-  const [cvc, setCvc] = useState('');
+  // La tarjeta viene precargada (pago simulado del prototipo): el usuario no tiene que
+  // escribir nada para pagar. Son datos de demostración, no una tarjeta real.
+  const [numeroTarjeta, setNumeroTarjeta] = useState('4111 1111 1111 1111');
+  const [fechaCaducidad, setFechaCaducidad] = useState('12/30');
+  const [cvc, setCvc] = useState('123');
   const [aceptaMarketing, setAceptaMarketing] = useState(true);
   const [codigoPromo, setCodigoPromo] = useState('');
   const [promoAplicada, setPromoAplicada] = useState(false);
@@ -144,6 +144,11 @@ export function AlojamientoCheckoutModal({
   const [mensajeDuplicado, setMensajeDuplicado] = useState('');
   // Ref y no estado: el reintento tras confirmar se lanza en el mismo ciclo.
   const confirmadoDuplicadoRef = useRef(false);
+  // Clave de idempotencia ESTABLE por intento de reserva: se reutiliza en los reintentos
+  // para que, si el primer envío hizo timeout pero el hotel sí reservó, el reintento
+  // recupere la MISMA reserva en vez de crear otra (o agotar el cupo). Se limpia al
+  // confirmar o al cerrar el modal.
+  const idempotencyKeyRef = useRef(null);
 
   // Discount calculation
   const discountAmount = Math.max(0, originalPrice - totalPrice);
@@ -285,7 +290,9 @@ export function AlojamientoCheckoutModal({
     }
     setPendingOfflinePay(false);
 
-    const idempotencyKey = uuidv4();
+    // Clave estable por intento: solo se genera una vez y se reutiliza en los reintentos.
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = uuidv4();
+    const idempotencyKey = idempotencyKeyRef.current;
     // Solo se envían los acompañantes con nombre; un niño siempre lleva su edad.
     const acompanantesValidos = acompanantes
       .filter((a) => a.nombre.trim())
@@ -381,8 +388,8 @@ export function AlojamientoCheckoutModal({
       return;
     }
 
-    try {
-      const res = await reservarAlojamiento(alojamiento.id, payload, idempotencyKey);
+    // Pinta la pantalla de reserva confirmada a partir de la respuesta del backend.
+    const finalizarConReserva = (res) => {
       const reservationCode = res.codigo_reserva || res.codigoReserva || res.reservation_id || codigoReservaPnr;
 
       // Automated email invoice dispatch
@@ -430,19 +437,46 @@ export function AlojamientoCheckoutModal({
       localStorage.setItem('reservas_alojamientos', JSON.stringify(existing));
 
       confirmadoDuplicadoRef.current = false;
+      idempotencyKeyRef.current = null; // reserva cerrada: la próxima usa clave nueva
       setBookingConfirmed(confirmedBooking);
       setStep(3);
       if (onSuccess) onSuccess(confirmedBooking);
+    };
+
+    // Timeout o caída de red: no sabemos si el hotel reservó o no.
+    const esTimeoutORed = (e) => e?.code === 'ECONNABORTED' || e?.message === 'Network Error' || !e?.response;
+
+    try {
+      const res = await reservarAlojamiento(alojamiento.id, payload, idempotencyKey);
+      finalizarConReserva(res);
     } catch (err) {
+      // Si fue timeout/red, el hotel PUDO haber reservado. Reintentamos UNA vez con la
+      // MISMA Idempotency-Key: el backend deduplica y devuelve la reserva ya creada, así
+      // mostramos la pantalla de reservado en vez de un error (y sin agotar el cupo).
+      if (esTimeoutORed(err)) {
+        try {
+          const res2 = await reservarAlojamiento(
+            alojamiento.id,
+            { ...payload, confirmar_duplicado: true },
+            idempotencyKey,
+          );
+          finalizarConReserva(res2);
+          return;
+        } catch (err2) {
+          err = err2;
+        }
+      }
       if (esAvisoDuplicado(err) && !confirmadoDuplicadoRef.current) {
         // La reserva previa existe en el servidor (p. ej. hecha desde otro dispositivo).
         setReservasSolapadas([]);
         setMensajeDuplicado(err.response.data.detail);
         setShowModalExistente(true);
       } else if (err.response?.status === 409) {
+        idempotencyKeyRef.current = null;
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;
         setErrorMsg(errorDetail || 'Esta reserva ya fue procesada anteriormente.');
       } else {
+        idempotencyKeyRef.current = null;
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;
         const invalidParams = err.response?.data?.invalidParams?.map(p => `${p.name}: ${p.reason}`).join(', ');
         setErrorMsg(invalidParams || errorDetail || 'Hubo un inconveniente al procesar tu reserva. Inténtalo de nuevo.');

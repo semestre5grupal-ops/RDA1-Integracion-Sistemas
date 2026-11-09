@@ -69,7 +69,11 @@ export async function getDisponibilidadAlojamiento(id, params = {}) {
  */
 export async function reservarAlojamiento(id, reservationData, idempotencyKey) {
   const token = await obtenerAccessToken().catch(() => null);
+  // El Saga hacia el socio (sincronizar cliente + cotizar + crear la orden + guardar la
+  // copia) tarda más que una lectura: con 8 s se cortaba por timeout aunque el hotel SÍ
+  // reservaba, y el reintento con otra clave agotaba el cupo. Se da margen holgado.
   const { data } = await api.post(`/alojamientos/${id}/reservations`, reservationData, {
+    timeout: 45000,
     headers: {
       'idempotency-key': idempotencyKey,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
