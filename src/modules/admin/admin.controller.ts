@@ -1,6 +1,7 @@
 import { BadRequestException, Optional, UseInterceptors, Controller, Get, Put, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminMetricasService } from './admin-metricas.service';
 import { trazaVuelos } from '../vuelos/socios/vuelos-traza';
+import { trazaAlojamientos } from '../alojamientos/socios/alojamientos-traza';
 import { RabbitMqEventBusService } from '../event-bus/rabbitmq/rabbitmq-event-bus.service';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
@@ -94,6 +95,12 @@ export class AdminController {
   @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de alojamientos (estados, dinero, hoteles socios)' })
   async getProcesoAlojamientos() {
     return this.metricasService.getProcesoAlojamientos();
+  }
+
+  @Get('procesos/alojamientos/en-vivo')
+  @ApiOperation({ summary: 'Traza en tiempo real del proceso de alojamientos, agrupable por correlación (eventos nuevos desde `desde`)' })
+  enVivoAlojamientos(@Query('desde') desde?: string) {
+    return trazaAlojamientos.desde(Number(desde) || 0);
   }
 
   @Get('finanzas/vuelos/conciliacion')

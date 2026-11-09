@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit, Optional }
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { AlojamientosSociosService, OpcionSocio } from './alojamientos-socios.service';
+import { trazaAlojamientos, PasoAlojamiento, ResultadoPaso } from './alojamientos-traza';
 import { CodigoProblema, conflicto, validacion } from '../../../core/errors/codigo-error';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
 
@@ -209,6 +210,19 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     if (errores.length) throw validacion('Faltan datos del titular para reservar en el hotel.', errores);
   }
 
+  /** Deja un paso en la traza en vivo (telemetría; nunca rompe el flujo). */
+  private traza(d: DatosReservaSocio, paso: PasoAlojamiento, resultado: ResultadoPaso, detalle: string, nodo?: string | null, monto?: number | string | null): void {
+    trazaAlojamientos.registrar({
+      correlacion: d.correlationId || 'sin-correlacion',
+      paso,
+      resultado,
+      detalle,
+      nodo: nodo ?? null,
+      monto: monto != null && Number.isFinite(Number(monto)) ? Number(monto) : null,
+      cliente: d.email?.trim().toLowerCase() || (d.usuarioId ? String(d.usuarioId) : 'invitado'),
+    });
+  }
+
   private async reservarSinCandado(d: DatosReservaSocio): Promise<any> {
     // 0. Reintento con la misma clave: la misma reserva (no se vuelve a pedir al socio).
     const existente = await this.porClave(d.idempotencyKey);
@@ -221,8 +235,18 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     const disp = await this.socios.opciones(d.idCompuesto, d.checkin, d.checkout, d.adultos, d.habitaciones);
     if (!disp) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);
     const { nodo, idSocio, opciones, respuesta } = disp;
-    if (respuesta.status !== 200) this.errorDelSocio(respuesta, nodo, 'consultar la disponibilidad');
-    const opcion = this.elegirOpcion(opciones, d);
+    if (respuesta.status !== 200) {
+      this.traza(d, 'busqueda', 'error', `El hotel ${nodo.nombreProveedor} no respondió la disponibilidad`, nodo.codigoNodo);
+      this.errorDelSocio(respuesta, nodo, 'consultar la disponibilidad');
+    }
+    this.traza(d, 'busqueda', 'ok', `Disponibilidad en vivo de ${nodo.nombreProveedor}`, nodo.codigoNodo);
+    let opcion: OpcionSocio;
+    try {
+      opcion = this.elegirOpcion(opciones, d);
+    } catch (e: any) {
+      this.traza(d, 'busqueda', 'error', e?.message || 'Sin cupo para esas fechas', nodo.codigoNodo);
+      throw e;
+    }
 
     // 2. Cliente cross-platform (Flujo 2): ficha del huésped en el socio, sin duplicarla.
     const identificacion = d.documentoNumero!.trim();
@@ -232,6 +256,13 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       correlationId,
     );
     await this.guardarMapeoCliente(d.usuarioId, nodo.codigoNodo, cliente.clientId, cliente.origen);
+    this.traza(
+      d,
+      'cliente',
+      cliente.origen === 'NO_SOPORTADO' || cliente.origen === 'ERROR' ? 'aviso' : 'ok',
+      cliente.origen === 'NO_SOPORTADO' ? `${nodo.nombreProveedor} aún no expone /clientes` : `Huésped ${cliente.origen === 'CREADO' ? 'creado' : 'sincronizado'} en el hotel`,
+      nodo.codigoNodo,
+    );
 
     // 3. Cotización con precio congelado.
     const ocupantes = { adultos: d.adultos, ninos: d.ninos };
@@ -247,10 +278,14 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         ...(opcion.plan ? { planTarifaCodigo: opcion.plan } : {}),
       },
     });
-    if (cot.status !== 200) this.errorDelSocio(cot, nodo, 'cotizar');
+    if (cot.status !== 200) {
+      this.traza(d, 'cotizar', 'error', `El hotel ${nodo.nombreProveedor} no cotizó`, nodo.codigoNodo);
+      this.errorDelSocio(cot, nodo, 'cotizar');
+    }
     const c = desempacar(cot.body) || {};
     const total = dinero(c.precioTotalCotizado ?? c.totalPagar ?? c.desglosePrecio?.totalPagar);
     if (!total) throw new HttpException(`El hotel ${nodo.nombreProveedor} no devolvió un precio.`, HttpStatus.BAD_GATEWAY);
+    this.traza(d, 'cotizar', 'ok', `Precio congelado en ${nodo.nombreProveedor}`, nodo.codigoNodo, total);
 
     // 4. Orden en el socio con la MISMA Idempotency-Key del cliente.
     const cuerpoOrden: Record<string, any> = {
@@ -282,12 +317,17 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
 
     // 4b. Sin respuesta o 5xx: ¿llegó a crearse? (contrato §3, recuperación tras timeout)
     if (orden.status === 0 || orden.status >= 500) {
+      this.traza(d, 'recuperar', 'aviso', `Timeout/5xx de ${nodo.nombreProveedor}: recuperando por idempotency_key`, nodo.codigoNodo);
       const rec = await this.socios.llamar(nodo, 'GET', `/alojamientos/orders?idempotency_key=${encodeURIComponent(d.idempotencyKey)}`, { correlationId });
       const lista = rec.status === 200 ? (Array.isArray(rec.body) ? rec.body : rec.body?.data || rec.body?.orders || []) : [];
       const viva = lista.find((o: any) => String(o?.estado || o?.status || '').toUpperCase() !== 'CANCELLED');
       if (viva) orden = { ...orden, status: 201, body: viva };
     }
-    if (orden.status !== 200 && orden.status !== 201) this.errorDelSocio(orden, nodo, 'crear la reserva');
+    if (orden.status !== 200 && orden.status !== 201) {
+      this.traza(d, 'crear_orden', 'error', `El hotel ${nodo.nombreProveedor} no confirmó la orden`, nodo.codigoNodo);
+      this.errorDelSocio(orden, nodo, 'crear la reserva');
+    }
+    this.traza(d, 'crear_orden', 'ok', `Orden creada en ${nodo.nombreProveedor}`, nodo.codigoNodo, total);
 
     const o = desempacar(orden.body) || {};
     const ref = {
@@ -305,6 +345,8 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     try {
       const fila = await this.insertarCopia(d, nodo, idSocio, opcion, ref, cliente.clientId, correlationId, hotel, o);
       this.socios.invalidarCatalogo();
+      this.traza(d, 'copia', 'ok', `Copia guardada (RESERVADO) ${fila.codigo_reserva}`, nodo.codigoNodo, ref.total);
+      this.traza(d, 'confirmada', 'ok', `Reserva confirmada ${fila.codigo_reserva}`, nodo.codigoNodo, ref.total);
       this.logger.log(`[alojamientos-socios] ${nodo.codigoNodo} confirmó ${ref.codigoReserva || ref.orderId} → Booking ${fila.codigo_reserva} (RESERVADO)`);
       return this.respuesta(fila);
     } catch (e: any) {
@@ -312,12 +354,14 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       const ganadora = await this.porClave(d.idempotencyKey).catch(() => null);
       if (ganadora) return { ...this.respuesta(ganadora), idempotent_replayed: true };
       this.logger.error(`[alojamientos-socios] Copia local falló (${e?.message}); compensando en ${nodo.codigoNodo}`);
+      this.traza(d, 'copia', 'error', 'La copia local falló; se compensa cancelando en el hotel', nodo.codigoNodo);
       const ref2 = ref.orderId || ref.externalOrderId || ref.codigoReserva;
       const comp = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(ref2)}/cancel`, {
         idempotencyKey: randomUUID(),
         correlationId,
         body: { motivo: 'Compensación Saga: Booking no pudo registrar la reserva', solicitadoPor: 'SAGA_ORCHESTRATOR' },
       });
+      this.traza(d, 'compensar', comp.status === 200 ? 'aviso' : 'error', comp.status === 200 ? 'Orden anulada en el hotel (Saga)' : 'La anulación en el hotel falló', nodo.codigoNodo);
       throw new HttpException(
         comp.status === 200
           ? 'No se pudo registrar la reserva; se anuló en el hotel y no se cobró nada. Inténtalo de nuevo.'
@@ -467,6 +511,11 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       [fila.id, ESTADO_CANCELADO, motivo || null, b.codigoReembolso ?? null, dinero(b.montoReembolsado)],
     ));
     this.socios.invalidarCatalogo();
+    trazaAlojamientos.registrar({
+      correlacion: correlationId || 'sin-correlacion', paso: 'cancelacion', resultado: 'aviso',
+      detalle: `Cancelada ${fila.codigo_reserva} · cupo liberado en ${nodo.nombreProveedor}`,
+      nodo: fila.codigo_nodo, monto: b.montoReembolsado != null ? Number(dinero(b.montoReembolsado)) || null : null, cliente: fila.cliente_email || 'invitado',
+    });
     return this.respuesta(act);
   }
 
@@ -502,6 +551,11 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         RETURNING *`,
       [fila.id, ESTADO_ASISTIDO, datos.fecha || null, datos.admin || null],
     ));
+    trazaAlojamientos.registrar({
+      correlacion: `checkin-${fila.codigo_reserva}`, paso: 'checkin', resultado: 'ok',
+      detalle: `Check-in confirmado por ${nodo.nombreProveedor} (Flujo 2)`,
+      nodo: fila.codigo_nodo, cliente: fila.cliente_email || 'invitado',
+    });
     return act;
   }
 
