@@ -349,6 +349,71 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pasoActual, hold?.holdId]);
 
+  /**
+   * El contrato v2 bloquea el cupo en el hold, pero el asiento concreto se
+   * asigna recién en la reserva. Para que dos personas no elijan el mismo
+   * asiento sin enterarse, el mapa se vuelve a leer en silencio y, antes de
+   * cobrar, se confirma que los asientos elegidos siguen libres.
+   * Devuelve los asientos elegidos que otra persona ya tomó.
+   */
+  const listaRef = useRef(lista);
+  listaRef.current = lista;
+  const revisarAsientos = useCallback(async () => {
+    const tramos = hold?.tramos ?? [];
+    if (!hold?.offerId || !tramos.length) return [];
+    const frescos = {};
+    await Promise.all(tramos.map(async (t) => {
+      try {
+        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId);
+        frescos[t.segmentId] = asientosDeCabina(data, t.cabina);
+      } catch {
+        // sin mapa no se puede comprobar: la aerolínea igual rechaza un asiento ocupado (409)
+      }
+    }));
+    if (Object.keys(frescos).length) {
+      setMapas((m) => {
+        const n = { ...m };
+        for (const [seg, asientos] of Object.entries(frescos)) n[seg] = { estado: 'ok', asientos };
+        return n;
+      });
+    }
+    const tomados = [];
+    listaRef.current.forEach((p, i) => {
+      for (const [seg, numero] of Object.entries(p.asientos ?? {})) {
+        const filas = frescos[seg];
+        if (!filas || !numero) continue;
+        const asiento = filas.flatMap((f) => f.asientos).find((a) => a.numero === numero);
+        if (asiento && !asiento.libre) tomados.push({ indice: i, segmentId: seg, numero });
+      }
+    });
+    return tomados;
+  }, [hold]);
+
+  /** Quita los asientos que ya no están libres y avisa al cliente. */
+  const soltarTomados = useCallback((tomados, cobro) => {
+    tomados.forEach(({ indice, segmentId }) => {
+      const p = listaRef.current[indice];
+      const resto = { ...(p?.asientos ?? {}) };
+      delete resto[segmentId];
+      cambiar(indice, 'asientos', resto);
+    });
+    const nums = [...new Set(tomados.map((t) => t.numero))].join(', ');
+    setErrorGeneral(`El asiento ${nums} lo acaba de tomar otra persona. Elige otro${cobro ? '. No se hizo ningún cobro' : ''}.`);
+  }, [cambiar]);
+
+  // Mientras el cliente elige asiento o está por pagar, el mapa se actualiza cada 15 s.
+  useEffect(() => {
+    if (pasoActual !== 2 && pasoActual !== 3) return undefined;
+    const id = setInterval(async () => {
+      const tomados = await revisarAsientos();
+      if (tomados.length) {
+        soltarTomados(tomados, pasoActual === 3);
+        setPasoActual(2);
+      }
+    }, 15_000);
+    return () => clearInterval(id);
+  }, [pasoActual, revisarAsientos, soltarTomados]);
+
   /** Valida el teléfono del pasajero `i` al momento (al salir del campo o al cambiar el país). */
   const validarTelefonoAhora = useCallback((i, pais, numero) => {
     const mensaje = numero ? errorTelefono(pais, numero) : '';
@@ -443,6 +508,11 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           navigate('/login');
           return;
         }
+        const tomadosAntes = await revisarAsientos();
+        if (tomadosAntes.length) {
+          soltarTomados(tomadosAntes, false);
+          return;
+        }
         setErrorGeneral(null);
         setPasoActual(3);
         trackEvent('form_step_completed', 'vuelos', { step: 2 });
@@ -463,6 +533,16 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       try {
         // Simulando pasarela de pagos
         await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Justo antes de cobrar: los asientos elegidos tienen que seguir libres.
+        if (navigator.onLine) {
+          const tomados = await revisarAsientos();
+          if (tomados.length) {
+            soltarTomados(tomados, true);
+            setPasoActual(2);
+            return;
+          }
+        }
 
         const payload = {
           holdId: hold.holdId,
@@ -554,7 +634,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         setEnviando(false);
       }
     },
-    [enviando, lista, hold, validar, onConfirmada, pasoActual, cargarMapas],
+    [enviando, lista, hold, validar, onConfirmada, pasoActual, cargarMapas, revisarAsientos, soltarTomados],
   );
 
   if (!abierto || !hold) return null;

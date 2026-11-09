@@ -21,6 +21,7 @@ export type PasoVuelo =
   | 'reembolso'
   | 'cancelacion'
   | 'checkin'
+  | 'cambio_fecha'
   | 'estado_vuelo'
   | 'consulta';
 
