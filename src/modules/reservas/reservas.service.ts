@@ -416,7 +416,7 @@ export class ReservasService {
       external_order_id: dto.external_order_id || dto.order_id || targetId,
       order_id: dto.order_id || dto.external_order_id || targetId,
       vertical: verticalActualizada || 'SOCIO_EXTERNO',
-      asistentes_confirmados: dto.asistentes_reales || 1,
+      asistentes_confirmados: dto.asistentes_reales || dto.huespedes_reales || 1,
       fecha_checkin: fechaCheckin,
       mensaje: 'Asistencia presencial confirmada exitosamente en Booking Central. Ambas plataformas sincronizadas.',
       correlation_id: safeCorrId,
