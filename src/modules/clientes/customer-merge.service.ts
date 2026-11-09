@@ -116,6 +116,42 @@ export class CustomerMergeService {
   }
 
   // ===========================================================================
+  // 1.1 VERIFICAR EXISTENCIA DE IDENTIFICACIÓN EN BOOKING CENTRAL
+  // ===========================================================================
+  async existeIdentificacionEnBooking(identificacion: string): Promise<{ existe: boolean; cliente?: any }> {
+    const raw = (identificacion || '').trim();
+    if (!raw) return { existe: false };
+
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT id, nombre, email, cedula_ruc, estado 
+         FROM schema_clientes.clientes 
+         WHERE cedula_ruc = $1 AND estado != 'FUSIONADO' 
+         LIMIT 1`,
+        [raw],
+      );
+
+      if (rows && rows.length > 0) {
+        const c = rows[0];
+        const parts = (c.email || '').split('@');
+        const masked = parts.length === 2 ? `${parts[0].slice(0, 2)}***@${parts[1]}` : 'c***@***.com';
+        return {
+          existe: true,
+          cliente: {
+            id: c.id,
+            nombre: c.nombre,
+            email_enmascarado: masked,
+          },
+        };
+      }
+    } catch (err: any) {
+      this.logger.warn(`[Service Merge] Error verificando existencia de identificacion: ${err.message}`);
+    }
+
+    return { existe: false };
+  }
+
+  // ===========================================================================
   // 2. RESOLUCIÓN JIT (JUST-IN-TIME) DE IDENTIDADES MULTIPLATAFORMA
   // ===========================================================================
   /**

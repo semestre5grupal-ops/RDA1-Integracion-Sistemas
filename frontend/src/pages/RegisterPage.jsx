@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase, supabaseAdmin } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { api } from '../services/api';
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -116,6 +117,26 @@ export function RegisterPage() {
     if (hasError) return;
 
     setLoading(true);
+
+    // Verificar si la identificación ya se encuentra registrada en Booking Central
+    try {
+      const { data: checkData } = await api.post('/clientes/validar-identificacion', {
+        identificacion: cedula.trim(),
+        tipo: tipoDocumento
+      });
+      if (checkData && checkData.registrado) {
+        setErrors(prev => ({
+          ...prev,
+          cedula: `Esta identificación ya se encuentra registrada en Booking Central (${checkData.cliente_existente?.email_enmascarado || 'cuenta existente'}). Por favor inicia sesión o recupera tu cuenta.`
+        }));
+        triggerFlash('cedula');
+        setLoading(false);
+        return;
+      }
+    } catch (_) {
+      // Si la API no responde, continúa con la validación de Supabase
+    }
+
     let sessionEstablished = false;
 
     const userMeta = {
@@ -291,6 +312,25 @@ export function RegisterPage() {
     }
   };
 
+  const handleCedulaBlur = async () => {
+    if (!cedula || cedula.length < 6) return;
+    try {
+      const { data: valData } = await api.post('/clientes/validar-identificacion', {
+        identificacion: cedula.trim(),
+        tipo: tipoDocumento
+      });
+      if (valData && !valData.valido) {
+        setErrors(prev => ({ ...prev, cedula: valData.razon || 'Identificación inválida.', general: '' }));
+      } else if (valData && valData.registrado) {
+        setErrors(prev => ({
+          ...prev,
+          cedula: `Esta identificación ya se encuentra registrada en Booking Central (${valData.cliente_existente?.email_enmascarado || 'cuenta existente'}). Por favor inicia sesión.`,
+          general: ''
+        }));
+      }
+    } catch (_) {}
+  };
+
   const handleTelefonoChange = (e) => {
     const rawValue = e.target.value;
     const hasInvalid = /\D/.test(rawValue);
@@ -422,6 +462,7 @@ export function RegisterPage() {
               autoComplete="off"
               value={cedula} 
               onChange={handleCedulaChange}
+              onBlur={handleCedulaBlur}
               placeholder={tipoDocumento === 'PASAPORTE' ? 'Ej. A12345678 (6 a 15 caracteres)' : '10 dígitos numéricos'}
               style={inputStyle(errors.cedula)}
             />

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Headers, Req, HttpCode, HttpStatus, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, Headers, Req, HttpCode, HttpStatus, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiParam } from '@nestjs/swagger';
 import { CustomerMergeService } from './customer-merge.service';
 import { MergeClientesDto, ValidarIdentificacionDto } from './dto/merge-clientes.dto';
@@ -14,9 +14,28 @@ export class ClientesController {
 
   @Post('validar-identificacion')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Validar matemáticamente Cédula Ecuatoriana (Módulo 10) o formato de Pasaporte' })
-  validarIdentificacion(@Body() dto: ValidarIdentificacionDto) {
-    return this.customerMergeService.validarIdentificacion(dto.identificacion, dto.tipo);
+  @ApiOperation({ summary: 'Validar matemáticamente Cédula/Pasaporte y verificar si ya está registrada en Booking Central' })
+  async validarIdentificacion(@Body() dto: ValidarIdentificacionDto) {
+    const res = this.customerMergeService.validarIdentificacion(dto.identificacion, dto.tipo);
+    if (!res.valido) {
+      return { ...res, registrado: false };
+    }
+
+    const checkBooking = await this.customerMergeService.existeIdentificacionEnBooking(dto.identificacion);
+    return {
+      ...res,
+      registrado: checkBooking.existe,
+      cliente_existente: checkBooking.cliente || null,
+      razon: checkBooking.existe
+        ? `Esta identificación ya se encuentra registrada en Booking Central (${checkBooking.cliente?.email_enmascarado || 'cuenta existente'}).`
+        : undefined,
+    };
+  }
+
+  @Get('verificar-disponibilidad')
+  @ApiOperation({ summary: 'Verificar si una cédula o pasaporte ya está registrada en Booking' })
+  async verificarDisponibilidad(@Query('identificacion') identificacion: string) {
+    return this.customerMergeService.existeIdentificacionEnBooking(identificacion);
   }
 
   @Post('merge')
