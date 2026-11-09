@@ -407,3 +407,4 @@ export function ProcesosAtraccionesTab({ refreshKey = 0 }) {
     </div>
   );
 }
+
