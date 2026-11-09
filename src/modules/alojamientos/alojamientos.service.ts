@@ -2346,9 +2346,9 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async getResenas(alojamientoId: string): Promise<any> {
-    // Reseñas de un socio: no se inventan (las del socio se mostrarán cuando las expongamos).
+    // Reseñas de un socio: se proxian las reales del socio (nunca se inventan).
     if (this.esDeSocio(alojamientoId)) {
-      return { resenas: [], scores: { limpieza: 0, servicio: 0, calidad: 0, general: 0 }, total: 0 };
+      return this.socios!.resenas(alojamientoId);
     }
     const alojamiento = await this.alojamientoRepo.findOneBy({ id: alojamientoId });
     if (!alojamiento) throw new HttpException('Alojamiento no encontrado', HttpStatus.NOT_FOUND);

@@ -362,12 +362,13 @@ export function AlojamientoDetail() {
     loadData();
   }, [id]);
 
-  // Photo gallery with fallbacks
+  // Galería: SIEMPRE las fotos reales que manda el alojamiento. Solo se usa la galería
+  // de ejemplo cuando el socio no envió ninguna foto (p. ej. catálogo sin imágenes).
   const photos = useMemo(() => {
-    if (alojamiento?.photos && alojamiento.photos.length >= 4) {
-      return alojamiento.photos;
-    }
-    return GALLERY_DEFAULT_PHOTOS;
+    const reales = Array.isArray(alojamiento?.photos)
+      ? alojamiento.photos.filter((p) => p && p.url)
+      : [];
+    return reales.length >= 1 ? reales : GALLERY_DEFAULT_PHOTOS;
   }, [alojamiento]);
 
   // Nights calculation
@@ -1580,17 +1581,22 @@ export function AlojamientoDetail() {
               <h3>
                 <ApartmentIcon size={18} color="#003580" /> Lo más destacado
               </h3>
+              {/* Servicios REALES que envía el alojamiento (amenidades). Solo si el socio
+                  no envió ninguno se muestra una lista genérica de ejemplo. */}
               <ul className="dt-facility-items-list">
-                <li><CheckmarkIcon size={14} /> WiFi gratis</li>
-                <li><CheckmarkIcon size={14} /> Cocina</li>
-                <li><CheckmarkIcon size={14} /> Baño privado</li>
-                <li><CheckmarkIcon size={14} /> Se admiten mascotas</li>
-                <li><CheckmarkIcon size={14} /> Estacionamiento</li>
-                <li><CheckmarkIcon size={14} /> Habitaciones familiares</li>
-                <li><CheckmarkIcon size={14} /> TV de pantalla plana</li>
-                <li><CheckmarkIcon size={14} /> Habitaciones para no fumadores</li>
-                <li><CheckmarkIcon size={14} /> Información turística</li>
-                <li><CheckmarkIcon size={14} /> Piscina al aire libre</li>
+                {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 ? (
+                  alojamiento.amenidades.map((a, i) => (
+                    <li key={i}><CheckmarkIcon size={14} /> {a}</li>
+                  ))
+                ) : (
+                  <>
+                    <li><CheckmarkIcon size={14} /> WiFi gratis</li>
+                    <li><CheckmarkIcon size={14} /> Cocina</li>
+                    <li><CheckmarkIcon size={14} /> Baño privado</li>
+                    <li><CheckmarkIcon size={14} /> Estacionamiento</li>
+                    <li><CheckmarkIcon size={14} /> Habitaciones para no fumadores</li>
+                  </>
+                )}
               </ul>
             </div>
 
