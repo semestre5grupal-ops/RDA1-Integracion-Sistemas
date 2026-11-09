@@ -216,20 +216,6 @@ export function MisReservasPage() {
           });
           updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO', { checkinEntrega: res });
         }
-      } else if (reserva.tipo === 'alojamiento') {
-        const res = await api.post(`/v2/alojamientos/reservas/${reserva.id}/checkin`, {}).catch(() => ({
-          mensaje: '¡Check-in de alojamiento exitoso! Llave digital activada a partir de las 14:00.',
-          habitacion_asignada: 'Habitación 304 (Suite Deluxe)',
-          clave_acceso_digital: `KEY-${Math.floor(100000 + Math.random() * 900000)}`,
-        }));
-        setCheckinStepResult({
-          vertical: 'alojamiento',
-          success: true,
-          mensaje: res.mensaje,
-          habitacion: res.habitacion_asignada || 'Habitación 304',
-          clave: res.clave_acceso_digital || 'KEY-994122',
-        });
-        updateCheckinState(reserva.id || reserva.pnr, 'CONFIRMADO_ASISTIDO');
       } else if (reserva.tipo === 'vuelo') {
         // Check-in real en la aerolínea (POST /vuelos/bookings/{id}/check-in).
         // Booking guarda el estado CHECKED_IN en el servidor, así que se mantiene al recargar.
@@ -1413,7 +1399,7 @@ export function MisReservasPage() {
                       <div className="trip-card-price">
                         {convertPrice(r.totalRaw)}
                       </div>
-                      {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                      {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
                         <button
                           type="button"
                           className="btn-card-checkin"
@@ -1453,7 +1439,7 @@ export function MisReservasPage() {
 
                         {activeMenuId === r.id && (
                           <div className="trip-dropdown-menu">
-                            {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                            {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
                               <button
                                 type="button"
                                 className="trip-dropdown-item"
@@ -1651,7 +1637,7 @@ export function MisReservasPage() {
                     </button>
                   </div>
 
-                  {selectedReserva.status !== 'CANCELLED' && selectedReserva.tipo !== 'auto' && selectedReserva.tipo !== 'atraccion' && (
+                  {selectedReserva.status !== 'CANCELLED' && selectedReserva.tipo !== 'auto' && selectedReserva.tipo !== 'atraccion' && selectedReserva.tipo !== 'alojamiento' && (
                     <button
                       type="button"
                       onClick={() => {
@@ -2221,40 +2207,8 @@ export function MisReservasPage() {
                 </div>
               )}
 
-              {/* VERTICAL: ALOJAMIENTOS */}
-              {checkinReserva.tipo === 'alojamiento' && (
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '1.05rem', color: '#1a1a1a' }}>
-                    {checkinReserva.titulo}
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '16px' }}>
-                    Emisión de llave digital para cerradura inteligente, liberada a partir de las 14:00 (RDA2 §4).
-                  </p>
-
-                  {checkinStepResult?.success ? (
-                    <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '1.5rem' }}>🏨</span>
-                      <strong style={{ display: 'block', color: '#047857', marginTop: '6px' }}>
-                        {checkinStepResult.mensaje}
-                      </strong>
-                      <div style={{ margin: '14px 0', background: '#fff', padding: '12px', borderRadius: '6px', border: '1px dashed #10b981' }}>
-                        <div style={{ fontSize: '0.9rem', color: '#334155' }}>Habitación: <strong>{checkinStepResult.habitacion}</strong></div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#003580', marginTop: '4px' }}>
-                          Clave Digital: {checkinStepResult.clave}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleExecuteCheckin(checkinReserva)}
-                      disabled={checkinProcessing}
-                      style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
-                    >
-                      {checkinProcessing ? 'Verificando horario 14:00...' : '🗝️ Activar Llave Digital de Acceso'}
-                    </button>
-                  )}
-                </div>
-              )}
+              {/* El check-in de alojamientos lo realiza el hotel directamente (Flujo 2),
+                  no el huésped: por eso no hay check-in digital en Mis Reservas. */}
 
               {/* VERTICAL: VUELOS */}
               {checkinReserva.tipo === 'vuelo' && (
