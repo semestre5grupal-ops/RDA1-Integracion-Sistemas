@@ -25,6 +25,7 @@ import { TraceContextMiddleware } from './core/tracing/trace-context.middleware'
 import { SecurityModule } from './core/security/security.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
+import { ClientesModule } from './modules/clientes/clientes.module';
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { ReservasModule } from './modules/reservas/reservas.module';
     // Catálogo formal de contratos por microservicio (RDA2)
     ContractsModule,
     ReservasModule,
+    ClientesModule,
   ],
   controllers: [],
   providers: [TraceContextMiddleware],

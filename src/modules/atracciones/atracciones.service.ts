@@ -758,6 +758,19 @@ export class AtraccionesService implements OnModuleInit {
         );
         if (data && (data.identificacion || data.client_id || data.id)) {
           this.logger.log(`[Cross-Platform Gloria] Cliente existente por identificación en Gloria: ${JSON.stringify(data)}`);
+          if (customer.identificacion && this.dataSource?.isInitialized) {
+            this.dataSource.query(
+              `INSERT INTO schema_clientes.clientes_socios_mapeo (cliente_id, codigo_nodo, external_client_id, metadata)
+               VALUES ($1, 'NODE_ATR_GLORIA', $2, $3)
+               ON CONFLICT (cliente_id, codigo_nodo)
+               DO UPDATE SET external_client_id = EXCLUDED.external_client_id, metadata = EXCLUDED.metadata, updated_at = NOW()`,
+              [
+                (customer as any).cliente_id || `CLI-${customer.identificacion}`,
+                data.client_id || data.id || `GLORIA-${customer.identificacion}`,
+                JSON.stringify({ alias_email: data.email || customer.email, identificacion: customer.identificacion, origen: 'GLORIA_EXISTENTE' }),
+              ],
+            ).catch(() => {});
+          }
           return {
             nombre: data.nombre || customer.nombre,
             email: data.email || customer.email,
