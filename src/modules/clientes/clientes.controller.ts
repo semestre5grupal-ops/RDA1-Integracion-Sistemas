@@ -5,7 +5,7 @@ import { MergeClientesDto, ValidarIdentificacionDto } from './dto/merge-clientes
 import { DataSource } from 'typeorm';
 
 @ApiTags('Service Merge & Customer Identity (Capa 3)')
-@Controller('api/v1/clientes')
+@Controller('clientes')
 export class ClientesController {
   constructor(
     private readonly customerMergeService: CustomerMergeService,
