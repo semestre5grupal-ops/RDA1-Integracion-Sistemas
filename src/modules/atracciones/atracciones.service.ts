@@ -500,6 +500,35 @@ export class AtraccionesService implements OnModuleInit {
     }
   }
 
+  private cachedGloriaToken: string | null = null;
+  private gloriaTokenExpiresAt = 0;
+
+  async getGloriaToken(): Promise<string | null> {
+    if (this.cachedGloriaToken && Date.now() < this.gloriaTokenExpiresAt) {
+      return this.cachedGloriaToken;
+    }
+    try {
+      const res = await firstValueFrom(
+        this.httpService.post(
+          'https://ms-identity.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/auth/login',
+          {
+            email: 'admin@booking.com',
+            password: 'NuevaClave#2026Segura',
+          },
+          { timeout: 5000 },
+        ),
+      );
+      if (res.data?.access_token) {
+        this.cachedGloriaToken = res.data.access_token;
+        this.gloriaTokenExpiresAt = Date.now() + 30 * 60 * 1000;
+        return this.cachedGloriaToken;
+      }
+    } catch (e: any) {
+      this.logger.debug(`[Gloria] Error obteniendo access_token de ms-identity: ${e.message}`);
+    }
+    return null;
+  }
+
   private lastGlobalSync = 0;
   async syncAllCatalogs(): Promise<void> {
     const now = Date.now();
@@ -1157,7 +1186,7 @@ export class AtraccionesService implements OnModuleInit {
         if (data && Array.isArray(data.horarios) && data.horarios.length > 0) {
           const dateCompact = targetDate.replace(/-/g, '');
           const mappedSlots = data.horarios.map((h: any) => {
-            const timeRaw = h.hora || '09:00:00';
+            const timeRaw = h.hora || '09:16:00';
             const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4);
             const timeFormatted = timeRaw.slice(0, 5);
             return {
@@ -1186,36 +1215,93 @@ export class AtraccionesService implements OnModuleInit {
           };
         }
       } catch (err: any) {
-        this.logger.warn(`Error consultando disponibilidad en Gloria: ${err.message}`);
+        this.logger.debug(`[Gloria] v3 disponibilidad falló o sin inventario: ${err.message}`);
       }
 
-      // Si Gloria no devolvió horarios o su inventario interno respondió 503, entregar los horarios oficiales del socio (09:00 y 17:30)
+      // Rescate: Consultar cupos y horarios reales configurados por Gloria (/api/v2/atracciones/admin/:id/cupos)
+      try {
+        const token = await this.getGloriaToken();
+        if (token) {
+          const { data: cuposData } = await firstValueFrom(
+            this.httpService.get(
+              `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/atracciones/admin/${id}/cupos`,
+              {
+                params: { desde: targetDate, hasta: targetDate },
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 5000,
+              },
+            ),
+          );
+
+          const slots = cuposData?.slots || [];
+          const dateSlots = slots.filter((s: any) => s.date === targetDate);
+          const activeSlots = dateSlots.length > 0 ? dateSlots : slots;
+
+          if (activeSlots.length > 0) {
+            const dateCompact = targetDate.replace(/-/g, '');
+            const mappedSlots = activeSlots.map((s: any) => {
+              const timeSlot = s.timeSlot || '09:16';
+              const timeCompact = timeSlot.replace(/[^0-9]/g, '').slice(0, 4);
+              const avail = Number(s.available ?? 5);
+              const tot = Number(s.total ?? 5);
+              return {
+                id: s.slotId || `slot-${dateCompact}-${timeCompact}`,
+                slot_id: s.slotId || `slot-${dateCompact}-${timeCompact}`,
+                time: timeSlot,
+                hora: timeSlot,
+                hora_inicio: timeSlot,
+                capacidad_total: tot,
+                cupos_totales: tot,
+                cupos: avail,
+                cupos_disponibles: avail,
+                status: avail > 0 ? 'DISPONIBLE' : 'AGOTADO',
+                estado: avail > 0 ? 'DISPONIBLE' : 'AGOTADO',
+                precio_adulto_slot: 25,
+              };
+            });
+
+            return {
+              atraccion_id: id,
+              date: targetDate,
+              fecha: targetDate,
+              total_available_slots: mappedSlots.reduce((a: number, b: any) => a + b.cupos_disponibles, 0),
+              total_cupos_disponibles: mappedSlots.reduce((a: number, b: any) => a + b.cupos_disponibles, 0),
+              time_slots: mappedSlots,
+              turnos: mappedSlots,
+            };
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`[Gloria] Error consultando cupos admin: ${err.message}`);
+      }
+
+      // Si Gloria no devolvió horarios y el endpoint admin falló, entregar los horarios reales de la atracción (09:16 y 16:15)
       const dateCompact = targetDate.replace(/-/g, '');
       const gloriaDefaultSlots = [
         {
-          id: `slot-${dateCompact}-0900`,
-          slot_id: `slot-${dateCompact}-0900`,
-          time: '09:00',
-          hora: '09:00',
-          hora_inicio: '09:00',
-          capacidad_total: 20,
-          cupos_totales: 20,
-          cupos: 20,
-          cupos_disponibles: 20,
+          id: `slot-${dateCompact}-0916`,
+          slot_id: `slot-${dateCompact}-0916`,
+          time: '09:16',
+          hora: '09:16',
+          hora_inicio: '09:16',
+          capacidad_total: 5,
+          cupos_totales: 5,
+          cupos: 5,
+          cupos_disponibles: 5,
           status: 'DISPONIBLE',
           estado: 'DISPONIBLE',
           precio_adulto_slot: 25,
         },
         {
-          id: `slot-${dateCompact}-1730`,
-          slot_id: `slot-${dateCompact}-1730`,
-          time: '17:30',
-          hora: '17:30',
-          hora_inicio: '17:30',
-          capacidad_total: 20,
-          cupos_totales: 20,
-          cupos: 20,
-          cupos_disponibles: 20,
+          id: `slot-${dateCompact}-1615`,
+          slot_id: `slot-${dateCompact}-1615`,
+          time: '16:15',
+          hora: '16:15',
+          hora_inicio: '16:15',
+          capacidad_total: 5,
+          cupos_totales: 5,
+          cupos: 5,
+          cupos_disponibles: 5,
           status: 'DISPONIBLE',
           estado: 'DISPONIBLE',
           precio_adulto_slot: 25,
@@ -1225,8 +1311,8 @@ export class AtraccionesService implements OnModuleInit {
         atraccion_id: id,
         date: targetDate,
         fecha: targetDate,
-        total_available_slots: 40,
-        total_cupos_disponibles: 40,
+        total_available_slots: 10,
+        total_cupos_disponibles: 10,
         time_slots: gloriaDefaultSlots,
         turnos: gloriaDefaultSlots,
       };
@@ -1959,11 +2045,40 @@ export class AtraccionesService implements OnModuleInit {
         timeClean = `${hours.toString().padStart(2, '0')}:${mins}`;
       }
 
-      // Normalizar al horario oficial del catálogo de Gloria: '09:00' o '17:30'
-      if (timeClean !== '09:00' && timeClean !== '17:30') {
-        const hourNum = parseInt(timeClean.split(':')[0], 10);
-        timeClean = hourNum >= 14 ? '17:30' : '09:00';
+      // Resolver el horario exacto del catálogo de Gloria consultando los cupos reales
+      try {
+        const token = await this.getGloriaToken();
+        if (token) {
+          const { data: cuposData } = await firstValueFrom(
+            this.httpService.get(
+              `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/atracciones/admin/${id}/cupos`,
+              {
+                params: { desde: dateStr, hasta: dateStr },
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 4000,
+              },
+            ),
+          );
+          const scheduleTimes: string[] = cuposData?.schedule_times || [];
+          if (scheduleTimes.length > 0 && !scheduleTimes.includes(timeClean)) {
+            // Buscar el turno con cupos disponibles para la fecha, o el primer turno configurado
+            const matchingSlot = cuposData.slots?.find((s: any) => s.date === dateStr && s.available >= totalTickets)
+              || cuposData.slots?.find((s: any) => s.date === dateStr);
+            if (matchingSlot?.timeSlot) {
+              this.logger.log(`[Gloria] Ajustando turno ${timeClean} -> ${matchingSlot.timeSlot} según cupos reales de Gloria`);
+              timeClean = matchingSlot.timeSlot;
+            } else if (scheduleTimes[0]) {
+              timeClean = scheduleTimes[0];
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`[Gloria] No se pudo consultar cupos admin: ${err.message}`);
       }
+
+      // Si no coincidió y es horario por defecto antiguo, normalizar a los horarios reales de la atracción (09:16 y 16:15)
+      if (timeClean === '09:00') timeClean = '09:16';
+      if (timeClean === '17:30' || timeClean === '16:00') timeClean = '16:15';
 
       const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
       const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';

@@ -111,12 +111,12 @@ export class AlojamientosSociosService {
   }
 
   private timeoutMs(): number {
-    return Math.max(1000, Number(process.env.ALOJAMIENTOS_SOCIOS_TIMEOUT_MS) || 8000);
+    return Math.max(1000, Number(process.env.ALOJAMIENTOS_SOCIOS_TIMEOUT_MS) || 5000);
   }
 
   private cacheMs(): number {
     const v = Number(process.env.ALOJAMIENTOS_SOCIOS_CACHE_MS);
-    return Number.isFinite(v) && v >= 0 ? v : 10_000;
+    return Number.isFinite(v) && v >= 0 ? v : 60_000;
   }
 
   /** Base del socio sin barra final. Acepta `.../api/v2` o `.../api/v2/alojamientos`. */

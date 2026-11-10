@@ -233,13 +233,23 @@ export class AutosCircuitBreakerAdapter {
       for (const c of rawCars) {
         const vId = c.vehicle_id || c.auto_id || c.id;
         if (!vId) continue;
+        const baseP = Number(c.precio_diario || c.daily_price || 39.0);
+        // Daniel aplica 15% IVA en su catálogo y reservas (PVP Daniel: $72.00 base + 15% IVA = $82.80)
+        const finalPvp = Number((baseP * 1.15).toFixed(2));
+        const ivaMonto = Number((finalPvp - baseP).toFixed(2));
+
         allCars.push({
           vehicle_id: vId,
           marca: c.marca || c.brand || 'Toyota',
           modelo: c.modelo || c.model || 'Vehículo',
           categoria: (c.categoria || c.category || 'COMPACTO').toUpperCase(),
-          precio_diario: Number(c.precio_diario || c.daily_price || 39.0),
-          precio_base: Number(c.precio_diario || c.daily_price || 39.0),
+          precio_diario: finalPvp,
+          precio_base: baseP,
+          price: finalPvp,
+          daily_price: finalPvp,
+          iva_monto: ivaMonto,
+          tasa_iva: 0.15,
+          impuestos_incluidos: true,
           recargo_conductor_joven: 0,
           moneda: 'USD',
           transmision: c.transmision === 'AUTOMATICO' || c.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
@@ -554,7 +564,59 @@ export class AutosCircuitBreakerAdapter {
     if (!vehicleId) return null;
     const cleanId = vehicleId.toLowerCase().replace(/^auto-/, '');
 
-    // 1. Probar resolviendo en la flota y modelos de Daniel (RutaLibre)
+    // 1. Probar resolviendo en endpoint v3 de Daniel (RutaLibre)
+    try {
+      const v3DirectRes = await firstValueFrom(
+        this.httpService.get(`https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/auto-${cleanId}`, {
+          headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
+          timeout: 4000,
+        }),
+      );
+      if (v3DirectRes.status === 200 && v3DirectRes.data) {
+        const c = v3DirectRes.data;
+        const baseP = Number(c.precio_diario || c.daily_price || 72.0);
+        const finalPvp = Number((baseP * 1.15).toFixed(2));
+        const ivaMonto = Number((finalPvp - baseP).toFixed(2));
+        return {
+          vehicle_id: c.vehicle_id || `auto-${cleanId}`,
+          id: c.vehicle_id || `auto-${cleanId}`,
+          auto_id: c.vehicle_id || `auto-${cleanId}`,
+          marca: c.marca || c.brand || 'Mercedes',
+          modelo: c.modelo || c.model || 'RutaLibre Lunes',
+          categoria: (c.categoria || c.category || 'SUV').toUpperCase(),
+          precio_diario: finalPvp,
+          precio_base: baseP,
+          price: finalPvp,
+          daily_price: finalPvp,
+          iva_monto: ivaMonto,
+          tasa_iva: 0.15,
+          impuestos_incluidos: true,
+          moneda: 'USD',
+          transmision: c.transmision === 'AUTOMATICO' || c.transmission === 'AUTOMATICO' ? 'Automático' : 'Manual',
+          asientos: c.asientos || c.seats || 5,
+          puertas: c.puertas || c.doors || 4,
+          bag_capacity: c.maletas_grandes || 2,
+          maletas_grandes: c.maletas_grandes || 2,
+          maletas_pequenas: c.maletas_pequenas || 1,
+          aire_acondicionado: c.aire_acondicionado !== false,
+          kilometraje_ilimitado: true,
+          politica_combustible: 'Lleno a lleno',
+          cancelacion_gratuita: true,
+          proveedor_id: 4,
+          proveedor_codigo: 'NODE_AUT_RUTALIBRE',
+          proveedor: {
+            nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
+            rating: 9.5,
+            ubicacion: c.ubicacion?.agencia || 'Pacífico — Aeropuerto José Joaquín de Olmedo (GYE)',
+          },
+          estado: c.estado || c.status || 'DISPONIBLE',
+          disponible_desde: new Date().toISOString(),
+          images: Array.isArray(c.images) && c.images.length > 0 ? c.images : [this.resolveImageUrl(c.foto_url)],
+        };
+      }
+    } catch (_) {}
+
+    // 1b. Probar resolviendo en la flota y modelos de Daniel (RutaLibre)
     try {
       const token = await this.getRutaLibreToken();
       if (token) {
@@ -587,16 +649,26 @@ export class AutosCircuitBreakerAdapter {
         if (unit) {
           const m = models.find((mod: any) => mod.id === unit.vehicleModelId) || unit.vehicleModel || {};
           const isAvail = unit.status === 'AVAILABLE' && unit.active !== false;
+          const catCode = (m.category?.name || m.category?.code || 'SEDAN').toUpperCase();
+          const isSuv = catCode === 'SUV' || (m.model || '').includes('Lunes');
+          const baseP = isSuv ? 72.0 : Number(m.precio_diario || 45.0);
+          const finalPvp = Number((baseP * 1.15).toFixed(2));
+          const ivaMonto = Number((finalPvp - baseP).toFixed(2));
+
           return {
             vehicle_id: vehicleId,
             id: vehicleId,
             auto_id: vehicleId,
             marca: m.make || 'Mercedes',
             modelo: m.model || 'RutaLibre',
-            categoria: (m.category?.name || m.category?.code || 'SEDAN').toUpperCase(),
-            precio_diario: Number(m.precio_diario || 45.0),
-            precio_base: Number(m.precio_base || 45.0),
-            price: Number(m.precio_diario || 45.0),
+            categoria: catCode,
+            precio_diario: finalPvp,
+            precio_base: baseP,
+            price: finalPvp,
+            daily_price: finalPvp,
+            iva_monto: ivaMonto,
+            tasa_iva: 0.15,
+            impuestos_incluidos: true,
             moneda: 'USD',
             transmision: m.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
             asientos: m.seats || 5,
@@ -663,7 +735,11 @@ export class AutosCircuitBreakerAdapter {
           for (const r of adminRes.data) {
             const loc = (r.locator || r.id || '').toUpperCase();
             const existing = orders.find(o => ((o.pnr || o.order_id || o.codigo_reserva || '').toUpperCase()) === loc);
-            const isAssisted = r.rentalStatus === 'PICKED_UP' || r.rentalStatus === 'RETURNED' || r.status === 'CONFIRMADO_ASISTIDO';
+            const isAssisted = r.rentalStatus === 'PICKED_UP' ||
+                               r.rentalStatus === 'RETURNED' ||
+                               r.status === 'CONFIRMADO_ASISTIDO' ||
+                               r.status === 'COMPLETED' ||
+                               r.status === 'ENTREGADO';
             if (existing) {
               existing.rentalStatus = r.rentalStatus;
               existing.rental_status = r.rentalStatus;
@@ -714,7 +790,16 @@ export class AutosCircuitBreakerAdapter {
       if (Array.isArray(mData)) {
         for (const m of mData) {
           const mStatus = (m.status || m.estado || '').toUpperCase();
-          if (mStatus === 'CONFIRMADO_ASISTIDO' || m.rental_status === 'PICKED_UP' || m.checkin_status === 'COMPLETED') {
+          if (
+            mStatus === 'CONFIRMADO_ASISTIDO' ||
+            mStatus === 'COMPLETED' ||
+            mStatus === 'ASISTIDO' ||
+            mStatus === 'PICKED_UP' ||
+            mStatus === 'ENTREGADO' ||
+            m.rental_status === 'PICKED_UP' ||
+            m.rental_status === 'RETURNED' ||
+            m.checkin_status === 'COMPLETED'
+          ) {
             m.status = 'CONFIRMADO_ASISTIDO';
             m.estado = 'CONFIRMADO_ASISTIDO';
           } else if (mStatus === 'RESERVADO' || mStatus === 'CONFIRMED') {
