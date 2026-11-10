@@ -1,4 +1,5 @@
 import { Injectable, Logger, HttpException, HttpStatus, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigProveedor } from './entities';
@@ -43,7 +44,40 @@ export class NodesService {
     private readonly connectorHealthService?: ConnectorHealthService,
     @Optional()
     private readonly traceContext?: TraceContextService,
+    @Optional()
+    private readonly moduleRef?: ModuleRef,
   ) { }
+
+  /**
+   * Ping de una aerolínea con el contrato v2: se llama a un endpoint real del
+   * contrato con su OAuth2 (GET /vuelos/eventos?limit=1 y, si no lo tiene,
+   * POST /vuelos/search). Solo cuenta como "en línea" si responde como API:
+   * 2xx, o 400/422 con JSON en la búsqueda. Una URL mal escrita (404), un
+   * servidor detenido en Azure (403) o caído (5xx / sin conexión) es "caído".
+   * Antes bastaba con que el host contestara cualquier cosa < 500.
+   */
+  private async pingVuelos(codigoNodo: string): Promise<{ online: boolean; status: number; ms: number }> {
+    const t0 = Date.now();
+    let socios: any = null;
+    try {
+      // Import perezoso: evita un ciclo de módulos entre nodos y vuelos.
+      const { VuelosSociosService } = await import('../vuelos/socios/vuelos-socios.service');
+      socios = this.moduleRef?.get(VuelosSociosService, { strict: false }) ?? null;
+    } catch {
+      socios = null;
+    }
+    if (!socios) return { online: false, status: 0, ms: Date.now() - t0 };
+    const eventos = await socios.reenviar(codigoNodo, 'GET', ['eventos'], 'limit=1', null, {});
+    if (eventos.status >= 200 && eventos.status < 300) return { online: true, status: eventos.status, ms: Date.now() - t0 };
+    const fecha = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+    const busqueda = await socios.reenviar(codigoNodo, 'POST', ['search'], '', {
+      itineraries: [{ origin: 'UIO', destination: 'GYE', departureDate: fecha }],
+      passengers: { adults: 1, children: 0, infants: 0 },
+    }, {});
+    const esApi = (busqueda.status >= 200 && busqueda.status < 300)
+      || ([400, 422].includes(busqueda.status) && busqueda.body && typeof busqueda.body === 'object');
+    return { online: !!esApi, status: busqueda.status, ms: Date.now() - t0 };
+  }
 
   private fetchWithTrace(input: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
@@ -394,7 +428,18 @@ export class NodesService {
     let online = false;
     let verificable = false;
 
-    if (nodo.baseUrlRest && (nodo.baseUrlRest.startsWith('http://') || nodo.baseUrlRest.startsWith('https://'))) {
+    if (nodo.vertical === 'VUELOS' && /^https?:\/\//.test(nodo.baseUrlRest || '')) {
+      verificable = true;
+      try {
+        const r = await this.pingVuelos(nodo.codigoNodo);
+        online = r.online;
+        latencia = r.ms;
+        if (!r.online) this.logger.warn(`[ping] ${nodo.codigoNodo} no responde con el contrato de vuelos (HTTP ${r.status || 'sin conexión'})`);
+      } catch (e) {
+        latencia = Date.now() - t0;
+        online = false;
+      }
+    } else if (nodo.baseUrlRest && (nodo.baseUrlRest.startsWith('http://') || nodo.baseUrlRest.startsWith('https://'))) {
       verificable = true;
       try {
         const cleanBase = nodo.baseUrlRest.replace(/\/+$/, '');

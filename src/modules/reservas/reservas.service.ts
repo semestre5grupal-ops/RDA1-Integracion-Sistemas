@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -263,6 +263,21 @@ export class ReservasService {
     let reservaActualizada: any = null;
 
     this.logger.log(`[Check-in Inbound] Procesando confirmación de asistencia para orden ${targetId} con estado ${estado}`);
+
+    // Seguridad (Flujo 2): si el socio envía una X-API-Key, debe ser de un socio
+    // REGISTRADO. Una clave inválida se rechaza con 401 y no se confirma nada; antes el
+    // endpoint respondía 200 con cualquier clave (reportado por el equipo de Atracciones).
+    // Si no viene clave, el flujo sigue como antes (el check-in de alojamientos de socios
+    // exige además que la clave sea la del hotel dueño en su propio paso).
+    if (apiKey && apiKey.trim()) {
+      const prov = await this.dataSource
+        .query(`SELECT codigo_nodo, vertical FROM schema_proveedores.config_proveedor WHERE api_key = $1 LIMIT 1`, [apiKey.trim()])
+        .catch(() => [] as any[]);
+      if (!prov || prov.length === 0) {
+        this.logger.warn(`[Check-in Inbound] X-API-Key inválida para la orden ${targetId}: 401`);
+        throw new HttpException('X-API-Key inválida: no corresponde a ningún socio registrado en Booking.', HttpStatus.UNAUTHORIZED);
+      }
+    }
 
     // 0. Alojamientos de SOCIOS (reservas hechas desde Booking en el hotel del socio).
     //    Va primero: las búsquedas de abajo usan LIKE y podrían coincidir por error.

@@ -1,6 +1,7 @@
 import { BadRequestException, Optional, UseInterceptors, Controller, Get, Put, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminMetricasService } from './admin-metricas.service';
 import { trazaVuelos } from '../vuelos/socios/vuelos-traza';
+import { trazaAlojamientos } from '../alojamientos/socios/alojamientos-traza';
 import { RabbitMqEventBusService } from '../event-bus/rabbitmq/rabbitmq-event-bus.service';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
@@ -96,6 +97,12 @@ export class AdminController {
     return this.metricasService.getProcesoAlojamientos();
   }
 
+  @Get('procesos/alojamientos/en-vivo')
+  @ApiOperation({ summary: 'Traza en tiempo real del proceso de alojamientos, agrupable por correlación (eventos nuevos desde `desde`)' })
+  enVivoAlojamientos(@Query('desde') desde?: string) {
+    return trazaAlojamientos.desde(Number(desde) || 0);
+  }
+
   @Get('procesos/autos')
   @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de autos (estados, dinero, agencias socias)' })
   async getProcesoAutos() {
@@ -106,6 +113,7 @@ export class AdminController {
   @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de atracciones (estados, dinero, operadores socios)' })
   async getProcesoAtracciones() {
     return this.metricasService.getProcesoAtracciones();
+  }
   }
 
   @Get('finanzas/vuelos/conciliacion')
@@ -119,9 +127,10 @@ export class AdminController {
 
   @Get('procesos/vuelos/en-vivo')
   @ApiOperation({ summary: 'Traza en tiempo real del proceso de vuelos, agrupable por X-Correlation-Id (eventos nuevos desde `desde`)' })
-  enVivoVuelos(@Query('desde') desde?: string) {
+  async enVivoVuelos(@Query('desde') desde?: string) {
     // `bus`: si los eventos de pago salen a un broker RabbitMQ real o quedan en memoria.
-    return { ...trazaVuelos.desde(Number(desde) || 0), bus: { rabbitmq: this.rabbit?.isBrokerActive?.() ?? false } };
+    // La traza sale de Postgres (compartida por todas las instancias y computadoras).
+    return { ...(await trazaVuelos.consultar(Number(desde) || 0)), bus: { rabbitmq: this.rabbit?.isBrokerActive?.() ?? false } };
   }
 
   // ── Usuarios ──────────────────────────────────────────────────────────────
