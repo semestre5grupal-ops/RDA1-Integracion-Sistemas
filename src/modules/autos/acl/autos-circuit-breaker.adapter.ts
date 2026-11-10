@@ -669,6 +669,15 @@ export class AutosCircuitBreakerAdapter {
             }
             if (!r.pickup_date) r.pickup_date = this.fechaEcuador(r.recogida?.fecha_hora);
             if (!r.dropoff_date) r.dropoff_date = this.fechaEcuador(r.devolucion?.fecha_hora);
+            if (!r.driver && r.conductor) {
+              r.driver = {
+                full_name: r.conductor.nombre,
+                email: r.conductor.email,
+                phone: r.conductor.telefono,
+                license_number: r.conductor.licencia_conducir || r.conductor.identificacion,
+              };
+            }
+            if (!r.client_email && r.driver?.email) r.client_email = r.driver.email;
             r.proveedor_codigo = this.RENTAFACIL_NODO;
             if (r.pnr) this.rentaFacilPnrs.add(String(r.pnr).toUpperCase());
             orders.push(r);
