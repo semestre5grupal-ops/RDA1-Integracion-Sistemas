@@ -130,11 +130,12 @@ const ENTIDADES = [
 ];
 
 import { VuelosTrazaPersistencia } from './socios/vuelos-traza-persistencia';
+import { VuelosAsientosBloqueo } from './socios/vuelos-asientos-bloqueo';
 
 @Module({
   imports: [CommonModule, PagosModule, TypeOrmModule.forFeature([...ENTIDADES, ConfigProveedor])],
   controllers: [VuelosController],
-  providers: [VuelosService, SupabaseOrquestadorService, VuelosSociosService, VuelosSociosReservasService, VuelosSociosMiddleware, VuelosTrazaPersistencia],
+  providers: [VuelosService, SupabaseOrquestadorService, VuelosSociosService, VuelosSociosReservasService, VuelosSociosMiddleware, VuelosTrazaPersistencia, VuelosAsientosBloqueo],
   exports: [SupabaseOrquestadorService, VuelosSociosService, VuelosSociosMiddleware],
 })
 export class VuelosModule {}
