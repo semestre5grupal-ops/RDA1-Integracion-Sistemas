@@ -3036,6 +3036,24 @@ export class AtraccionesService implements OnModuleInit {
         }
       }
 
+      // Restituir cupos en base de datos concurrentemente (SQL directo idempotente)
+      if (this.dataSource && this.dataSource.isInitialized && reserva.atraccionId && reserva.date) {
+        try {
+          const rawTime = (reserva.time || '10:00').trim();
+          await this.dataSource.query(
+            `UPDATE schema_atracciones.atracciones_turnos_aforo
+             SET cupos_disponibles = LEAST(capacidad_total, cupos_disponibles + $1),
+                 estado = CASE 
+                   WHEN (cupos_disponibles + $1) > 5 THEN 'DISPONIBLE'
+                   WHEN (cupos_disponibles + $1) > 0 THEN 'ULTIMOS_CUPOS'
+                   ELSE 'DISPONIBLE'
+                 END
+             WHERE atraccion_id = $2 AND fecha = $3 AND (hora_inicio = $4 OR hora_inicio LIKE $5)`,
+            [reserva.ticketCount, reserva.atraccionId, reserva.date, rawTime, `${rawTime.split(' ')[0]}%`],
+          );
+        } catch (_) {}
+      }
+
       // Evento Outbox
       try {
         await this.outboxRepo.save({
@@ -3046,81 +3064,177 @@ export class AtraccionesService implements OnModuleInit {
       } catch (e) {}
     }
 
-    // Compensación Saga: Notificar a socio externo para liberar stock
-    const isGloria = partnerUrlIcs.includes('ms-catalog') || (atraccionId && atraccionId.length === 36) || (partnerCancelId && partnerCancelId.length === 36 && !partnerCancelId.startsWith('ECT-'));
-    const isAriel = atraccionId.startsWith('ECT-') || partnerCancelId.startsWith('ECT-');
-    const isAlisson = atraccionId.startsWith('ALI-') || (atraccionId && atraccionId.length === 32);
-    const isMichael = atraccionId === 'rLohsmEh6809' || (atraccionId.length === 12 && !atraccionId.startsWith('PRhu'));
+    // Compensación Saga: Identificación unívoca del socio y notificación externa para liberar stock
+    let atraccion = reserva ? await this.atraccionRepo.findOne({ where: { id: reserva.atraccionId } }) : null;
+    const provCode = (atraccion?.proveedorCodigo || atraccion?.proveedorId || '').toUpperCase();
+    const urlIcs = partnerUrlIcs.toLowerCase();
+    const idLower = reservationId.toLowerCase();
+    const guiaLower = (reserva?.guiaOficialAsignado || '').toLowerCase();
+
+    const isGloria = provCode === 'NODE_ATR_GLORIA' ||
+      urlIcs.includes('ms-catalog') ||
+      partnerCancelId.startsWith('GLO-') ||
+      atraccionId === 'df3d1877-88f8-4183-805d-ced39a36811d';
+
+    const isAriel = provCode === 'NODE_ATR_ARIEL' ||
+      urlIcs.includes('ecuatravel') ||
+      partnerCancelId.startsWith('ECT-') ||
+      idLower.startsWith('ect-') ||
+      atraccionId === 'e5c682af-a261-4c0a-8ee0-2cf6a13c1cec' ||
+      atraccionId === '1143067f-f491-44a3-ace8-7c3e1a3866d0' ||
+      atraccionId === 'c21c2034-0974-494c-a7d1-66db95b5e196';
+
+    const isAlisson = provCode === 'NODE_ATR_ALISSON' ||
+      urlIcs.includes('alisson') ||
+      partnerCancelId.startsWith('ALI-') ||
+      atraccionId === 'GEYxY8SrwSF7' ||
+      atraccionId === 'ZaCdCHGGEfCF' ||
+      atraccionId === 'hbvYQ4MqxhpG' ||
+      atraccionId.startsWith('PRhu');
+
+    const isMichael = provCode === 'NODE_ATR_MOLINA' ||
+      urlIcs.includes('tourgirls') ||
+      partnerCancelId.startsWith('TG-') ||
+      guiaLower.includes('tourgirls') ||
+      atraccionId === 'Fy6d7XTppVZ5' ||
+      atraccionId === 'rLohsmEh6809';
 
     if (isGloria) {
       try {
-        await firstValueFrom(
-          this.httpService.post(
-            `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas/${partnerCancelId}/cancel`,
-            { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
-            {
-              headers: { 'Content-Type': 'application/json' },
-              timeout: 6000,
-            },
-          ),
-        );
-        this.logger.log(`[Gloria Cancel] Reserva ${partnerCancelId} cancelada exitosamente en ms-catalog`);
+        const token = await this.getGloriaToken();
+        const headers: any = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas/${partnerCancelId}/cancel`,
+              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+              { headers, timeout: 6000 },
+            ),
+          );
+          this.logger.log(`[Gloria Cancel] Reserva ${partnerCancelId} cancelada exitosamente en ms-catalog`);
+        } catch (err1: any) {
+          if (err1.response?.status === 404 && partnerCancelId !== reservationId) {
+            await firstValueFrom(
+              this.httpService.post(
+                `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas/${reservationId}/cancel`,
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                { headers, timeout: 6000 },
+              ),
+            );
+            this.logger.log(`[Gloria Cancel] Reserva ${reservationId} cancelada exitosamente en ms-catalog (fallback id)`);
+          } else {
+            throw err1;
+          }
+        }
       } catch (err: any) {
         this.logger.warn(`[Gloria Cancel] Error notificando cancelación a ms-catalog: ${err.message}`);
       }
     } else if (isAriel) {
       try {
-        await firstValueFrom(
-          this.httpService.post(
-            `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${partnerCancelId}/cancel`,
-            { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
-            {
-              headers: { 'X-API-Key': 'atr-ariel-ecua-travel-2026', 'Content-Type': 'application/json' },
-              timeout: 6000,
-            },
-          ),
-        );
-        this.logger.log(`[Ariel Cancel] Reserva ${partnerCancelId} cancelada exitosamente en Ecuatravel`);
+        const arielHeaders = {
+          'X-API-Key': 'atr-ariel-ecua-travel-2026',
+          'Content-Type': 'application/json',
+        };
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${partnerCancelId}/cancel`,
+              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+              { headers: arielHeaders, timeout: 6000 },
+            ),
+          );
+          this.logger.log(`[Ariel Cancel] Reserva ${partnerCancelId} cancelada exitosamente en Ecuatravel`);
+        } catch (err1: any) {
+          if (err1.response?.status === 404 && partnerCancelId !== reservationId) {
+            await firstValueFrom(
+              this.httpService.post(
+                `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${reservationId}/cancel`,
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                { headers: arielHeaders, timeout: 6000 },
+              ),
+            );
+            this.logger.log(`[Ariel Cancel] Reserva ${reservationId} cancelada exitosamente en Ecuatravel (fallback id)`);
+          } else {
+            throw err1;
+          }
+        }
       } catch (err: any) {
         this.logger.warn(`[Ariel Cancel] Error notificando cancelación a Ariel: ${err.message}`);
       }
     } else if (isAlisson) {
       try {
-        await firstValueFrom(
-          this.httpService.post(
-            `https://alisson-atracciones-api.azurewebsites.net/api/v3/atracciones/reservas/${partnerCancelId}/cancel`,
-            { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
-            {
-              headers: { 'X-API-Key': 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078', 'Content-Type': 'application/json' },
-              timeout: 6000,
-            },
-          ),
-        );
-        this.logger.log(`[Alisson Cancel] Reserva ${partnerCancelId} cancelada exitosamente en Alisson`);
+        const alissonHeaders = {
+          'X-API-Key': 'atr-f575172d62a81d51e87fbc0a37952d984ce1c078',
+          'Content-Type': 'application/json',
+        };
+        const alissonTargetId = partnerCancelId || reservationId;
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://alisson-atracciones-api.azurewebsites.net/api/v3/atracciones/reservas/${alissonTargetId}/cancel`,
+              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+              { headers: alissonHeaders, timeout: 6000 },
+            ),
+          );
+          this.logger.log(`[Alisson Cancel] Reserva ${alissonTargetId} cancelada exitosamente en Alisson (/atracciones/reservas)`);
+        } catch (err1: any) {
+          if (err1.response?.status === 404) {
+            await firstValueFrom(
+              this.httpService.post(
+                `https://alisson-atracciones-api.azurewebsites.net/api/v3/reservas/${alissonTargetId}/cancel`,
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                { headers: alissonHeaders, timeout: 6000 },
+              ),
+            );
+            this.logger.log(`[Alisson Cancel] Reserva ${alissonTargetId} cancelada exitosamente en Alisson (/reservas)`);
+          } else {
+            throw err1;
+          }
+        }
       } catch (err: any) {
         this.logger.warn(`[Alisson Cancel] Error notificando cancelación a Alisson: ${err.message}`);
       }
     } else if (isMichael) {
       try {
-        await firstValueFrom(
-          this.httpService.post(
-            `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${reservationId}/cancel`,
-            { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
-            {
-              headers: { 'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w', 'Content-Type': 'application/json' },
-              timeout: 5000,
-            },
-          ),
-        );
-        this.logger.log(`[Michael Cancel] Reserva ${reservationId} cancelada exitosamente en TourGirls`);
+        const michaelHeaders = {
+          'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w',
+          'Content-Type': 'application/json',
+        };
+        const michaelTargetId = partnerCancelId || reservationId;
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${michaelTargetId}/cancel`,
+              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+              { headers: michaelHeaders, timeout: 5000 },
+            ),
+          );
+          this.logger.log(`[Michael Cancel] Reserva ${michaelTargetId} cancelada exitosamente en TourGirls (/atracciones/reservas)`);
+        } catch (err1: any) {
+          if (err1.response?.status === 404) {
+            await firstValueFrom(
+              this.httpService.post(
+                `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/reservas/${michaelTargetId}/cancel`,
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                { headers: michaelHeaders, timeout: 5000 },
+              ),
+            );
+            this.logger.log(`[Michael Cancel] Reserva ${michaelTargetId} cancelada exitosamente en TourGirls (/reservas)`);
+          } else {
+            throw err1;
+          }
+        }
       } catch (err: any) {
-        this.logger.warn(`[Michael Cancel] Error notificando cancelación: ${err.message}`);
+        this.logger.warn(`[Michael Cancel] Error notificando cancelación a Michael: ${err.message}`);
       }
     } else {
       try {
-        await this.dilanAdapter.cancelarReserva(reservationId, dto?.reason || 'Cancelación solicitada por el usuario', idempotencyKey, cId);
-      } catch (adapterErr) {
-        this.logger.warn(`ACL: No se pudo notificar reverso a tienda externa: ${adapterErr.message}`);
+        await this.dilanAdapter.cancelarReserva(partnerCancelId || reservationId, dto?.reason || 'Cancelación solicitada por el usuario', idempotencyKey, cId);
+        this.logger.log(`[Dilan Cancel] Reserva notificada exitosamente a Descubre EC (${partnerCancelId || reservationId})`);
+      } catch (adapterErr: any) {
+        this.logger.warn(`ACL: No se pudo notificar reverso a tienda externa de Dilan: ${adapterErr.message}`);
       }
     }
 

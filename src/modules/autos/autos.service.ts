@@ -1656,6 +1656,9 @@ export class AutosService implements OnModuleInit {
       auto.estado = EstadoVehiculo.DISPONIBLE;
       this.logger.log(`[Reverso Saga Autos] Vehículo ${auto.marca} ${auto.modelo} (${auto.id}) liberado a DISPONIBLE tras cancelación.`);
     }
+    try {
+      await this.autoRepo.update({ id: autoId }, { estadoOperativo: 'DISPONIBLE' });
+    } catch (_) {}
 
     // 3. Generar reembolso financiero formal
     const refundId = `REF-AUTO-${Date.now().toString(36).toUpperCase()}`;
