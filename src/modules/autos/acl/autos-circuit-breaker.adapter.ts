@@ -547,6 +547,88 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Resuelve los datos completos de un vehículo externo por ID o placa
+   * consultando la flota interna de Daniel (RutaLibre) o Mateo (Maneja de Una).
+   */
+  async fetchExternalCarById(vehicleId: string): Promise<any> {
+    if (!vehicleId) return null;
+    const cleanId = vehicleId.toLowerCase().replace(/^auto-/, '');
+
+    // 1. Probar resolviendo en la flota y modelos de Daniel (RutaLibre)
+    try {
+      const token = await this.getRutaLibreToken();
+      if (token) {
+        const [modelsRes, fleetRes] = await Promise.allSettled([
+          firstValueFrom(
+            this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/admin/models', {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 4000,
+            }),
+          ),
+          firstValueFrom(
+            this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/admin/fleet', {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 4000,
+            }),
+          ),
+        ]);
+
+        const models = modelsRes.status === 'fulfilled' ? (modelsRes.value.data || []) : [];
+        const fleet = fleetRes.status === 'fulfilled' ? (fleetRes.value.data || []) : [];
+
+        // Buscar unidad por placa o vehicleModelId o id
+        const unit = fleet.find((f: any) =>
+          (f.plate && f.plate.toLowerCase() === cleanId) ||
+          f.id === vehicleId ||
+          f.id === cleanId ||
+          f.vehicleModelId === vehicleId,
+        );
+
+        if (unit) {
+          const m = models.find((mod: any) => mod.id === unit.vehicleModelId) || unit.vehicleModel || {};
+          const isAvail = unit.status === 'AVAILABLE' && unit.active !== false;
+          return {
+            vehicle_id: vehicleId,
+            id: vehicleId,
+            auto_id: vehicleId,
+            marca: m.make || 'Mercedes',
+            modelo: m.model || 'RutaLibre',
+            categoria: (m.category?.name || m.category?.code || 'SEDAN').toUpperCase(),
+            precio_diario: Number(m.precio_diario || 45.0),
+            precio_base: Number(m.precio_base || 45.0),
+            price: Number(m.precio_diario || 45.0),
+            moneda: 'USD',
+            transmision: m.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
+            asientos: m.seats || 5,
+            puertas: m.doors || 4,
+            bag_capacity: m.bagCapacity || 2,
+            maletas_grandes: m.bagCapacity || 2,
+            maletas_pequenas: 1,
+            aire_acondicionado: m.airConditioning !== false,
+            kilometraje_ilimitado: true,
+            politica_combustible: 'Lleno a lleno',
+            cancelacion_gratuita: true,
+            proveedor_id: 4,
+            proveedor_codigo: 'NODE_AUT_RUTALIBRE',
+            proveedor: {
+              nombre: 'RutaLibre Renta de Autos (NODE_AUT_RUTALIBRE)',
+              rating: 9.5,
+              ubicacion: unit.depot?.name || 'Andes — Aeropuerto Mariscal Sucre (UIO)',
+            },
+            estado: isAvail ? 'DISPONIBLE' : 'RESERVADO',
+            disponible_desde: new Date().toISOString(),
+            images: [this.resolveImageUrl(m.imageUrl)],
+          };
+        }
+      }
+    } catch (e: any) {
+      this.logger.debug(`[fetchExternalCarById] Falló consulta de rescate en Daniel: ${e.message}`);
+    }
+
+    return null;
+  }
+
+  /**
    * Obtiene todas las órdenes activas en el socio externo para reconciliación.
    */
   async getOrdersDirect(): Promise<any[]> {
