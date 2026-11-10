@@ -15,6 +15,7 @@
 export type PasoVuelo =
   | 'busqueda'
   | 'hold'
+  | 'asiento'
   | 'cobro'
   | 'reserva_aerolinea'
   | 'copia'

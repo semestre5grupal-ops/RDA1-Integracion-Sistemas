@@ -181,12 +181,50 @@ export async function buscarVuelos(cuerpo: SearchRequest, fingerprint: string) {
  * `offerId` y `segmentId` son `type: string` en el contrato: identificadores de
  * negocio, no UUID. Se interpolan sin validar como UUID.
  */
-export async function obtenerMapaAsientos(offerId: string, segmentId: string) {
+export async function obtenerMapaAsientos(offerId: string, segmentId: string, holdId?: string) {
   const { data } = await api.get(`/vuelos/offers/${encodeURIComponent(offerId)}/seatmap`, {
-    params: { segmentId },
-    headers: cabeceraCorrelacion(),
+    // `holdId` lo usa Booking para no marcar como ocupados mis propios asientos; no va a la aerolínea.
+    params: holdId ? { segmentId, holdId } : { segmentId },
+    headers: { 'X-Device-Fingerprint': obtenerHuellaDispositivo(), ...cabeceraCorrelacion() },
   });
   return data;
+}
+
+// ---------------------------------------------------------------------------
+// Bloqueo de asientos en tiempo real (propio de Booking, no es del contrato de
+// la aerolínea): al elegir un asiento queda reservado para esta compra y los
+// demás clientes lo ven ocupado.
+// ---------------------------------------------------------------------------
+
+export interface AsientoElegido {
+  segmentId: string;
+  seatNumber: string;
+}
+
+/**
+ * PUT /offers/{offerId}/seat-locks — deja bloqueados exactamente estos asientos
+ * para la compra `holdId` (los que ya no estén en la lista se sueltan).
+ * Responde 409 `SEAT_TAKEN` con `taken` si alguno ya lo tiene otra compra.
+ */
+export async function bloquearAsientos(offerId: string, holdId: string, seats: AsientoElegido[], expiresAt?: string) {
+  const { data } = await api.put(
+    `/vuelos/offers/${encodeURIComponent(offerId)}/seat-locks`,
+    { holdId, seats, expiresAt },
+    // Misma identidad con la que se creó el hold (la aerolínea valida al dueño).
+    { headers: { 'X-Device-Fingerprint': obtenerHuellaDispositivo(), ...cabeceraCorrelacion() } },
+  );
+  return data as { locked: AsientoElegido[]; taken: AsientoElegido[]; expiresAt: string; ttlMinutes: number };
+}
+
+/** GET /offers/{offerId}/seat-locks — asientos que otras compras tienen bloqueados ahora. */
+export async function consultarBloqueosAsientos(offerId: string, holdId: string) {
+  const { data } = await api.get(`/vuelos/offers/${encodeURIComponent(offerId)}/seat-locks`, { params: { holdId } });
+  return (data?.locks ?? []) as AsientoElegido[];
+}
+
+/** DELETE /offers/{offerId}/seat-locks — suelta los asientos de esta compra. */
+export async function liberarAsientos(offerId: string, holdId: string) {
+  await api.delete(`/vuelos/offers/${encodeURIComponent(offerId)}/seat-locks`, { params: { holdId } });
 }
 
 // ===========================================================================

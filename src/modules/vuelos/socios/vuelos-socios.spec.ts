@@ -46,7 +46,12 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
           });
         }
         if (ruta === '/api/v2/vuelos/offers/hold' && req.method === 'POST') {
-          return json(201, { holdId: `HOLD-${nodo}`, offerId: body.offerId });
+          const asientos = (body.assignedSeats ?? []).map((x: any) => x.seatNumber);
+          // 'oauth' es una aerolínea que todavía no acepta assignedSeats; '9Z' ya lo compró alguien en la web de la aerolínea.
+          if (asientos.length && nodo === 'oauth') return json(400, { title: 'property assignedSeats should not exist' });
+          if (asientos.includes('9Z')) return json(409, { code: 'SEAT_TAKEN', title: 'Seat taken' });
+          const id = asientos.length ? `HOLD-${nodo}-${asientos.join('-')}` : `HOLD-${nodo}`;
+          return json(201, { holdId: id, offerId: body.offerId, status: 'HELD', expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), lockedPrice: { currency: 'USD', total: '150.00' }, assignedSeats: body.assignedSeats });
         }
         if (ruta.startsWith('/api/v2/vuelos/offers/hold/') && req.method === 'GET') {
           return json(200, { holdId: ruta.split('/').pop(), lockedPrice: { currency: 'USD', total: '150.00' } });
@@ -60,6 +65,9 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
         }
         if (/\/api\/v2\/vuelos\/bookings\/[^/]+\/cancel$/.test(ruta)) {
           return json(200, { bookingId: ruta.split('/')[5], pnr: 'ABC123', status: 'CANCELLED', refund: { refundId: 'R1', amount: '125.00' } });
+        }
+        if (/\/offers\/[^/]+\/seatmap/.test(ruta)) {
+          return json(200, { segmentId: 'SEG-1', cabins: [{ cabinClass: 'ECONOMY', rows: [{ rowNumber: 7, seats: [{ seatNumber: '7A', isAvailable: true, status: 'AVAILABLE' }, { seatNumber: '7B', isAvailable: true, status: 'AVAILABLE' }] }] }] });
         }
         if (ruta.startsWith('/api/v2/vuelos/flights/')) {
           return nodo === 'oauth' ? json(200, { flightNumber: 'RA101', status: 'DELAYED' }) : json(404, { title: 'no opera' });
@@ -123,7 +131,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       { 'idempotency-key': 'idem-1' },
     );
     expect(r.status).toBe(201);
-    expect(r.body).toEqual({ holdId: 'NODE_VUE_KEY~HOLD-key', offerId: 'NODE_VUE_KEY~OF-key' });
+    expect(r.body).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key', offerId: 'NODE_VUE_KEY~OF-key' });
     const hold = llamadas.find((c) => c.url === '/api/v2/vuelos/offers/hold')!;
     expect(hold.body.offerId).toBe('OF-key');
     expect(hold.headers['x-user-id']).toMatch(/^[0-9a-f-]{36}$/);
@@ -324,6 +332,96 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(copias.get('NODE_VUE_KEY~BK-1').status).toBe('CANCELLED');
     });
 
+    it('asientos en tiempo real: el que elige primero lo bloquea, el otro lo ve ocupado y no se le cobra', async () => {
+      const locks = `${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_KEY~OF-key')}/seat-locks`;
+      const put = (holdId: string, seats: any[]) =>
+        fetch(locks, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ holdId, seats }) });
+      const uno = await put('NODE_VUE_KEY~HOLD-A', [{ segmentId: 'SEG-1', seatNumber: '7A' }]);
+      expect(uno.status).toBe(200);
+      expect((await uno.json()).locked).toEqual([{ segmentId: 'SEG-1', seatNumber: '7A' }]);
+
+      const dos = await put('NODE_VUE_KEY~HOLD-B', [{ segmentId: 'SEG-1', seatNumber: '7A' }]);
+      expect(dos.status).toBe(409);
+      expect(await dos.json()).toMatchObject({ code: 'SEAT_TAKEN', taken: [{ segmentId: 'SEG-1', seatNumber: '7A' }], charged: false });
+
+      // El mapa del segundo cliente muestra 7A ocupado; a la aerolínea no le llega `holdId`.
+      llamadas.length = 0;
+      const mapa = await (await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_KEY~OF-key')}/seatmap?segmentId=SEG-1&holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-B')}`)).json();
+      expect(mapa.cabins[0].rows[0].seats).toEqual([
+        { seatNumber: '7A', isAvailable: false, status: 'HELD' },
+        { seatNumber: '7B', isAvailable: true, status: 'AVAILABLE' },
+      ]);
+      expect(llamadas.find((c) => c.url.includes('/seatmap'))!.url).not.toContain('holdId');
+      // El dueño del bloqueo sigue viendo su asiento libre para él.
+      const propio = await (await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_KEY~OF-key')}/seatmap?segmentId=SEG-1&holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-A')}`)).json();
+      expect(propio.cabins[0].rows[0].seats[0].status).toBe('AVAILABLE');
+      const otros = await (await fetch(`${locks}?holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-B')}&segmentId=SEG-1`)).json();
+      expect(otros.locks).toEqual([{ segmentId: 'SEG-1', seatNumber: '7A' }]);
+
+      // Si el segundo intenta pagar ese asiento de todos modos: 409 y NO se cobra.
+      const antes = cobros.length;
+      const pago = await fetch(`${base}/api/v2/vuelos/bookings`, {
+        method: 'POST', headers: conDueno(OTRO, { 'Idempotency-Key': 'idem-asiento' }),
+        body: JSON.stringify({ holdId: 'NODE_VUE_KEY~HOLD-B', passengers: [{ assignedSeats: [{ segmentId: 'SEG-1', seatNumber: '7A' }] }] }),
+      });
+      expect(pago.status).toBe(409);
+      expect((await pago.json()).detail).toMatch(/No se realizó ningún cobro/);
+      expect(cobros.length).toBe(antes);
+
+      // El primero sale del formulario: el asiento queda libre para el segundo.
+      expect((await fetch(`${locks}?holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-A')}`, { method: 'DELETE' })).status).toBe(204);
+      expect((await put('NODE_VUE_KEY~HOLD-B', [{ segmentId: 'SEG-1', seatNumber: '7A' }])).status).toBe(200);
+      await fetch(`${locks}?holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-B')}`, { method: 'DELETE' });
+    });
+
+    it('asiento en la aerolínea: rehace el hold con assignedSeats, suelta el anterior y respeta el 409 de la aerolínea', async () => {
+      const oferta = encodeURIComponent('NODE_VUE_KEY~OF-key');
+      const locks = `${base}/api/v2/vuelos/offers/${oferta}/seat-locks`;
+      // 1) Se crea el hold por Booking (así Booking guarda cómo se creó).
+      const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-h1' }), body: JSON.stringify({ offerId: 'NODE_VUE_KEY~OF-key', itinerarySelections: [{ itineraryId: 'IT-1', cabinClass: 'ECONOMY', fareBrand: 'BASIC' }], passengersBreakdown: { adults: 1 } }) })).json();
+      expect(h.holdId).toBe('NODE_VUE_KEY~HOLD-key');
+      llamadas.length = 0;
+      // 2) Elige 8C: la aerolínea recibe un hold nuevo con assignedSeats y se libera el anterior.
+      const r = await fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: h.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '8C' }] }) });
+      const datos = await r.json();
+      expect(r.status).toBe(200);
+      expect(datos).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key-8C', previousHoldId: 'NODE_VUE_KEY~HOLD-key', airlineHold: true });
+      expect(datos.hold.bookingPrice).toMatchObject({ airlineTotal: '150.00', total: '165.00' });
+      const nuevo = llamadas.find((c) => c.url === '/api/v2/vuelos/offers/hold' && c.method === 'POST')!;
+      expect(nuevo.body).toMatchObject({ offerId: 'OF-key', assignedSeats: [{ segmentId: 'SEG-1', seatNumber: '8C' }], passengersBreakdown: { adults: 1 } });
+      await new Promise((ok) => setTimeout(ok, 50));
+      expect(llamadas.some((c) => c.method === 'DELETE' && c.url === '/api/v2/vuelos/offers/hold/HOLD-key')).toBe(true);
+      // 3) El mismo PUT con el hold nuevo y los mismos asientos no rehace nada.
+      llamadas.length = 0;
+      const igual = await (await fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: datos.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '8C' }] }) })).json();
+      expect(igual).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key-8C', airlineHold: true });
+      expect(llamadas.filter((c) => c.method === 'POST')).toHaveLength(0);
+      // 4) Cambia a 9Z, que ya se vendió en la web de la aerolínea: 409 y sigue con 8C.
+      const tomado = await fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: datos.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '9Z' }] }) });
+      expect(tomado.status).toBe(409);
+      expect(await tomado.json()).toMatchObject({ code: 'SEAT_TAKEN', taken: [{ segmentId: 'SEG-1', seatNumber: '9Z' }], charged: false });
+      const otros = await (await fetch(`${locks}?holdId=otro`)).json();
+      expect(otros.locks).toEqual([{ segmentId: 'SEG-1', seatNumber: '8C' }]);
+      await fetch(`${locks}?holdId=${encodeURIComponent(datos.holdId)}`, { method: 'DELETE' });
+    });
+
+    it('aerolínea que aún no acepta assignedSeats: queda el bloqueo de Booking, sin romper la compra', async () => {
+      const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-h2' }), body: JSON.stringify({ offerId: 'NODE_VUE_OAUTH~OF-oauth', itinerarySelections: [] }) })).json();
+      const r = await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_OAUTH~OF-oauth')}/seat-locks`, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: h.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '3A' }] }) });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toMatchObject({ holdId: h.holdId, airlineHold: false, locked: [{ segmentId: 'SEG-1', seatNumber: '3A' }] });
+      await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_OAUTH~OF-oauth')}/seat-locks?holdId=${encodeURIComponent(h.holdId)}`, { method: 'DELETE' });
+    });
+
+    it('la acción de una reserva se compara en minúsculas (/CANCEL también reembolsa)', async () => {
+      copias.set('NODE_VUE_KEY~BK-9', { bookingId: 'NODE_VUE_KEY~BK-9', codigoNodo: 'NODE_VUE_KEY', propietarioId: DUENO, transaccionId: 'tx-9', status: 'CONFIRMED' });
+      reembolsos.length = 0;
+      const r = await fetch(`${base}/api/v2/vuelos/bookings/${encodeURIComponent('NODE_VUE_KEY~BK-9')}/CANCEL`, { method: 'POST', headers: conDueno(DUENO), body: '{}' });
+      expect(r.status).toBe(200);
+      expect(reembolsos).toEqual([expect.objectContaining({ tx: 'tx-9', monto: 125 })]);
+      expect(copias.get('NODE_VUE_KEY~BK-9').status).toBe('CANCELLED');
+    });
+
     it('estado de vuelo: responde la aerolínea que opera el vuelo', async () => {
       const r = await fetch(`${base}/api/v2/vuelos/flights/RA101/status?date=2026-11-10`);
       expect(r.status).toBe(200);
@@ -445,11 +543,62 @@ describe('SincronizadorEventosVuelos (feed GET /vuelos/eventos)', () => {
 
   it('una cancelación recién hecha espera (puede ser la que hizo Booking) y no avanza el cursor', async () => {
     const { s, reservas, cursor } = armar([
-      { id: 'e4', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(5_000), data: { bookingId: 'B1' } },
+      { id: 'e4', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(2_000), data: { bookingId: 'B1' } },
     ], { 'NODE_VUE_X~B1': copia });
     await s.sincronizarNodo('NODE_VUE_X');
     expect(reservas.marcarEstado).not.toHaveBeenCalled();
     expect(cursor()).toBeNull();
+  });
+
+  it('la cancelación que Booking está procesando no la toca el feed; al terminar sí se lee', async () => {
+    const { s, reservas } = armar([
+      { id: 'e8', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(60_000), data: { bookingId: 'B1', refundAmount: '10.50' } },
+    ], { 'NODE_VUE_X~B1': copia });
+    s.enCurso.add('NODE_VUE_X~B1');
+    await s.sincronizarNodo('NODE_VUE_X');
+    expect(reservas.marcarEstado).not.toHaveBeenCalled();
+    s.enCurso.delete('NODE_VUE_X~B1');
+    await s.sincronizarNodo('NODE_VUE_X');
+    expect(reservas.marcarEstado).toHaveBeenCalledWith('NODE_VUE_X~B1', 'CANCELLED', 10.5);
+  });
+
+  it('feed con lo más reciente primero y reembolso numérico (EQ10): aplica solo lo nuevo, en orden', async () => {
+    const eventos = [
+      { id: 'n3', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(60_000), data: { bookingId: 'B1', refund: 42.55, reason: 'web' } },
+      { id: 'n2', type: 'ec.edu.epn.booking.vuelos.booking.confirmed', time: hace(120_000), data: { bookingId: 'B1' } },
+      { id: 'n1', type: 'ec.edu.epn.booking.vuelos.booking.cancelled', time: hace(180_000), data: { bookingId: 'B9', refund: 5 } },
+    ];
+    const { s, reservas, cursor, llamadas } = armar(eventos, { 'NODE_VUE_X~B1': copia });
+    expect(await s.sincronizarNodo('NODE_VUE_X')).toBe(1);
+    expect(reservas.reembolsar).toHaveBeenCalledWith('tx-1', 42.55, expect.any(String));
+    expect(cursor()).toBe('n3'); // el más nuevo
+    // Siguiente ciclo: nada nuevo, y no se usa `after` (en este feed devuelve lo más antiguo).
+    reservas.reembolsar.mockClear();
+    expect(await s.sincronizarNodo('NODE_VUE_X')).toBe(0);
+    expect(reservas.reembolsar).not.toHaveBeenCalled();
+    expect(llamadas.every((q: string) => !q.includes('after='))).toBe(true);
+  });
+
+  it('cancelada sin devolución y luego llega el monto: completa el reembolso una sola vez', async () => {
+    const { s, reservas } = armar([], {});
+    const cancelada = { ...copia, status: 'CANCELLED', reembolsado: 0 };
+    expect(await s.cancelarPorAerolinea('NODE_VUE_X', 'NODE_VUE_X~B1', cancelada, { refundAmount: '10.50' }, 'R9', {})).toBe(true);
+    expect(reservas.reembolsar).toHaveBeenCalledTimes(1);
+    expect(await s.cancelarPorAerolinea('NODE_VUE_X', 'NODE_VUE_X~B1', { ...cancelada, reembolsado: 10.5 }, { refundAmount: '10.50' }, 'R9', {})).toBe(false);
+    expect(reservas.reembolsar).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconciliar: sin eventos, el detalle de la aerolínea trae el check-in o la cancelación', async () => {
+    const { s, socios, reservas } = armar([], { 'NODE_VUE_X~B1': copia, 'NODE_VUE_X~B2': copia });
+    (socios.reenviar as jest.Mock).mockImplementation(async (_n: string, _m: string, seg: string[]) => ({
+      status: 200,
+      body: seg[1].endsWith('B1') ? { bookingId: seg[1], pnr: 'ABC', status: 'CHECKED_IN' } : { bookingId: seg[1], status: 'CANCELLED', refund: { amount: '20.00' } },
+    }));
+    expect(await s.reconciliar('NODE_VUE_X', 'NODE_VUE_X~B1')).toBe(true);
+    expect(reservas.marcarCheckin).toHaveBeenCalledWith('NODE_VUE_X~B1', expect.any(Date), 'aerolinea');
+    expect(await s.reconciliar('NODE_VUE_X', 'NODE_VUE_X~B2')).toBe(true);
+    expect(reservas.reembolsar).toHaveBeenCalledWith('tx-1', 20, expect.any(String));
+    expect(reservas.marcarEstado).toHaveBeenCalledWith('NODE_VUE_X~B2', 'CANCELLED', 20);
   });
 });
 
@@ -470,4 +619,47 @@ describe('ofertas de la fecha pedida', () => {
     expect(ofertaCoincideConFechas(oferta(['2026-11-04T12:00:00Z']), pedido(['2026-11-04']), ahora)).toBe(false); // ya salió
   });
 
+});
+
+describe('Bloqueo de asientos en tiempo real', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { VuelosAsientosBloqueo, limpiarAsientos } = require('./vuelos-asientos-bloqueo');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { marcarBloqueados } = require('./vuelos-socios.middleware');
+  const en15 = () => new Date(Date.now() + 15 * 60_000);
+  const a = (seatNumber: string, segmentId = 'SEG-1') => ({ segmentId, seatNumber });
+
+  it('el primero que elige un asiento lo bloquea; el segundo lo ve tomado', async () => {
+    const b = new VuelosAsientosBloqueo();
+    expect(await b.fijar('N', 'N~H1', [a('14D')], en15())).toEqual({ locked: [a('14D')], taken: [] });
+    expect(await b.fijar('N', 'N~H2', [a('14D'), a('14E')], en15())).toEqual({ locked: [a('14E')], taken: [a('14D')] });
+    expect(await b.deOtros('N', 'N~H2', 'SEG-1')).toEqual([a('14D')]);
+    expect(await b.deOtros('N', 'N~H1')).toEqual([a('14E')]);
+    expect(await b.tomadosPorOtros('N', 'N~H2', [a('14D')])).toEqual([a('14D')]);
+    // Otro vuelo (otro tramo) u otra aerolínea no se mezclan.
+    expect(await b.fijar('N', 'N~H2', [a('14E'), a('14D', 'SEG-2')], en15())).toMatchObject({ taken: [] });
+    expect(await b.fijar('OTRA', 'OTRA~H3', [a('14D')], en15())).toMatchObject({ taken: [] });
+  });
+
+  it('cambiar de asiento suelta el anterior; salir o comprar suelta todo; lo vencido no bloquea', async () => {
+    const b = new VuelosAsientosBloqueo();
+    await b.fijar('N', 'N~H1', [a('1A')], en15());
+    await b.fijar('N', 'N~H1', [a('2B')], en15());
+    expect(await b.fijar('N', 'N~H2', [a('1A')], en15())).toMatchObject({ taken: [] });
+    expect(await b.fijar('N', 'N~H2', [a('1A'), a('2B')], en15())).toMatchObject({ taken: [a('2B')] });
+    await b.liberar('N~H1');
+    expect(await b.deOtros('N', 'N~H2')).toEqual([]);
+    await b.fijar('N', 'N~H4', [a('9C')], new Date(Date.now() - 1000));
+    expect(await b.fijar('N', 'N~H5', [a('9C')], en15())).toMatchObject({ taken: [] });
+  });
+
+  it('limpia la entrada y pinta el mapa con los asientos de otros como HELD', () => {
+    expect(limpiarAsientos([{ segmentId: 'S', seatNumber: ' 3d ' }, { segmentId: 'S', seatNumber: '3D' }, { seatNumber: '4A' }, { segmentId: 'S', seatNumber: '; DROP' }, null]))
+      .toEqual([{ segmentId: 'S', seatNumber: '3D' }]);
+    const mapa = { segmentId: 'S', cabins: [{ cabinClass: 'ECONOMY', rows: [{ rowNumber: 3, seats: [{ seatNumber: '3D', isAvailable: true, status: 'AVAILABLE' }, { seatNumber: '3E', isAvailable: true }, { seatNumber: '3F', isAvailable: false, status: 'TICKETED' }] }] }] };
+    const fila = marcarBloqueados(mapa, new Set(['3D', '3F'])).cabins[0].rows[0].seats;
+    expect(fila[0]).toMatchObject({ isAvailable: false, status: 'HELD' });
+    expect(fila[1]).toEqual({ seatNumber: '3E', isAvailable: true });
+    expect(fila[2].status).toBe('TICKETED');
+  });
 });

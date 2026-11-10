@@ -125,8 +125,31 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   caso(`${n}-04`, 'Mapa de asientos real de la cabina pagada', mapa.status === 200 && libres.length > 0, `${libres.length} libres`);
   const asiento = libres[Math.floor(libres.length / 2)];
 
+  // Bloqueo de asiento en tiempo real (capa de Booking): quien lo elige primero lo bloquea.
+  if (asiento) {
+    const locks = `/vuelos/offers/${encodeURIComponent(oferta.offerId)}/seat-locks`;
+    const elegido = [{ segmentId: seg.segmentId, seatNumber: asiento }];
+    // El segundo cliente (otro usuario) crea su propio hold del mismo vuelo.
+    const hB = await llamar('POST', '/vuelos/offers/hold', { cuerpo: { offerId: oferta.offerId, itinerarySelections: selecciones(oferta), passengersBreakdown: { adults: 1, children: 0, infants: 0 } }, sub: OTRO });
+    const l1 = await llamar('PUT', locks, { cuerpo: { holdId: h.json.holdId, seats: elegido, expiresAt: h.json.expiresAt } });
+    const l2 = hB.json.holdId ? await llamar('PUT', locks, { cuerpo: { holdId: hB.json.holdId, seats: elegido }, sub: OTRO }) : { status: 0, json: {} };
+    caso(`${n}-04b`, 'Asiento elegido: queda bloqueado y otro cliente no puede tomarlo (409)', l1.status === 200 && l2.status === 409 && l2.json.code === 'SEAT_TAKEN', `HTTP ${l1.status} / ${l2.status}`);
+    // Si la aerolínea apartó el asiento, Booking rehízo el hold: la compra sigue con el nuevo.
+    if (l1.json.holdId && l1.json.holdId !== h.json.holdId) h.json.holdId = l1.json.holdId;
+    caso(`${n}-04e`, 'El asiento se envía a la aerolínea en el hold (assignedSeats)', l1.status === 200, l1.json.airlineHold ? 'la aerolínea lo aceptó (hold nuevo)' : 'la aerolínea aún no acepta assignedSeats: queda el bloqueo de Booking');
+    const mB = await llamar('GET', `/vuelos/offers/${encodeURIComponent(oferta.offerId)}/seatmap?segmentId=${encodeURIComponent(seg.segmentId)}&holdId=${encodeURIComponent(hB.json.holdId ?? '')}`, { sub: OTRO });
+    const visto = (mB.json.cabins || []).flatMap((c) => c.rows).flatMap((x) => x.seats).find((x) => x.seatNumber === asiento);
+    caso(`${n}-04c`, 'El otro cliente lo ve ocupado en el mapa', mB.status === 200 && visto?.isAvailable === false, `${asiento} → ${visto?.status}`);
+    if (hB.json.holdId) {
+      const pagoB = await llamar('POST', '/vuelos/bookings', { cuerpo: { holdId: hB.json.holdId, passengers: [pasajero({ lastName: 'Segundo', assignedSeats: elegido })], payment: { paymentReference: 'x' } }, sub: OTRO });
+      caso(`${n}-04d`, 'Si igual intenta pagarlo: 409 y no se cobra', pagoB.status === 409 && pagoB.json.charged === false, `HTTP ${pagoB.status} ${pagoB.json.detail ?? ''}`.slice(0, 100));
+      await llamar('DELETE', `/vuelos/offers/hold/${encodeURIComponent(hB.json.holdId)}`, { sub: OTRO });
+    }
+  }
+
   // Compra con datos como los manda el formulario (ECU, teléfono local) + asiento
-  const pax = [pasajero({ nationality: 'ECU', contact: { email: 'prueba.vuelos@example.com', phone: '0991234567' }, assignedSeats: asiento ? [{ segmentId: seg.segmentId, seatNumber: asiento }] : undefined })];
+  // Pasaporte distinto en cada corrida: las aerolíneas no aceptan dos reservas activas del mismo pasajero en un vuelo.
+  const pax = [pasajero({ documentType: 'PASSPORT', documentNumber: `PE${Date.now().toString().slice(-7)}`, documentExpiryDate: '2031-01-31', nationality: 'ECU', contact: { email: 'prueba.vuelos@example.com', phone: '0991234567' }, assignedSeats: asiento ? [{ segmentId: seg.segmentId, seatNumber: asiento }] : undefined })];
   const r = await reservar(h.json.holdId, pax);
   const f = r.json.factura;
   caso(`${n}-05`, 'Compra: cobro, PNR y reserva CONFIRMED', r.status === 201 && !!r.json.pnr && r.json.status === 'CONFIRMED', `HTTP ${r.status} PNR ${r.json.pnr ?? r.json.title}`);

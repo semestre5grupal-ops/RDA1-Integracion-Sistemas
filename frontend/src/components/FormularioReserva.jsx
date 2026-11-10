@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../hooks/useAuth';
 import { useFocusTrap } from '../hooks/useFocusTrap';
-import { crearReserva, obtenerMapaAsientos } from '../services/vuelosApi';
+import { api } from '../services/api';
+import { crearReserva, obtenerMapaAsientos, bloquearAsientos, consultarBloqueosAsientos, liberarAsientos } from '../services/vuelosApi';
 import { obtenerHuellaDispositivo, formatearMoneda } from '../services/formato';
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
@@ -231,7 +232,7 @@ const REGLAS = {
   phone: (v, p) => errorTelefono(p?.phoneCountry ?? 'EC', v),
 };
 
-export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada }) {
+export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada, onHoldCambiado }) {
   const { user } = useAuth();
   const isAdmin = user?.email === 'admin@booking.com' || user?.email === 'alejandroflores@booking.com' || user?.user_metadata?.role === 'admin';
   const navigate = useNavigate();
@@ -239,7 +240,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const idBase = useId();
   const { trackEvent } = useTelemetry();
 
-  const tipos = useMemo(() => distribuir(pasajeros), [pasajeros]);
+  // Por contenido, no por referencia: un objeto `pasajeros` nuevo con los mismos números no reinicia el formulario.
+  const clavePasajeros = JSON.stringify(pasajeros ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tipos = useMemo(() => distribuir(pasajeros), [clavePasajeros]);
   const [lista, setLista] = useState([]);
   // Día del primer vuelo (para las edades); si no se conoce, hoy en Ecuador.
   const fechaViaje = hold?.fechaViaje
@@ -253,6 +257,9 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const [errores, setErrores] = useState({});
   // Mapas de asientos reales por tramo: { [segmentId]: { estado, asientos, error } }
   const [mapas, setMapas] = useState({});
+  const [avisoPrecio, setAvisoPrecio] = useState(null);
+  // Asientos que otros clientes están eligiendo ahora mismo: { [segmentId]: ['14D', ...] }
+  const [bloqueosAjenos, setBloqueosAjenos] = useState({});
   const [enviando, setEnviando] = useState(false);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
@@ -289,6 +296,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
 
   // Al abrir: un formulario por pasajero, con una clave de idempotencia nueva
   // para esta intencion de negocio.
+  // El formulario se reinicia solo con una compra nueva, no cuando el hold se rehace al elegir asiento.
+  const idCompra = hold?.compraId ?? hold?.holdId;
   useEffect(() => {
     if (!abierto || !hold) return;
     setPasoActual(1);
@@ -296,6 +305,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     setErrorGeneral(null);
     setErrores({});
     setMapas({}); // hold nuevo: el mapa de asientos se vuelve a pedir
+    setBloqueosAjenos({});
     trackEvent('checkout_started', 'vuelos');
 
     const idsAdultos = [];
@@ -304,7 +314,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     }
     let infantes = 0;
     setLista(tipos.map((tipo, i) => pasajeroVacio(tipo, i, idsAdultos, tipo === 'INFANT' ? infantes++ : 0)));
-  }, [abierto, hold, tipos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, idCompra, tipos]);
 
   const cambiar = useCallback((indice, campo, valor) => {
     setLista((prev) =>
@@ -336,7 +347,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       if (!forzar && mapas[t.segmentId]?.estado === 'ok') return;
       setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'cargando' } }));
       try {
-        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId);
+        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId, hold.holdId);
         setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'ok', asientos: asientosDeCabina(data, t.cabina) } }));
       } catch {
         setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'error' } }));
@@ -352,8 +363,11 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   /**
    * El contrato v2 bloquea el cupo en el hold, pero el asiento concreto se
    * asigna recién en la reserva. Para que dos personas no elijan el mismo
-   * asiento sin enterarse, el mapa se vuelve a leer en silencio y, antes de
-   * cobrar, se confirma que los asientos elegidos siguen libres.
+   * asiento:
+   *  1. al elegirlo, Booking lo bloquea para esta compra (seat-locks) y los
+   *     demás clientes lo ven ocupado a los pocos segundos;
+   *  2. el mapa de la aerolínea se vuelve a leer en silencio y, antes de
+   *     cobrar, se confirma que los asientos elegidos siguen libres.
    * Devuelve los asientos elegidos que otra persona ya tomó.
    */
   const listaRef = useRef(lista);
@@ -364,7 +378,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     const frescos = {};
     await Promise.all(tramos.map(async (t) => {
       try {
-        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId);
+        const data = await obtenerMapaAsientos(hold.offerId, t.segmentId, hold.holdId);
         frescos[t.segmentId] = asientosDeCabina(data, t.cabina);
       } catch {
         // sin mapa no se puede comprobar: la aerolínea igual rechaza un asiento ocupado (409)
@@ -400,6 +414,106 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     const nums = [...new Set(tomados.map((t) => t.numero))].join(', ');
     setErrorGeneral(`El asiento ${nums} lo acaba de tomar otra persona. Elige otro${cobro ? '. No se hizo ningún cobro' : ''}.`);
   }, [cambiar]);
+
+  // ── Bloqueo en tiempo real ──
+  // Cada vez que cambia la selección, Booking deja bloqueados exactamente esos
+  // asientos para esta compra. Si otro cliente ganó alguno (409), se suelta aquí.
+  const firmaAsientos = JSON.stringify(lista.map((p) => (p.passengerType === 'INFANT' ? {} : p.asientos ?? {})));
+  const ultimaFirma = useRef('');
+  const colaAsientos = useRef(Promise.resolve());
+  const holdRef = useRef(hold);
+  holdRef.current = hold;
+  useEffect(() => {
+    if (!abierto || !hold?.offerId || !hold?.holdId) return undefined;
+    const elegidos = [];
+    listaRef.current.forEach((p, indice) => {
+      if (p.passengerType === 'INFANT') return;
+      for (const [segmentId, seatNumber] of Object.entries(p.asientos ?? {})) {
+        if (seatNumber) elegidos.push({ indice, segmentId, seatNumber });
+      }
+    });
+    const firma = `${hold.holdId}|${elegidos.map((a) => `${a.segmentId}:${a.seatNumber}`).sort().join(',')}`;
+    if (firma === ultimaFirma.current || (!elegidos.length && !ultimaFirma.current.includes(':'))) {
+      ultimaFirma.current = firma;
+      return undefined;
+    }
+    ultimaFirma.current = firma;
+    const t = setTimeout(() => {
+      // Una petición a la vez: si el hold se rehace, la siguiente usa el nuevo.
+      colaAsientos.current = colaAsientos.current.then(async () => {
+      const holdActual = holdRef.current;
+      try {
+        const r = await bloquearAsientos(holdActual.offerId, holdActual.holdId, elegidos.map(({ segmentId, seatNumber }) => ({ segmentId, seatNumber })), holdActual.expiresAt);
+        // La aerolínea apartó el asiento en un hold nuevo: la compra sigue con ese hold.
+        if (r?.hold?.holdId && r.holdId !== holdActual.holdId) {
+          ultimaFirma.current = `${r.holdId}|${elegidos.map((a) => `${a.segmentId}:${a.seatNumber}`).sort().join(',')}`;
+          const antes = Number(holdActual.bookingPrice?.total ?? holdActual.lockedPrice?.total);
+          const despues = Number(r.hold.bookingPrice?.total ?? r.hold.lockedPrice?.total);
+          if (Number.isFinite(antes) && Number.isFinite(despues) && Math.abs(antes - despues) >= 0.01) {
+            setAvisoPrecio(`La aerolínea actualizó el precio al apartar tu asiento: ahora es ${formatearMoneda(despues, r.hold.lockedPrice?.currency)}.`);
+          }
+          onHoldCambiado?.({ ...r.hold, compraId: holdActual.compraId });
+        }
+      } catch (fallo) {
+        const tomados = fallo?.response?.status === 409 ? fallo.response.data?.taken ?? [] : [];
+        if (tomados.length) {
+          ultimaFirma.current = '';
+          soltarTomados(
+            elegidos
+              .filter((a) => tomados.some((x) => x.segmentId === a.segmentId && x.seatNumber === a.seatNumber))
+              .map((a) => ({ indice: a.indice, segmentId: a.segmentId, numero: a.seatNumber })),
+            false,
+          );
+          setBloqueosAjenos((b) => {
+            const n = { ...b };
+            for (const x of tomados) n[x.segmentId] = [...new Set([...(n[x.segmentId] ?? []), x.seatNumber])];
+            return n;
+          });
+        }
+        // Otros errores (red, hold vencido): la aerolínea igual valida el asiento al reservar.
+      }
+      });
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaAsientos, abierto, hold?.holdId]);
+
+  // Mientras se elige asiento o se paga: cada 3 s se leen los asientos que otros
+  // clientes están eligiendo (consulta liviana a Booking, sin llamar a la aerolínea).
+  useEffect(() => {
+    if (!abierto || !hold?.offerId || !hold?.holdId || (pasoActual !== 2 && pasoActual !== 3)) return undefined;
+    let vivo = true;
+    const leer = async () => {
+      try {
+        const locks = await consultarBloqueosAsientos(hold.offerId, hold.holdId);
+        if (!vivo) return;
+        const porTramo = {};
+        for (const l of locks) (porTramo[l.segmentId] ??= []).push(l.seatNumber);
+        setBloqueosAjenos((b) => (JSON.stringify(b) === JSON.stringify(porTramo) ? b : porTramo));
+      } catch {
+        // sin conexión: se conserva lo último conocido
+      }
+    };
+    leer();
+    const id = setInterval(leer, 3_000);
+    return () => { vivo = false; clearInterval(id); };
+  }, [abierto, hold?.offerId, hold?.holdId, pasoActual]);
+
+  // Al cerrar la pestaña con asientos elegidos se sueltan (si no, vencen solos con el hold).
+  useEffect(() => {
+    if (!abierto || !hold?.offerId || !hold?.holdId) return undefined;
+    const soltar = () => {
+      // `keepalive`: la petición sale aunque la pestaña ya se esté cerrando.
+      const url = `${api.defaults.baseURL}/vuelos/offers/${encodeURIComponent(hold.offerId)}/seat-locks?holdId=${encodeURIComponent(hold.holdId)}`;
+      try {
+        fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {});
+      } catch {
+        liberarAsientos(hold.offerId, hold.holdId).catch(() => {});
+      }
+    };
+    window.addEventListener('pagehide', soltar);
+    return () => window.removeEventListener('pagehide', soltar);
+  }, [abierto, hold?.offerId, hold?.holdId]);
 
   // Mientras el cliente elige asiento o está por pagar, el mapa se actualiza cada 15 s.
   useEffect(() => {
@@ -618,7 +732,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         if (fallo?.response?.status === 409 && /seat|asiento/i.test(JSON.stringify(datos))) {
           setPasoActual(2);
           cargarMapas(true);
-          setErrorGeneral('Ese asiento lo acaba de ocupar otra persona. Elige otro (el cobro ya se devolvió).');
+          // `charged: false`: Booking lo detectó antes de cobrar (otra compra lo tiene bloqueado).
+          setErrorGeneral(datos.charged === false
+            ? 'Ese asiento lo acaba de elegir otra persona. Elige otro. No se hizo ningún cobro.'
+            : 'Ese asiento lo acaba de ocupar otra persona. Elige otro (el cobro ya se devolvió).');
           return;
         }
         const campos = (datos.invalidParams ?? [])
@@ -964,7 +1081,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             <div className="paso-extras" style={{ marginTop: '20px' }}>
               <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Selección de Asientos</h3>
               <p className="modal-nota-bloque">
-                Mapa real de la aerolínea: los asientos en gris ya están ocupados. Si no eliges, la aerolínea asigna uno.
+                Mapa real de la aerolínea: los asientos en gris ya están ocupados o los está eligiendo otra persona.
+                El asiento que elijas queda bloqueado para ti mientras dure tu cupo. Si no eliges, la aerolínea asigna uno.
               </p>
               {lista.map((p, i) =>
                 p.passengerType === 'INFANT' ? null : (
@@ -982,6 +1100,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                           .filter((_, idx) => idx !== i)
                           .map((o) => o.asientos?.[t.segmentId])
                           .filter(Boolean)}
+                        bloqueadosAhora={bloqueosAjenos[t.segmentId] ?? []}
                         onElegir={(asiento) =>
                           cambiar(i, 'asientos', { ...(p.asientos ?? {}), [t.segmentId]: asiento })
                         }
@@ -1029,6 +1148,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                 </div>
               </div>
             </div>
+          )}
+
+          {avisoPrecio && (
+            <p className="modal-nota-bloque" role="status">{avisoPrecio}</p>
           )}
 
           {errorGeneral && (
@@ -1116,7 +1239,7 @@ function asientosDeCabina(data, cabina) {
 }
 
 /** Mapa de asientos de un tramo para un pasajero. */
-function MapaAsientos({ tramo, mapa, elegido, ocupadosPorOtros, onElegir, onReintentar }) {
+function MapaAsientos({ tramo, mapa, elegido, ocupadosPorOtros, bloqueadosAhora = [], onElegir, onReintentar }) {
   const titulo = `${tramo.flightNumber ?? ''} ${tramo.origen ?? ''} → ${tramo.destino ?? ''}`.trim();
   if (!mapa || mapa.estado === 'cargando') {
     return <div className="mapa-tramo"><div className="mapa-tramo-titulo">{titulo}</div><small className="modal-nota-bloque">Cargando asientos…</small></div>;
@@ -1148,7 +1271,9 @@ function MapaAsientos({ tramo, mapa, elegido, ocupadosPorOtros, onElegir, onRein
             {f.asientos.map((a, idx) => {
               const deOtro = ocupadosPorOtros.includes(a.numero);
               const seleccionado = elegido === a.numero;
-              const bloqueado = !a.libre || deOtro;
+              // Otro cliente lo está eligiendo en este momento (bloqueo en tiempo real de Booking).
+              const enUso = !seleccionado && bloqueadosAhora.includes(a.numero);
+              const bloqueado = !a.libre || deOtro || enUso;
               return (
                 <span key={a.numero} className="asiento-celda">
                   <button
@@ -1156,7 +1281,7 @@ function MapaAsientos({ tramo, mapa, elegido, ocupadosPorOtros, onElegir, onRein
                     className={`asiento ${seleccionado ? 'asiento-elegido' : ''} ${bloqueado ? 'asiento-ocupado' : ''} ${a.extra ? 'asiento-extra' : ''}`}
                     disabled={bloqueado}
                     aria-pressed={seleccionado}
-                    title={!a.libre ? `${a.numero}: ocupado` : deOtro ? `${a.numero}: elegido por otro pasajero` : `${a.numero}${a.ventana ? ' · ventana' : ''}${a.extra ? ' · espacio extra' : ''}`}
+                    title={!a.libre ? `${a.numero}: ocupado` : enUso ? `${a.numero}: lo está eligiendo otra persona` : deOtro ? `${a.numero}: elegido por otro pasajero` : `${a.numero}${a.ventana ? ' · ventana' : ''}${a.extra ? ' · espacio extra' : ''}`}
                     onClick={() => onElegir(seleccionado ? '' : a.numero)}
                   >
                     {a.numero}
