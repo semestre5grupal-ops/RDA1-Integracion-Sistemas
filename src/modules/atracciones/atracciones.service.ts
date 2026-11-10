@@ -1591,7 +1591,32 @@ export class AtraccionesService implements OnModuleInit {
     if (isMichaelAttr) {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
       const timeRaw = (dto.time || dto.hora || '09:00 a.m.').trim();
-      const timeFormatted = timeRaw.includes('a.m.') || timeRaw.includes('p.m.') ? timeRaw : `${timeRaw} a.m.`;
+
+      // Normalizar hora para TourGirls considerando formato 24h y slots
+      let timeFormatted = timeRaw;
+      if (timeRaw.includes('a.m.') || timeRaw.includes('p.m.')) {
+        timeFormatted = timeRaw;
+      } else {
+        const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})/);
+        if (timeMatch) {
+          const hour = parseInt(timeMatch[1], 10);
+          const min = timeMatch[2];
+          if (hour === 0) {
+            timeFormatted = `12:${min} a.m.`;
+          } else if (hour === 12) {
+            timeFormatted = `12:${min} p.m.`;
+          } else if (hour > 12) {
+            const h12 = String(hour - 12).padStart(2, '0');
+            timeFormatted = `${h12}:${min} p.m.`;
+          } else {
+            const h12 = String(hour).padStart(2, '0');
+            timeFormatted = `${h12}:${min} a.m.`;
+          }
+        } else {
+          timeFormatted = `${timeRaw} a.m.`;
+        }
+      }
+
       const dateCompact = dateStr.replace(/-/g, '');
       const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4).padEnd(4, '0');
       const slotIdMichael = dto.slot_id && dto.slot_id.startsWith('slot-')
