@@ -10,6 +10,7 @@ import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.s
 
 export interface SearchAutosDto {
   pickup_location?: string;
+  q?: string;
   dropoff_location?: string;
   pickup_date?: string;
   pickup_time?: string;
@@ -326,7 +327,29 @@ export class AutosService implements OnModuleInit {
     // 5. Integración externa con Circuit Breaker
     const externalCars = await this.circuitBreakerAdapter.fetchExternalCars(dto, cId);
 
-    const merged = [...formattedLocales, ...externalCars];
+    let merged = [...formattedLocales, ...externalCars];
+
+    // 5b. Búsqueda flexible por marca, modelo o nombre del auto (además de ubicación)
+    const rawTerm = (dto.q || dto.pickup_location || '').trim().toLowerCase();
+    const ciudadesPaises = [
+      'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'ecuador', 'uio', 'gye', 'cue'
+    ];
+    const esSoloUbicacion = ciudadesPaises.includes(rawTerm);
+
+    if (rawTerm && !esSoloUbicacion) {
+      const matchCars = merged.filter((c: any) => {
+        const marca = (c.marca || '').toLowerCase();
+        const modelo = (c.modelo || '').toLowerCase();
+        const cat = (c.categoria || '').toLowerCase();
+        const prov = (c.proveedor?.nombre || '').toLowerCase();
+        const fullDesc = `${marca} ${modelo} ${cat} ${prov}`;
+        return fullDesc.includes(rawTerm) || rawTerm.includes(marca) || (marca && rawTerm.includes(modelo));
+      });
+
+      if (matchCars.length > 0) {
+        merged = matchCars;
+      }
+    }
 
     // 6. Observabilidad Winston: Guardar en archivo plano físico (Prohibido PostgreSQL para logs)
     this.winstonLogger.logAudit('BUSQUEDA_AUTOS', {
