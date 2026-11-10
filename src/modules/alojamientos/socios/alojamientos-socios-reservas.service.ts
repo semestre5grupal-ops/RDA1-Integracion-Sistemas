@@ -283,7 +283,10 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       this.errorDelSocio(cot, nodo, 'cotizar');
     }
     const c = desempacar(cot.body) || {};
-    const total = dinero(c.precioTotalCotizado ?? c.totalPagar ?? c.desglosePrecio?.totalPagar);
+    const total = dinero(
+      c.precioTotalCotizado ?? c.totalPagar ?? c.desglosePrecio?.totalPagar ??
+      c.precioTotalEstancia ?? c.totalPrice ?? c.precioTotal ?? c.total ?? c.monto,
+    );
     if (!total) throw new HttpException(`El hotel ${nodo.nombreProveedor} no devolvió un precio.`, HttpStatus.BAD_GATEWAY);
     this.traza(d, 'cotizar', 'ok', `Precio congelado en ${nodo.nombreProveedor}`, nodo.codigoNodo, total);
 
@@ -334,7 +337,7 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       orderId: o.orderId ?? o.ordenId ?? o.id ?? null,
       externalOrderId: o.external_order_id ?? o.externalOrderId ?? null,
       codigoReserva: o.codigoReserva ?? o.codigo_reserva ?? null,
-      total: dinero(o.total ?? o.totalPagar) ?? total,
+      total: dinero(o.total ?? o.totalPagar ?? o.precioTotalEstancia ?? o.totalPrice ?? o.precioTotal) ?? total,
     };
     if (!ref.orderId && !ref.externalOrderId && !ref.codigoReserva) {
       throw new HttpException(`El hotel ${nodo.nombreProveedor} confirmó sin identificador de reserva.`, HttpStatus.BAD_GATEWAY);
