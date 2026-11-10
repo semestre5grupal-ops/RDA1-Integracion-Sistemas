@@ -543,6 +543,10 @@ export class AutosCircuitBreakerAdapter {
       const orders = Array.isArray(response.data) ? response.data : [];
       return orders
         .filter((o: any) => {
+          const oId = (o.id || o.order_id || o.pnr || '').toUpperCase();
+          if (this.cancelledOrderIds.has(oId) || this.cancelledOrderIds.has(o.id) || this.cancelledOrderIds.has(o.pnr)) {
+            return false;
+          }
           const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
           return oVid === cleanId && o.status !== 'CANCELLED';
         })

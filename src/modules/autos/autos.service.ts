@@ -429,10 +429,14 @@ export class AutosService implements OnModuleInit {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
           // Verificar si tiene orden activa en memoria
           const isReservedMem = Array.from(this.memoryOrders.values()).some(
-            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED'
+            (o: any) =>
+              (o.auto_id === id || o.vehicle_id === id) &&
+              (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.estado === 'CONFIRMED' || o.estado === 'PENDING'),
           );
           if (isReservedMem) {
             foundExt.estado = 'RESERVADO';
+          } else {
+            foundExt.estado = 'DISPONIBLE';
           }
           return {
             ...foundExt,
@@ -445,10 +449,14 @@ export class AutosService implements OnModuleInit {
         if (fallbackExt) {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
           const isReservedMem = Array.from(this.memoryOrders.values()).some(
-            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED',
+            (o: any) =>
+              (o.auto_id === id || o.vehicle_id === id) &&
+              (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.estado === 'CONFIRMED' || o.estado === 'PENDING'),
           );
           if (isReservedMem) {
             fallbackExt.estado = 'RESERVADO';
+          } else {
+            fallbackExt.estado = 'DISPONIBLE';
           }
           return {
             ...fallbackExt,
