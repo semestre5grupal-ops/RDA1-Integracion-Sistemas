@@ -5,7 +5,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 8000,
+  timeout: 45000,
 });
 
 export async function getAlojamientos({ page = 1, limit = 10, destino, tienePiscina } = {}) {

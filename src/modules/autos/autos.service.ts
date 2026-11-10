@@ -1373,6 +1373,36 @@ export class AutosService implements OnModuleInit {
       }
     } catch (_) {}
 
+    // 1b. Cargar órdenes de la base de datos física para persistencia y soporte de reinicios en Azure
+    try {
+      const dbOrders = await this.orderRepo.find();
+      if (Array.isArray(dbOrders)) {
+        for (const d of dbOrders) {
+          const k = d.pnr || d.id;
+          if (k && !unique.has(k)) {
+            const chk = checkinMap.get(k.toUpperCase());
+            const isAssisted = d.status === 'CONFIRMADO_ASISTIDO' || (d as any).checkinStatus === 'COMPLETED' || !!chk;
+            const st = isAssisted ? 'CONFIRMADO_ASISTIDO' : (d.status || 'CONFIRMED');
+            unique.set(k, {
+              order_id: k,
+              pnr: k,
+              codigo_reserva: k,
+              status: st,
+              estado: st,
+              auto_id: d.autoId,
+              placa: chk?.placa || (d as any).placa || null,
+              checkin: chk || (isAssisted ? { status: 'COMPLETED' } : null),
+              email: d.driver?.email || 'cliente@booking.com',
+              conductor: d.driver,
+              dias_renta: d.diasRenta || 3,
+              total_price: d.totalPrice,
+              createdAt: (d as any).createdAt,
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
     for (const order of this.memoryOrders.values()) {
       const key = order.pnr || order.order_id || order.idempotency_key;
       if (key && !unique.has(key)) {
@@ -1395,6 +1425,12 @@ export class AutosService implements OnModuleInit {
 
         const isExtAssisted = ext.status === 'CONFIRMADO_ASISTIDO' ||
                               ext.estado === 'CONFIRMADO_ASISTIDO' ||
+                              ext.status === 'COMPLETED' ||
+                              ext.estado === 'COMPLETED' ||
+                              ext.status === 'ASISTIDO' ||
+                              ext.estado === 'ASISTIDO' ||
+                              ext.status === 'ENTREGADO' ||
+                              ext.estado === 'ENTREGADO' ||
                               ext.rentalStatus === 'PICKED_UP' ||
                               ext.rental_status === 'PICKED_UP' ||
                               ext.rentalStatus === 'RETURNED' ||
@@ -1406,18 +1442,20 @@ export class AutosService implements OnModuleInit {
         const existingKey = (pnr && unique.has(pnr)) ? pnr : (ext.order_id && unique.has(ext.order_id)) ? ext.order_id : (ext.id && unique.has(ext.id)) ? ext.id : null;
 
         if (existingKey) {
-          // Si ya existe en memoria o local, sincronizar el estado confirmado/asistido
+          // Si ya existe en memoria o local, sincronizar el estado confirmado/asistido con regla monotónica
           const existing = unique.get(existingKey);
-          if (isExtAssisted && existing.status !== 'CANCELLED') {
+          const yaEraAsistido = existing.status === 'CONFIRMADO_ASISTIDO' || existing.estado === 'CONFIRMADO_ASISTIDO';
+          if ((isExtAssisted || yaEraAsistido) && existing.status !== 'CANCELLED') {
             existing.status = 'CONFIRMADO_ASISTIDO';
             existing.estado = 'CONFIRMADO_ASISTIDO';
+            this.orderRepo.update({ pnr: existingKey }, { status: 'CONFIRMADO_ASISTIDO' } as any).catch(() => {});
           }
           if (ext.plate || ext.placa) {
             existing.placa = ext.plate || ext.placa;
           }
           const mem = this.memoryOrders.get(existingKey) || (pnr ? this.memoryOrders.get(pnr) : null);
           if (mem) {
-            if (isExtAssisted && mem.status !== 'CANCELLED') {
+            if ((isExtAssisted || yaEraAsistido) && mem.status !== 'CANCELLED') {
               mem.status = 'CONFIRMADO_ASISTIDO';
               mem.estado = 'CONFIRMADO_ASISTIDO';
               if (ext.plate || ext.placa) mem.placa = ext.plate || ext.placa;
@@ -1434,8 +1472,11 @@ export class AutosService implements OnModuleInit {
           email = 'cliente@booking.com';
         }
 
-        let finalStatus = isExtAssisted ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED');
         const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
+        let finalStatus = (isExtAssisted || chk) ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED');
+        if (finalStatus === 'CONFIRMADO_ASISTIDO') {
+          this.orderRepo.update({ pnr }, { status: 'CONFIRMADO_ASISTIDO' } as any).catch(() => {});
+        }
 
         const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || (ext.auto_id && ext.auto_id.length === 36);
         const brandName = ext.vehiculo?.marca || (isMateoOrder ? 'Maneja de Una' : 'Toyota');

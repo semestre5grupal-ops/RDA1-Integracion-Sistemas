@@ -53,7 +53,7 @@ export function AutoDetail() {
 
   const auto = { ...(location.state?.auto || {}), ...(fetchedAuto || {}) };
 
-  const precioDiario = auto.price || 35.50;
+  const precioDiario = auto.precio_diario || auto.price || 35.50;
   const make = auto.make || 'Chevrolet';
   const model = auto.model || 'Spark';
   const seats = auto.seats || 5;
@@ -729,12 +729,21 @@ export function AutoDetail() {
             {/* Desglose */}
             <div style={{ background: 'white', borderRadius: '4px', border: '1px solid #e7e7e7', padding: '20px' }}>
               <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#333', marginBottom: '15px' }}>Desglose del precio del coche</h3>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', color: '#333', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', color: '#333', marginBottom: auto.iva_monto ? '8px' : '20px' }}>
                 <span>Precio del alquiler ({dias} días)</span>
-                <span>{total}</span>
+                <span>{auto.precio_base ? convertPrice(auto.precio_base * dias) : total}</span>
               </div>
+              {auto.iva_monto && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: '#666', marginBottom: '15px' }}>
+                  <span>IVA Ecuador (15%)</span>
+                  <span>{convertPrice(auto.iva_monto * dias)}</span>
+                </div>
+              )}
               <div style={{ borderTop: '1px solid #e7e7e7', paddingTop: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#333' }}>Total</span>
+                <div>
+                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#333' }}>Total</span>
+                  <div style={{ fontSize: '0.78rem', color: '#008009', fontWeight: 500 }}>Impuestos incluidos</div>
+                </div>
                 <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#333' }}>{total}</span>
               </div>
               <p style={{ fontSize: '0.75rem', color: '#666', marginTop: '15px', lineHeight: '1.4' }}>

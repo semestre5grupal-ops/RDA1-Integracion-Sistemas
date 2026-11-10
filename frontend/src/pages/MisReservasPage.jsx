@@ -146,6 +146,12 @@ export function MisReservasPage() {
 
       // Persistir de inmediato en localStorage para evitar reversión en recargas o encuestas
       try {
+        const savedCheckedIn = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+        if (idOrPnr) savedCheckedIn.add(idOrPnr);
+        if (reserva?.pnr) savedCheckedIn.add(reserva.pnr);
+        if (reserva?.id) savedCheckedIn.add(reserva.id);
+        localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
+
         if (reserva.tipo === 'auto') {
           const localAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
           const updated = localAutos.map((a) => {
@@ -672,12 +678,27 @@ export function MisReservasPage() {
       let listaFinal = Array.from(mapaCombinado.values());
       listaFinal.sort((a, b) => b.rawDate - a.rawDate);
 
+      // Persistencia monotónica en localStorage: si un PNR/ID ya asistió, nunca permitir degradación al recargar
+      const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'];
+      try {
+        const savedCheckedIn = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+        for (const item of listaFinal) {
+          const itemKey = item.id;
+          const pnrKey = item.pnr;
+          if ((itemKey && savedCheckedIn.has(itemKey)) || (pnrKey && savedCheckedIn.has(pnrKey))) {
+            item.status = 'CONFIRMADO_ASISTIDO';
+          } else if (estadosAsistidos.includes(item.status)) {
+            if (itemKey) savedCheckedIn.add(itemKey);
+            if (pnrKey) savedCheckedIn.add(pnrKey);
+          }
+        }
+        localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
+      } catch (_) {}
+
       // Reactividad tipo Composable (Android):
       // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),
       // mantenemos intacta la referencia previa para evitar cualquier re-render o parpadeo visual.
       setReservas((prev) => {
-        const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED'];
-
         // Preservación monotónica de check-in: nunca degradar a CONFIRMED tras confirmación
         if (prev && prev.length > 0) {
           for (const item of listaFinal) {
