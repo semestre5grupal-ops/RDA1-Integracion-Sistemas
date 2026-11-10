@@ -4,6 +4,7 @@ import { firstValueFrom, timeout, catchError } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
 import { ConnectorHealthService } from '../../admin/connector-health.service';
 import { TraceContextService } from '../../../core/tracing/trace-context.service';
+import { DataSource } from 'typeorm';
 
 export enum CircuitState {
   CLOSED = 'CLOSED',       // Tráfico normal
@@ -61,8 +62,74 @@ export class AutosCircuitBreakerAdapter {
     private readonly httpService: HttpService,
     @Optional() private readonly connectorHealthService?: ConnectorHealthService,
     @Optional() private readonly traceContext?: TraceContextService,
+    @Optional() private readonly dataSource?: DataSource,
   ) {
     this.traceContext?.instrumentAxios(this.httpService.axiosRef);
+  }
+
+
+  // ===========================================================================
+  // RentaFacil EC (Anthony) — NODE_AUT_RENTAFACIL
+  // URL, X-API-Key y código de nodo se leen de schema_proveedores.config_proveedor
+  // (nodo AUTOS registrado en el panel con URL de rentafacil). Respaldo: env.
+  // Ids de vehículo: VEH-xxxx · PNR: RFxxxxxx
+  // ===========================================================================
+  private RENTAFACIL_NODO = process.env.RENTAFACIL_NODO || 'NODE_AUT_RENTAFACIL';
+  private rentaFacilCache: { baseUrl: string; apiKey: string; activo: boolean; at: number } | null = null;
+  private readonly rentaFacilVehiculos = new Set<string>();
+  private readonly rentaFacilPnrs = new Set<string>();
+
+  private async getRentaFacilConfig(): Promise<{ baseUrl: string; apiKey: string; activo: boolean }> {
+    if (this.rentaFacilCache && Date.now() - this.rentaFacilCache.at < 60000) {
+      return this.rentaFacilCache;
+    }
+    let baseUrl = process.env.RENTAFACIL_BASE_URL || 'https://rentafacil-autos-api.azurewebsites.net/api/v3';
+    let apiKey = process.env.RENTAFACIL_API_KEY || '';
+    let activo = true;
+    try {
+      const rows = await this.dataSource?.query(
+        `SELECT codigo_nodo, base_url_rest, api_key, kill_switch_activo
+           FROM schema_proveedores.config_proveedor
+          WHERE codigo_nodo = $1
+             OR (UPPER(vertical) = 'AUTOS' AND base_url_rest ILIKE '%rentafacil%')
+          ORDER BY (codigo_nodo = $1) DESC
+          LIMIT 1`,
+        [this.RENTAFACIL_NODO],
+      );
+      if (rows && rows.length > 0) {
+        if (rows[0].codigo_nodo) this.RENTAFACIL_NODO = String(rows[0].codigo_nodo);
+        if (rows[0].base_url_rest) baseUrl = String(rows[0].base_url_rest);
+        if (rows[0].api_key) apiKey = String(rows[0].api_key);
+        activo = rows[0].kill_switch_activo !== true;
+      }
+    } catch (err: any) {
+      this.logger.debug(`[RentaFacil] No se pudo leer config_proveedor: ${err.message}`);
+    }
+    this.rentaFacilCache = { baseUrl: baseUrl.replace(/\/$/, ''), apiKey, activo, at: Date.now() };
+    return this.rentaFacilCache;
+  }
+
+  private rentaFacilHeaders(apiKey: string, extra: Record<string, string> = {}): Record<string, string> {
+    return { 'Content-Type': 'application/json', ...(apiKey ? { 'X-API-Key': apiKey } : {}), ...extra };
+  }
+
+  private isRentaFacilVehicle(vehicleId?: string): boolean {
+    if (!vehicleId) return false;
+    return this.rentaFacilVehiculos.has(vehicleId) || /^VEH-\d+$/i.test(vehicleId);
+  }
+
+  private isRentaFacilPnr(id?: string): boolean {
+    if (!id) return false;
+    const up = id.toUpperCase();
+    return this.rentaFacilPnrs.has(up) || /^RF[A-Z0-9]{6}$/.test(up);
+  }
+
+  /** Fecha AAAA-MM-DD en hora de Ecuador a partir de un ISO. */
+  private fechaEcuador(iso?: string): string | undefined {
+    if (!iso) return undefined;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return undefined;
+    return d.toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
   }
 
   /**
@@ -132,8 +199,10 @@ export class AutosCircuitBreakerAdapter {
 
     const allCars: any[] = [];
 
+    const rentaFacilCfg = await this.getRentaFacilConfig();
+
     // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo (limit=100 para no truncar la flota)
-    const [danielRes, mateoRes] = await Promise.allSettled([
+    const [danielRes, mateoRes, rentaFacilRes] = await Promise.allSettled([
       firstValueFrom(
         this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
           headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
@@ -146,6 +215,14 @@ export class AutosCircuitBreakerAdapter {
           timeout: this.TIMEOUT_MS,
         }),
       ),
+      rentaFacilCfg.activo
+        ? firstValueFrom(
+            this.httpService.get(`${rentaFacilCfg.baseUrl}/autos?limit=100`, {
+              headers: this.rentaFacilHeaders(rentaFacilCfg.apiKey),
+              timeout: this.TIMEOUT_MS,
+            }),
+          )
+        : Promise.reject(new Error('RentaFacil desactivado (kill switch)')),
     ]);
 
     // Procesar flota de Daniel (RutaLibre - NODE_AUT_RUTALIBRE)
@@ -226,6 +303,49 @@ export class AutosCircuitBreakerAdapter {
           images: [c.foto_url || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'],
         });
       }
+    }
+
+    // Procesar flota de Anthony (RentaFacil EC - NODE_AUT_RENTAFACIL)
+    if (rentaFacilRes.status === 'fulfilled' && rentaFacilRes.value?.data) {
+      const rawCars = Array.isArray(rentaFacilRes.value.data)
+        ? rentaFacilRes.value.data
+        : (rentaFacilRes.value.data?.data || rentaFacilRes.value.data?.items || []);
+      for (const c of rawCars) {
+        const vId = c.vehicle_id || c.auto_id || c.id;
+        if (!vId) continue;
+        this.rentaFacilVehiculos.add(String(vId));
+        allCars.push({
+          vehicle_id: vId,
+          marca: c.marca || c.brand || 'Vehículo',
+          modelo: c.modelo || c.model || '',
+          categoria: (c.categoria || c.category || 'COMPACTO').toUpperCase(),
+          precio_diario: Number(c.precio_diario || c.daily_price || 0),
+          precio_base: Number(c.precio_diario || c.daily_price || 0),
+          recargo_conductor_joven: 0,
+          moneda: c.moneda || 'USD',
+          transmision: c.transmision === 'AUTOMATICO' || c.transmission === 'AUTOMATIC' ? 'Automático' : 'Manual',
+          asientos: c.asientos || c.seats || 5,
+          puertas: c.puertas || c.doors || 4,
+          bag_capacity: c.maletas_grandes || 2,
+          maletas_grandes: c.maletas_grandes || 2,
+          maletas_pequenas: c.maletas_pequenas || 1,
+          aire_acondicionado: c.aire_acondicionado !== false,
+          kilometraje_ilimitado: c.kilometraje_ilimitado !== false,
+          politica_combustible: 'Lleno a lleno',
+          cancelacion_gratuita: c.cancelacion_gratuita !== false,
+          proveedor_id: 6,
+          proveedor_codigo: this.RENTAFACIL_NODO,
+          proveedor: {
+            nombre: 'RentaFacil EC (NODE_AUT_RENTAFACIL)',
+            rating: Number(c.proveedor?.rating || 9.0),
+            ubicacion: c.proveedor?.ubicacion || c.agencia?.nombre || 'Quito',
+          },
+          estado: c.estado || c.status || 'DISPONIBLE',
+          images: [c.foto_url || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'],
+        });
+      }
+    } else if (rentaFacilRes.status === 'rejected') {
+      this.logger.warn(`[RentaFacil] Catálogo no disponible: ${(rentaFacilRes as any).reason?.message}`);
     }
 
     if (allCars.length > 0) {
@@ -524,6 +644,41 @@ export class AutosCircuitBreakerAdapter {
       }
     } catch (_) {}
 
+    // 3. RentaFacil EC (Anthony)
+    try {
+      const rf = await this.getRentaFacilConfig();
+      if (rf.activo) {
+        const rRes = await firstValueFrom(
+          this.httpService.get(`${rf.baseUrl}/autos/orders`, {
+            headers: this.rentaFacilHeaders(rf.apiKey),
+            timeout: 5000,
+          })
+        );
+        const rData = Array.isArray(rRes.data)
+          ? rRes.data
+          : (rRes.data?.data || rRes.data?.items || rRes.data?.value || []);
+        if (Array.isArray(rData)) {
+          for (const r of rData) {
+            const rStatus = (r.status || r.estado || '').toUpperCase();
+            if (rStatus === 'CONFIRMADO_ASISTIDO' || r.rental_status === 'PICKED_UP' || r.checkin_status === 'COMPLETED') {
+              r.status = 'CONFIRMADO_ASISTIDO';
+              r.estado = 'CONFIRMADO_ASISTIDO';
+            } else if (rStatus === 'RESERVADO' || rStatus === 'CONFIRMED') {
+              r.status = 'RESERVADO';
+              r.estado = 'RESERVADO';
+            }
+            if (!r.pickup_date) r.pickup_date = this.fechaEcuador(r.recogida?.fecha_hora);
+            if (!r.dropoff_date) r.dropoff_date = this.fechaEcuador(r.devolucion?.fecha_hora);
+            r.proveedor_codigo = this.RENTAFACIL_NODO;
+            if (r.pnr) this.rentaFacilPnrs.add(String(r.pnr).toUpperCase());
+            orders.push(r);
+          }
+        }
+      }
+    } catch (err: any) {
+      this.logger.debug(`[RentaFacil] No se pudieron leer órdenes: ${err.response?.status || err.message}`);
+    }
+
     // Sobrescribir inmediatamente el estado a CANCELLED para órdenes canceladas registradas
     for (const ord of orders) {
       const id1 = ord.id ? String(ord.id).toUpperCase() : '';
@@ -560,6 +715,34 @@ export class AutosCircuitBreakerAdapter {
     const cleanId = orderId.toUpperCase();
     this.cancelledOrderIds.add(orderId);
     this.cancelledOrderIds.add(cleanId);
+
+    // 0. RentaFacil EC (Anthony) — PNR RFxxxxxx
+    if (this.isRentaFacilPnr(cleanId)) {
+      const rf = await this.getRentaFacilConfig();
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `${rf.baseUrl}/autos/orders/${cleanId}/cancel`,
+            { reason },
+            { headers: this.rentaFacilHeaders(rf.apiKey, { 'Idempotency-Key': uuidv4() }), timeout: 8000 }
+          )
+        );
+        this.logger.log(`[AutosCircuitBreaker] Cancelación propagada a RentaFacil: ${cleanId}`);
+        return true;
+      } catch (err: any) {
+        if (err.response?.status === 409) {
+          const detail = err.response.data?.detail || 'Cancelación no permitida: el alquiler ya comenzó.';
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Cancelación No Permitida',
+            status: HttpStatus.CONFLICT,
+            detail,
+          }, HttpStatus.CONFLICT);
+        }
+        this.logger.warn(`[AutosCircuitBreaker] No se pudo cancelar en RentaFacil (${cleanId}): ${err.response?.status || err.message}`);
+        return false;
+      }
+    }
 
     // 1. Si coincide con formato Maneja de Una (MDU- o UUID)
     if (cleanId.startsWith('MDU-') || cleanId.length === 36) {
@@ -695,6 +878,103 @@ export class AutosCircuitBreakerAdapter {
       (payload as any).proveedor_codigo === 'NODE_AUT_MATEO' ||
       (payload as any).proveedor_codigo === 'NODE_AUT_MANEJADEUNA' ||
       (payload as any).proveedor_id === 5;
+
+    // Despacho a RentaFacil EC (Anthony - NODE_AUT_RENTAFACIL)
+    const isRentaFacil =
+      (payload as any).proveedor_codigo === this.RENTAFACIL_NODO ||
+      (!isMateo && this.isRentaFacilVehicle(payload.vehicle_id));
+    if (isRentaFacil) {
+      const rf = await this.getRentaFacilConfig();
+      const clientEmail = (payload.conductor.email || '').trim();
+      const clientDoc = (payload.conductor.licencia || (payload.conductor as any).documento || (payload.conductor as any).identificacion || '').trim();
+      const clientName = (payload.conductor.nombre || '').trim();
+      const clientPhone = normalizedPhone || '';
+
+      // 1-2. Sincronizar cliente (GET y, si no existe, POST /clientes)
+      let clientExists = false;
+      try {
+        const checkRes = await firstValueFrom(
+          this.httpService.get(
+            `${rf.baseUrl}/clientes?email=${encodeURIComponent(clientEmail)}&identificacion=${encodeURIComponent(clientDoc)}`,
+            { headers: this.rentaFacilHeaders(rf.apiKey), timeout: 8000 }
+          )
+        );
+        clientExists = checkRes.status === 200 && !!checkRes.data;
+      } catch (_) {}
+      if (!clientExists) {
+        try {
+          await firstValueFrom(
+            this.httpService.post(
+              `${rf.baseUrl}/clientes`,
+              { nombre: clientName, email: clientEmail, identificacion: clientDoc, telefono: clientPhone, licencia: clientDoc },
+              { headers: this.rentaFacilHeaders(rf.apiKey), timeout: 8000 }
+            )
+          );
+        } catch (regErr: any) {
+          this.logger.warn(`[RentaFacil] Aviso al registrar cliente: ${regErr.response?.data?.detail || regErr.message}`);
+        }
+      }
+
+      // 3. Crear la reserva
+      const pickupTime = (payload as any).pickup_time || '10:00';
+      const dropoffTime = (payload as any).dropoff_time || '10:00';
+      const rfPayload = {
+        vehicle_id: payload.vehicle_id,
+        pickup_date: payload.pickup_date,
+        dropoff_date: payload.dropoff_date,
+        pickup_time: /^([01]\d|2[0-3]):(?:00|30)$/.test(pickupTime) ? pickupTime : '10:00',
+        dropoff_time: /^([01]\d|2[0-3]):(?:00|30)$/.test(dropoffTime) ? dropoffTime : '10:00',
+        pickup_location: payload.pickup_location,
+        dropoff_location: payload.dropoff_location,
+        coverage_type: payload.tipo_cobertura === 'TOTAL' ? 'TOTAL' : 'BASIC',
+        driver: {
+          full_name: clientName,
+          email: clientEmail,
+          phone: clientPhone,
+          license_number: clientDoc,
+          age: Number(payload.conductor.edad),
+        },
+      };
+
+      try {
+        const response = await firstValueFrom(
+          this.httpService.post(`${rf.baseUrl}/autos/orders/create`, rfPayload, {
+            headers: this.rentaFacilHeaders(rf.apiKey, {
+              'Idempotency-Key': safeIdempotencyKey,
+              'X-Correlation-Id': cId,
+            }),
+            timeout: 25000,
+          })
+        );
+        this.handleSuccess();
+        const pnr = response.data?.pnr || response.data?.codigo_reserva || response.data?.order_id;
+        if (pnr) this.rentaFacilPnrs.add(String(pnr).toUpperCase());
+        return {
+          external_order_id: pnr,
+          status: 'CONFIRMED',
+          pnr,
+          auto_id: response.data?.auto_id || response.data?.vehicle_id || payload.vehicle_id,
+          voucher_qr_data: response.data?.voucher_qr_data || response.data?.voucher_qr_payload || `BOOKING-CAR-${pnr}`,
+          raw_response: response.data,
+        };
+      } catch (err: any) {
+        this.logger.error(`[AutosCircuitBreaker] Error despachando a RentaFacil: ${JSON.stringify(err.response?.data || err.message)}`);
+        if (err.response?.status === 409) {
+          throw new HttpException({
+            type: 'https://api.booking.local/errors/conflict',
+            title: 'Vehículo No Disponible',
+            status: HttpStatus.CONFLICT,
+            detail: err.response?.data?.detail || 'El vehículo no está disponible en esas fechas.',
+          }, HttpStatus.CONFLICT);
+        }
+        throw new HttpException({
+          type: 'https://api.booking.local/errors/bad-request',
+          title: 'Datos Inválidos',
+          status: HttpStatus.BAD_REQUEST,
+          detail: err.response?.data?.detail || err.response?.data?.message || 'No se pudo crear la orden en RentaFacil.',
+        }, HttpStatus.BAD_REQUEST);
+      }
+    }
 
     // Despacho a Maneja de Una (Mateo Morales - NODE_AUT_MDU)
     if (isMateo) {
