@@ -46,7 +46,12 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
           });
         }
         if (ruta === '/api/v2/vuelos/offers/hold' && req.method === 'POST') {
-          return json(201, { holdId: `HOLD-${nodo}`, offerId: body.offerId });
+          const asientos = (body.assignedSeats ?? []).map((x: any) => x.seatNumber);
+          // 'oauth' es una aerolínea que todavía no acepta assignedSeats; '9Z' ya lo compró alguien en la web de la aerolínea.
+          if (asientos.length && nodo === 'oauth') return json(400, { title: 'property assignedSeats should not exist' });
+          if (asientos.includes('9Z')) return json(409, { code: 'SEAT_TAKEN', title: 'Seat taken' });
+          const id = asientos.length ? `HOLD-${nodo}-${asientos.join('-')}` : `HOLD-${nodo}`;
+          return json(201, { holdId: id, offerId: body.offerId, status: 'HELD', expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), lockedPrice: { currency: 'USD', total: '150.00' }, assignedSeats: body.assignedSeats });
         }
         if (ruta.startsWith('/api/v2/vuelos/offers/hold/') && req.method === 'GET') {
           return json(200, { holdId: ruta.split('/').pop(), lockedPrice: { currency: 'USD', total: '150.00' } });
@@ -126,7 +131,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       { 'idempotency-key': 'idem-1' },
     );
     expect(r.status).toBe(201);
-    expect(r.body).toEqual({ holdId: 'NODE_VUE_KEY~HOLD-key', offerId: 'NODE_VUE_KEY~OF-key' });
+    expect(r.body).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key', offerId: 'NODE_VUE_KEY~OF-key' });
     const hold = llamadas.find((c) => c.url === '/api/v2/vuelos/offers/hold')!;
     expect(hold.body.offerId).toBe('OF-key');
     expect(hold.headers['x-user-id']).toMatch(/^[0-9a-f-]{36}$/);
@@ -367,6 +372,45 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect((await fetch(`${locks}?holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-A')}`, { method: 'DELETE' })).status).toBe(204);
       expect((await put('NODE_VUE_KEY~HOLD-B', [{ segmentId: 'SEG-1', seatNumber: '7A' }])).status).toBe(200);
       await fetch(`${locks}?holdId=${encodeURIComponent('NODE_VUE_KEY~HOLD-B')}`, { method: 'DELETE' });
+    });
+
+    it('asiento en la aerolínea: rehace el hold con assignedSeats, suelta el anterior y respeta el 409 de la aerolínea', async () => {
+      const oferta = encodeURIComponent('NODE_VUE_KEY~OF-key');
+      const locks = `${base}/api/v2/vuelos/offers/${oferta}/seat-locks`;
+      // 1) Se crea el hold por Booking (así Booking guarda cómo se creó).
+      const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-h1' }), body: JSON.stringify({ offerId: 'NODE_VUE_KEY~OF-key', itinerarySelections: [{ itineraryId: 'IT-1', cabinClass: 'ECONOMY', fareBrand: 'BASIC' }], passengersBreakdown: { adults: 1 } }) })).json();
+      expect(h.holdId).toBe('NODE_VUE_KEY~HOLD-key');
+      llamadas.length = 0;
+      // 2) Elige 8C: la aerolínea recibe un hold nuevo con assignedSeats y se libera el anterior.
+      const r = await fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: h.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '8C' }] }) });
+      const datos = await r.json();
+      expect(r.status).toBe(200);
+      expect(datos).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key-8C', previousHoldId: 'NODE_VUE_KEY~HOLD-key', airlineHold: true });
+      expect(datos.hold.bookingPrice).toMatchObject({ airlineTotal: '150.00', total: '165.00' });
+      const nuevo = llamadas.find((c) => c.url === '/api/v2/vuelos/offers/hold' && c.method === 'POST')!;
+      expect(nuevo.body).toMatchObject({ offerId: 'OF-key', assignedSeats: [{ segmentId: 'SEG-1', seatNumber: '8C' }], passengersBreakdown: { adults: 1 } });
+      await new Promise((ok) => setTimeout(ok, 50));
+      expect(llamadas.some((c) => c.method === 'DELETE' && c.url === '/api/v2/vuelos/offers/hold/HOLD-key')).toBe(true);
+      // 3) El mismo PUT con el hold nuevo y los mismos asientos no rehace nada.
+      llamadas.length = 0;
+      const igual = await (await fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: datos.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '8C' }] }) })).json();
+      expect(igual).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key-8C', airlineHold: true });
+      expect(llamadas.filter((c) => c.method === 'POST')).toHaveLength(0);
+      // 4) Cambia a 9Z, que ya se vendió en la web de la aerolínea: 409 y sigue con 8C.
+      const tomado = await fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: datos.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '9Z' }] }) });
+      expect(tomado.status).toBe(409);
+      expect(await tomado.json()).toMatchObject({ code: 'SEAT_TAKEN', taken: [{ segmentId: 'SEG-1', seatNumber: '9Z' }], charged: false });
+      const otros = await (await fetch(`${locks}?holdId=otro`)).json();
+      expect(otros.locks).toEqual([{ segmentId: 'SEG-1', seatNumber: '8C' }]);
+      await fetch(`${locks}?holdId=${encodeURIComponent(datos.holdId)}`, { method: 'DELETE' });
+    });
+
+    it('aerolínea que aún no acepta assignedSeats: queda el bloqueo de Booking, sin romper la compra', async () => {
+      const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-h2' }), body: JSON.stringify({ offerId: 'NODE_VUE_OAUTH~OF-oauth', itinerarySelections: [] }) })).json();
+      const r = await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_OAUTH~OF-oauth')}/seat-locks`, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: h.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '3A' }] }) });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toMatchObject({ holdId: h.holdId, airlineHold: false, locked: [{ segmentId: 'SEG-1', seatNumber: '3A' }] });
+      await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_OAUTH~OF-oauth')}/seat-locks?holdId=${encodeURIComponent(h.holdId)}`, { method: 'DELETE' });
     });
 
     it('la acción de una reserva se compara en minúsculas (/CANCEL también reembolsa)', async () => {

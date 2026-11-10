@@ -232,7 +232,7 @@ const REGLAS = {
   phone: (v, p) => errorTelefono(p?.phoneCountry ?? 'EC', v),
 };
 
-export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada }) {
+export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfirmada, onHoldCambiado }) {
   const { user } = useAuth();
   const isAdmin = user?.email === 'admin@booking.com' || user?.email === 'alejandroflores@booking.com' || user?.user_metadata?.role === 'admin';
   const navigate = useNavigate();
@@ -240,7 +240,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const idBase = useId();
   const { trackEvent } = useTelemetry();
 
-  const tipos = useMemo(() => distribuir(pasajeros), [pasajeros]);
+  // Por contenido, no por referencia: un objeto `pasajeros` nuevo con los mismos números no reinicia el formulario.
+  const clavePasajeros = JSON.stringify(pasajeros ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tipos = useMemo(() => distribuir(pasajeros), [clavePasajeros]);
   const [lista, setLista] = useState([]);
   // Día del primer vuelo (para las edades); si no se conoce, hoy en Ecuador.
   const fechaViaje = hold?.fechaViaje
@@ -254,6 +257,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const [errores, setErrores] = useState({});
   // Mapas de asientos reales por tramo: { [segmentId]: { estado, asientos, error } }
   const [mapas, setMapas] = useState({});
+  const [avisoPrecio, setAvisoPrecio] = useState(null);
   // Asientos que otros clientes están eligiendo ahora mismo: { [segmentId]: ['14D', ...] }
   const [bloqueosAjenos, setBloqueosAjenos] = useState({});
   const [enviando, setEnviando] = useState(false);
@@ -292,6 +296,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
 
   // Al abrir: un formulario por pasajero, con una clave de idempotencia nueva
   // para esta intencion de negocio.
+  // El formulario se reinicia solo con una compra nueva, no cuando el hold se rehace al elegir asiento.
+  const idCompra = hold?.compraId ?? hold?.holdId;
   useEffect(() => {
     if (!abierto || !hold) return;
     setPasoActual(1);
@@ -308,7 +314,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     }
     let infantes = 0;
     setLista(tipos.map((tipo, i) => pasajeroVacio(tipo, i, idsAdultos, tipo === 'INFANT' ? infantes++ : 0)));
-  }, [abierto, hold, tipos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, idCompra, tipos]);
 
   const cambiar = useCallback((indice, campo, valor) => {
     setLista((prev) =>
@@ -413,6 +420,9 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   // asientos para esta compra. Si otro cliente ganó alguno (409), se suelta aquí.
   const firmaAsientos = JSON.stringify(lista.map((p) => (p.passengerType === 'INFANT' ? {} : p.asientos ?? {})));
   const ultimaFirma = useRef('');
+  const colaAsientos = useRef(Promise.resolve());
+  const holdRef = useRef(hold);
+  holdRef.current = hold;
   useEffect(() => {
     if (!abierto || !hold?.offerId || !hold?.holdId) return undefined;
     const elegidos = [];
@@ -428,9 +438,22 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       return undefined;
     }
     ultimaFirma.current = firma;
-    const t = setTimeout(async () => {
+    const t = setTimeout(() => {
+      // Una petición a la vez: si el hold se rehace, la siguiente usa el nuevo.
+      colaAsientos.current = colaAsientos.current.then(async () => {
+      const holdActual = holdRef.current;
       try {
-        await bloquearAsientos(hold.offerId, hold.holdId, elegidos.map(({ segmentId, seatNumber }) => ({ segmentId, seatNumber })), hold.expiresAt);
+        const r = await bloquearAsientos(holdActual.offerId, holdActual.holdId, elegidos.map(({ segmentId, seatNumber }) => ({ segmentId, seatNumber })), holdActual.expiresAt);
+        // La aerolínea apartó el asiento en un hold nuevo: la compra sigue con ese hold.
+        if (r?.hold?.holdId && r.holdId !== holdActual.holdId) {
+          ultimaFirma.current = `${r.holdId}|${elegidos.map((a) => `${a.segmentId}:${a.seatNumber}`).sort().join(',')}`;
+          const antes = Number(holdActual.bookingPrice?.total ?? holdActual.lockedPrice?.total);
+          const despues = Number(r.hold.bookingPrice?.total ?? r.hold.lockedPrice?.total);
+          if (Number.isFinite(antes) && Number.isFinite(despues) && Math.abs(antes - despues) >= 0.01) {
+            setAvisoPrecio(`La aerolínea actualizó el precio al apartar tu asiento: ahora es ${formatearMoneda(despues, r.hold.lockedPrice?.currency)}.`);
+          }
+          onHoldCambiado?.({ ...r.hold, compraId: holdActual.compraId });
+        }
       } catch (fallo) {
         const tomados = fallo?.response?.status === 409 ? fallo.response.data?.taken ?? [] : [];
         if (tomados.length) {
@@ -449,7 +472,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         }
         // Otros errores (red, hold vencido): la aerolínea igual valida el asiento al reservar.
       }
-    }, 120);
+      });
+    }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firmaAsientos, abierto, hold?.holdId]);
@@ -1124,6 +1148,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                 </div>
               </div>
             </div>
+          )}
+
+          {avisoPrecio && (
+            <p className="modal-nota-bloque" role="status">{avisoPrecio}</p>
           )}
 
           {errorGeneral && (

@@ -33,7 +33,23 @@ CREATE TABLE IF NOT EXISTS public.vuelos_asientos_bloqueo (
   PRIMARY KEY (codigo_nodo, segmento_id, asiento)
 );
 CREATE INDEX IF NOT EXISTS ix_vuelos_asientos_bloqueo_hold ON public.vuelos_asientos_bloqueo (hold_id);
+-- Cómo se creó cada hold en la aerolínea (para rehacerlo con los asientos
+-- elegidos: contrato v2, HoldRequest.assignedSeats) y qué asientos tiene allá.
+CREATE TABLE IF NOT EXISTS public.vuelos_holds_booking (
+  hold_id     varchar(200) PRIMARY KEY,
+  codigo_nodo varchar(50)  NOT NULL,
+  cuerpo      jsonb        NOT NULL,
+  asientos    jsonb        NOT NULL DEFAULT '[]'::jsonb,
+  created_at  timestamptz  NOT NULL DEFAULT now()
+);
 `;
+
+export interface HoldGuardado {
+  nodo: string;
+  cuerpo: any;
+  /** Asientos que la aerolínea ya tiene apartados en este hold. */
+  asientos: AsientoRef[];
+}
 
 export interface AsientoRef {
   segmentId: string;
@@ -71,6 +87,7 @@ export class VuelosAsientosBloqueo {
   private tablaLista = false;
   /** Respaldo en memoria: clave `nodo|segmento|asiento`. */
   private readonly memoria = new Map<string, { holdId: string; expira: number }>();
+  private readonly holds = new Map<string, HoldGuardado & { t: number }>();
 
   constructor(@Optional() private readonly dataSource?: DataSource) {}
 
@@ -176,6 +193,48 @@ export class VuelosAsientosBloqueo {
     await ds.query(`DELETE FROM public.vuelos_asientos_bloqueo WHERE hold_id = $1`, [holdId]).catch((e: any) =>
       this.logger.warn(`[asientos] liberar falló: ${e?.message}`),
     );
+  }
+
+  // ───────────── Holds: cómo se crearon y qué asientos tienen en la aerolínea ─────────────
+
+  async guardarHold(holdId: string, nodo: string, cuerpo: any, asientos: AsientoRef[] = []): Promise<void> {
+    if (!holdId || !cuerpo || typeof cuerpo !== 'object') return;
+    const limpio = { ...cuerpo };
+    delete limpio.assignedSeats;
+    if (this.holds.size > 2_000) {
+      const viejo = Date.now() - 2 * 3_600_000;
+      for (const [k, v] of this.holds) if (v.t < viejo) this.holds.delete(k);
+    }
+    this.holds.set(holdId, { nodo, cuerpo: limpio, asientos, t: Date.now() });
+    const ds = await this.base();
+    if (!ds) return;
+    await ds.query(
+      `INSERT INTO public.vuelos_holds_booking (hold_id, codigo_nodo, cuerpo, asientos) VALUES ($1, $2, $3::jsonb, $4::jsonb)
+       ON CONFLICT (hold_id) DO UPDATE SET cuerpo = EXCLUDED.cuerpo, asientos = EXCLUDED.asientos`,
+      [holdId, nodo, JSON.stringify(limpio), JSON.stringify(asientos)],
+    ).catch((e: any) => this.logger.warn(`[asientos] guardar hold falló: ${e?.message}`));
+    if (Math.random() < 0.02) {
+      void ds.query(`DELETE FROM public.vuelos_holds_booking WHERE created_at < now() - interval '1 day'`).catch(() => undefined);
+    }
+  }
+
+  async hold(holdId: string): Promise<HoldGuardado | null> {
+    const m = this.holds.get(holdId);
+    if (m) return { nodo: m.nodo, cuerpo: m.cuerpo, asientos: m.asientos };
+    const ds = await this.base();
+    if (!ds) return null;
+    try {
+      const [f] = await ds.query(`SELECT codigo_nodo, cuerpo, asientos FROM public.vuelos_holds_booking WHERE hold_id = $1`, [holdId]);
+      return f ? { nodo: f.codigo_nodo, cuerpo: f.cuerpo, asientos: Array.isArray(f.asientos) ? f.asientos : [] } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async olvidarHold(holdId: string): Promise<void> {
+    this.holds.delete(holdId);
+    const ds = await this.base();
+    if (ds) await ds.query(`DELETE FROM public.vuelos_holds_booking WHERE hold_id = $1`, [holdId]).catch(() => undefined);
   }
 
   private fijarEnMemoria(nodo: string, holdId: string, asientos: AsientoRef[], expira: Date) {
