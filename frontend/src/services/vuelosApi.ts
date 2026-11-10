@@ -185,7 +185,7 @@ export async function obtenerMapaAsientos(offerId: string, segmentId: string, ho
   const { data } = await api.get(`/vuelos/offers/${encodeURIComponent(offerId)}/seatmap`, {
     // `holdId` lo usa Booking para no marcar como ocupados mis propios asientos; no va a la aerolínea.
     params: holdId ? { segmentId, holdId } : { segmentId },
-    headers: cabeceraCorrelacion(),
+    headers: { 'X-Device-Fingerprint': obtenerHuellaDispositivo(), ...cabeceraCorrelacion() },
   });
   return data;
 }
@@ -210,7 +210,8 @@ export async function bloquearAsientos(offerId: string, holdId: string, seats: A
   const { data } = await api.put(
     `/vuelos/offers/${encodeURIComponent(offerId)}/seat-locks`,
     { holdId, seats, expiresAt },
-    { headers: cabeceraCorrelacion() },
+    // Misma identidad con la que se creó el hold (la aerolínea valida al dueño).
+    { headers: { 'X-Device-Fingerprint': obtenerHuellaDispositivo(), ...cabeceraCorrelacion() } },
   );
   return data as { locked: AsientoElegido[]; taken: AsientoElegido[]; expiresAt: string; ttlMinutes: number };
 }

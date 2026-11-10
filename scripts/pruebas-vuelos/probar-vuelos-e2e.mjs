@@ -129,7 +129,8 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   if (asiento) {
     const locks = `/vuelos/offers/${encodeURIComponent(oferta.offerId)}/seat-locks`;
     const elegido = [{ segmentId: seg.segmentId, seatNumber: asiento }];
-    const hB = await hold(oferta);
+    // El segundo cliente (otro usuario) crea su propio hold del mismo vuelo.
+    const hB = await llamar('POST', '/vuelos/offers/hold', { cuerpo: { offerId: oferta.offerId, itinerarySelections: selecciones(oferta), passengersBreakdown: { adults: 1, children: 0, infants: 0 } }, sub: OTRO });
     const l1 = await llamar('PUT', locks, { cuerpo: { holdId: h.json.holdId, seats: elegido, expiresAt: h.json.expiresAt } });
     const l2 = hB.json.holdId ? await llamar('PUT', locks, { cuerpo: { holdId: hB.json.holdId, seats: elegido }, sub: OTRO }) : { status: 0, json: {} };
     caso(`${n}-04b`, 'Asiento elegido: queda bloqueado y otro cliente no puede tomarlo (409)', l1.status === 200 && l2.status === 409 && l2.json.code === 'SEAT_TAKEN', `HTTP ${l1.status} / ${l2.status}`);

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { RespuestaProxy, VuelosSociosService } from './vuelos-socios.service';
 import { resumenDeReserva, VuelosSociosReservasService } from './vuelos-socios-reservas.service';
 import { ordenDeReserva, precioConRecargo } from './vuelos-facturacion';
-import { SincronizadorEventosVuelos } from './vuelos-eventos';
+import { montoReembolso, SincronizadorEventosVuelos } from './vuelos-eventos';
 import { PasoVuelo, ResultadoPaso, trazaVuelos } from './vuelos-traza';
 import { AsientoRef, limpiarAsientos, minutosBloqueo, VuelosAsientosBloqueo } from './vuelos-asientos-bloqueo';
 import { VuelosService } from '../vuelos.service';
@@ -404,9 +404,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         if (copia.status === 'CHECKED_IN') r.body = { ...r.body, status: 'CHECKED_IN' };
       } else if (metodo === 'POST' && segmentos[2] === 'cancel') {
         // Contrato v2: "La aerolínea calcula; Booking ejecuta el reembolso al cliente."
-        const monto = parseFloat(String(r.body?.refund?.amount ?? r.body?.refundAmount ?? ''));
+        const monto = montoReembolso(r.body);
         let devuelto = 0;
-        if (copia.transaccionId && Number.isFinite(monto) && monto > 0) {
+        if (copia.transaccionId && monto > 0) {
           devuelto = await this.reservas.reembolsar(copia.transaccionId, monto, `Cancelación ${bookingId}`);
           if (devuelto <= 0) this.traza(entrantes, 'reembolso', 'error', `Cancelación ${bookingId}: el reembolso FALLÓ`, { nodo: copia.codigoNodo, monto });
         }
@@ -562,13 +562,18 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     res.status(200).json({ holdId, locked, taken: [], expiresAt: expira.toISOString(), ttlMinutes: minutosBloqueo() });
   }
 
-  /** El hold existe y sigue activo en la aerolínea (se recuerda 5 min; si la aerolínea no responde, se asume que sí). */
+  /**
+   * El hold sigue activo en la aerolínea (se recuerda 5 min). Solo se rechaza
+   * cuando la aerolínea dice claramente que venció o se liberó; si no responde o
+   * no reconoce al usuario (403/404 por dueño distinto) se deja pasar: es mejor
+   * bloquear de más que dejar a un cliente sin su asiento.
+   */
   private async holdVigente(nodo: string, holdId: string, entrantes: Record<string, any>): Promise<boolean> {
     const visto = this.holdsVistos.get(holdId);
     if (visto && Date.now() - visto < 5 * 60_000) return true;
     const h = await this.socios.reenviar(nodo, 'GET', ['offers', 'hold', holdId], '', null, entrantes);
     const estado = String(h.body?.status ?? 'HELD').toUpperCase();
-    if (h.status === 404 || h.status === 410 || (h.status >= 200 && h.status < 300 && estado !== 'HELD')) return false;
+    if (h.status === 410 || (h.status >= 200 && h.status < 300 && estado !== 'HELD')) return false;
     if (this.holdsVistos.size > 5_000) this.holdsVistos.clear();
     this.holdsVistos.set(holdId, Date.now());
     return true;
