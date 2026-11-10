@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { ResumenTab } from '../components/admin/ResumenTab';
 import { ProcesosTab } from '../components/admin/ProcesosTab';
 import { ProcesosAlojamientosTab } from '../components/admin/ProcesosAlojamientosTab';
+import { ProcesosAutosTab } from '../components/admin/ProcesosAutosTab';
+import { ProcesosAtraccionesTab } from '../components/admin/ProcesosAtraccionesTab';
 import { api } from '../services/api';
 import { supabase } from '../services/supabase';
 import { GestionAlojamientos } from '../components/admin/GestionAlojamientos';
@@ -11,6 +13,7 @@ import { Panel3_ArbolCategoriasAtracciones } from '../components/admin/Panel3_Ar
 import { Panel4_LiquidacionesFinanzas } from '../components/admin/Panel4_LiquidacionesFinanzas';
 import { Panel5_ConsolaFiscalFacturas } from '../components/admin/Panel5_ConsolaFiscalFacturas';
 import { Panel8_AuditoriaSagas } from '../components/admin/Panel8_AuditoriaSagas';
+import { PanelServiceMesh } from '../components/admin/PanelServiceMesh';
 import { cotizarCancelacion, cancelarReserva as cancelarReservaVuelo } from '../services/vuelosApi';
 
 const C = {
@@ -115,6 +118,10 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
 
       <SectionTitle>🧾 Facturas emitidas</SectionTitle>
       <Panel5_ConsolaFiscalFacturas refreshKey={refreshKey}/>
+
+      <div style={{ marginTop: 24, marginBottom: 8 }}>
+        <PanelServiceMesh refreshKey={refreshKey} />
+      </div>
 
       <SectionTitle>🔌 Módulos de Booking (respuesta medida desde tu navegador)</SectionTitle>
       <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
@@ -2471,8 +2478,8 @@ function ConfiguracionTab() {
 // ── Servicios & Proveedores: socios de las 4 verticales + vista propia de cada una ──
 const VERTICALES_ADMIN = [
   { id: 'vuelos', label: '✈️ Vuelos', sub: 'Proceso en vivo, grafos y liquidaciones por aerolínea' },
-  { id: 'autos', label: '🚗 Autos', sub: 'Flota que ve Booking' },
-  { id: 'atracciones', label: '🎡 Atracciones', sub: 'Categorías del catálogo' },
+  { id: 'autos', label: '🚗 Autos', sub: 'Canal gRPC punto a punto (:50051), grafos de fallas y gestión de flota' },
+  { id: 'atracciones', label: '🎡 Atracciones', sub: 'Canal gRPC punto a punto (:50051), grafos de fallas y árbol de categorías' },
   { id: 'alojamientos', label: '🏨 Alojamientos', sub: 'Proceso en vivo, grafos de fallas, catálogo y tipos de habitación' },
 ];
 
@@ -2502,8 +2509,18 @@ function ServiciosTab({ refreshKey }) {
             <Panel4_LiquidacionesFinanzas refreshKey={refreshKey} />
           </div>
         )}
-        {vertical === 'autos' && <Panel2_GestionFlotaAutos refreshKey={refreshKey} />}
-        {vertical === 'atracciones' && <Panel3_ArbolCategoriasAtracciones refreshKey={refreshKey} />}
+        {vertical === 'autos' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            <ProcesosAutosTab refreshKey={refreshKey} />
+            <Panel2_GestionFlotaAutos refreshKey={refreshKey} />
+          </div>
+        )}
+        {vertical === 'atracciones' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            <ProcesosAtraccionesTab refreshKey={refreshKey} />
+            <Panel3_ArbolCategoriasAtracciones refreshKey={refreshKey} />
+          </div>
+        )}
         {vertical === 'alojamientos' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             <ProcesosAlojamientosTab refreshKey={refreshKey} />

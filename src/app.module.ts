@@ -28,6 +28,7 @@ import { SecurityModule } from './core/security/security.module';
 import { ContractsModule } from './modules/contracts/contracts.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
 import { ClientesModule } from './modules/clientes/clientes.module';
+import { ServiceMeshModule } from './modules/service-mesh/service-mesh.module';
 
 @Module({
   imports: [
@@ -113,6 +114,7 @@ import { ClientesModule } from './modules/clientes/clientes.module';
     ContractsModule,
     ReservasModule,
     ClientesModule,
+    ServiceMeshModule,
   ],
   controllers: [],
   providers: [TraceContextMiddleware],

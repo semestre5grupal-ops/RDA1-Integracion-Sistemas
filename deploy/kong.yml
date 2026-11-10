@@ -1,0 +1,131 @@
+# ==============================================================================
+# KONG API GATEWAY — CONFIGURACIÓN DECLARATIVA DB-LESS (§8.3)
+# ==============================================================================
+# Cátedra: Integración de Sistemas — Semana 08: API Gateways y Service Mesh
+# Docente: Damián Nicolalde
+# Modo: DB-less (Declarativo sin base de datos)
+# Rol: Tráfico Norte-Sur (Borde perimetral del ecosistema Booking Ecuador)
+# ==============================================================================
+
+_format_version: "3.0"
+
+services:
+  # ── 1. Gateway Principal / BFF Aggregator ──
+  - name: booking-core-aggregator
+    url: http://booking-core-api:3000/api
+    routes:
+      - name: core-api-route
+        paths:
+          - /api
+        strip_path: false
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Correlation-Id
+          generator: uuid
+          echo_downstream: true
+      - name: rate-limiting
+        config:
+          minute: 120
+          policy: local
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Gateway-Node: Kong-Edge-01"
+              - "X-Security-Perimeter: Edge-Verified"
+
+  # ── 2. Vertical de Vuelos ──
+  - name: vuelos-service
+    url: http://booking-core-api:3000/api/v1/vuelos
+    routes:
+      - name: vuelos-route
+        paths:
+          - /api/v1/vuelos
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  # ── 3. Vertical de Autos ──
+  - name: autos-service
+    url: http://booking-core-api:3000/api/v1/autos
+    routes:
+      - name: autos-route
+        paths:
+          - /api/v1/autos
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  # ── 4. Vertical de Atracciones ──
+  - name: atracciones-service
+    url: http://booking-core-api:3000/api/v1/atracciones
+    routes:
+      - name: atracciones-route
+        paths:
+          - /api/v1/atracciones
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  # ── 5. Vertical de Alojamientos ──
+  - name: alojamientos-service
+    url: http://booking-core-api:3000/api/v1/alojamientos
+    routes:
+      - name: alojamientos-route
+        paths:
+          - /api/v1/alojamientos
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 60
+          policy: local
+
+  # ── 6. Orquestador ESB (Checkout Multivertical y Sagas) ──
+  - name: esb-checkout-service
+    url: http://booking-core-api:3000/api/v1/esb
+    routes:
+      - name: esb-route
+        paths:
+          - /api/v1/esb
+        strip_path: false
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 30
+          policy: local
+
+plugins:
+  # Plugins Globales aplicados en el Borde (Norte-Sur §8.5)
+  - name: response-transformer
+    config:
+      remove:
+        headers:
+          - "X-Powered-By"
+          - "Server"
+      add:
+        headers:
+          - "X-Ecosystem: Booking-PUCE-RDA2"
+          - "X-Mesh-Edge-Protected: true"
+
+consumers:
+  - username: partner-daniel-autos
+    keyauth_credentials:
+      - key: key_aut_daniel_secret_123
+  - username: partner-mateo-autos
+    keyauth_credentials:
+      - key: key_aut_mateo_secret_456
+  - username: partner-gloria-atracciones
+    keyauth_credentials:
+      - key: key_atr_gloria_secret_789
+
