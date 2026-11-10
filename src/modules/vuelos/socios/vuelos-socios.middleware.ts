@@ -154,10 +154,15 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     if (esMapa && rg.status >= 200 && rg.status < 300 && rg.body && typeof rg.body === 'object') {
       const otros = await this.bloqueos.deOtros(nodo, holdMapa, params.get('segmentId'));
       if (otros.length) rg.body = marcarBloqueados(rg.body, new Set(otros.map((a) => a.seatNumber)));
+      // Los asientos que la aerolínea tiene apartados para MI hold me salen libres (son míos).
+      const mio = holdMapa ? await this.bloqueos.hold(holdMapa) : null;
+      const propios = (mio?.asientos ?? []).filter((a) => !params.get('segmentId') || a.segmentId === params.get('segmentId'));
+      if (propios.length) rg.body = marcarPropios(rg.body, new Set(propios.map((a) => a.seatNumber)));
     }
     // Hold liberado por el cliente: se sueltan también sus asientos.
     if (metodo === 'DELETE' && segmentos[0] === 'offers' && segmentos[1] === 'hold' && segmentos[2]) {
       await this.bloqueos.liberar(decodeURIComponent(segmentos[2]));
+      void this.bloqueos.olvidarHold(decodeURIComponent(segmentos[2]));
     }
     // Hold (crear o consultar): Booking agrega lo que cobrará al cliente.
     if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && rg.status < 300 && rg.body?.lockedPrice?.total != null) {
@@ -165,6 +170,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       if (Number.isFinite(base) && base > 0) {
         rg.body = { ...rg.body, bookingPrice: precioBooking(precioConRecargo(base, await this.reservas.recargoPct()), rg.body.lockedPrice.currency) };
       }
+    }
+    if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && metodo === 'POST' && segmentos.length === 2 && rg.status < 300 && rg.body?.holdId) {
+      await this.bloqueos.guardarHold(String(rg.body.holdId), nodo, req.body, limpiarAsientos(req.body?.assignedSeats));
     }
     if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && metodo === 'POST') {
       this.traza(entrantes, 'hold', rg.status < 300 ? 'ok' : 'error',
@@ -331,6 +339,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
     // La aerolínea ya marca esos asientos como ocupados: se suelta el bloqueo de Booking.
     void this.bloqueos.liberar(holdId);
+    void this.bloqueos.olvidarHold(holdId);
 
     // 5) Copia para Mis Reservas.
     try {
@@ -559,7 +568,80 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       this.enviar(res, r);
       return;
     }
-    res.status(200).json({ holdId, locked, taken: [], expiresAt: expira.toISOString(), ttlMinutes: minutosBloqueo() });
+
+    // En la aerolínea: el hold se rehace con `assignedSeats` (contrato v2) para
+    // que ella también vea el asiento apartado. Si no lo acepta, sigue el bloqueo de Booking.
+    const enAerolinea = await this.apartarEnAerolinea(nodo, holdId, asientos, entrantes);
+    if (enAerolinea.tomados) {
+      await this.bloqueos.fijar(nodo, holdId, enAerolinea.previos, expira);
+      const r = asientoTomado(enAerolinea.tomados, 'Elige otro asiento.');
+      r.body = { ...r.body, holdId, airlineHold: true };
+      this.enviar(res, r);
+      return;
+    }
+    const nuevo = enAerolinea.nuevoHold;
+    if (nuevo) {
+      const expiraNuevo = Date.parse(String(nuevo.expiresAt ?? ''));
+      const hasta = new Date(Number.isFinite(expiraNuevo) && expiraNuevo > Date.now() ? Math.min(expiraNuevo, Date.now() + minutosBloqueo() * 60_000) : Date.now() + minutosBloqueo() * 60_000);
+      await this.bloqueos.liberar(holdId);
+      await this.bloqueos.fijar(nodo, String(nuevo.holdId), asientos, hasta);
+      res.status(200).json({ holdId: String(nuevo.holdId), previousHoldId: holdId, hold: nuevo, locked: asientos, taken: [], expiresAt: hasta.toISOString(), ttlMinutes: minutosBloqueo(), airlineHold: true });
+      return;
+    }
+    res.status(200).json({ holdId, locked, taken: [], expiresAt: expira.toISOString(), ttlMinutes: minutosBloqueo(), airlineHold: enAerolinea.apartado });
+  }
+
+  /** Aerolíneas que todavía no aceptan `assignedSeats` en el hold (se vuelve a probar cada 10 min). */
+  private readonly sinAsientoEnHold = new Map<string, number>();
+
+  /**
+   * Rehace el hold en la aerolínea con los asientos elegidos (`assignedSeats`) y
+   * suelta el anterior. Devuelve el hold nuevo, o `tomados` si la aerolínea dice
+   * que el asiento ya está ocupado (409). Si la aerolínea no lo soporta o falla,
+   * no cambia nada (queda el bloqueo de Booking).
+   */
+  private async apartarEnAerolinea(nodo: string, holdId: string, asientos: AsientoRef[], entrantes: Record<string, any>): Promise<{ nuevoHold?: any; tomados?: AsientoRef[]; previos: AsientoRef[]; apartado: boolean }> {
+    const guardado = await this.bloqueos.hold(holdId);
+    const previos = guardado?.asientos ?? [];
+    const firma = (l: AsientoRef[]) => l.map((a) => `${a.segmentId}|${a.seatNumber}`).sort().join(',');
+    if (!guardado) return { previos, apartado: false };
+    if (firma(previos) === firma(asientos)) return { previos, apartado: previos.length > 0 };
+    const pausa = this.sinAsientoEnHold.get(nodo);
+    if (asientos.length && pausa && Date.now() - pausa < 10 * 60_000) return { previos, apartado: false };
+
+    const t0 = Date.now();
+    const cuerpo = asientos.length ? { ...guardado.cuerpo, assignedSeats: asientos } : { ...guardado.cuerpo };
+    const r = await this.socios.reenviar(nodo, 'POST', ['offers', 'hold'], '', cuerpo, { ...entrantes, 'idempotency-key': randomUUID() });
+    if (r.status >= 200 && r.status < 300 && r.body?.holdId) {
+      this.sinAsientoEnHold.delete(nodo);
+      const nuevoId = String(r.body.holdId);
+      await this.bloqueos.guardarHold(nuevoId, nodo, guardado.cuerpo, asientos);
+      // El hold anterior se suelta en la aerolínea (si falla, vence solo).
+      void this.socios.reenviar(nodo, 'DELETE', ['offers', 'hold', holdId], '', null, entrantes).catch(() => undefined);
+      void this.bloqueos.olvidarHold(holdId);
+      const base = parseFloat(String(r.body?.lockedPrice?.total ?? ''));
+      if (Number.isFinite(base) && base > 0) {
+        r.body = { ...r.body, bookingPrice: precioBooking(precioConRecargo(base, await this.reservas.recargoPct()), r.body.lockedPrice.currency) };
+      }
+      this.traza(entrantes, 'asiento', 'ok',
+        asientos.length
+          ? `Asiento ${asientos.map((a) => a.seatNumber).join(', ')} apartado también en la aerolínea (hold ${nuevoId.split('~').pop()?.slice(0, 8)})`
+          : 'Asientos soltados en la aerolínea',
+        { nodo, ms: Date.now() - t0 });
+      return { nuevoHold: r.body, previos, apartado: asientos.length > 0 };
+    }
+    if (r.status === 409) {
+      const clave = new Set(previos.map((a) => `${a.segmentId}|${a.seatNumber}`));
+      const nuevos = asientos.filter((a) => !clave.has(`${a.segmentId}|${a.seatNumber}`));
+      this.traza(entrantes, 'asiento', 'aviso', `La aerolínea dice que el asiento ${(nuevos.length ? nuevos : asientos).map((a) => a.seatNumber).join(', ')} ya está ocupado`, { nodo, ms: Date.now() - t0 });
+      return { tomados: nuevos.length ? nuevos : asientos, previos, apartado: previos.length > 0 };
+    }
+    if (r.status === 400 || r.status === 422) {
+      // La aerolínea todavía no acepta `assignedSeats` en el hold.
+      this.sinAsientoEnHold.set(nodo, Date.now());
+      this.traza(entrantes, 'asiento', 'aviso', `La aerolínea no acepta asientos en el hold (HTTP ${r.status}): queda el bloqueo de Booking`, { nodo, ms: Date.now() - t0 });
+    }
+    return { previos, apartado: false };
   }
 
   /**
@@ -625,6 +707,23 @@ function asientoTomado(asientos: AsientoRef[], extra: string): RespuestaProxy {
   const r = problema(409, 'Asiento no disponible', `El asiento ${nums} lo acaba de elegir otra persona. ${extra}`);
   r.body = { ...r.body, type: 'https://api.booking.local/errors/seat-taken', code: 'SEAT_TAKEN', taken: asientos, charged: false };
   return r;
+}
+
+/** Deja libres en MI mapa los asientos que la aerolínea apartó para mi propio hold. */
+export function marcarPropios(mapa: any, propios: Set<string>): any {
+  return {
+    ...mapa,
+    cabins: (mapa.cabins ?? []).map((c: any) => ({
+      ...c,
+      rows: (c.rows ?? []).map((f: any) => ({
+        ...f,
+        seats: (f.seats ?? []).map((a: any) =>
+          propios.has(String(a?.seatNumber ?? '').toUpperCase()) && String(a?.status ?? 'HELD').toUpperCase() === 'HELD'
+            ? { ...a, isAvailable: true, status: 'AVAILABLE', heldByMe: true }
+            : a),
+      })),
+    })),
+  };
 }
 
 /** Marca como ocupados (HELD) en el mapa los asientos bloqueados por otras compras de Booking. */

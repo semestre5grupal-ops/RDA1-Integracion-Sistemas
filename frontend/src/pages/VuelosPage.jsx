@@ -179,7 +179,8 @@ export function VuelosPage() {
       );
       // La edad de cada pasajero se mide el día del primer vuelo.
       const fechaViaje = busquedaActiva?.itineraries?.[0]?.departureDate ?? null;
-      setHoldActivo({ ...respuesta, offerId: oferta.offerId, tramos, fechaViaje });
+      // `compraId` identifica esta compra aunque el hold se rehaga al elegir asiento.
+      setHoldActivo({ ...respuesta, offerId: oferta.offerId, tramos, fechaViaje, compraId: clave });
     } catch (error) {
       const detalle = error?.response?.data?.detail ?? 'No se pudo procesar tu selección. Inténtalo de nuevo.';
       setError({ title: 'Error al continuar', detail: detalle });
@@ -665,6 +666,10 @@ export function VuelosPage() {
         hold={holdActivo}
         pasajeros={busquedaActiva?.passengers}
         onCerrar={cerrarFormulario}
+        // Al elegir asiento la aerolínea aparta un hold nuevo con ese asiento: se reemplaza aquí.
+        onHoldCambiado={(nuevo) =>
+          setHoldActivo((actual) => (actual && actual.compraId === nuevo.compraId ? { ...actual, ...nuevo } : actual))
+        }
         onConfirmada={async (reservaData, pasajerosState) => {
           if (pasajerosState) {
             try {
