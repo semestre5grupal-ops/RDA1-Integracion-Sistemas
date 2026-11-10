@@ -114,7 +114,6 @@ export class AdminController {
   async getProcesoAtracciones() {
     return this.metricasService.getProcesoAtracciones();
   }
-  }
 
   @Get('finanzas/vuelos/conciliacion')
   @ApiOperation({ summary: 'Conciliación con aerolíneas socias: vendido, devuelto, comisión y neto a pagar por aerolínea y por reserva' })

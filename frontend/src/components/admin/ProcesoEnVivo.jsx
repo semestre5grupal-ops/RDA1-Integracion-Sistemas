@@ -31,6 +31,7 @@ const RAMAS = [
   { id: 'cancelacion', label: 'Cancelación', sub: 'del cliente', icon: '🛑' },
   { id: 'checkin', label: 'Check-in', sub: 'Asistencia en aerolínea', icon: '🛂' },
   { id: 'cambio_fecha', label: 'Cambio de fecha', sub: 'retraso o cambio', icon: '🗓️' },
+  { id: 'asiento', label: 'Asiento', sub: 'bloqueo en tiempo real', icon: '💺' },
   { id: 'estado_vuelo', label: 'Estado de vuelo', sub: 'consulta', icon: '📡' },
 ];
 const TODOS = [...PASOS, ...RAMAS, { id: 'consulta', label: 'Otra consulta', icon: '🔁' }];
