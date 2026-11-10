@@ -1,0 +1,112 @@
+# ==============================================================================
+# ISTIO SERVICE MESH — CONFIGURACIÓN DECLARATIVA ESTE-OESTE (§8.4)
+# ==============================================================================
+# Cátedra: Integración de Sistemas — Semana 08: API Gateways y Service Mesh
+# Docente: Damián Nicolalde
+# Componente: Malla de Servicios Interna (Istio Control Plane / Envoy Sidecars)
+# Rol: Tráfico Este-Oeste (Comunicación interna inter-microservicio)
+# ==============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: booking-mesh
+  labels:
+    istio-injection: enabled # Inyección automática de sidecars Envoy (§8.4)
+
+---
+# ── 1. mTLS Automático / Zero Trust en todo el Namespace (§8.4, §8.5) ──
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-strict-mtls
+  namespace: booking-mesh
+spec:
+  mtls:
+    mode: STRICT # Todo tráfico interno debe estar mutuamente cifrado y autenticado
+
+---
+# ── 2. Circuit Breakers y Políticas TLS Mutuas (DestinationRules) ──
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: pagos-circuit-breaker
+  namespace: booking-mesh
+spec:
+  host: ms-pagos.booking-mesh.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 10
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: inventario-grpc-circuit-breaker
+  namespace: booking-mesh
+spec:
+  host: ms-inventario.booking-mesh.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      http:
+        h2UpgradePolicy: UPGRADE # Forzar HTTP/2 para gRPC (:50051)
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 5s
+      baseEjectionTime: 15s
+
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: facturas-circuit-breaker
+  namespace: booking-mesh
+spec:
+  host: ms-facturacion.booking-mesh.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 20s
+
+---
+# ── 3. Enrutamiento Canary Este-Oeste (VirtualService §8.4, §8.5 Diagrama 6) ──
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: esb-canary-route
+  namespace: booking-mesh
+spec:
+  hosts:
+    - ms-esb.booking-mesh.svc.cluster.local
+  http:
+    - route:
+        - destination:
+            host: ms-esb.booking-mesh.svc.cluster.local
+            subset: v1
+          weight: 90
+        - destination:
+            host: ms-esb.booking-mesh.svc.cluster.local
+            subset: v2
+          weight: 10
+      retries:
+        attempts: 3
+        perTryTimeout: 2s
+        retryOn: "5xx,connect-failure,refused-stream"
+      timeout: 5s
+

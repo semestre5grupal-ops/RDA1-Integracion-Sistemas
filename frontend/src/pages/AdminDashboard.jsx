@@ -13,6 +13,7 @@ import { Panel3_ArbolCategoriasAtracciones } from '../components/admin/Panel3_Ar
 import { Panel4_LiquidacionesFinanzas } from '../components/admin/Panel4_LiquidacionesFinanzas';
 import { Panel5_ConsolaFiscalFacturas } from '../components/admin/Panel5_ConsolaFiscalFacturas';
 import { Panel8_AuditoriaSagas } from '../components/admin/Panel8_AuditoriaSagas';
+import { PanelServiceMesh } from '../components/admin/PanelServiceMesh';
 import { cotizarCancelacion, cancelarReserva as cancelarReservaVuelo } from '../services/vuelosApi';
 
 const C = {
@@ -117,6 +118,10 @@ function ObservabilidadTab({stats,loadingStats,serviceHealth,refreshKey}) {
 
       <SectionTitle>🧾 Facturas emitidas</SectionTitle>
       <Panel5_ConsolaFiscalFacturas refreshKey={refreshKey}/>
+
+      <div style={{ marginTop: 24, marginBottom: 8 }}>
+        <PanelServiceMesh refreshKey={refreshKey} />
+      </div>
 
       <SectionTitle>🔌 Módulos de Booking (respuesta medida desde tu navegador)</SectionTitle>
       <div style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:'12px 20px'}}>
