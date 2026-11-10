@@ -431,7 +431,7 @@ export class AtraccionesService implements OnModuleInit {
     try {
       const { data } = await firstValueFrom(
         this.httpService.get(
-          'https://descubre-gateway.livelymoss-5ea81cc6.chilecentral.azurecontainerapps.io/api/v3/atracciones?limit=100',
+          'https://descubre-gateway.livelymoss-5ea81cc6.chilecentral.azurecontainerapps.io/api/v3/atracciones?limit=50',
           {
             headers: { 'x-api-key': '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568' },
             timeout: 6000,
@@ -2019,46 +2019,36 @@ export class AtraccionesService implements OnModuleInit {
       this.logger.log(`ESB: Despachando reserva B2B a Gloria (NODE_ATR_GLORIA) -> POST /api/v3/atracciones/reservas: ${JSON.stringify(gloriaPayload)}`);
 
       let gloriaRes: any = null;
-      // Probar con el horario seleccionado y reintentar con el turno alterno si está agotado
-      const candidateSlots = [timeClean, timeClean === '09:00' ? '17:30' : '09:00'];
       let lastErr: any = null;
+      // Usar UUID v4 fresco para cada intento B2B hacia Gloria evitando colisiones o rechazos por Idempotency-Key reutilizada
+      const gloriaB2BKey = crypto.randomUUID();
 
-      for (const slotCandidate of candidateSlots) {
-        gloriaPayload.hora = slotCandidate;
-        const currentKey = isUuid ? safeKey : crypto.randomUUID();
-        try {
-          const response = await firstValueFrom(
-            this.httpService.post(
-              'https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas',
-              gloriaPayload,
-              {
-                headers: {
-                  'Idempotency-Key': currentKey,
-                  'idempotency-key': currentKey,
-                  'Content-Type': 'application/json',
-                },
-                timeout: 30000,
+      try {
+        const response = await firstValueFrom(
+          this.httpService.post(
+            'https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/reservas',
+            gloriaPayload,
+            {
+              headers: {
+                'Idempotency-Key': gloriaB2BKey,
+                'idempotency-key': gloriaB2BKey,
+                'Content-Type': 'application/json',
               },
-            ),
-          );
-          gloriaRes = response.data;
-          timeClean = slotCandidate;
-          lastErr = null;
-          break;
-        } catch (err: any) {
-          lastErr = err;
-          this.logger.warn(`Intento reservando en Gloria slot ${slotCandidate}: ${err.response?.status} - ${JSON.stringify(err.response?.data || err.message)}`);
-          if (err.response?.status === 409 && slotCandidate !== candidateSlots[candidateSlots.length - 1]) {
-            continue; // Reintentar con el turno complementario
-          }
-          break;
-        }
+              timeout: 30000,
+            },
+          ),
+        );
+        gloriaRes = response.data;
+        lastErr = null;
+      } catch (err: any) {
+        lastErr = err;
+        this.logger.warn(`Error reservando en Gloria slot ${timeClean}: ${err.response?.status} - ${JSON.stringify(err.response?.data || err.message)}`);
       }
 
       if (lastErr && !gloriaRes) {
         this.logger.error(`Error reservando en API de Gloria: ${JSON.stringify(lastErr.response?.data || lastErr.message)}`);
-        const detailMsg = lastErr.response?.data?.detail || lastErr.response?.data?.message || 'Cupos agotados en Descubre EC para este turno. Por favor intente en otro turno u otra fecha.';
-        if (lastErr.response?.status === 409) {
+        const detailMsg = lastErr.response?.data?.detail || lastErr.response?.data?.details || lastErr.response?.data?.message || 'Cupos agotados en Vívelo Ecuador para este turno. Por favor intente en otro turno u otra fecha.';
+        if (lastErr.response?.status === 409 || lastErr.response?.data?.code === 'OUT_OF_STOCK') {
           throw new HttpException(
             {
               type: 'https://booking.epn.edu.ec/errors/out-of-stock',
@@ -2072,11 +2062,25 @@ export class AtraccionesService implements OnModuleInit {
             HttpStatus.CONFLICT,
           );
         }
+        if (lastErr.response?.status === 503 || lastErr.response?.data?.code === 'SERVICE_UNAVAILABLE') {
+          throw new HttpException(
+            {
+              type: 'https://booking.epn.edu.ec/errors/service-unavailable',
+              title: 'Servicio No Disponible en Socio',
+              status: HttpStatus.SERVICE_UNAVAILABLE,
+              statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+              message: detailMsg,
+              detail: detailMsg,
+              code: 'SERVICE_UNAVAILABLE',
+            },
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
+        }
         throw new HttpException(
           {
             statusCode: HttpStatus.BAD_GATEWAY,
             status: HttpStatus.BAD_GATEWAY,
-            message: `Error en socio de atracciones (Gloria): ${detailMsg}`,
+            message: `Error en socio de atracciones (Gloria - Vívelo Ecuador): ${detailMsg}`,
             detail: detailMsg,
           },
           HttpStatus.BAD_GATEWAY,
@@ -2343,15 +2347,30 @@ export class AtraccionesService implements OnModuleInit {
         );
         arielRes = response.data;
       } catch (err: any) {
-        this.logger.error(`Error reservando en API de Ariel: ${err.response?.data?.message || err.message}`);
+        const detailMsg = err.response?.data?.detail || err.response?.data?.details || err.response?.data?.message || err.message;
+        this.logger.error(`Error reservando en API de Ariel: ${detailMsg}`);
         if (err.response?.status === 409 || err.response?.data?.code === 'OUT_OF_STOCK') {
           throw new HttpException(
             err.response.data || { message: 'Sin cupos disponibles en la atracción seleccionada' },
             HttpStatus.CONFLICT,
           );
         }
+        if (err.response?.status === 422 || err.response?.data?.code === 'DATE_IN_PAST') {
+          throw new HttpException(
+            {
+              type: 'https://booking.epn.edu.ec/errors/fecha-pasada',
+              title: 'Turno o Fecha en el Pasado',
+              status: HttpStatus.UNPROCESSABLE_ENTITY,
+              statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+              message: detailMsg || 'El turno u horario seleccionado ya comenzó o pasó. Por favor seleccione un horario posterior o una fecha futura.',
+              detail: detailMsg || 'El turno u horario seleccionado ya comenzó o pasó. Por favor seleccione un horario posterior o una fecha futura.',
+              code: 'DATE_IN_PAST',
+            },
+            HttpStatus.UNPROCESSABLE_ENTITY,
+          );
+        }
         throw new HttpException(
-          `Error en socio de atracciones (Ariel): ${err.response?.data?.message || err.message}`,
+          `Error en socio de atracciones (Ariel - Ecuatravel): ${detailMsg}`,
           HttpStatus.BAD_GATEWAY,
         );
       }

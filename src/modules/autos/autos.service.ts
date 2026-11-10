@@ -416,6 +416,22 @@ export class AutosService implements OnModuleInit {
             fechas_ocupadas: occupied,
           };
         }
+
+        // Rescate: consultar por placa o ID en la flota directa del socio externo
+        const fallbackExt = await this.circuitBreakerAdapter.fetchExternalCarById(id);
+        if (fallbackExt) {
+          const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
+          const isReservedMem = Array.from(this.memoryOrders.values()).some(
+            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED',
+          );
+          if (isReservedMem) {
+            fallbackExt.estado = 'RESERVADO';
+          }
+          return {
+            ...fallbackExt,
+            fechas_ocupadas: occupied,
+          };
+        }
       } catch (_) {}
 
       throw new HttpException({

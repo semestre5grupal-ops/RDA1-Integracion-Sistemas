@@ -22,17 +22,33 @@ export function AutoDetail() {
 
   useEffect(() => {
     if (!id) return;
+    let failCount = 0;
+    let intervalId = null;
+
     const refrescarAuto = () => {
       getAutoById(id)
         .then(data => {
-          if (data) setFetchedAuto(prev => ({ ...(prev || {}), ...data }));
+          if (data) {
+            failCount = 0;
+            setFetchedAuto(prev => ({ ...(prev || {}), ...data }));
+          }
         })
-        .catch(err => console.warn('No se pudo refrescar datos de vehículo:', err));
+        .catch(err => {
+          failCount++;
+          const status = err?.response?.status;
+          // Si el vehículo no existe en el catálogo remoto (404) o falla repetidamente, detener el polling para no saturar la red ni la consola
+          if (status === 404 || failCount >= 2) {
+            if (intervalId) clearInterval(intervalId);
+            console.warn(`[AutoDetail] Detenido el refresco en vivo para auto ${id} (HTTP ${status || 'ERR'}). Usando datos cargados en sesión.`);
+          }
+        });
     };
 
     refrescarAuto();
-    const interval = setInterval(refrescarAuto, 4000);
-    return () => clearInterval(interval);
+    intervalId = setInterval(refrescarAuto, 4000);
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [id]);
 
   const auto = { ...(location.state?.auto || {}), ...(fetchedAuto || {}) };
