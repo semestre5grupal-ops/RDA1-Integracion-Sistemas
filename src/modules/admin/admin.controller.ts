@@ -2,6 +2,8 @@ import { BadRequestException, Optional, UseInterceptors, Controller, Get, Put, P
 import { AdminMetricasService } from './admin-metricas.service';
 import { trazaVuelos } from '../vuelos/socios/vuelos-traza';
 import { trazaAlojamientos } from '../alojamientos/socios/alojamientos-traza';
+import { trazaAutos } from '../autos/socios/autos-traza';
+import { trazaAtracciones } from '../atracciones/socios/atracciones-traza';
 import { RabbitMqEventBusService } from '../event-bus/rabbitmq/rabbitmq-event-bus.service';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
@@ -109,10 +111,22 @@ export class AdminController {
     return this.metricasService.getProcesoAutos();
   }
 
+  @Get('procesos/autos/en-vivo')
+  @ApiOperation({ summary: 'Traza en tiempo real del proceso de autos, agrupable por correlación (eventos nuevos desde `desde`)' })
+  enVivoAutos(@Query('desde') desde?: string) {
+    return trazaAutos.desde(Number(desde) || 0);
+  }
+
   @Get('procesos/atracciones')
   @ApiOperation({ summary: 'Datos en vivo para los grafos del proceso de reserva de atracciones (estados, dinero, operadores socios)' })
   async getProcesoAtracciones() {
     return this.metricasService.getProcesoAtracciones();
+  }
+
+  @Get('procesos/atracciones/en-vivo')
+  @ApiOperation({ summary: 'Traza en tiempo real del proceso de atracciones, agrupable por correlación (eventos nuevos desde `desde`)' })
+  enVivoAtracciones(@Query('desde') desde?: string) {
+    return trazaAtracciones.desde(Number(desde) || 0);
   }
 
   @Get('finanzas/vuelos/conciliacion')
