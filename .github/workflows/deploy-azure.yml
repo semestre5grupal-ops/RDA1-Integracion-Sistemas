@@ -1,0 +1,81 @@
+# Despliegue automático del backend (booking-core-api) en Azure App Service.
+#
+# Corre al hacer merge a main (si cambió el backend) o a mano desde Actions.
+# Siempre compila desde main, así nadie sube un dist viejo encima de otro.
+#
+# Requiere el secreto del repositorio AZURE_WEBAPP_PUBLISH_PROFILE (el "perfil
+# de publicación" que se descarga en el portal de Azure). Sin ese secreto el
+# workflow compila y prueba, pero no despliega.
+name: Deploy backend a Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'contracts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'nest-cli.json'
+      - '.github/workflows/deploy-azure.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-azure-booking-core-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PERFIL: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Pruebas de vuelos, pagos y nodos
+        run: npx jest src/modules/vuelos src/modules/pagos src/modules/nodes --ci
+
+      - name: Armar paquete (dist + dependencias de producción)
+        run: |
+          npm prune --omit=dev
+          zip -qr booking-app.zip dist node_modules package.json package-lock.json contracts src/proto
+          ls -lh booking-app.zip
+
+      - name: Desplegar en Azure
+        if: env.PERFIL != ''
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: booking-core-api
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: booking-app.zip
+
+      - name: Comprobar que responde
+        if: env.PERFIL != ''
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" https://booking-core-api.azurewebsites.net/api/v2/admin/procesos/vuelos/en-vivo || true)
+            echo "intento $i: HTTP $code"
+            if [ "$code" = "401" ]; then echo "Backend arriba"; exit 0; fi
+            sleep 10
+          done
+          echo "El backend no respondió después del despliegue"; exit 1
+
+      - name: Aviso si falta el secreto
+        if: env.PERFIL == ''
+        run: echo "::warning::Falta el secreto AZURE_WEBAPP_PUBLISH_PROFILE; se compiló y probó pero no se desplegó."
