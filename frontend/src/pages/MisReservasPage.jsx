@@ -293,7 +293,7 @@ export function MisReservasPage() {
         }),
         getOrdersAuto(),
         getReservasAtracciones(isAdmin ? undefined : (correoSesion || undefined)),
-        getReservasAlojamientos(),
+        (user?.email || user?.id) ? getReservasAlojamientos() : Promise.resolve([]),
       ]);
 
       // 1. Vuelos API

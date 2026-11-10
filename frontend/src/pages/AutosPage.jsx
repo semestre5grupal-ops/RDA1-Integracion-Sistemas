@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { searchAutos } from '../services/autosApi';
@@ -47,13 +47,35 @@ export function AutosPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const { convertPrice, currency } = useCurrency();
   const { user } = useAuth();
+  const resultsRef = useRef(null);
   
   // Search form state
   const [pickupLocation, setPickupLocation] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [pickupError, setPickupError] = useState('');
   const [flashRed, setFlashRed] = useState(false);
-  const destinos = ['Quito', 'Guayaquil', 'Cuenca', 'Manta', 'Aeropuerto Mariscal Sucre', 'Aeropuerto José Joaquín de Olmedo', 'Loja', 'Machala'];
+  const sugerenciasBusqueda = [
+    { texto: 'Quito', tipo: 'ciudad', icono: '📍' },
+    { texto: 'Guayaquil', tipo: 'ciudad', icono: '📍' },
+    { texto: 'Cuenca', tipo: 'ciudad', icono: '📍' },
+    { texto: 'Manta', tipo: 'ciudad', icono: '📍' },
+    { texto: 'Aeropuerto Mariscal Sucre', tipo: 'aeropuerto', icono: '✈️' },
+    { texto: 'Aeropuerto José Joaquín de Olmedo', tipo: 'aeropuerto', icono: '✈️' },
+    { texto: 'Loja', tipo: 'ciudad', icono: '📍' },
+    { texto: 'Machala', tipo: 'ciudad', icono: '📍' },
+    { texto: 'Mercedes', tipo: 'auto', icono: '🚗' },
+    { texto: 'Mercedes RutaLibre Lunes', tipo: 'auto', icono: '🚗' },
+    { texto: 'Toyota', tipo: 'auto', icono: '🚗' },
+    { texto: 'Toyota Yaris Cross', tipo: 'auto', icono: '🚗' },
+    { texto: 'Chevrolet', tipo: 'auto', icono: '🚗' },
+    { texto: 'Chevrolet Tracker', tipo: 'auto', icono: '🚗' },
+    { texto: 'Kia', tipo: 'auto', icono: '🚗' },
+    { texto: 'Kia Sportage', tipo: 'auto', icono: '🚗' },
+    { texto: 'Hyundai', tipo: 'auto', icono: '🚗' },
+    { texto: 'Hyundai Tucson', tipo: 'auto', icono: '🚗' },
+    { texto: 'Nissan', tipo: 'auto', icono: '🚗' },
+    { texto: 'SUV', tipo: 'categoria', icono: '🚙' },
+  ];
 
   const triggerFlash = (msg) => {
     setPickupError(msg);
@@ -63,14 +85,11 @@ export function AutosPage() {
 
   const handlePickupChange = (e) => {
     const raw = e.target.value.slice(0, 60);
-    const hasNumbers = /[0-9]/.test(raw);
-    const hasSymbols = /[^a-zA-Z\s,áéíóúÁÉÍÓÚñÑ0-9]/.test(raw);
     const hasMultipleSpaces = /\s{2,}/.test(raw);
+    const hasForbiddenSymbols = /[^a-zA-Z0-9\s,\-áéíóúÁÉÍÓÚñÑ]/.test(raw);
 
-    if (hasNumbers) {
-      triggerFlash('No se permiten números en el destino');
-    } else if (hasSymbols) {
-      triggerFlash('Solo se permiten letras, comas y acentos');
+    if (hasForbiddenSymbols) {
+      triggerFlash('Solo se permiten letras, números, guiones y comas');
     } else if (hasMultipleSpaces) {
       triggerFlash('No se permiten espacios consecutivos');
     } else if (raw.length >= 60) {
@@ -79,7 +98,7 @@ export function AutosPage() {
       setPickupError('');
     }
 
-    const clean = raw.replace(/[^a-zA-Z\s,áéíóúÁÉÍÓÚñÑ]/g, '').replace(/\s{2,}/g, ' ');
+    const clean = raw.replace(/[^a-zA-Z0-9\s,\-áéíóúÁÉÍÓÚñÑ]/g, '').replace(/\s{2,}/g, ' ');
     setPickupLocation(clean);
     setShowSuggestions(clean.trim().length > 0);
     setFormError('');
@@ -89,11 +108,11 @@ export function AutosPage() {
     setTimeout(() => {
       setShowSuggestions(false);
       setPickupLocation(prev => prev.trim().replace(/\s{2,}/g, ' '));
-    }, 200);
+    }, 250);
   };
 
-  const handleSelectSuggestion = (destino) => {
-    setPickupLocation(destino);
+  const handleSelectSuggestion = (texto) => {
+    setPickupLocation(texto);
     setShowSuggestions(false);
     setPickupError('');
     setFormError('');
@@ -196,6 +215,7 @@ export function AutosPage() {
 
       const requestPayload = {
         pickup_location: pickupLocation || 'Quito',
+        q: pickupLocation || '',
         dropoff_location: sameDropoff ? (dropoffLocation || pickupLocation || 'Quito') : (pickupLocation || 'Quito'),
         pickup_date: startDate || new Date().toISOString().split('T')[0],
         pickup_time: pickupTime || '10:00',
@@ -209,7 +229,25 @@ export function AutosPage() {
       };
 
       const result = await searchAutos(requestPayload);
-      setAutos(result.data || []);
+      let fetchedCars = result.data || [];
+      const termLower = (pickupLocation || '').trim().toLowerCase();
+      const ciudadesComunes = ['quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos'];
+      const esSoloCiudad = ciudadesComunes.includes(termLower);
+
+      if (termLower && !esSoloCiudad) {
+        const filtered = fetchedCars.filter(c => {
+          const marca = (c.marca || '').toLowerCase();
+          const modelo = (c.modelo || '').toLowerCase();
+          const catName = (c.categoria || '').toLowerCase();
+          const provName = (c.proveedor?.nombre || '').toLowerCase();
+          const fullText = `${marca} ${modelo} ${catName} ${provName}`;
+          return fullText.includes(termLower) || termLower.includes(marca) || (marca && termLower.includes(modelo));
+        });
+        if (filtered.length > 0) {
+          fetchedCars = filtered;
+        }
+      }
+      setAutos(fetchedCars);
       setMetadata(result.metadata || null);
     } catch (err) {
       console.error('Error al consultar autos:', err);
@@ -219,6 +257,12 @@ export function AutosPage() {
       setHasSearched(true);
     }
   }, [pickupLocation, dropoffLocation, sameDropoff, startDate, endDate, pickupTime, dropoffTime, driverAge, customAge, selectedCategory, selectedTransmission]);
+
+  useEffect(() => {
+    if (hasSearched && !loading && resultsRef.current) {
+      resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [hasSearched, loading]);
 
   const timeOptions = [];
   for(let i=0; i<24; i++) {
@@ -270,9 +314,6 @@ export function AutosPage() {
     
     setFormError('');
     fetchData();
-    setTimeout(() => {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-    }, 100);
   };
 
   const marcasPopulares = [
@@ -359,12 +400,12 @@ export function AutosPage() {
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
                   </div>
                   <div className="av-input-field">
-                    <label style={{ color: flashRed ? '#d93025' : '#666' }}>Lugar de recogida</label>
+                    <label style={{ color: flashRed ? '#d93025' : '#666' }}>Lugar de recogida, marca o modelo</label>
                     <input
                       type="text"
                       maxLength={60}
                       required
-                      placeholder="Aeropuerto, ciudad o estación"
+                      placeholder="Ciudad, aeropuerto, marca o modelo (ej. Mercedes, Quito, Toyota)"
                       value={pickupLocation}
                       onChange={handlePickupChange}
                       onFocus={() => setShowSuggestions(pickupLocation.trim().length > 0)}
@@ -380,15 +421,19 @@ export function AutosPage() {
                 </div>
                 {pickupError && <div role="alert" style={{ position: 'absolute', top: '-25px', left: 0, color: '#d93025', fontSize: '0.8rem', fontWeight: 'bold', background: '#fce8e6', padding: '2px 8px', borderRadius: '4px' }}>{pickupError}</div>}
                 {showSuggestions && pickupLocation && (
-                  <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', listStyle: 'none', margin: 0, padding: '0', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: '4px', zIndex: 1050, maxHeight: '200px', overflowY: 'auto' }}>
-                    {destinos.filter(d => d.toLowerCase().includes(pickupLocation.toLowerCase())).length > 0 ? (
-                      destinos.filter(d => d.toLowerCase().includes(pickupLocation.toLowerCase())).map((destino, idx) => (
-                        <li key={idx} onMouseDown={() => handleSelectSuggestion(destino)} style={{ padding: '12px 16px', borderBottom: '1px solid #e7e7e7', cursor: 'pointer', fontSize: '0.95rem', color: '#333', display: 'flex', alignItems: 'center', gap: '10px' }} onMouseOver={e => e.currentTarget.style.background = '#f5f5f5'} onMouseOut={e => e.currentTarget.style.background = 'white'}>
-                          <span style={{ color: '#666' }}>📍</span> {destino}
+                  <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', listStyle: 'none', margin: 0, padding: '0', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: '4px', zIndex: 1050, maxHeight: '220px', overflowY: 'auto' }}>
+                    {sugerenciasBusqueda.filter(s => s.texto.toLowerCase().includes(pickupLocation.toLowerCase())).length > 0 ? (
+                      sugerenciasBusqueda.filter(s => s.texto.toLowerCase().includes(pickupLocation.toLowerCase())).map((item, idx) => (
+                        <li key={idx} onMouseDown={() => handleSelectSuggestion(item.texto)} style={{ padding: '10px 16px', borderBottom: '1px solid #e7e7e7', cursor: 'pointer', fontSize: '0.95rem', color: '#333', display: 'flex', alignItems: 'center', gap: '10px' }} onMouseOver={e => e.currentTarget.style.background = '#f5f5f5'} onMouseOut={e => e.currentTarget.style.background = 'white'}>
+                          <span style={{ fontSize: '1.1rem' }}>{item.icono}</span>
+                          <div>
+                            <span style={{ fontWeight: item.tipo === 'auto' ? 600 : 400 }}>{item.texto}</span>
+                            <span style={{ fontSize: '0.75rem', color: '#888', marginLeft: '8px', textTransform: 'capitalize' }}>({item.tipo})</span>
+                          </div>
                         </li>
                       ))
                     ) : (
-                      <li style={{ padding: '12px 16px', color: '#666', fontSize: '0.95rem' }}>No hay resultados</li>
+                      <li style={{ padding: '12px 16px', color: '#666', fontSize: '0.95rem' }}>Buscar "{pickupLocation}" en coches disponibles</li>
                     )}
                   </ul>
                 )}
@@ -712,7 +757,7 @@ export function AutosPage() {
       )}
 
       {hasSearched && (
-        <div className="main-content" style={{ maxWidth: '1100px', margin: '0 auto', padding: '40px 20px' }}>
+        <div ref={resultsRef} className="main-content" style={{ maxWidth: '1100px', margin: '0 auto', padding: '40px 20px' }}>
           {error && (
           <div className="state-container" style={{ textAlign: 'center', padding: '40px 0' }}>
             <div className="error-icon" style={{ fontSize: '2rem' }}>⚠️</div>

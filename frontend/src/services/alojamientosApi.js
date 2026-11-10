@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { obtenerAccessToken, api as apiAuth } from './api';
+import { supabase } from './supabase';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
@@ -87,12 +88,29 @@ export async function reservarAlojamiento(id, reservationData, idempotencyKey) {
  * cliente de la sesión (un administrador ve todas).
  */
 export async function getReservasAlojamientos() {
-  const token = await obtenerAccessToken();
-  if (!token) return [];
-  const { data } = await api.get('/alojamientos/reservations', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return data;
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    let token = sessionData?.session?.access_token;
+
+    // Si la sesión expiró pero hay refresh token, intentar refrescar silenciosamente
+    if (sessionData?.session?.expires_at && sessionData.session.expires_at * 1000 < Date.now()) {
+      const { data: refreshData } = await supabase.auth.refreshSession().catch(() => ({ data: null }));
+      token = refreshData?.session?.access_token || null;
+    }
+
+    if (!token) return [];
+
+    const { data } = await api.get('/alojamientos/reservations', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return data;
+  } catch (err) {
+    // Si no está autorizado o la sesión caducó, retornar array vacío limpiamente sin lanzar error
+    if (err?.response?.status === 401) {
+      return [];
+    }
+    return [];
+  }
 }
 
 // ── Gestión del catálogo (panel de administración) ───────────────────────────
