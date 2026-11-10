@@ -2473,8 +2473,8 @@ function ConfiguracionTab() {
 // ── Servicios & Proveedores: socios de las 4 verticales + vista propia de cada una ──
 const VERTICALES_ADMIN = [
   { id: 'vuelos', label: '✈️ Vuelos', sub: 'Proceso en vivo, grafos y liquidaciones por aerolínea' },
-  { id: 'autos', label: '🚗 Autos', sub: 'Proceso en vivo, grafos de fallas y gestión de flota' },
-  { id: 'atracciones', label: '🎡 Atracciones', sub: 'Proceso en vivo, grafos de fallas y árbol de categorías' },
+  { id: 'autos', label: '🚗 Autos', sub: 'Canal gRPC punto a punto (:50051), grafos de fallas y gestión de flota' },
+  { id: 'atracciones', label: '🎡 Atracciones', sub: 'Canal gRPC punto a punto (:50051), grafos de fallas y árbol de categorías' },
   { id: 'alojamientos', label: '🏨 Alojamientos', sub: 'Proceso en vivo, grafos de fallas, catálogo y tipos de habitación' },
 ];
 
