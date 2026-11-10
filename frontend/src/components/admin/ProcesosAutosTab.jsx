@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
+import { ProcesoEnVivoAutos } from './ProcesoEnVivoAutos';
 
 /**
  * Vista de Autos en "Servicios & Prov." del admin: el proceso de reserva con
@@ -260,7 +261,7 @@ function Diagrama({ definicion, id }) {
 // ───────────────────────────── Pestaña ─────────────────────────────
 
 export function ProcesosAutosTab({ refreshKey = 0 }) {
-  const [activo, setActivo] = useState('cfg');
+  const [activo, setActivo] = useState('vivo');
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -326,7 +327,7 @@ export function ProcesosAutosTab({ refreshKey = 0 }) {
       </div>
 
       <div role="tablist" aria-label="Tipo de grafo" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {GRAFOS.map((g) => (
+        {[{ id: 'vivo', tab: '🔴 Flujo en vivo' }, ...GRAFOS].map((g) => (
           <button
             key={g.id}
             role="tab"
@@ -343,6 +344,9 @@ export function ProcesosAutosTab({ refreshKey = 0 }) {
         ))}
       </div>
 
+      {activo === 'vivo' && <ProcesoEnVivoAutos agencias={agencias} />}
+
+      {activo !== 'vivo' && (
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: '18px 20px', display: 'grid', gap: 14 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'baseline' }}>
           <h3 style={{ margin: 0, fontSize: '1.1rem', color: T.text }}>{grafo.titulo}</h3>
@@ -371,6 +375,7 @@ export function ProcesosAutosTab({ refreshKey = 0 }) {
           </div>
         </div>
       </section>
+      )}
 
       {agencias.length > 0 && activo === 'fta' && (
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, overflowX: 'auto' }}>
