@@ -309,6 +309,28 @@ describe('AlojamientosSociosService (catálogo y disponibilidad en vivo)', () =>
     expect(r.resenas).toHaveLength(0);
   });
 
+  it('disponibilidad: acepta el formato `tipos` del socio (no solo `opciones`)', async () => {
+    const { socios, posada } = montar();
+    const orig = posada.atender.bind(posada);
+    // El socio (p. ej. Hábitat) devuelve la disponibilidad como `tipos`, no `opciones`.
+    posada.atender = async (m: string, u: URL, h: any, b: any) => {
+      if (m === 'GET' && u.pathname.replace(/^\/api\/v2/, '') === '/alojamientos/HTL-1/availability') {
+        return {
+          status: 200,
+          body: {
+            total_rooms: 2, reserved_rooms: 0, available_rooms: 2, price_per_night: 95,
+            tipos: [{ codigo: 'HABITACION_ESTANDAR', nombre: 'Eco-Villa', precio_noche: 95, available_rooms: 2, total_rooms: 2, capacidadAdultos: 2, capacidadNinos: 0 }],
+          },
+        };
+      }
+      return orig(m, u, h, b);
+    };
+    const d = await socios.opciones('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12');
+    const bk = socios.disponibilidadBooking('NODE_ALO_PEC~HTL-1', '2027-03-10', '2027-03-12', d!.opciones);
+    expect(bk.tipos.find((t) => t.codigo === 'HABITACION_ESTANDAR')).toMatchObject({ available_rooms: 2, precio_noche: 95 });
+    expect(bk.is_available).toBe(true);
+  });
+
   it('ids: separa NODO~id y rechaza lo que no es un nodo', () => {
     expect(AlojamientosSociosService.separarId('NODE_ALO_PEC~HTL-1')).toEqual({ nodo: 'NODE_ALO_PEC', id: 'HTL-1' });
     expect(AlojamientosSociosService.separarId('NODE_ALO_PEC%7EHTL-1')).toEqual({ nodo: 'NODE_ALO_PEC', id: 'HTL-1' });

@@ -461,27 +461,29 @@ export class AlojamientosSociosService {
     const tipos = this.tiposDesdeHabitaciones(hab);
     const porCodigo = new Map(tipos.map((t) => [t.codigo, t]));
     const b = r.status === 200 ? desempacar(r.body) : null;
-    const lista: any[] = b?.opciones || b?.options || [];
+    // El contrato v2.2.0 (Posada) devuelve `opciones`. Otros socios exponen la
+    // disponibilidad como `tipos`/`habitaciones` (p. ej. Hábitat): se aceptan ambos.
+    const lista: any[] = b?.opciones || b?.options || b?.tipos || b?.habitaciones || [];
     const opciones: OpcionSocio[] = lista
       .filter((o) => o && (o.tipoHabitacionCodigo || o.codigo))
       .map((o) => {
         const codigo = String(o.tipoHabitacionCodigo || o.codigo);
         const plan = o.planTarifaCodigo ? String(o.planTarifaCodigo) : null;
         const t = porCodigo.get(codigo);
-        const remanentes = num(o.habitacionesRemanentes ?? o.available_rooms) ?? 0;
+        const remanentes = num(o.habitacionesRemanentes ?? o.available_rooms ?? o.stockDisponible) ?? 0;
         return {
           productId: plan ? `${codigo}@${plan}` : codigo,
           codigo,
           plan,
           nombre: o.nombre || t?.nombre || codigo,
           remanentes,
-          disponible: o.estaDisponible ?? remanentes > 0,
-          precioNoche: money(o.precioNoche) ?? t?.precio_noche ?? null,
+          disponible: o.estaDisponible ?? o.disponible ?? remanentes > 0,
+          precioNoche: money(o.precioNoche ?? o.precio_noche ?? o.precioBaseNoche) ?? t?.precio_noche ?? null,
           precioTotal: money(o.precioTotalEstancia ?? o.precioTotal),
           regimen: o.regimen || t?.regimen || null,
-          capacidadAdultos: t?.capacidad_adultos ?? null,
-          capacidadNinos: t?.capacidad_ninos ?? null,
-          totalHabitaciones: t?.cantidad ?? null,
+          capacidadAdultos: t?.capacidad_adultos ?? num(o.capacidadAdultos) ?? null,
+          capacidadNinos: t?.capacidad_ninos ?? num(o.capacidadNinos) ?? null,
+          totalHabitaciones: t?.cantidad ?? num(o.total_rooms ?? o.totalHabitaciones) ?? null,
           cancelacionHoras: t?.cancelacion_gratuita_horas ?? null,
           reembolsable: t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null,
         };
