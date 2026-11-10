@@ -134,6 +134,9 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
     const l1 = await llamar('PUT', locks, { cuerpo: { holdId: h.json.holdId, seats: elegido, expiresAt: h.json.expiresAt } });
     const l2 = hB.json.holdId ? await llamar('PUT', locks, { cuerpo: { holdId: hB.json.holdId, seats: elegido }, sub: OTRO }) : { status: 0, json: {} };
     caso(`${n}-04b`, 'Asiento elegido: queda bloqueado y otro cliente no puede tomarlo (409)', l1.status === 200 && l2.status === 409 && l2.json.code === 'SEAT_TAKEN', `HTTP ${l1.status} / ${l2.status}`);
+    // Si la aerolínea apartó el asiento, Booking rehízo el hold: la compra sigue con el nuevo.
+    if (l1.json.holdId && l1.json.holdId !== h.json.holdId) h.json.holdId = l1.json.holdId;
+    caso(`${n}-04e`, 'El asiento se envía a la aerolínea en el hold (assignedSeats)', l1.status === 200, l1.json.airlineHold ? 'la aerolínea lo aceptó (hold nuevo)' : 'la aerolínea aún no acepta assignedSeats: queda el bloqueo de Booking');
     const mB = await llamar('GET', `/vuelos/offers/${encodeURIComponent(oferta.offerId)}/seatmap?segmentId=${encodeURIComponent(seg.segmentId)}&holdId=${encodeURIComponent(hB.json.holdId ?? '')}`, { sub: OTRO });
     const visto = (mB.json.cabins || []).flatMap((c) => c.rows).flatMap((x) => x.seats).find((x) => x.seatNumber === asiento);
     caso(`${n}-04c`, 'El otro cliente lo ve ocupado en el mapa', mB.status === 200 && visto?.isAvailable === false, `${asiento} → ${visto?.status}`);
@@ -145,7 +148,8 @@ async function probarAerolinea(nodo, oferta, ofertaVuelta, fechaIda) {
   }
 
   // Compra con datos como los manda el formulario (ECU, teléfono local) + asiento
-  const pax = [pasajero({ nationality: 'ECU', contact: { email: 'prueba.vuelos@example.com', phone: '0991234567' }, assignedSeats: asiento ? [{ segmentId: seg.segmentId, seatNumber: asiento }] : undefined })];
+  // Pasaporte distinto en cada corrida: las aerolíneas no aceptan dos reservas activas del mismo pasajero en un vuelo.
+  const pax = [pasajero({ documentType: 'PASSPORT', documentNumber: `PE${Date.now().toString().slice(-7)}`, documentExpiryDate: '2031-01-31', nationality: 'ECU', contact: { email: 'prueba.vuelos@example.com', phone: '0991234567' }, assignedSeats: asiento ? [{ segmentId: seg.segmentId, seatNumber: asiento }] : undefined })];
   const r = await reservar(h.json.holdId, pax);
   const f = r.json.factura;
   caso(`${n}-05`, 'Compra: cobro, PNR y reserva CONFIRMED', r.status === 201 && !!r.json.pnr && r.json.status === 'CONFIRMED', `HTTP ${r.status} PNR ${r.json.pnr ?? r.json.title}`);
