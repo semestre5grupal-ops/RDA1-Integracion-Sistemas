@@ -25,30 +25,21 @@ import {
   PinIcon,
   BedIcon,
   CalendarIcon,
-  UserIcon,
-  UsersIcon,
-  DocumentIcon,
-  CarIcon,
-  TicketIcon,
-  PlaneIcon,
-  ClockIcon,
 } from '../components/BookingIcons';
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
   CONFIRMED: 'Confirmada',
-  CHECKED_IN: 'Check-in realizado',
+  CHECKED_IN: 'Check-in Realizado (Sí asistió)',
   CHECKED_OUT: 'Check-out completado',
-  CONFIRMADO_ASISTIDO: 'Completada',
-  ASISTIDO: 'Asistido',
-  PICKED_UP: 'Vehículo entregado',
-  RETURNED: 'Vehículo devuelto',
-  ENTREGADO: 'Vehículo entregado',
+  CONFIRMADO_ASISTIDO: 'Check-in Realizado (Sí asistió)',
+  ASISTIDO: 'Sí asistió',
+  PICKED_UP: 'Vehículo Entregado (En curso)',
+  ENTREGADO: 'Vehículo Entregado (En curso)',
   PENDING: 'Pendiente',
   PENDING_PAYMENT: 'Pendiente de pago',
   TICKET_ISSUING: 'Emitiendo billetes',
   COMPLETADA: 'Completada',
-  COMPLETED: 'Completada',
   FAILED: 'Fallida',
   CHANGE_PENDING: 'Cambio en curso',
   CANCELLATION_PENDING: 'Cancelación en curso',
@@ -56,20 +47,25 @@ const ESTADOS_ES = {
   PENDING_OFFLINE: 'Pendiente (Offline)',
 };
 
-function getDisplayStatus(r) {
-  if (!r) return '';
-  if (r.status === 'CHECKED_OUT') return 'Check-out completado';
-  if (r.status === 'CANCELLED') return 'Cancelada';
+function getAlojamientoStatus(r) {
+  if (!r) return { text: '', cls: '' };
+  if (r.status === 'CANCELLED') {
+    return { text: 'Cancelada', cls: 'cancelled' };
+  }
+  if (r.status === 'CHECKED_OUT') {
+    return { text: 'Check-out completado', cls: 'checked_out' };
+  }
+  const isPast = r.checkoutRaw && new Date(r.checkoutRaw).getTime() < Date.now();
+  if (isPast) {
+    return { text: 'Check-out completado', cls: 'checked_out' };
+  }
   if (r.status === 'CHECKED_IN') {
-    if (r.checkoutRaw && new Date(r.checkoutRaw).getTime() < Date.now()) {
-      return 'Check-out completado';
-    }
-    return 'Check-in realizado';
+    return { text: 'Check-in realizado', cls: 'checked_in' };
   }
-  if (r.tipo === 'alojamiento' && r.checkoutRaw && new Date(r.checkoutRaw).getTime() < Date.now()) {
-    return 'Check-out completado';
+  if (r.status === 'CONFIRMED' || r.status === 'CONFIRMADO_ASISTIDO') {
+    return { text: 'Confirmada', cls: 'confirmed' };
   }
-  return ESTADOS_ES[r.status] ?? r.status;
+  return { text: ESTADOS_ES[r.status] ?? r.status, cls: (r.status || '').toLowerCase() };
 }
 
 const DEFAULT_IMAGES = {
@@ -1260,7 +1256,7 @@ export function MisReservasPage() {
             onClick={() => { setMainView('reports'); setFiltroServicio(''); setTicketBadgeSeen(true); }}
             style={{ borderLeft: '2px solid #e7e7e7', marginLeft: '4px', paddingLeft: '12px' }}
           >
-            Mis Reportes
+            📋 Mis Reportes
             {misTickets.length > 0 && !ticketBadgeSeen && (
               <span style={{ background: '#d32f2f', color: 'white', borderRadius: '10px', padding: '1px 6px', fontSize: '0.72rem', marginLeft: '4px', fontWeight: 700 }}>
                 {misTickets.length}
@@ -1315,7 +1311,7 @@ export function MisReservasPage() {
         <div style={{ maxWidth: '700px', margin: '0 auto', width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
             <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#1a1a1a' }}>Mis Reportes de Soporte</h2>
-            <button type="button" onClick={fetchMisTickets} style={{ background: 'none', border: '1px solid #ddd', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem', color: '#595959' }}>Actualizar</button>
+            <button type="button" onClick={fetchMisTickets} style={{ background: 'none', border: '1px solid #ddd', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem', color: '#595959' }}>⟳ Actualizar</button>
           </div>
 
           {loadingTickets && (
@@ -1327,9 +1323,7 @@ export function MisReservasPage() {
 
           {!loadingTickets && misTickets.length === 0 && (
             <div style={{ textAlign: 'center', padding: '60px 20px', background: '#fafafa', borderRadius: '12px', border: '1px dashed #ddd' }}>
-              <div style={{ marginBottom: '12px' }}>
-                <DocumentIcon size={32} color="#003580" />
-              </div>
+              <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>📋</div>
               <h3 style={{ margin: '0 0 8px', color: '#1a1a1a', fontSize: '1.1rem' }}>No tienes reportes enviados</h3>
               <p style={{ color: '#595959', fontSize: '0.9rem', margin: 0 }}>Cuando reportes un problema con una reserva, podrás seguir su estado aquí.</p>
             </div>
@@ -1337,10 +1331,10 @@ export function MisReservasPage() {
 
           {!loadingTickets && misTickets.map(ticket => {
             const ST = {
-              PENDING:   { label: 'Pendiente',   bg: '#fff8e1', color: '#f57f17', border: '#ffe082' },
-              IN_REVIEW: { label: 'En revisión', bg: '#e3f2fd', color: '#1565c0', border: '#90caf9' },
-              RESOLVED:  { label: 'Resuelto',    bg: '#e8f5e9', color: '#2e7d32', border: '#a5d6a7' },
-              REJECTED:  { label: 'Rechazado',   bg: '#ffebee', color: '#c62828', border: '#ef9a9a' },
+              PENDING:   { label: '🕐 Pendiente',    bg: '#fff8e1', color: '#f57f17', border: '#ffe082' },
+              IN_REVIEW: { label: '🔍 En revisión', bg: '#e3f2fd', color: '#1565c0', border: '#90caf9' },
+              RESOLVED:  { label: '✅ Resuelto',    bg: '#e8f5e9', color: '#2e7d32', border: '#a5d6a7' },
+              REJECTED:  { label: '❌ Rechazado',   bg: '#ffebee', color: '#c62828', border: '#ef9a9a' },
             };
             const st = ST[ticket.status] || ST.PENDING;
             const priColor = ticket.priority === 'Alta' ? '#d32f2f' : ticket.priority === 'Media' ? '#e65100' : '#388e3c';
@@ -1382,7 +1376,7 @@ export function MisReservasPage() {
                   {ticket.resolution && (
                     <div style={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '8px', padding: '12px 16px', marginTop: '12px' }}>
                       <div style={{ fontSize: '0.73rem', fontWeight: 700, color: '#2e7d32', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <CheckmarkIcon size={14} color="#2e7d32" /> RESOLUCIÓN DEL SOPORTE
+                        ✅ RESOLUCIÓN DEL SOPORTE
                         {ticket.resolved_at && (
                           <span style={{ color: '#66bb6a', fontWeight: 400 }}>· {new Date(ticket.resolved_at).toLocaleDateString('es-EC', { day: 'numeric', month: 'long' })}</span>
                         )}
@@ -1392,12 +1386,12 @@ export function MisReservasPage() {
                   )}
                   {ticket.status === 'PENDING' && !ticket.resolution && (
                     <div style={{ marginTop: '10px', fontSize: '0.8rem', color: '#888', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <ClockIcon size={14} color="#888" /> Tu reporte está en cola. El equipo de soporte lo revisará pronto.
+                      🕐 Tu reporte está en cola. El equipo de soporte lo revisará pronto.
                     </div>
                   )}
                   {ticket.status === 'IN_REVIEW' && (
-                    <div style={{ marginTop: '10px', fontSize: '0.8rem', color: '#1565c0', background: '#e3f2fd', borderRadius: '5px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <InfoIcon size={14} color="#1565c0" /> Un agente está revisando tu caso. Te notificaremos cuando haya una resolución.
+                    <div style={{ marginTop: '10px', fontSize: '0.8rem', color: '#1565c0', background: '#e3f2fd', borderRadius: '5px', padding: '8px 12px' }}>
+                      🔍 Un agente está revisando tu caso. Te notificaremos cuando haya una resolución.
                     </div>
                   )}
                 </div>
@@ -1454,85 +1448,98 @@ export function MisReservasPage() {
                         />
                       </div>
                       <div className="trip-card-info">
-                        <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 700, color: '#006ce4', letterSpacing: '0.5px', marginBottom: '2px' }}>
-                          {r.servicioTexto}
-                        </div>
                         <h3 className="trip-card-title">{r.titulo}</h3>
 
-                        {/* Fechas claras de entrada y salida (Check-in y Check-out) */}
-                        <div className="trip-card-meta-row">
-                          <CalendarIcon size={14} color="#595959" />
-                          <span>
-                            {r.tipo === 'alojamiento'
-                              ? `Check-in: ${r.fechaEntrega} · Check-out: ${r.fechaDevolucion}`
-                              : r.tipo === 'auto'
-                              ? `Retiro: ${r.fechaEntrega} · Devolución: ${r.fechaDevolucion}`
-                              : r.tipo === 'vuelo'
-                              ? `Salida: ${r.fechaEntrega}${r.fechaDevolucion ? ` · Retorno: ${r.fechaDevolucion}` : ''}`
-                              : `Fecha: ${r.fechaEntrega || r.fecha}`}
-                          </span>
-                        </div>
-
-                        {/* Especificación de unidades, habitaciones y camas */}
-                        <div className="trip-card-meta-row">
-                          {r.tipo === 'alojamiento' ? (
-                            <>
-                              <BedIcon size={14} color="#595959" />
-                              <span>
-                                {r.habitaciones_count > 1 ? `${r.habitaciones_count} habitaciones` : '1 habitación'}
-                                {' · '}
-                                {r.descripcion_camas || '1 Cama'}
-                                {' · '}
-                                {r.cantidad} {r.cantidad === 1 ? 'huésped' : 'huéspedes'}
-                              </span>
-                            </>
-                          ) : r.tipo === 'auto' ? (
-                            <>
-                              <CarIcon size={14} color="#595959" />
-                              <span>{r.cantidadTexto}</span>
-                            </>
-                          ) : r.tipo === 'vuelo' ? (
-                            <>
-                              <PlaneIcon size={14} color="#595959" />
-                              <span>{r.cantidadTexto || '1 pasajero'}</span>
-                            </>
-                          ) : (
-                            <>
-                              <TicketIcon size={14} color="#595959" />
-                              <span>{r.cantidadTexto}</span>
-                            </>
-                          )}
-                        </div>
-
-                        {/* Ubicación, PNR y Fecha de reserva */}
-                        <div className="trip-card-meta-row trip-card-meta-subtle">
-                          <PinIcon size={13} color="#6b7280" />
-                          <span>{r.destino}</span>
-                          <span>·</span>
-                          <span>PNR: <strong style={{ color: '#1a1a1a' }}>{r.pnr}</strong></span>
-                          {r.fechaReserva && (
-                            <>
+                        {r.tipo === 'alojamiento' ? (
+                          /* ALOJAMIENTOS: Minimalista estilo Booking.com (Sin pastillas, sin emojis, con SVGs limpios) */
+                          <>
+                            <p className="trip-card-subtitle">
+                              <span>{r.destino}</span>
                               <span>·</span>
-                              <span>Reservado el {r.fechaReserva}</span>
-                            </>
-                          )}
-                        </div>
+                              <span style={{ color: '#006ce4', fontWeight: 600 }}>PNR: {r.pnr}</span>
+                            </p>
 
-                        {/* Estado: Minimalista y natural de Booking */}
-                        <div style={{ marginTop: '6px' }}>
-                          <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
-                            {(r.status === 'CONFIRMED' || r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'ASISTIDO') && (
-                              <CheckmarkIcon size={13} color="#008009" />
+                            <div className="trip-card-meta-row">
+                              <CalendarIcon size={14} color="#4b5563" />
+                              <span>
+                                <strong>Check-in:</strong> {r.fechaEntrega || r.fechasTexto || '—'}
+                              </span>
+                              <span>·</span>
+                              <span>
+                                <strong>Check-out:</strong> {r.fechaDevolucion || '—'}
+                              </span>
+                            </div>
+
+                            <div className="trip-card-meta-row">
+                              <BedIcon size={14} color="#4b5563" />
+                              <span>{r.cantidadTexto || '1 habitación'}</span>
+                              {r.descripcion_camas && (
+                                <>
+                                  <span>·</span>
+                                  <span className="trip-card-meta-subtle">{r.descripcion_camas}</span>
+                                </>
+                              )}
+                            </div>
+
+                            {(() => {
+                              const st = getAlojamientoStatus(r);
+                              return (
+                                <span className={`trip-card-alojamiento-status ${st.cls}`}>
+                                  <CheckCircleIcon size={13} color="currentColor" />
+                                  <span>{st.text}</span>
+                                </span>
+                              );
+                            })()}
+                          </>
+                        ) : (
+                          /* OTROS MÓDULOS (Vuelos, Autos, Atracciones): 100% INTACTOS como estaban originalmente */
+                          <>
+                            <p className="trip-card-subtitle">
+                              <span>{r.fechasTexto}</span>
+                              <span>·</span>
+                              <span>{r.destino}</span>
+                              <span style={{ color: '#006ce4', fontWeight: 600 }}>({r.pnr})</span>
+                            </p>
+
+                            {/* Metadatos detallados de Cantidad y Fechas */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '4px 0 6px 0', fontSize: '0.78rem' }}>
+                              {r.cantidadTexto && (
+                                <span style={{ background: '#eef2ff', color: '#3730a3', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {r.tipo === 'auto' ? '🚗' : r.tipo === 'atraccion' ? '🎟️' : r.tipo === 'vuelo' ? '✈️' : '🏨'} {r.cantidadTexto}
+                                </span>
+                              )}
+                              {r.fechaReserva && (
+                                <span style={{ background: '#f3f4f6', color: '#4b5563', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  📅 Reservado: {r.fechaReserva}
+                                </span>
+                              )}
+                              {r.fechaEntrega && (
+                                <span style={{ background: '#ecfdf5', color: '#065f46', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {r.tipo === 'auto' ? '🔑 Retiro' : r.tipo === 'atraccion' ? '🎟️ Visita' : r.tipo === 'vuelo' ? '🛫 Salida' : '📥 Check-in'}: {r.fechaEntrega}
+                                </span>
+                              )}
+                              {r.fechaDevolucion && (
+                                <span style={{ background: '#fffbeb', color: '#92400e', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {r.tipo === 'auto' ? '🔄 Devolución' : r.tipo === 'alojamiento' ? '📤 Check-out' : '🛬 Retorno'}: {r.fechaDevolucion}
+                                </span>
+                              )}
+                              {r.tipo === 'alojamiento' && r.descripcion_camas && (
+                                <span style={{ background: '#f5f3ff', color: '#6d28d9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  🛏️ {r.descripcion_camas}
+                                </span>
+                              )}
+                            </div>
+
+                            <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
+                              {ESTADOS_ES[r.status] ?? r.status}
+                            </span>
+                            {(r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN') && (
+                              <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
+                                • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                              </span>
                             )}
-                            {(r.status === 'CHECKED_IN' || r.status === 'CHECKED_OUT' || (r.tipo === 'alojamiento' && r.checkoutRaw && new Date(r.checkoutRaw).getTime() < Date.now())) && (
-                              <CheckCircleIcon size={13} color={r.status === 'CHECKED_OUT' || (r.tipo === 'alojamiento' && r.checkoutRaw && new Date(r.checkoutRaw).getTime() < Date.now()) ? '#4b5563' : '#006ce4'} />
-                            )}
-                            {r.status === 'CANCELLED' && (
-                              <CloseIcon size={13} color="#6b7280" />
-                            )}
-                            {getDisplayStatus(r)}
-                          </span>
-                        </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -1554,7 +1561,7 @@ export function MisReservasPage() {
                             color: '#ffffff',
                             border: 'none',
                             borderRadius: '6px',
-                            padding: '6px 12px',
+                            padding: '6px 10px',
                             fontSize: '0.78rem',
                             fontWeight: 700,
                             cursor: 'pointer',
@@ -1565,7 +1572,7 @@ export function MisReservasPage() {
                             whiteSpace: 'nowrap'
                           }}
                         >
-                          Check-in
+                          ⚡ Check-in
                         </button>
                       )}
                       <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
@@ -1591,7 +1598,7 @@ export function MisReservasPage() {
                                   setCheckinStepResult(null);
                                 }}
                               >
-                                Realizar Check-in Digital
+                                ⚡ Realizar Check-in Digital
                               </button>
                             )}
                             <button
@@ -1708,23 +1715,31 @@ export function MisReservasPage() {
                     <h3 style={{ fontSize: '1.35rem', fontWeight: 800, margin: '4px 0 6px 0', color: '#1a1a1a' }}>
                       {selectedReserva.titulo}
                     </h3>
-                    <div style={{ marginTop: '4px' }}>
-                      <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
-                        {(selectedReserva.status === 'CONFIRMED' || selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'ASISTIDO') && (
-                          <CheckmarkIcon size={14} color="#008009" />
+                    {selectedReserva.tipo === 'alojamiento' ? (
+                      (() => {
+                        const st = getAlojamientoStatus(selectedReserva);
+                        return (
+                          <span className={`trip-card-alojamiento-status ${st.cls}`} style={{ marginTop: '6px' }}>
+                            <CheckCircleIcon size={14} color="currentColor" />
+                            <span>{st.text}</span>
+                          </span>
+                        );
+                      })()
+                    ) : (
+                      <>
+                        <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
+                          {ESTADOS_ES[selectedReserva.status] ?? selectedReserva.status}
+                        </span>
+                        {(selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'CHECKED_IN') && (
+                          <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
+                            • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                          </span>
                         )}
-                        {(selectedReserva.status === 'CHECKED_IN' || selectedReserva.status === 'CHECKED_OUT' || (selectedReserva.tipo === 'alojamiento' && selectedReserva.checkoutRaw && new Date(selectedReserva.checkoutRaw).getTime() < Date.now())) && (
-                          <CheckCircleIcon size={14} color={selectedReserva.status === 'CHECKED_OUT' || (selectedReserva.tipo === 'alojamiento' && selectedReserva.checkoutRaw && new Date(selectedReserva.checkoutRaw).getTime() < Date.now()) ? '#4b5563' : '#006ce4'} />
-                        )}
-                        {selectedReserva.status === 'CANCELLED' && (
-                          <CloseIcon size={14} color="#6b7280" />
-                        )}
-                        {getDisplayStatus(selectedReserva)}
-                      </span>
-                    </div>
+                      </>
+                    )}
                   </div>
 
-                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  <div style={{ background: '#f5f5f5', borderRadius: '6px', padding: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                     <div>
                       <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Código PNR</div>
                       <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}>{selectedReserva.pnr}</div>
@@ -1735,22 +1750,6 @@ export function MisReservasPage() {
                         {selectedReserva.cantidadTexto || `${selectedReserva.cantidad || 1} unidad`}
                       </div>
                     </div>
-                    {selectedReserva.tipo === 'alojamiento' && (
-                      <>
-                        <div>
-                          <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Habitaciones</div>
-                          <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
-                            {selectedReserva.habitaciones_count > 1 ? `${selectedReserva.habitaciones_count} habitaciones` : '1 habitación'}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Configuración de Camas</div>
-                          <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
-                            {selectedReserva.descripcion_camas || '1 Cama'}
-                          </div>
-                        </div>
-                      </>
-                    )}
                     <div>
                       <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Fecha de Reserva</div>
                       <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
@@ -1824,21 +1823,21 @@ export function MisReservasPage() {
                         gap: '8px'
                       }}
                     >
-                      Realizar Check-in Digital
+                      ⚡ Realizar Check-in Digital
                     </button>
                   )}
 
                   {(() => {
                     const s = (selectedReserva.status || '').toUpperCase();
-                    const yaAsistio = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'CHECKED_OUT', 'ASISTIDO', 'PICKED_UP', 'ENTREGADO', 'COMPLETED'].includes(s);
+                    const yaAsistio = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'ENTREGADO', 'COMPLETED'].includes(s);
                     const estaCancelada = s === 'CANCELLED';
 
                     if (estaCancelada) {
                       return (
                         <div style={{ marginTop: '8px', padding: '12px 14px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: '6px', color: '#b71c1c', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <InfoIcon size={20} color="#b71c1c" />
+                          <span style={{ fontSize: '1.3rem' }}>ℹ️</span>
                           <div>
-                            <strong>Esta reserva ha sido cancelada.</strong> Los cupos fueron liberados al operador y el importe ({convertPrice(selectedReserva.totalRaw)}) fue procesado para reembolso según política.
+                            <strong>Esta reserva ha sido cancelada.</strong> Los cupos fueron liberados al operador y el 100% del importe ({convertPrice(selectedReserva.totalRaw)}) fue procesado para reembolso.
                           </div>
                         </div>
                       );
@@ -1846,10 +1845,10 @@ export function MisReservasPage() {
 
                     if (yaAsistio) {
                       return (
-                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', color: '#334155', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <CheckCircleIcon size={20} color="#006ce4" />
+                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#e8f5e9', border: '1px solid #c8e6c9', borderRadius: '6px', color: '#1b5e20', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.3rem' }}>✅</span>
                           <div>
-                            <strong>{s === 'CHECKED_OUT' ? 'Check-out completado.' : 'Servicio en curso o realizado.'}</strong> La cancelación no aplica una vez iniciado o concluido el servicio.
+                            <strong>Check-in realizado / Servicio en curso.</strong> El servicio ya fue verificado o retirado en mostrador. La cancelación no aplica una vez iniciado o completado el servicio.
                           </div>
                         </div>
                       );
@@ -1878,7 +1877,7 @@ export function MisReservasPage() {
                           transition: 'background 0.2s'
                         }}
                       >
-                        Cancelar reserva y solicitar reembolso
+                        ✕ Cancelar reserva y solicitar reembolso
                       </button>
                     );
                   })()}
@@ -1886,9 +1885,9 @@ export function MisReservasPage() {
                   <button
                     type="button"
                     onClick={() => { setModalView('report'); setSubjectError(''); setDescError(''); setReportSuccess(false); }}
-                    style={{ width: '100%', marginTop: '6px', padding: '10px', background: '#f8fafc', color: '#4b5563', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.88rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    style={{ width: '100%', marginTop: '6px', padding: '10px', background: '#fff5f5', color: '#d32f2f', border: '1px solid #ffcdd2', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   >
-                    Reportar un problema con esta reserva
+                    ⚠️ Reportar un problema con esta reserva
                   </button>
                 </>
               )}
@@ -1925,9 +1924,7 @@ export function MisReservasPage() {
 
                   {reportSuccess ? (
                     <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                      <div style={{ marginBottom: '10px' }}>
-                        <CheckmarkIcon size={36} color="#2e7d32" />
-                      </div>
+                      <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>✅</div>
                       <h4 style={{ margin: '0 0 8px', color: '#2e7d32', fontSize: '1.1rem' }}>Reporte enviado con éxito</h4>
                       <p style={{ fontSize: '0.88rem', color: '#595959', margin: '0 0 20px' }}>Nuestro equipo de soporte revisará tu reporte a la brevedad.</p>
                       <button type="button" onClick={() => setSelectedReserva(null)} className="trips-btn-primary" style={{ width: '100%' }}>Cerrar</button>
@@ -1950,7 +1947,7 @@ export function MisReservasPage() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '3px' }}>
                           {subjectError
-                            ? <span className="field-err-msg"><InfoIcon size={13} color="#d32f2f" />{subjectError}</span>
+                            ? <span className="field-err-msg"><span>⚠️</span>{subjectError}</span>
                             : <span />}
                           <span className="field-counter">{reportSubject.length}/120</span>
                         </div>
@@ -1985,7 +1982,7 @@ export function MisReservasPage() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '3px' }}>
                           {descError
-                            ? <span className="field-err-msg"><InfoIcon size={13} color="#d32f2f" />{descError}</span>
+                            ? <span className="field-err-msg"><span>⚠️</span>{descError}</span>
                             : <span />}
                           <span className="field-counter">{reportDescription.length}/800</span>
                         </div>
@@ -1994,7 +1991,7 @@ export function MisReservasPage() {
                       {/* Error global de envío */}
                       {submitError && (
                         <div style={{ background: '#ffebee', color: '#d32f2f', padding: '10px 12px', borderRadius: '5px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', gap: '6px', alignItems: 'center' }}>
-                          <InfoIcon size={14} color="#d32f2f" />{submitError}
+                          <span>⚠️</span>{submitError}
                         </div>
                       )}
 
@@ -2113,9 +2110,8 @@ export function MisReservasPage() {
                       </div>
 
                       {cancelError && (
-                        <div style={{ padding: '10px 12px', background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '6px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <InfoIcon size={14} color="#b91c1c" />
-                          <span>{cancelError}</span>
+                        <div style={{ padding: '10px 12px', background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '6px', fontSize: '0.85rem' }}>
+                          ⚠️ {cancelError}
                         </div>
                       )}
 
@@ -2246,7 +2242,7 @@ export function MisReservasPage() {
           >
             <div style={{ background: '#003580', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
-                Check-in Digital · {checkinReserva.pnr} ({checkinReserva.servicioTexto})
+                ⚡ Check-in Digital · {checkinReserva.pnr} ({checkinReserva.servicioTexto})
               </h3>
               <button 
                 onClick={() => setCheckinReserva(null)}
@@ -2269,7 +2265,7 @@ export function MisReservasPage() {
 
                   {checkinStepResult?.success ? (
                     <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <TicketIcon size={24} color="#047857" />
+                      <span style={{ fontSize: '1.5rem' }}>🎟️</span>
                       <strong style={{ display: 'block', color: '#047857', marginTop: '4px' }}>
                         {checkinStepResult.mensaje}
                       </strong>
@@ -2290,7 +2286,7 @@ export function MisReservasPage() {
                       disabled={checkinProcessing}
                       style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
                     >
-                      {checkinProcessing ? 'Validando con Guía...' : 'Validar Check-in y Obtener QR'}
+                      {checkinProcessing ? 'Validando con Guía...' : '✔ Validar Check-in y Obtener QR'}
                     </button>
                   )}
                 </div>
@@ -2308,7 +2304,7 @@ export function MisReservasPage() {
 
                   {checkinStepResult?.success ? (
                     <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <CarIcon size={24} color="#047857" />
+                      <span style={{ fontSize: '1.5rem' }}>🚗</span>
                       <strong style={{ display: 'block', color: '#047857', marginTop: '6px' }}>
                         {checkinStepResult.mensaje}
                       </strong>
@@ -2358,14 +2354,14 @@ export function MisReservasPage() {
                           disabled={checkinProcessing}
                           style={{ flex: 1, background: '#006ce4', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
                         >
-                          Check-in Entrega
+                          🔑 Check-in Entrega
                         </button>
                         <button
                           onClick={() => handleExecuteCheckin(checkinReserva, 'DEVOLUCION')}
                           disabled={checkinProcessing}
                           style={{ flex: 1, background: '#e8650a', color: '#fff', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}
                         >
-                          Check-in Devolución
+                          🔄 Check-in Devolución
                         </button>
                       </div>
                     </div>
@@ -2388,7 +2384,7 @@ export function MisReservasPage() {
 
                   {checkinStepResult?.success ? (
                     <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <PlaneIcon size={24} color="#047857" />
+                      <span style={{ fontSize: '1.5rem' }}>✈️</span>
                       <strong style={{ display: 'block', color: '#047857', marginTop: '6px' }}>
                         {checkinStepResult.mensaje}
                       </strong>
@@ -2411,7 +2407,7 @@ export function MisReservasPage() {
                         disabled={checkinProcessing}
                         style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
                       >
-                        {checkinProcessing ? 'Haciendo check-in…' : 'Hacer check-in'}
+                        {checkinProcessing ? 'Haciendo check-in…' : '🎫 Hacer check-in'}
                       </button>
                     </>
                   )}
