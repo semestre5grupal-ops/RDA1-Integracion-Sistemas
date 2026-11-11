@@ -1952,6 +1952,34 @@ export class AlojamientosService implements OnModuleInit {
       return this.buildReservaResponse(reserva);
     }
 
+    // Validar políticas de cancelación del tipo de habitación contratado
+    if (reserva.tipoHabitacionId) {
+      const [tipo] = await this.tiposService.listarPorIds([reserva.tipoHabitacionId]);
+      if (tipo && (tipo.cancelacionGratuitaHoras === null || tipo.cancelacionGratuitaHoras === 0)) {
+        throw conflicto(
+          CodigoProblema.CANCELLATION_NOT_ALLOWED,
+          'Esta reserva fue realizada con una tarifa no reembolsable y no admite cancelación ni devolución.',
+        );
+      }
+      if (tipo && tipo.cancelacionGratuitaHoras && reserva.checkin) {
+        const fechaCheckin = new Date(`${reserva.checkin}T14:00:00Z`).getTime();
+        const limiteMs = fechaCheckin - tipo.cancelacionGratuitaHoras * 3600 * 1000;
+        if (Date.now() > limiteMs) {
+          throw conflicto(
+            CodigoProblema.CANCELLATION_NOT_ALLOWED,
+            `El plazo de cancelación gratuita (${tipo.cancelacionGratuitaHoras} horas antes del check-in) ha vencido.`,
+          );
+        }
+      }
+    }
+
+    if (reserva.checkin && new Date(`${reserva.checkin}T14:00:00Z`).getTime() <= Date.now()) {
+      throw conflicto(
+        CodigoProblema.CANCELLATION_NOT_ALLOWED,
+        'No es posible cancelar una reserva cuya estancia ya ha iniciado.',
+      );
+    }
+
     if (reserva.checkout && new Date(reserva.checkout).getTime() < Date.now()) {
       throw conflicto(
         CodigoProblema.CANCELLATION_NOT_ALLOWED,
@@ -2464,9 +2492,16 @@ export class AlojamientosService implements OnModuleInit {
       nombre_alojamiento: alojamiento?.nombre || null,
       destino: alojamiento?.destino || null,
       photo_url: photoUrl,
+      es_reembolsable: extra.tipo ? (extra.tipo.cancelacionGratuitaHoras !== null && extra.tipo.cancelacionGratuitaHoras !== 0) : true,
+      reembolsable: extra.tipo ? (extra.tipo.cancelacionGratuitaHoras !== null && extra.tipo.cancelacionGratuitaHoras !== 0) : true,
+      cancelacion_texto: extra.tipo ? textoCancelacion(extra.tipo.cancelacionGratuitaHoras) : null,
+      politica_cancelacion: extra.tipo ? textoCancelacion(extra.tipo.cancelacionGratuitaHoras) : null,
+      cancelacion_gratuita_horas: extra.tipo?.cancelacionGratuitaHoras ?? null,
       _links: {
         self: { href: `/api/v1/alojamientos/reservations/${reserva.id}`, type: 'GET' },
-        cancelar: { href: `/api/v1/alojamientos/reservations/${reserva.id}/cancel`, type: 'POST' },
+        ...((extra.tipo?.cancelacionGratuitaHoras !== null && reserva.status !== ReservationStatus.CANCELLED)
+          ? { cancelar: { href: `/api/v1/alojamientos/reservations/${reserva.id}/cancel`, type: 'POST' } }
+          : {}),
         alojamiento: { href: `/api/v1/alojamientos/${reserva.alojamientoId}`, type: 'GET' },
       },
     };

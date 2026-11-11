@@ -503,6 +503,9 @@ export function MisReservasPage() {
           const huespedesNum = Number(al.huespedes || al.personas || al.raw?.passengers?.length || 1);
           const habNum = Number(al.habitaciones_count || al.habitaciones || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
+          const cancelTexto = al.cancelacion_texto || al.tipo_habitacion?.cancelacion || al.politica_cancelacion || (al.reembolsable === false || al.es_reembolsable === false ? 'No reembolsable' : null);
+          const esNoReembolsable = al.reembolsable === false || al.es_reembolsable === false || (cancelTexto && /no reembolsable|no cancelable/i.test(cancelTexto)) || (al.tipo_habitacion?.plan_tarifa && /no reembolsable/i.test(al.tipo_habitacion.plan_tarifa));
+          const esReembolsable = !esNoReembolsable;
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -518,6 +521,8 @@ export function MisReservasPage() {
             fechaReserva: fReservaAloj,
             fechaEntrega: checkinStr,
             fechaDevolucion: checkoutStr,
+            checkinRaw: al.checkin,
+            checkoutRaw: al.checkout,
             cantidad: huespedesNum,
             cantidadTexto: `${huespedesNum} Huésped${huespedesNum > 1 ? 'es' : ''}${habNum > 1 ? ` · ${habNum} Habitaciones` : ' · 1 Habitación'}`,
             rawDate: al.created_at ? new Date(al.created_at).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
@@ -525,6 +530,9 @@ export function MisReservasPage() {
             totalRaw: al.total_price?.total || al.total || 0,
             imagen: al.photo_url || DEFAULT_IMAGES.alojamiento,
             link: al.alojamiento_id ? `/alojamientos/${al.alojamiento_id}` : '/',
+            esReembolsable,
+            cancellationPolicy: cancelTexto || (esReembolsable ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
+            cancelacionGratuitaHoras: al.cancelacion_gratuita_horas ?? null,
             raw: {
               createdAt: al.created_at || new Date().toISOString(),
               passengers: (al.huespedes_detalle?.length ? al.huespedes_detalle : [{ nombre: al.customer_name || 'Huésped', apellido: '' }]).map((h, i) => ({
@@ -545,6 +553,8 @@ export function MisReservasPage() {
         const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
         const huespedesLocalNum = Number(al.huespedes || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
+        const cancelTextoLoc = al.cancelacionTexto || al.cancellationPolicy || al.tipoHabitacion?.cancelacion || (al.reembolsable === false ? 'No reembolsable' : null);
+        const esNoReemLoc = al.reembolsable === false || (cancelTextoLoc && /no reembolsable|no cancelable/i.test(cancelTextoLoc));
         return {
           id: al.reservationId || al.id,
           pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
@@ -559,6 +569,8 @@ export function MisReservasPage() {
           fechaReserva: fReservaLocalAloj,
           fechaEntrega: checkinLocalStr,
           fechaDevolucion: checkoutLocalStr,
+          checkinRaw: al.checkin,
+          checkoutRaw: al.checkout,
           cantidad: huespedesLocalNum,
           cantidadTexto: `${huespedesLocalNum} Huésped${huespedesLocalNum > 1 ? 'es' : ''}`,
           rawDate: al.createdAt ? new Date(al.createdAt).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
@@ -567,6 +579,8 @@ export function MisReservasPage() {
           imagen: al.photoUrl || DEFAULT_IMAGES.alojamiento,
           link: al.alojamientoId ? `/alojamientos/${al.alojamientoId}` : '/',
           email: (al.email || al.customer_email || '').trim().toLowerCase(),
+          esReembolsable: !esNoReemLoc,
+          cancellationPolicy: cancelTextoLoc || (!esNoReemLoc ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
           isLocal: true,
           raw: {
             createdAt: al.createdAt || new Date().toISOString(),
@@ -928,6 +942,9 @@ export function MisReservasPage() {
           throw new Error(datos.detail || datos.title || 'La aerolínea no aceptó la cancelación. Inténtalo de nuevo.');
         }
       } else if (selectedReserva.tipo === 'alojamiento' || selectedReserva.tipo === 'hospedaje') {
+        if (selectedReserva.esReembolsable === false || /no reembolsable|no cancelable/i.test(selectedReserva.cancellationPolicy || '')) {
+          throw new Error('Esta reserva tiene tarifa no reembolsable según las normas del hotel y no admite cancelación.');
+        }
         try {
           const idParaCancelar = selectedReserva.id || selectedReserva.reservation_id || selectedReserva.codigo_reserva || selectedReserva.codigoReserva || selectedReserva.codigo;
           const r = await cancelarReservaAlojamiento(idParaCancelar, { reason: motivoFinal });
@@ -1740,6 +1757,23 @@ export function MisReservasPage() {
                           <span style={{ fontSize: '1.3rem' }}>✅</span>
                           <div>
                             <strong>Check-in realizado / Servicio en curso.</strong> El servicio ya fue verificado o retirado en mostrador. La cancelación no aplica una vez iniciado o completado el servicio.
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const esNoReembolsableAloj = (selectedReserva.tipo === 'alojamiento' || selectedReserva.tipo === 'hospedaje') && (
+                      selectedReserva.esReembolsable === false ||
+                      /no reembolsable|no cancelable/i.test(selectedReserva.cancellationPolicy || '') ||
+                      /no reembolsable|no cancelable/i.test(selectedReserva.titulo || '')
+                    );
+
+                    if (esNoReembolsableAloj) {
+                      return (
+                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '6px', color: '#8d6e63', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.3rem' }}>🔒</span>
+                          <div>
+                            <strong>Tarifa No Reembolsable.</strong> Esta habitación fue contratada bajo una política que no admite cancelación ni devolución según las normas del alojamiento.
                           </div>
                         </div>
                       );
