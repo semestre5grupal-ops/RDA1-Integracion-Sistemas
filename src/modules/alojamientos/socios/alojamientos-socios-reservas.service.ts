@@ -169,13 +169,16 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
   async porId(id: string): Promise<any | null> {
     if (!id || typeof id !== 'string') return null;
     if (!(await this.asegurarTabla())) return null;
-    const limpio = id.trim();
-    const esUuid = /^[0-9a-f-]{36}$/i.test(limpio);
-    const sql = esUuid
-      ? `SELECT * FROM ${TABLA} WHERE id = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 LIMIT 1`
-      : `SELECT * FROM ${TABLA} WHERE codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 LIMIT 1`;
-    const [fila] = await this.dataSource!.query(sql, [limpio]);
-    return fila ?? null;
+    const raw = decodeURIComponent(id.trim());
+    const stripped = raw.includes('~') ? raw.split('~').pop()!.trim() : raw;
+    const candidatos = Array.from(new Set([raw, stripped].filter(Boolean)));
+
+    for (const cand of candidatos) {
+      const sql = `SELECT * FROM ${TABLA} WHERE id::text = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 LIMIT 1`;
+      const [fila] = await this.dataSource!.query(sql, [cand]);
+      if (fila) return fila;
+    }
+    return null;
   }
 
   private async porClave(clave: string): Promise<any | null> {
@@ -512,9 +515,9 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     const nodo = await this.socios.nodoPorCodigo(fila.codigo_nodo);
     if (!nodo) throw new HttpException('El hotel de esta reserva ya no está disponible en Booking.', HttpStatus.BAD_GATEWAY);
 
-    // En Booking el consumidor fija las reglas: toda reserva admite cancelación previa al inicio de la estadía
+    // En Booking el consumidor fija las reglas: toda reserva admite cancelación previa al inicio de la estadía (14:00 hora hotel Ecuador / UTC-5)
     if (fila.checkin) {
-      const fechaEntrada = new Date(`${fecha(fila.checkin)}T14:00:00Z`).getTime();
+      const fechaEntrada = new Date(`${fecha(fila.checkin)}T14:00:00-05:00`).getTime();
       if (Date.now() >= fechaEntrada) {
         throw conflicto(
           CodigoProblema.CANCELLATION_NOT_ALLOWED,
@@ -523,7 +526,8 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       }
     }
 
-    const ref = fila.order_id_socio || fila.external_order_id || fila.codigo_reserva_socio || fila.codigo_reserva;
+    const rawRef = fila.order_id_socio || fila.external_order_id || fila.codigo_reserva_socio || fila.codigo_reserva;
+    const ref = String(rawRef || '').includes('~') ? String(rawRef).split('~').pop()! : String(rawRef || '');
     const cuerpoCancel = {
       motivo: (motivo || 'Cancelada por el cliente desde Booking').slice(0, 300),
       solicitadoPor: 'CLIENTE',
@@ -539,6 +543,14 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         correlationId,
         body: cuerpoCancel,
       });
+      if (r.status === 404 && fila.codigo_reserva_socio && fila.codigo_reserva_socio !== ref) {
+        const porLoc = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(fila.codigo_reserva_socio)}/cancel`, {
+          idempotencyKey: randomUUID(),
+          correlationId,
+          body: cuerpoCancel,
+        });
+        if (porLoc.status === 200 || porLoc.status === 204 || porLoc.status === 409) r = porLoc;
+      }
       if (r.status === 404) {
         const alias = await this.socios.llamar(nodo, 'POST', `/alojamientos/reservas/${encodeURIComponent(ref)}/cancel`, {
           idempotencyKey: randomUUID(),

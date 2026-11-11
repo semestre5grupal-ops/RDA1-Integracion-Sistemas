@@ -178,7 +178,25 @@ export class AlojamientosSociosService {
 
   async nodoPorCodigo(codigo: string): Promise<ConfigProveedor | null> {
     const nodos = await this.nodosActivos();
-    return nodos.find((n) => n.codigoNodo.toUpperCase() === codigo.toUpperCase()) ?? null;
+    const c = (codigo || '').trim().toUpperCase();
+    if (!c) return null;
+    const exacto = nodos.find((n) => n.codigoNodo.toUpperCase() === c);
+    if (exacto) return exacto;
+
+    const norm = (s: string) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const cNorm = norm(c);
+
+    const difuso = nodos.find((n) => {
+      const nNorm = norm(n.codigoNodo);
+      const provNorm = norm(n.nombreProveedor || '');
+      if (nNorm === cNorm) return true;
+      if (cNorm.includes('HABITAT') || cNorm === 'NODEALOHAB' || cNorm === 'HABITAT') {
+        return nNorm.includes('HABITAT') || provNorm.includes('HABITAT') || nNorm.includes('NODEALOH');
+      }
+      return nNorm.includes(cNorm) || cNorm.includes(nNorm);
+    });
+
+    return difuso ?? null;
   }
 
   /** Para el check-in entrante: el nodo dueño de esta API key (o null). */
