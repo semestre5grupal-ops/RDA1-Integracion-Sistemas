@@ -1038,8 +1038,9 @@ export function AlojamientoDetail() {
                       <td>
                         <span className="dt-room-title-link">{p.room_name}</span>
                         <div className="dt-room-features-list">
-                          <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
-                            🛏️ {p.descripcion_camas || `${p.camas} ${p.camas === 1 ? 'cama' : 'camas'}`}
+                          <span style={{ fontWeight: 600, color: '#1a1a1a', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <BedIcon size={14} color="#003580" />
+                            {p.descripcion_camas || `${p.camas} ${p.camas === 1 ? 'cama' : 'camas'}`}
                             {p.tamano_m2 ? ` · ${p.tamano_m2} m²` : ''}
                           </span>
                           {p.descripcion && <span>{p.descripcion}</span>}

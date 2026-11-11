@@ -1523,11 +1523,6 @@ export function MisReservasPage() {
                                   {r.tipo === 'auto' ? '🔄 Devolución' : r.tipo === 'alojamiento' ? '📤 Check-out' : '🛬 Retorno'}: {r.fechaDevolucion}
                                 </span>
                               )}
-                              {r.tipo === 'alojamiento' && r.descripcion_camas && (
-                                <span style={{ background: '#f5f3ff', color: '#6d28d9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  🛏️ {r.descripcion_camas}
-                                </span>
-                              )}
                             </div>
 
                             <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
