@@ -782,7 +782,10 @@ export function AlojamientoCheckoutModal({
               <div className="bkg-total-stay-text">
                 Duración total de la estancia: <strong>{nightsCount} noches</strong>
                 <br />
-                <strong>{rooms} apartamento para {adults} adultos</strong>
+                <strong>
+                  {rooms} {rooms === 1 ? 'apartamento' : 'apartamentos'} para {adults} {adults === 1 ? 'adulto' : 'adultos'}
+                  {Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
+                </strong>
               </div>
 
               {step === 1 && (

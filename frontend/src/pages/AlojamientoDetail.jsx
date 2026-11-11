@@ -609,6 +609,30 @@ export function AlojamientoDetail() {
 
                   <div className="dt-popover-row">
                     <div>
+                      <div className="dt-row-title">Niños</div>
+                      <div className="dt-row-desc">De 0 a 17 años</div>
+                    </div>
+                    <div className="dt-stepper">
+                      <button
+                        type="button"
+                        disabled={edadesNinos.length <= 0}
+                        onClick={() => setEdadesNinos((prev) => prev.slice(0, -1))}
+                      >
+                        −
+                      </button>
+                      <span>{edadesNinos.length}</span>
+                      <button
+                        type="button"
+                        disabled={edadesNinos.length >= 10}
+                        onClick={() => setEdadesNinos((prev) => [...prev, 7])}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="dt-popover-row">
+                    <div>
                       <div className="dt-row-title">Habitaciones</div>
                       <div className="dt-row-desc">Cantidad total</div>
                     </div>
