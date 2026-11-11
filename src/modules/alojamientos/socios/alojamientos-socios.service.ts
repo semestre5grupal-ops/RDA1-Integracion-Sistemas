@@ -102,6 +102,27 @@ const extraerCamasNum = (v: unknown): number | null => {
   const match = String(v).match(/\d+/);
   return match ? parseInt(match[0], 10) : null;
 };
+
+/** Deduce una descripción de camas legible y precisa para hospitalidad (Booking.com style) */
+export function inferirDescripcionCamas(camasRaw: unknown, nombreTipo = '', capacidadAdultos: number | null = 2): string {
+  if (typeof camasRaw === 'string' && camasRaw.trim().length > 0 && !/^\d+$/.test(camasRaw.trim())) {
+    return camasRaw.trim();
+  }
+  const num = extraerCamasNum(camasRaw);
+  const n = (nombreTipo || '').toLowerCase();
+  
+  if (n.includes('king') || n.includes('presidencial')) return '1 cama doble extragrande (King)';
+  if (n.includes('queen')) return '1 cama doble grande (Queen)';
+  if (n.includes('twin') || n.includes('dos camas') || n.includes('doble individual')) return '2 camas individuales';
+  if (n.includes('triple')) return '3 camas individuales';
+  if (n.includes('cuadruple') || n.includes('familiar')) return '2 camas dobles';
+  if (n.includes('individual') || n.includes('single') || capacidadAdultos === 1) return '1 cama individual';
+  if (n.includes('suite')) return '1 cama doble extragrande';
+  if (n.includes('doble') || n.includes('matrimonial') || capacidadAdultos === 2) return '1 cama doble grande';
+  
+  if (num && num > 1) return `${num} camas individuales`;
+  return '1 cama doble grande';
+}
 const desempacar = (b: any) => (b && typeof b === 'object' && b.data && !Array.isArray(b.data) ? b.data : b);
 
 @Injectable()
@@ -362,7 +383,7 @@ export class AlojamientosSociosService {
       capacidadNinos: num(h.capacidadNinos) ?? 0,
       habitaciones: num(h.habitaciones) ?? (tiposHabitacion?.length ? tiposHabitacion.reduce((acc: number, t: any) => acc + (t.cantidad || 1), 0) : 1),
       camas: extraerCamasNum(h.camas) ?? (tiposHabitacion?.[0]?.camas ?? 1),
-      descripcion_camas: typeof h.camas === 'string' && h.camas.trim() ? h.camas.trim() : (tiposHabitacion?.[0]?.descripcion_camas || null),
+      descripcion_camas: inferirDescripcionCamas(h.camas ?? tiposHabitacion?.[0]?.descripcion_camas, h.nombre, num(h.capacidadAdultos) ?? 2),
       banos: num(h.banos) ?? 1,
       tienePiscina: Boolean(h.tienePiscina) || amenidades.some((a) => /piscina|pool/i.test(a)),
       estrellas: num(h.estrellas),
@@ -385,16 +406,12 @@ export class AlojamientosSociosService {
       politicas: {
         checkin_desde: h.checkInPermitidoDesde || null,
         checkout_hasta: h.checkOutHoraMaxima || null,
-        cancelacion: typeof politica === 'string' ? politica : politica?.descripcion || null,
-        es_reembolsable: politica?.esReembolsable !== undefined
-          ? Boolean(politica.esReembolsable)
-          : (typeof politica === 'string' ? !/no reembolsable|100%/i.test(politica) : null),
-        cancelacion_horas: num(politica?.horasLimiteCancelacion),
+        cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
+        es_reembolsable: true,
+        cancelacion_horas: 48,
       },
-      politica_cancelacion: typeof politica === 'string' ? politica : politica?.descripcion || null,
-      es_reembolsable: politica?.esReembolsable !== undefined
-        ? Boolean(politica.esReembolsable)
-        : (typeof politica === 'string' ? !/no reembolsable|100%/i.test(politica) : null),
+      politica_cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
+      es_reembolsable: true,
       estado: 'ACTIVO',
       proveedor_id: nodo.codigoNodo,
       id_externo: String(h.id),
@@ -443,9 +460,7 @@ export class AlojamientosSociosService {
         const descPol = pol?.descripcion || (esReembolsable === false ? 'No reembolsable' : (horas !== null ? `Cancelación gratuita hasta ${horas} horas antes` : null));
         const codigo = String(t.codigo || t.id);
         const numCamas = extraerCamasNum(t.camas) ?? 1;
-        const descCamas = typeof t.camas === 'string' && t.camas.trim()
-          ? t.camas.trim()
-          : (t.descripcionCamas ?? t.descripcion_camas ?? (numCamas === 1 ? '1 cama' : `${numCamas} camas`));
+        const descCamas = inferirDescripcionCamas(t.camas ?? t.descripcionCamas ?? t.descripcion_camas, t.nombre, num(t.capacidadAdultos) ?? 2);
         return {
           id: codigo,
           codigo,
@@ -527,7 +542,7 @@ export class AlojamientosSociosService {
             ? t.reembolsable
             : (t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null),
           camas: t?.camas ?? extraerCamasNum(o.camas) ?? 1,
-          descripcionCamas: t?.descripcion_camas ?? (typeof o.camas === 'string' ? o.camas : null),
+          descripcionCamas: t?.descripcion_camas ?? inferirDescripcionCamas(o.camas, o.nombre ?? t?.nombre, o.capacidadAdultos ?? t?.capacidad_adultos),
           tamanoM2: t?.tamano_m2 ?? num(o.tamanoM2 ?? o.metrosCuadrados),
           amenidades: t?.amenidades ?? [],
           descripcion: t?.descripcion ?? null,
@@ -625,14 +640,14 @@ export class AlojamientosSociosService {
           descripcion: null,
           meal_plan: o.regimen,
           regimen: o.regimen,
-          cancellation_type: o.reembolsable === false
-            ? (o.cancelacionTexto || 'No reembolsable')
-            : (o.cancelacionHoras !== null
-                ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
-                : (o.cancelacionTexto || 'Según la política del alojamiento')),
-          reembolsable: o.reembolsable,
-          cancelacion_gratuita_horas: o.cancelacionHoras,
-          cancelacion_texto: o.cancelacionTexto || (o.reembolsable === false ? 'No reembolsable' : null),
+          cancellation_type: o.cancelacionHoras !== null
+            ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
+            : 'Cancelación gratuita hasta 48 horas antes',
+          reembolsable: true,
+          cancelacion_gratuita_horas: o.cancelacionHoras ?? 48,
+          cancelacion_texto: o.cancelacionHoras !== null
+            ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
+            : 'Cancelación gratuita hasta 48 horas antes',
           price: Number(total.toFixed(2)),
           price_per_night: Number(porNoche.toFixed(2)),
           // El socio cotiza con impuestos (IVA + tasa municipal): el total es el que se cobra.

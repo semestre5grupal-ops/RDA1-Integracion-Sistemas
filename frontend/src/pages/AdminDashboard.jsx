@@ -1289,7 +1289,12 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
     }
     const rows=reservas[vista]||[];
     const isVuelos = vista === 'vuelos';
+    const isHospedaje = vista === 'hospedaje';
     const totalIngresos = rows.filter((r) => ESTADOS_COBRADOS.has(String(r.estado || '').toUpperCase())).reduce((s, r) => s + Number(r.total) - Number(r.reembolsado || 0), 0);
+
+    const headersHospedaje = ['PNR / ID', 'Alojamiento & Tipo', 'Camas / Habitación', 'Estado', 'Total (USD)', 'Cliente', 'Fecha', 'Acciones'];
+    const headersEstandar = ['PNR / ID', 'Estado', 'Total (USD)', isVuelos ? 'Aerolínea' : vista === 'atracciones' ? 'Cliente' : 'Moneda', 'Fecha', 'Acciones'];
+    const headers = isHospedaje ? headersHospedaje : headersEstandar;
 
     return (
       <div>
@@ -1308,16 +1313,28 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
         )}
         <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.85rem'}}>
           <thead><tr style={{background:C.lightBlue}}>
-            {['PNR / ID','Estado','Total (USD)',isVuelos?'Aerolínea':(vista==='atracciones'||vista==='hospedaje')?'Cliente':'Moneda','Fecha','Acciones'].map(h=>(<th key={h} style={{padding:'10px 14px',textAlign:'left',fontWeight:600,color:C.darkBlue}}>{h}</th>))}
+            {headers.map(h=>(<th key={h} style={{padding:'10px 14px',textAlign:'left',fontWeight:600,color:C.darkBlue}}>{h}</th>))}
           </tr></thead>
           <tbody>
             {rows.map((r,i)=>(
               <tr key={r.id||i} style={{borderTop:`1px solid ${C.border}`}}>
                 <td style={{padding:'9px 14px',fontFamily:'monospace',fontWeight:600}}>
                   {r.pnr}
-                  {r.alojamiento && <div style={{fontFamily:'inherit',fontWeight:400,fontSize:'0.75rem',color:C.gray}}>🏨 {r.alojamiento}</div>}
+                  {!isHospedaje && r.alojamiento && <div style={{fontFamily:'inherit',fontWeight:400,fontSize:'0.75rem',color:C.gray}}>🏨 {r.alojamiento}</div>}
                   {r.ruta && <div style={{fontFamily:'inherit',fontWeight:400,fontSize:'0.75rem',color:C.gray}}>{r.ruta}</div>}
                 </td>
+                {isHospedaje && (
+                  <td style={{padding:'9px 14px'}}>
+                    <div style={{fontWeight:600,color:C.text}}>🏨 {r.alojamiento || 'Hotel'}</div>
+                    {r.tipoHabitacion && <div style={{fontSize:'0.75rem',color:C.gray}}>{r.tipoHabitacion}</div>}
+                  </td>
+                )}
+                {isHospedaje && (
+                  <td style={{padding:'9px 14px'}}>
+                    <div style={{fontWeight:600,color:'#6d28d9',fontSize:'0.8rem'}}>🛏️ {r.camas || '1 Cama'}</div>
+                    <div style={{fontSize:'0.75rem',color:C.gray}}>🚪 {r.habitaciones || 1} Hab.</div>
+                  </td>
+                )}
                 <td style={{padding:'9px 14px'}}><Badge status={r.estado}/></td>
                 <td style={{padding:'9px 14px',fontWeight:600}}>${fmt(r.total)}</td>
                 <td style={{padding:'9px 14px',color:C.gray}}>{isVuelos?(r.socio?r.aerolinea:'Inventario local'):(vista==='atracciones'||vista==='hospedaje')?(r.cliente||'—'):(r.moneda||'USD')}</td>
@@ -1330,7 +1347,7 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
                 </td>
               </tr>
             ))}
-            {rows.length===0&&!reservasError&&(<tr><td colSpan={6} style={{padding:24,textAlign:'center',color:C.gray}}>Sin registros</td></tr>)}
+            {rows.length===0&&!reservasError&&(<tr><td colSpan={isHospedaje ? 8 : 6} style={{padding:24,textAlign:'center',color:C.gray}}>Sin registros</td></tr>)}
           </tbody>
         </table>
       </div>

@@ -85,7 +85,7 @@ import { esAdministrador, UsuarioSupabase } from '../../core/auth/administradore
 import { TraceContextService } from '../../core/tracing/trace-context.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { AlojamientosCircuitBreakerAdapter } from './acl/alojamientos-circuit-breaker.adapter';
-import { AlojamientosSociosService } from './socios/alojamientos-socios.service';
+import { AlojamientosSociosService, inferirDescripcionCamas } from './socios/alojamientos-socios.service';
 import { AlojamientosSociosReservasService } from './socios/alojamientos-socios-reservas.service';
 
 /** Máximo de alojamientos por petición de sincronización. */
@@ -1527,6 +1527,7 @@ export class AlojamientosService implements OnModuleInit {
       order_id: reserva.id,
       codigo_reserva: reserva.codigoReserva,
       estado: 'CHECKED_IN',
+      estado_habitacion: 'OCUPADA',
       checkin_liberado: true,
       fecha_checkin: checkinDateStr,
       hora_checkin: now.toISOString(),
@@ -1950,6 +1951,13 @@ export class AlojamientosService implements OnModuleInit {
 
     if (reserva.status === ReservationStatus.CANCELLED) {
       return this.buildReservaResponse(reserva);
+    }
+
+    if (reserva.checkin && new Date(`${reserva.checkin}T14:00:00Z`).getTime() <= Date.now()) {
+      throw conflicto(
+        CodigoProblema.CANCELLATION_NOT_ALLOWED,
+        'No es posible cancelar una reserva cuya estancia ya ha iniciado.',
+      );
     }
 
     if (reserva.checkout && new Date(reserva.checkout).getTime() < Date.now()) {
@@ -2432,6 +2440,10 @@ export class AlojamientosService implements OnModuleInit {
       adultos: reserva.adultos ?? reserva.huespedes,
       ninos: reserva.ninos ?? 0,
       habitaciones_count: reserva.habitacionesCount,
+      camas: extra.tipo?.camas ?? 1,
+      descripcion_camas: extra.tipo?.descripcionCamas || inferirDescripcionCamas(extra.tipo?.camas, extra.tipo?.nombre, reserva.adultos),
+      habitacion_asignada: reserva.habitacionAsignada || null,
+      estado_habitacion: (reserva as any).estadoHabitacion || (reserva.status === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (reserva.status === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
       tipo_habitacion: extra.tipo
         ? {
             id: extra.tipo.id,
@@ -2464,9 +2476,16 @@ export class AlojamientosService implements OnModuleInit {
       nombre_alojamiento: alojamiento?.nombre || null,
       destino: alojamiento?.destino || null,
       photo_url: photoUrl,
+      es_reembolsable: extra.tipo ? (extra.tipo.cancelacionGratuitaHoras !== null && extra.tipo.cancelacionGratuitaHoras !== 0) : true,
+      reembolsable: extra.tipo ? (extra.tipo.cancelacionGratuitaHoras !== null && extra.tipo.cancelacionGratuitaHoras !== 0) : true,
+      cancelacion_texto: extra.tipo ? textoCancelacion(extra.tipo.cancelacionGratuitaHoras) : null,
+      politica_cancelacion: extra.tipo ? textoCancelacion(extra.tipo.cancelacionGratuitaHoras) : null,
+      cancelacion_gratuita_horas: extra.tipo?.cancelacionGratuitaHoras ?? null,
       _links: {
         self: { href: `/api/v1/alojamientos/reservations/${reserva.id}`, type: 'GET' },
-        cancelar: { href: `/api/v1/alojamientos/reservations/${reserva.id}/cancel`, type: 'POST' },
+        ...((extra.tipo?.cancelacionGratuitaHoras !== null && reserva.status !== ReservationStatus.CANCELLED)
+          ? { cancelar: { href: `/api/v1/alojamientos/reservations/${reserva.id}/cancel`, type: 'POST' } }
+          : {}),
         alojamiento: { href: `/api/v1/alojamientos/${reserva.alojamientoId}`, type: 'GET' },
       },
     };

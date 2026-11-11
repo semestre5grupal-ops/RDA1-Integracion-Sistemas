@@ -1174,8 +1174,14 @@ export function AlojamientosSearchPage() {
                       {/* Room & Beds summary */}
                       <div className="sr-room-details">
                         <div className="sr-room-name">{prop.tipo_alojamiento || 'Habitación Doble'}</div>
-                        <div className="sr-bed-config">
-                          {prop.descripcion_camas || `${prop.camas || 1} ${prop.camas === 1 ? 'cama' : 'camas'}`} ({prop.habitaciones || 1} hab.)
+                        <div className="sr-bed-config" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: 4 }}>
+                          <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
+                            🛏️ {prop.descripcion_camas || `${prop.camas || 1} ${prop.camas === 1 ? 'cama' : 'camas'}`}
+                          </span>
+                          <span style={{ color: '#595959' }}>•</span>
+                          <span style={{ color: '#595959' }}>
+                            🚪 {prop.habitaciones ? `${prop.habitaciones} ${prop.habitaciones === 1 ? 'habitación' : 'habitaciones'}` : 'Habitación privada'}
+                          </span>
                         </div>
 
                         <div className="sr-perks-list">

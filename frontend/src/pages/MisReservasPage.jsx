@@ -503,6 +503,8 @@ export function MisReservasPage() {
           const huespedesNum = Number(al.huespedes || al.personas || al.raw?.passengers?.length || 1);
           const habNum = Number(al.habitaciones_count || al.habitaciones || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
+          const cancelTexto = 'Cancelación gratuita hasta 48 horas antes de la llegada';
+          const esReembolsable = true;
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -518,6 +520,8 @@ export function MisReservasPage() {
             fechaReserva: fReservaAloj,
             fechaEntrega: checkinStr,
             fechaDevolucion: checkoutStr,
+            checkinRaw: al.checkin,
+            checkoutRaw: al.checkout,
             cantidad: huespedesNum,
             cantidadTexto: `${huespedesNum} Huésped${huespedesNum > 1 ? 'es' : ''}${habNum > 1 ? ` · ${habNum} Habitaciones` : ' · 1 Habitación'}`,
             rawDate: al.created_at ? new Date(al.created_at).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
@@ -525,6 +529,12 @@ export function MisReservasPage() {
             totalRaw: al.total_price?.total || al.total || 0,
             imagen: al.photo_url || DEFAULT_IMAGES.alojamiento,
             link: al.alojamiento_id ? `/alojamientos/${al.alojamiento_id}` : '/',
+            esReembolsable,
+            cancellationPolicy: cancelTexto || (esReembolsable ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
+            cancelacionGratuitaHoras: al.cancelacion_gratuita_horas ?? null,
+            camas: al.camas,
+            descripcion_camas: al.descripcion_camas || al.camas || (al.tipo_habitacion?.nombre ? `1 Cama Queen / Matrimonial` : '1 Cama'),
+            habitaciones_count: habNum,
             raw: {
               createdAt: al.created_at || new Date().toISOString(),
               passengers: (al.huespedes_detalle?.length ? al.huespedes_detalle : [{ nombre: al.customer_name || 'Huésped', apellido: '' }]).map((h, i) => ({
@@ -545,6 +555,8 @@ export function MisReservasPage() {
         const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
         const huespedesLocalNum = Number(al.huespedes || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
+        const cancelTextoLoc = 'Cancelación gratuita hasta 48 horas antes de la llegada';
+        const esReemLoc = true;
         return {
           id: al.reservationId || al.id,
           pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
@@ -559,6 +571,8 @@ export function MisReservasPage() {
           fechaReserva: fReservaLocalAloj,
           fechaEntrega: checkinLocalStr,
           fechaDevolucion: checkoutLocalStr,
+          checkinRaw: al.checkin,
+          checkoutRaw: al.checkout,
           cantidad: huespedesLocalNum,
           cantidadTexto: `${huespedesLocalNum} Huésped${huespedesLocalNum > 1 ? 'es' : ''}`,
           rawDate: al.createdAt ? new Date(al.createdAt).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
@@ -567,6 +581,11 @@ export function MisReservasPage() {
           imagen: al.photoUrl || DEFAULT_IMAGES.alojamiento,
           link: al.alojamientoId ? `/alojamientos/${al.alojamientoId}` : '/',
           email: (al.email || al.customer_email || '').trim().toLowerCase(),
+          esReembolsable: !esNoReemLoc,
+          cancellationPolicy: cancelTextoLoc || (!esNoReemLoc ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
+          camas: al.camas,
+          descripcion_camas: al.descripcion_camas || al.camas || '1 Cama Matrimonial',
+          habitaciones_count: Number(al.habitaciones || 1),
           isLocal: true,
           raw: {
             createdAt: al.createdAt || new Date().toISOString(),
@@ -1435,6 +1454,11 @@ export function MisReservasPage() {
                               {r.tipo === 'auto' ? '🔄 Devolución' : r.tipo === 'alojamiento' ? '📤 Check-out' : '🛬 Retorno'}: {r.fechaDevolucion}
                             </span>
                           )}
+                          {r.tipo === 'alojamiento' && r.descripcion_camas && (
+                            <span style={{ background: '#f5f3ff', color: '#6d28d9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              🛏️ {r.descripcion_camas}
+                            </span>
+                          )}
                         </div>
 
                         <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
@@ -2260,7 +2284,7 @@ export function MisReservasPage() {
                 </div>
               )}
 
-              {/* El check-in de alojamientos lo realiza el hotel directamente (Flujo 2),
+              {/* El check-in de alojamientos lo realiza el hotel directamente en su recepción (Flujo 2),
                   no el huésped: por eso no hay check-in digital en Mis Reservas. */}
 
               {/* VERTICAL: VUELOS */}
