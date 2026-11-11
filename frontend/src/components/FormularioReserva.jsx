@@ -444,7 +444,16 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const ultimaFirma = useRef('');
   const colaAsientos = useRef(Promise.resolve());
   const holdRef = useRef(hold);
-  holdRef.current = hold;
+  // Se toma del padre solo cuando cambia el hold que llega por props; si no, se
+  // conserva el que la cola ya actualizó al rehacer el hold.
+  const holdDelPadre = useRef(hold?.holdId);
+  const holdsRehechos = useRef(new Set());
+  if (hold?.holdId !== holdDelPadre.current) {
+    holdDelPadre.current = hold?.holdId;
+    // Un hold que rehízo esta misma pantalla puede llegar después de otro más nuevo: no se retrocede.
+    const esIntermedio = holdsRehechos.current.has(hold?.holdId) && holdRef.current?.compraId === hold?.compraId;
+    if (!esIntermedio) holdRef.current = hold;
+  }
   useEffect(() => {
     if (!abierto || !hold?.offerId || !hold?.holdId) return undefined;
     const elegidos = [];
@@ -454,7 +463,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         if (seatNumber) elegidos.push({ indice, segmentId, seatNumber });
       }
     });
-    const firma = `${hold.holdId}|${elegidos.map((a) => `${a.segmentId}:${a.seatNumber}`).sort().join(',')}`;
+    // Por compra y asientos (no por hold): rehacer el hold no debe volver a enviar los mismos asientos.
+    const firma = `${hold.compraId ?? hold.holdId}|${elegidos.map((a) => `${a.segmentId}:${a.seatNumber}`).sort().join(',')}`;
     if (firma === ultimaFirma.current || (!elegidos.length && !ultimaFirma.current.includes(':'))) {
       ultimaFirma.current = firma;
       return undefined;
@@ -468,7 +478,9 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         const r = await bloquearAsientos(holdActual.offerId, holdActual.holdId, elegidos.map(({ segmentId, seatNumber }) => ({ segmentId, seatNumber })), holdActual.expiresAt);
         // La aerolínea apartó el asiento en un hold nuevo: la compra sigue con ese hold.
         if (r?.hold?.holdId && r.holdId !== holdActual.holdId) {
-          ultimaFirma.current = `${r.holdId}|${elegidos.map((a) => `${a.segmentId}:${a.seatNumber}`).sort().join(',')}`;
+          // El siguiente cambio en cola ya debe salir con el hold nuevo (sin esperar a que React vuelva a pintar).
+          holdRef.current = { ...holdActual, ...r.hold, compraId: holdActual.compraId };
+          holdsRehechos.current.add(r.holdId);
           const antes = Number(holdActual.bookingPrice?.total ?? holdActual.lockedPrice?.total);
           const despues = Number(r.hold.bookingPrice?.total ?? r.hold.lockedPrice?.total);
           if (Number.isFinite(antes) && Number.isFinite(despues) && Math.abs(antes - despues) >= 0.01) {

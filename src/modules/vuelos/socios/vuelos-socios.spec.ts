@@ -405,6 +405,29 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       await fetch(`${locks}?holdId=${encodeURIComponent(datos.holdId)}`, { method: 'DELETE' });
     });
 
+    it('cambio de asiento rápido con el hold viejo: Booking usa el vigente y el comprador no se bloquea a sí mismo', async () => {
+      const oferta = encodeURIComponent('NODE_VUE_KEY~OF-key');
+      const locks = `${base}/api/v2/vuelos/offers/${oferta}/seat-locks`;
+      const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-h3' }), body: JSON.stringify({ offerId: 'NODE_VUE_KEY~OF-key', itinerarySelections: [], passengersBreakdown: { adults: 1 } }) })).json();
+      const put = (holdId: string, seat: string) => fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId, seats: [{ segmentId: 'SEG-1', seatNumber: seat }] }) });
+      const uno = await (await put(h.holdId, '7A')).json();
+      expect(uno.holdId).toBe('NODE_VUE_KEY~HOLD-key-7A');
+      // La pantalla todavía tiene el hold viejo y cambia a 7B.
+      const dos = await (await put(h.holdId, '7B')).json();
+      expect(dos.holdId).toBe('NODE_VUE_KEY~HOLD-key-7B');
+      expect(dos.hold.holdId).toBe('NODE_VUE_KEY~HOLD-key-7B');
+      // Nadie más tiene bloqueado nada: ni 7A (se soltó) ni 7B (es del comprador).
+      expect((await (await fetch(`${locks}?holdId=${encodeURIComponent(dos.holdId)}`)).json()).locks).toEqual([]);
+      // Con el hold viejo, el mapa igual le muestra 7B como suyo (libre para él).
+      const mapa = await (await fetch(`${base}/api/v2/vuelos/offers/${oferta}/seatmap?segmentId=SEG-1&holdId=${encodeURIComponent(h.holdId)}`)).json();
+      expect(mapa.cabins[0].rows[0].seats.find((x: any) => x.seatNumber === '7B').isAvailable).toBe(true);
+      // Una tercera vez con el hold viejo y el mismo asiento: no rehace nada.
+      llamadas.length = 0;
+      expect((await (await put(h.holdId, '7B')).json()).holdId).toBe('NODE_VUE_KEY~HOLD-key-7B');
+      expect(llamadas.filter((c) => c.method === 'POST')).toHaveLength(0);
+      await fetch(`${locks}?holdId=${encodeURIComponent(dos.holdId)}`, { method: 'DELETE' });
+    });
+
     it('aerolínea que aún no acepta assignedSeats: queda el bloqueo de Booking, sin romper la compra', async () => {
       const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-h2' }), body: JSON.stringify({ offerId: 'NODE_VUE_OAUTH~OF-oauth', itinerarySelections: [] }) })).json();
       const r = await fetch(`${base}/api/v2/vuelos/offers/${encodeURIComponent('NODE_VUE_OAUTH~OF-oauth')}/seat-locks`, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId: h.holdId, seats: [{ segmentId: 'SEG-1', seatNumber: '3A' }] }) });
