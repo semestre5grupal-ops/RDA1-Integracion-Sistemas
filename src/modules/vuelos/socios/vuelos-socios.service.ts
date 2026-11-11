@@ -282,6 +282,9 @@ export class VuelosSociosService {
 
   // ───────────────────────────── Búsqueda ─────────────────────────────
 
+  /** Aerolíneas que interpretan `departureDate` en UTC (detectado en sus respuestas). */
+  private readonly fechasEnUtc = new Set<string>();
+
   async buscar(
     body: any,
     entrantes: Record<string, any>,
@@ -303,19 +306,45 @@ export class VuelosSociosService {
     const base = VuelosSociosService.baseVuelos(nodo.baseUrlRest)!;
     const resumen: ResultadoSocio = { codigoNodo: nodo.codigoNodo, nombre: nodo.nombreProveedor, ok: false, ms: 0, ofertas: 0 };
     try {
-      const res = await fetch(`${base}/search`, {
-        method: 'POST',
-        headers: await this.cabecerasSocio(nodo, entrantes),
-        body: JSON.stringify(body ?? {}),
-        signal: AbortSignal.timeout(this.timeoutMs()),
-      });
-      resumen.status = res.status;
-      const datos: any = await res.json().catch(() => null);
-      if (!res.ok) {
-        resumen.error = datos?.detail || datos?.title || `HTTP ${res.status}`;
+      const consultar = async (cuerpo: any) => {
+        const res = await fetch(`${base}/search`, {
+          method: 'POST',
+          headers: await this.cabecerasSocio(nodo, entrantes),
+          body: JSON.stringify(cuerpo ?? {}),
+          signal: AbortSignal.timeout(this.timeoutMs()),
+        });
+        const datos: any = await res.json().catch(() => null);
+        const offers: any[] = Array.isArray(datos?.offers) ? datos.offers : Array.isArray(datos) ? datos : [];
+        return { status: res.status, ok: res.ok, offers, error: res.ok ? undefined : datos?.detail || datos?.title || `HTTP ${res.status}` };
+      };
+
+      // Algunas aerolíneas leen `departureDate` en UTC (en Ecuador, desde las 19:00
+      // ya es el día siguiente): rechazan "hoy" por pasado y un vuelo de las 23:00
+      // sale con la fecha de mañana. A esas se les pide también el día siguiente y
+      // se deja solo lo que sale en la fecha pedida en hora de Ecuador.
+      const primera = await consultar(body);
+      const fechaUtc = this.fechasEnUtc.has(nodo.codigoNodo)
+        || (!primera.ok && /before the current date|fecha.*(pasad|anterior)|past date/i.test(String(primera.error ?? '')))
+        || (primera.ok && primera.offers.some((o) => saleElDiaAnterior(o, body)));
+      let segunda: Awaited<ReturnType<typeof consultar>> | null = null;
+      if (fechaUtc && Array.isArray(body?.itineraries) && body.itineraries.length) {
+        this.fechasEnUtc.add(nodo.codigoNodo);
+        segunda = await consultar(conFechasMasUnDia(body)).catch(() => null);
+      }
+      resumen.status = primera.ok || !segunda?.ok ? primera.status : segunda.status;
+      if (!primera.ok && !segunda?.ok) {
+        resumen.error = primera.error;
         return { ofertas: [], resumen };
       }
-      const recibidas: any[] = Array.isArray(datos?.offers) ? datos.offers : Array.isArray(datos) ? datos : [];
+      const vistas = new Set<string>();
+      const recibidas: any[] = [...(primera.ok ? primera.offers : []), ...(segunda?.ok ? segunda.offers : [])]
+        .filter((o) => {
+          const id = String(o?.offerId ?? '');
+          if (!id) return true;
+          if (vistas.has(id)) return false;
+          vistas.add(id);
+          return true;
+        });
       // Solo vuelos de la fecha pedida y que no hayan salido: una aerolínea que
       // ignore la fecha no debe vender un vuelo pasado desde Booking.
       const lista = recibidas.filter((o) => ofertaCoincideConFechas(o, body));
@@ -474,9 +503,22 @@ function fechaEnEcuador(iso: unknown): string | null {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(d);
 }
 
+/** El texto trae zona horaria (`Z` o `±hh:mm`): el instante es inequívoco. */
+function tieneZona(iso: unknown): boolean {
+  return /(Z|[+-]\d{2}:?\d{2})$/i.test(String(iso ?? '').trim());
+}
+
 /**
- * true si cada itinerario de la oferta sale en la fecha pedida (hora de Ecuador
- * o la fecha local que trae el texto) y el primer vuelo no ha salido aún.
+ * Fecha de salida tal como la vive el pasajero: con zona horaria, la de Ecuador;
+ * sin zona (hora local de la aerolínea), la del texto.
+ */
+function fechaDeSalida(iso: unknown): string | null {
+  return tieneZona(iso) ? fechaEnEcuador(iso) : (/^\d{4}-\d{2}-\d{2}/.test(String(iso ?? '')) ? String(iso).slice(0, 10) : fechaEnEcuador(iso));
+}
+
+/**
+ * true si cada itinerario de la oferta sale en la fecha pedida (en hora de
+ * Ecuador) y el primer vuelo no ha salido aún.
  */
 export function ofertaCoincideConFechas(oferta: any, body: any, ahora = new Date()): boolean {
   const pedidos: any[] = Array.isArray(body?.itineraries) ? body.itineraries : [];
@@ -487,7 +529,33 @@ export function ofertaCoincideConFechas(oferta: any, body: any, ahora = new Date
     if (!salida) continue;
     if (i === 0 && new Date(salida).getTime() < ahora.getTime()) return false;
     const pedida = pedidos[i]?.departureDate;
-    if (pedida && fechaEnEcuador(salida) !== pedida && String(salida).slice(0, 10) !== pedida) return false;
+    if (pedida && fechaDeSalida(salida) !== pedida) return false;
   }
   return true;
+}
+
+/**
+ * La aerolínea devolvió, para la fecha pedida, un vuelo que en Ecuador sale el
+ * día anterior (por ejemplo 04:00 UTC = 23:00 del día antes): agrupa por fecha UTC.
+ */
+export function saleElDiaAnterior(oferta: any, body: any): boolean {
+  const pedida = body?.itineraries?.[0]?.departureDate;
+  const seg = oferta?.itineraries?.[0]?.segments?.[0];
+  const salida = seg?.departureAt ?? seg?.departure?.at;
+  if (!pedida || !salida || !tieneZona(salida)) return false;
+  return String(new Date(salida).toISOString()).slice(0, 10) === pedida && (fechaEnEcuador(salida) ?? '') < pedida;
+}
+
+/** El mismo pedido con cada fecha un día después (para aerolíneas que usan UTC). */
+export function conFechasMasUnDia(body: any): any {
+  const mas1 = (f: string) => {
+    const d = new Date(`${f}T12:00:00Z`);
+    if (Number.isNaN(d.getTime())) return f;
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+  return {
+    ...body,
+    itineraries: (body?.itineraries ?? []).map((it: any) => ({ ...it, departureDate: mas1(String(it?.departureDate ?? '')) })),
+  };
 }
