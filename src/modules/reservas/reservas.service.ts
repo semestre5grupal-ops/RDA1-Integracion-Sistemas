@@ -279,15 +279,59 @@ export class ReservasService {
       }
     }
 
-    // 0. Alojamientos de SOCIOS (reservas hechas desde Booking en el hotel del socio).
-    //    Va primero: las búsquedas de abajo usan LIKE y podrían coincidir por error.
-    //    Solo el socio dueño puede confirmar (su X-API-Key): 401 si no; 409 si está cancelada.
+    // 0. Alojamientos de SOCIOS y LOCALES (reservas de hospedaje)
+    //    Va primero: se resuelven antes de las demás verticales para no depender
+    //    ni alterar ninguna consulta de Atracciones, Autos ni Vuelos.
     if (this.alojamientosSocios) {
       const copia = await this.alojamientosSocios.marcarCheckin(targetId, apiKey, { admin: adminId, fecha: dto.fecha_checkin || null });
       if (copia) {
         verticalActualizada = 'ALOJAMIENTOS_SOCIO';
         reservaActualizada = copia;
       }
+    }
+
+    // 0b. Alojamientos de socios (si vino por recepción general sin API key del hotel)
+    if (!verticalActualizada) {
+      try {
+        const rawAloSocio = await this.dataSource.query(
+          `UPDATE schema_alojamientos.alojamientos_reservas_socio
+              SET estado = 'CONFIRMADO_ASISTIDO', checkin_at = COALESCE(checkin_at, now()), checkin_admin = $2, actualizado_en = now()
+            WHERE (id::text = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1)
+              AND estado <> 'CANCELADO'
+            RETURNING *`,
+          [targetId, adminId || null],
+        );
+        const filas = (Array.isArray(rawAloSocio) && Array.isArray(rawAloSocio[0])) ? rawAloSocio[0] : (Array.isArray(rawAloSocio) ? rawAloSocio : []);
+        if (filas.length > 0) {
+          verticalActualizada = 'ALOJAMIENTOS_SOCIO';
+          reservaActualizada = filas[0];
+        }
+      } catch (_) {}
+    }
+
+    // 0c. Alojamientos locales de Booking
+    if (!verticalActualizada) {
+      try {
+        const rawAlo = await this.dataSource.query(
+          `UPDATE schema_alojamientos.alojamientos_reservas 
+           SET estado = 'CONFIRMADO_ASISTIDO'
+           WHERE (id::text = $1 OR codigo_reserva = $1)
+             AND estado <> 'CANCELADO'
+           RETURNING *`,
+          [targetId],
+        );
+        const filas = (Array.isArray(rawAlo) && Array.isArray(rawAlo[0])) ? rawAlo[0] : (Array.isArray(rawAlo) ? rawAlo : []);
+        if (filas.length > 0) {
+          verticalActualizada = 'ALOJAMIENTOS';
+          reservaActualizada = filas[0];
+        }
+      } catch (_) {}
+    }
+
+    // 0d. Si la referencia es explícita de alojamiento (ORD-HTL-*, ORD-ALO-*) y no existe en el sistema:
+    if (!verticalActualizada && (targetId.toUpperCase().startsWith('ORD-HTL-') || targetId.toUpperCase().startsWith('ORD-ALO-'))) {
+      this.logger.warn(`[Check-in Inbound] No se encontró ninguna reserva activa de alojamiento para ${targetId}: 404`);
+      throw new HttpException(`No se encontró ninguna reserva activa de alojamiento para la referencia '${targetId}'.`, HttpStatus.NOT_FOUND);
     }
 
     // 1. Intentar actualizar en Atracciones
