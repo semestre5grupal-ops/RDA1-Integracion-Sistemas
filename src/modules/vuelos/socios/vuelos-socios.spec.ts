@@ -604,7 +604,7 @@ describe('SincronizadorEventosVuelos (feed GET /vuelos/eventos)', () => {
 
 describe('ofertas de la fecha pedida', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { ofertaCoincideConFechas } = require('./vuelos-socios.service');
+  const { ofertaCoincideConFechas, saleElDiaAnterior, conFechasMasUnDia } = require('./vuelos-socios.service');
   const oferta = (salidas: string[]) => ({ itineraries: salidas.map((at) => ({ segments: [{ departureAt: at }] })) });
   const pedido = (fechas: string[]) => ({ itineraries: fechas.map((d) => ({ departureDate: d })) });
   const ahora = new Date('2026-11-05T03:00:00Z');
@@ -617,6 +617,16 @@ describe('ofertas de la fecha pedida', () => {
     // 23:30 en Ecuador = 04:30Z del día siguiente: sigue siendo la fecha pedida
     expect(ofertaCoincideConFechas(oferta(['2026-11-07T04:30:00Z']), pedido(['2026-11-06']), ahora)).toBe(true);
     expect(ofertaCoincideConFechas(oferta(['2026-11-04T12:00:00Z']), pedido(['2026-11-04']), ahora)).toBe(false); // ya salió
+    // 04:06 UTC del 11 = 23:06 del 10 en Ecuador: no es un vuelo del 11.
+    expect(ofertaCoincideConFechas(oferta(['2026-11-11T04:06:00.000Z']), pedido(['2026-11-11']), ahora)).toBe(false);
+    expect(ofertaCoincideConFechas(oferta(['2026-11-11T04:06:00.000Z']), pedido(['2026-11-10']), ahora)).toBe(true);
+    // Aerolínea que agrupa por fecha UTC: se detecta y se le pide también el día siguiente.
+    expect(saleElDiaAnterior(oferta(['2026-11-11T04:06:00.000Z']), pedido(['2026-11-11']))).toBe(true);
+    expect(saleElDiaAnterior(oferta(['2026-11-11T14:00:00.000Z']), pedido(['2026-11-11']))).toBe(false);
+    expect(saleElDiaAnterior(oferta(['2026-11-11T02:00:00']), pedido(['2026-11-11']))).toBe(false);
+    expect(conFechasMasUnDia(pedido(['2026-11-30', '2026-12-31'])).itineraries.map((i: any) => i.departureDate)).toEqual(['2026-12-01', '2027-01-01']);
+    // Sin zona horaria: es la hora local de la aerolínea, vale la fecha del texto.
+    expect(ofertaCoincideConFechas(oferta(['2026-11-11T02:00:00']), pedido(['2026-11-11']), ahora)).toBe(true);
   });
 
 });
