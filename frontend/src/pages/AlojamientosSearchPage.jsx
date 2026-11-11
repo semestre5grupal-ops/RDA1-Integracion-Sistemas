@@ -1114,6 +1114,12 @@ export function AlojamientosSearchPage() {
               const isAd = index === 1;
 
               const detailQuery = `checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&group_children=${children}&no_rooms=${rooms}`;
+              const tieneDesayuno = (Array.isArray(prop.amenidades) && prop.amenidades.some((a) => /desayuno|breakfast/i.test(a)))
+                || /desayuno/i.test(prop.regimen || '')
+                || prop.incluye_desayuno === true;
+              const sinPagoAdelantado = prop.politicas?.pago_en_alojamiento || prop.sin_pago_adelantado;
+              const nombreUnidad = prop.tipos_habitacion?.[0]?.nombre
+                || (prop.tipo_propiedad === 'APARTAMENTO' ? 'Apartamento completo' : 'Habitación disponible');
 
               return (
                 <div key={prop.id} className="sr-property-card" data-testid="property-card">
@@ -1171,23 +1177,16 @@ export function AlojamientosSearchPage() {
 
                       {index === 2 && <div className="sr-deal-tag">Oferta de escapada</div>}
 
-                      {/* Room & Beds summary */}
+                      {/* Room & perks summary (Estilo Booking.com real: sin forzar camas individuales a nivel de hotel antes de ingresar) */}
                       <div className="sr-room-details">
-                        <div className="sr-room-name">{prop.tipo_alojamiento || 'Habitación Doble'}</div>
-                        <div className="sr-bed-config" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: 4 }}>
-                          <span style={{ fontWeight: 600, color: '#1a1a1a' }}>
-                            🛏️ {prop.descripcion_camas || `${prop.camas || 1} ${prop.camas === 1 ? 'cama' : 'camas'}`}
-                          </span>
-                          <span style={{ color: '#595959' }}>•</span>
-                          <span style={{ color: '#595959' }}>
-                            🚪 {prop.habitaciones ? `${prop.habitaciones} ${prop.habitaciones === 1 ? 'habitación' : 'habitaciones'}` : 'Habitación privada'}
-                          </span>
-                        </div>
+                        <div className="sr-room-name">{nombreUnidad}</div>
 
                         <div className="sr-perks-list">
-                          <div className="sr-perk-item green">
-                            <CheckmarkIcon size={14} color="#008009" /> Desayuno incluido
-                          </div>
+                          {tieneDesayuno && (
+                            <div className="sr-perk-item green">
+                              <CheckmarkIcon size={14} color="#008009" /> Desayuno incluido
+                            </div>
+                          )}
                           {prop.politicas?.es_reembolsable === false || prop.es_reembolsable === false ? (
                             <div className="sr-perk-item" style={{ color: '#d4111e', fontWeight: 600 }}>
                               ✕ No reembolsable
@@ -1197,9 +1196,11 @@ export function AlojamientosSearchPage() {
                               <CheckmarkIcon size={14} color="#008009" /> Cancelación gratis
                             </div>
                           )}
-                          <div className="sr-perk-item green">
-                            <CheckmarkIcon size={14} color="#008009" /> Sin pago por adelantado: paga en el alojamiento
-                          </div>
+                          {sinPagoAdelantado && (
+                            <div className="sr-perk-item green">
+                              <CheckmarkIcon size={14} color="#008009" /> Sin pago por adelantado: paga en el alojamiento
+                            </div>
+                          )}
                         </div>
 
                         <div className="sr-urgency-note">

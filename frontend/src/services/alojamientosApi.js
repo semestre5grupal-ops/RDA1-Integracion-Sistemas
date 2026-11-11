@@ -113,19 +113,33 @@ export async function getReservasAlojamientos() {
   }
 }
 
+function generarUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch (_) {}
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 /**
  * Cancela una reserva de alojamiento tanto en Booking como en el socio del hotel.
  * POST /alojamientos/reservations/{reservationId}/cancel
  */
-export async function cancelarReservaAlojamiento(reservationId, { reason } = {}, idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cancel-${Date.now()}`)) {
+export async function cancelarReservaAlojamiento(reservationId, { reason } = {}, idempotencyKey) {
   const token = await obtenerAccessToken().catch(() => null);
+  const key = idempotencyKey || generarUUID();
   const { data } = await api.post(
     `/alojamientos/reservations/${encodeURIComponent(reservationId)}/cancel`,
     { reason: reason || 'Cancelada por el cliente desde Mis Reservas' },
     {
       timeout: 45000,
       headers: {
-        'idempotency-key': idempotencyKey,
+        'idempotency-key': key,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     },

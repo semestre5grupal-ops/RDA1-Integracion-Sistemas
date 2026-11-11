@@ -1953,7 +1953,7 @@ export class AlojamientosService implements OnModuleInit {
       return this.buildReservaResponse(reserva);
     }
 
-    if (reserva.checkin && new Date(`${reserva.checkin}T14:00:00Z`).getTime() <= Date.now()) {
+    if (reserva.checkin && new Date(`${reserva.checkin}T14:00:00-05:00`).getTime() <= Date.now()) {
       throw conflicto(
         CodigoProblema.CANCELLATION_NOT_ALLOWED,
         'No es posible cancelar una reserva cuya estancia ya ha iniciado.',

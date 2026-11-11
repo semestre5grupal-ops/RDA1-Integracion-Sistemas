@@ -1146,14 +1146,14 @@ export function AlojamientoCheckoutModal({
                   <div className="bkg-room-summary-box">
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: '#1a1a1a' }}>
                       <div style={{ fontWeight: 700, color: '#003580' }}>
-                        🚪 {rooms} {Number(rooms) === 1 ? 'habitación reservada' : 'habitaciones reservadas'}
+                        {rooms} {Number(rooms) === 1 ? 'habitación reservada' : 'habitaciones reservadas'}
                       </div>
                       <div style={{ fontWeight: 600, color: '#262626' }}>
-                        🛏️ {tipoHabitacion?.descripcion_camas || (tipoHabitacion?.camas ? `${tipoHabitacion.camas} ${tipoHabitacion.camas === 1 ? 'cama' : 'camas'}` : '1 cama doble grande')}
-                        {tipoHabitacion?.tamano_m2 ? ` · 📐 ${tipoHabitacion.tamano_m2} m²` : ''}
+                        {tipoHabitacion?.descripcion_camas || (tipoHabitacion?.camas ? `${tipoHabitacion.camas} ${tipoHabitacion.camas === 1 ? 'cama' : 'camas'}` : '1 cama doble grande')}
+                        {tipoHabitacion?.tamano_m2 ? ` · ${tipoHabitacion.tamano_m2} m²` : ''}
                       </div>
                       <div style={{ color: '#595959', fontSize: '12px' }}>
-                        👥 Para {adults} {Number(adults) === 1 ? 'adulto' : 'adultos'}{Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
+                        Para {adults} {Number(adults) === 1 ? 'adulto' : 'adultos'}{Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
                       </div>
                     </div>
                     <div className="bkg-room-badge-row">
