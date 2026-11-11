@@ -75,12 +75,14 @@ export function AlojamientoCheckoutModal({
   const navigate = useNavigate();
   const [step, setStep] = useState(1); // 1: Tus datos, 2: Finalizar reserva, 3: Confirmada
 
-  // Con sesión se precargan los datos de la cuenta; sin sesión, vacíos. Antes se
-  // precargaba "Liz Cadena / lizcadena@example.com": todas las reservas de
-  // invitado compartían ese correo y el backend las tomaba por duplicadas.
-  const defaultNombre = user?.user_metadata?.nombre || user?.nombre || '';
-  const defaultApellido = user?.user_metadata?.apellido || user?.apellido || '';
-  const defaultEmail = user?.email || '';
+  // Con sesión se precargan los datos de la cuenta; sin sesión, vacíos.
+  // Filtramos correos de prueba o técnicos (como esbbooking) para que nunca se envíen
+  // valores dummy al socio si el usuario quiere usar sus datos reales.
+  const rawEmail = user?.email || '';
+  const esCorreoTecnico = /esb|placeholder|eval-|test/i.test(rawEmail);
+  const defaultEmail = esCorreoTecnico ? '' : rawEmail;
+  const defaultNombre = user?.user_metadata?.nombre || (esCorreoTecnico ? '' : user?.nombre || '');
+  const defaultApellido = user?.user_metadata?.apellido || (esCorreoTecnico ? '' : user?.apellido || '');
   const defaultCardHolder = `${defaultNombre} ${defaultApellido}`.trim();
 
   // Step 1 Form state
@@ -331,8 +333,8 @@ export function AlojamientoCheckoutModal({
         {
           firstName: nombre || 'Huésped',
           lastName: apellidos || '',
-          documentNumber: user?.user_metadata?.cedula || '',
-          email: email.trim() || user?.email || '',
+          documentNumber: documentoNumero.trim() || user?.user_metadata?.cedula || '',
+          email: email.trim() || (esCorreoTecnico ? '' : user?.email || ''),
         },
       ],
     };
