@@ -153,9 +153,14 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
   // ───────────────────────────── Consultas ─────────────────────────────
 
   async porId(id: string): Promise<any | null> {
-    if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+    if (!id || typeof id !== 'string') return null;
     if (!(await this.asegurarTabla())) return null;
-    const [fila] = await this.dataSource!.query(`SELECT * FROM ${TABLA} WHERE id = $1`, [id]);
+    const limpio = id.trim();
+    const esUuid = /^[0-9a-f-]{36}$/i.test(limpio);
+    const sql = esUuid
+      ? `SELECT * FROM ${TABLA} WHERE id = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 LIMIT 1`
+      : `SELECT * FROM ${TABLA} WHERE codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 LIMIT 1`;
+    const [fila] = await this.dataSource!.query(sql, [limpio]);
     return fila ?? null;
   }
 
@@ -493,11 +498,23 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     const nodo = await this.socios.nodoPorCodigo(fila.codigo_nodo);
     if (!nodo) throw new HttpException('El hotel de esta reserva ya no está disponible en Booking.', HttpStatus.BAD_GATEWAY);
     const ref = fila.order_id_socio || fila.external_order_id || fila.codigo_reserva_socio;
-    const r = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(ref)}/cancel`, {
+    const cuerpoCancel = {
+      motivo: (motivo || 'Cancelada por el cliente desde Booking').slice(0, 300),
+      solicitadoPor: 'CLIENTE',
+    };
+    let r = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(ref)}/cancel`, {
       idempotencyKey: randomUUID(),
       correlationId,
-      body: { motivo: (motivo || 'Cancelada por el cliente desde Booking').slice(0, 500), solicitadoPor: 'CLIENTE' },
+      body: cuerpoCancel,
     });
+    if (r.status === 404) {
+      const alias = await this.socios.llamar(nodo, 'POST', `/alojamientos/reservas/${encodeURIComponent(ref)}/cancel`, {
+        idempotencyKey: randomUUID(),
+        correlationId,
+        body: cuerpoCancel,
+      });
+      if (alias.status === 200 || alias.status === 409) r = alias;
+    }
     if (r.status !== 200) {
       if (r.status === 409) {
         throw conflicto(CodigoProblema.CANCELLATION_NOT_ALLOWED, `El hotel ${nodo.nombreProveedor} no permite cancelar esta reserva en su estado actual.`);
@@ -505,13 +522,15 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       this.errorDelSocio(r, nodo, 'cancelar');
     }
     const b = desempacar(r.body) || {};
+    const codReembolso = b.codigoReembolso ?? b.codigo_reembolso ?? b.refundId ?? b.refund_id ?? null;
+    const montoReembolso = dinero(b.montoReembolsado ?? b.monto_reembolsado ?? b.refundAmount ?? b.monto ?? null);
     const act = primeraFila(await this.q(
       `UPDATE ${TABLA}
           SET estado = $2, motivo_cancelacion = $3, cancelada_en = now(), actualizado_en = now(),
               codigo_reembolso = $4, monto_reembolsado = $5
         WHERE id = $1
         RETURNING *`,
-      [fila.id, ESTADO_CANCELADO, motivo || null, b.codigoReembolso ?? null, dinero(b.montoReembolsado)],
+      [fila.id, ESTADO_CANCELADO, motivo || null, codReembolso, montoReembolso],
     ));
     this.socios.invalidarCatalogo();
     trazaAlojamientos.registrar({

@@ -9,7 +9,7 @@ import {
 } from '../services/vuelosApi';
 import { getOrdersAuto, cancelOrderAuto } from '../services/autosApi';
 import { getReservas as getReservasAtracciones, cancelarReservaAtraccion } from '../services/atraccionesApi';
-import { getReservasAlojamientos } from '../services/alojamientosApi';
+import { getReservasAlojamientos, cancelarReservaAlojamiento } from '../services/alojamientosApi';
 import { descargarFactura } from '../utils/facturaPdf';
 import { formatearFecha } from '../services/formato';
 import { useCurrency } from '../hooks/CurrencyContext';
@@ -926,6 +926,38 @@ export function MisReservasPage() {
         } catch (fallo) {
           const datos = fallo?.response?.data ?? {};
           throw new Error(datos.detail || datos.title || 'La aerolínea no aceptó la cancelación. Inténtalo de nuevo.');
+        }
+      } else if (selectedReserva.tipo === 'alojamiento' || selectedReserva.tipo === 'hospedaje') {
+        try {
+          const idParaCancelar = selectedReserva.id || selectedReserva.reservation_id || selectedReserva.codigo_reserva || selectedReserva.codigoReserva || selectedReserva.codigo;
+          const r = await cancelarReservaAlojamiento(idParaCancelar, { reason: motivoFinal });
+          const reembolsoObj = r?.reembolso || r?.refund;
+          res = {
+            status: r?.status || 'CANCELLED',
+            message: 'Reserva de alojamiento cancelada exitosamente y cupo liberado en el hotel.',
+            refund: {
+              refund_id: reembolsoObj?.codigo || reembolsoObj?.refund_id || r?.codigoReembolso || `REF-ALO-${Date.now().toString(36).toUpperCase()}`,
+              amount: reembolsoObj?.monto || reembolsoObj?.amount || r?.montoReembolsado || selectedReserva.totalRaw,
+              currency: r?.moneda || selectedReserva.currency || 'USD',
+              status: 'PROCESSED',
+            },
+            stock_restoration: {
+              status: 'RESTORED',
+              message: 'Habitación liberada en el hotel.',
+            },
+          };
+          const locales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
+          const updated = locales.map(item => {
+            if (item.id === selectedReserva.id || item.reservation_id === selectedReserva.id || item.codigo_reserva === selectedReserva.id) {
+              return { ...item, status: 'CANCELLED' };
+            }
+            return item;
+          });
+          localStorage.setItem('reservas_alojamientos', JSON.stringify(updated));
+          cargarTodasLasReservas(true);
+        } catch (apiErr) {
+          const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
+          throw new Error(detalle || 'El hotel no permitió cancelar la reserva. Verifica el estado o las políticas de cancelación.');
         }
       } else {
         res = {

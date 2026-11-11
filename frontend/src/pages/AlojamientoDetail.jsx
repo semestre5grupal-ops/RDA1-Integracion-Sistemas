@@ -1076,8 +1076,8 @@ export function AlojamientoDetail() {
                         <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <CheckmarkIcon size={14} /> {p.meal_plan}
                         </div>
-                        <div style={{ color: p.reembolsable ? '#008009' : '#595959', fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          {p.reembolsable && <CheckmarkIcon size={14} />} {p.cancellation_type}
+                        <div style={{ color: p.reembolsable === false ? '#d4111e' : (p.reembolsable ? '#008009' : '#595959'), fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          {p.reembolsable ? <CheckmarkIcon size={14} /> : (p.reembolsable === false ? '✕' : null)} {p.cancellation_type || (p.reembolsable === false ? 'No reembolsable' : 'Cancelación gratis')}
                         </div>
                         {libres <= 3 ? (
                           <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
@@ -1157,8 +1157,8 @@ export function AlojamientoDetail() {
                     <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <CheckmarkIcon size={14} /> {cotizacion?.producto?.meal_plan || 'Desayuno incluido'}
                     </div>
-                    <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <CheckmarkIcon size={14} /> {cotizacion?.producto?.cancellation_type || 'Cancelación gratis'}
+                    <div style={{ color: cotizacion?.producto?.reembolsable === false ? '#d4111e' : '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {cotizacion?.producto?.reembolsable !== false && <CheckmarkIcon size={14} />} {cotizacion?.producto?.cancellation_type || (cotizacion?.producto?.reembolsable === false ? 'No reembolsable' : 'Cancelación gratis')}
                     </div>
                     {isSoldOut ? (
                       <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.8rem' }}>
@@ -1259,12 +1259,20 @@ export function AlojamientoDetail() {
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                   <CheckmarkIcon size={12} color="#008009" /> <span>¡Solo te llevará 2 minutos!</span>
                 </div>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  <CheckmarkIcon size={12} color="#008009" /> <span>No pagas nada hoy</span>
-                </div>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  <CheckmarkIcon size={12} color="#008009" /> <span>Cancelación gratuita</span>
-                </div>
+                {alojamiento?.politicas?.es_reembolsable === false || cotizacion?.producto?.reembolsable === false ? (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#d4111e', fontWeight: 600 }}>
+                    <span>✕ No reembolsable</span>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <CheckmarkIcon size={12} color="#008009" /> <span>No pagas nada hoy</span>
+                    </div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <CheckmarkIcon size={12} color="#008009" /> <span>Cancelación gratuita</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1361,7 +1369,7 @@ export function AlojamientoDetail() {
                 <span>Cancelación / prepago</span>
               </div>
               <div className="dt-rule-right">
-                Las condiciones de cancelación y pago por adelantado pueden variar según el tipo de alojamiento. Cancelación gratis hasta 48 horas antes de la entrada.
+                {alojamiento?.politicas?.cancelacion || 'Las condiciones de cancelación y pago por adelantado pueden variar según el tipo de alojamiento.'}
               </div>
             </div>
 

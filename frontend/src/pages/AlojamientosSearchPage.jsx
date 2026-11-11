@@ -1182,9 +1182,15 @@ export function AlojamientosSearchPage() {
                           <div className="sr-perk-item green">
                             <CheckmarkIcon size={14} color="#008009" /> Desayuno incluido
                           </div>
-                          <div className="sr-perk-item green">
-                            <CheckmarkIcon size={14} color="#008009" /> Cancelación gratis
-                          </div>
+                          {prop.politicas?.es_reembolsable === false || prop.es_reembolsable === false ? (
+                            <div className="sr-perk-item" style={{ color: '#d4111e', fontWeight: 600 }}>
+                              ✕ No reembolsable
+                            </div>
+                          ) : (
+                            <div className="sr-perk-item green">
+                              <CheckmarkIcon size={14} color="#008009" /> Cancelación gratis
+                            </div>
+                          )}
                           <div className="sr-perk-item green">
                             <CheckmarkIcon size={14} color="#008009" /> Sin pago por adelantado: paga en el alojamiento
                           </div>

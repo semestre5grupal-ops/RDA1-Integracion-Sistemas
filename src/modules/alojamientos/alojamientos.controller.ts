@@ -322,7 +322,7 @@ export class AlojamientosController {
   @ApiResponse({ status: 200, description: 'Cancelación procesada exitosamente.' })
   @ApiResponse({ status: 404, description: 'Orden no encontrada.' })
   async cancelOrder(
-    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Param('orderId') orderId: string,
     @Headers('idempotency-key') idempotencyKey: string,
     @Body() dto?: CancelReservationRequestDto,
   ): Promise<any> {
@@ -455,7 +455,7 @@ export class AlojamientosController {
   })
   @ApiResponse({ status: 200, description: 'Reserva cancelada exitosamente.', type: ReservationResponseDto })
   async cancelarReserva(
-    @Param('reservationId', ParseUUIDPipe) reservationId: string,
+    @Param('reservationId') reservationId: string,
     @Headers('idempotency-key') idempotencyKey: string,
     @Body() dto: CancelReservationRequestDto,
   ) {
