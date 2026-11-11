@@ -63,10 +63,18 @@ export class AdminService {
       alojs.forEach((a: any) => nombres.set(String(a.id), a.nombre));
     }
 
+    const aFechaIso = (v: any): string | null => {
+      if (!v) return null;
+      if (v instanceof Date) return v.toISOString().slice(0, 10);
+      return String(v).slice(0, 10);
+    };
+
     const listaLocales = reservasLocales.map((r) => ({
       ...r,
       nombreAlojamiento: nombres.get(String(r.alojamientoId)) || null,
       socio: false,
+      checkin: aFechaIso(r.checkin),
+      checkout: aFechaIso(r.checkout),
     }));
 
     const listaSocios = (reservasSocios || []).map((s: any) => ({
@@ -80,8 +88,8 @@ export class AdminService {
       customerEmail: s.cliente_email,
       nombreAlojamiento: s.alojamiento_nombre,
       alojamientoId: `${s.codigo_nodo}~${s.alojamiento_id_socio}`,
-      checkin: s.checkin,
-      checkout: s.checkout,
+      checkin: aFechaIso(s.checkin),
+      checkout: aFechaIso(s.checkout),
       socio: true,
       codigoNodo: s.codigo_nodo,
     }));

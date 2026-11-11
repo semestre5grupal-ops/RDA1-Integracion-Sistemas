@@ -675,11 +675,11 @@ export function AlojamientoCheckoutModal({
             </div>
             <div className="bkg-confirmed-detail-item">
               <strong>Check-in</strong>
-              <span>{checkin} (15:00 – 00:00)</span>
+              <span>{formatearFecha(checkin)} (a partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'})</span>
             </div>
             <div className="bkg-confirmed-detail-item">
               <strong>Check-out</strong>
-              <span>{checkout} (05:00 – 11:00)</span>
+              <span>{formatearFecha(checkout)} (hasta las {alojamiento?.politicas?.checkout_hasta || alojamiento?.checkOutHoraMaxima || '11:00'})</span>
             </div>
             <div className="bkg-confirmed-detail-item">
               <strong>Estancia</strong>
@@ -765,8 +765,8 @@ export function AlojamientoCheckoutModal({
               <div className="bkg-booking-dates-grid">
                 <div>
                   <div className="bkg-date-col-label">Entrada</div>
-                  <div className="bkg-date-col-value">{checkin}</div>
-                  <div className="bkg-date-col-hours">15:00 – 00:00</div>
+                  <div className="bkg-date-col-value">{formatearFecha(checkin)}</div>
+                  <div className="bkg-date-col-hours">A partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}</div>
                   <div className="bkg-today-tag">
                     <ClockIcon size={13} color="#d4111e" />
                     <span>El check-in es hoy</span>
@@ -774,8 +774,8 @@ export function AlojamientoCheckoutModal({
                 </div>
                 <div>
                   <div className="bkg-date-col-label">Salida</div>
-                  <div className="bkg-date-col-value">{checkout}</div>
-                  <div className="bkg-date-col-hours">05:00 – 11:00</div>
+                  <div className="bkg-date-col-value">{formatearFecha(checkout)}</div>
+                  <div className="bkg-date-col-hours">Hasta las {alojamiento?.politicas?.checkout_hasta || alojamiento?.checkOutHoraMaxima || '11:00'}</div>
                 </div>
               </div>
 
@@ -1271,7 +1271,7 @@ export function AlojamientoCheckoutModal({
                 <div className="bkg-card">
                   <h4 className="bkg-card-title">Tu hora de llegada</h4>
                   <p style={{ fontSize: '13px', color: '#1a1a1a', margin: '0 0 4px 0' }}>
-                    Tu habitación estará lista para el check-in entre las 15:00 y las 00:00.
+                    Tu habitación estará lista para el check-in a partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}.
                   </p>
                   <p style={{ fontSize: '12px', color: '#595959', margin: '0 0 12px 0' }}>
                     Recepción 24 horas: ¡siempre habrá alguien para recibirte!

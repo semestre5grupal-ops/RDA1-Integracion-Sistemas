@@ -1338,7 +1338,7 @@ export function AlojamientoDetail() {
                 <span>Entrada</span>
               </div>
               <div className="dt-rule-right">
-                <strong>De 15:00 a 23:00</strong>
+                <strong>A partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}</strong>
                 <div style={{ fontSize: '0.8rem', color: '#595959' }}>
                   Debes avisar al alojamiento con antelación a qué hora vas a llegar.
                 </div>
@@ -1351,7 +1351,7 @@ export function AlojamientoDetail() {
                 <span>Salida</span>
               </div>
               <div className="dt-rule-right">
-                <strong>De 07:00 a 11:00</strong>
+                <strong>Hasta las {alojamiento?.politicas?.checkout_hasta || alojamiento?.checkOutHoraMaxima || '11:00'}</strong>
               </div>
             </div>
 
