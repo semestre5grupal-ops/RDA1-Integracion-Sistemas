@@ -40,31 +40,69 @@ export class AdminService {
     this.supabase = createClient(url || 'https://placeholder.supabase.co', key || 'placeholder');
   }
 
-  /** Reservas de hospedaje guardadas en la BD (tabla reservas_alojamiento) con el nombre del alojamiento. */
+  /** Reservas de hospedaje guardadas en la BD (locales y de socios) con el nombre del alojamiento. */
   private async reservasHospedaje(take?: number) {
-    const reservas = await this.reservaAlojamientoRepo
-      .find({ order: { createdAt: 'DESC' }, ...(take ? { take } : {}) })
-      .catch((e) => { this.logger.error(`Error hospedaje: ${e.message}`); return [] as ReservaAlojamiento[]; });
-    const ids = [...new Set(reservas.map((r) => r.alojamientoId).filter(Boolean))];
+    const [reservasLocales, reservasSocios] = await Promise.all([
+      this.reservaAlojamientoRepo
+        .find({ order: { createdAt: 'DESC' }, ...(take ? { take } : {}) })
+        .catch((e) => { this.logger.error(`Error hospedaje local: ${e.message}`); return [] as ReservaAlojamiento[]; }),
+      this.dataSource.query(
+        `SELECT id, codigo_reserva, codigo_nodo, alojamiento_id_socio, alojamiento_nombre, destino,
+                tipo_codigo, tipo_nombre, checkin, checkout, total, moneda, estado, order_id_socio,
+                external_order_id, codigo_reserva_socio, usuario_id, cliente_nombre, cliente_email,
+                cliente_telefono, creado_en
+           FROM schema_alojamientos.alojamientos_reservas_socio
+          ORDER BY creado_en DESC ${take ? `LIMIT ${take}` : 'LIMIT 100'}`,
+      ).catch((e) => { this.logger.error(`Error hospedaje socios: ${e.message}`); return [] as any[]; }),
+    ]);
+
+    const ids = [...new Set(reservasLocales.map((r) => r.alojamientoId).filter(Boolean))];
     const nombres = new Map<string, string>();
     if (ids.length) {
       const alojs = await this.alojamientoRepo.find({ where: ids.map((id) => ({ id })) as any }).catch(() => [] as Alojamiento[]);
       alojs.forEach((a: any) => nombres.set(String(a.id), a.nombre));
     }
-    return reservas.map((r) => ({ ...r, nombreAlojamiento: nombres.get(String(r.alojamientoId)) || null }));
+
+    const listaLocales = reservasLocales.map((r) => ({
+      ...r,
+      nombreAlojamiento: nombres.get(String(r.alojamientoId)) || null,
+      socio: false,
+    }));
+
+    const listaSocios = (reservasSocios || []).map((s: any) => ({
+      id: s.id,
+      codigoReserva: s.codigo_reserva,
+      status: s.estado,
+      total: Number(s.total || 0),
+      totalPrice: { total: Number(s.total || 0), currency: s.moneda || 'USD' },
+      createdAt: s.creado_en,
+      customerName: s.cliente_nombre,
+      customerEmail: s.cliente_email,
+      nombreAlojamiento: s.alojamiento_nombre,
+      alojamientoId: `${s.codigo_nodo}~${s.alojamiento_id_socio}`,
+      checkin: s.checkin,
+      checkout: s.checkout,
+      socio: true,
+      codigoNodo: s.codigo_nodo,
+    }));
+
+    return [...listaSocios, ...listaLocales].sort(
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }
 
-  private mapHospedaje(h: ReservaAlojamiento & { nombreAlojamiento?: string | null }) {
+  private mapHospedaje(h: any) {
     return {
       id: h.id,
       tipo: 'hospedaje',
-      pnr: h.codigoReserva || h.id.substring(0, 6).toUpperCase(),
-      estado: h.status,
+      socio: !!h.socio,
+      pnr: h.codigoReserva || String(h.id).substring(0, 6).toUpperCase(),
+      estado: h.status || h.estado,
       total: Number(h.totalPrice?.total ?? h.total ?? 0),
-      moneda: h.totalPrice?.currency || 'USD',
-      createdAt: h.createdAt,
-      cliente: h.customerEmail || h.customerName || '—',
-      alojamiento: h.nombreAlojamiento || null,
+      moneda: h.totalPrice?.currency || h.moneda || 'USD',
+      createdAt: h.createdAt || h.creado_en,
+      cliente: h.customerEmail || h.customerName || h.cliente_email || h.cliente_nombre || '—',
+      alojamiento: h.nombreAlojamiento || h.alojamiento_nombre || null,
       checkin: h.checkin,
       checkout: h.checkout,
     };
@@ -480,17 +518,37 @@ export class AdminService {
     const vuelos = await this.reservaRepo.find({ where: { propietarioId: id } });
     let autos: OrderAuto[] = [];
     let atracciones: ReservaAtraccion[] = [];
-    let hospedaje: ReservaAlojamiento[] = [];
+    let hospedaje: any[] = [];
     if (email) {
       const mail = email.toLowerCase();
-      const [allAutos, allAtr, allHosp] = await Promise.all([
+      const [allAutos, allAtr, allHosp, hospSocios] = await Promise.all([
         this.orderAutoRepo.find().catch(() => [] as OrderAuto[]),
         this.reservaAtraccionRepo.find().catch(() => [] as ReservaAtraccion[]),
         this.reservaAlojamientoRepo.find().catch(() => [] as ReservaAlojamiento[]),
+        this.dataSource.query(
+          `SELECT id, codigo_reserva, estado, total, moneda, alojamiento_nombre, creado_en 
+             FROM schema_alojamientos.alojamientos_reservas_socio 
+            WHERE usuario_id::text = $1 OR lower(cliente_email) = $2 
+            ORDER BY creado_en DESC`,
+          [id, mail],
+        ).catch(() => [] as any[]),
       ]);
       autos = allAutos.filter((a) => String(a.booker?.email || '').toLowerCase() === mail);
       atracciones = allAtr.filter((a) => String(a.customerEmail || '').toLowerCase() === mail);
-      hospedaje = allHosp.filter((h) => String(h.customerEmail || '').toLowerCase() === mail);
+      hospedaje = [
+        ...allHosp.filter((h) => String(h.customerEmail || '').toLowerCase() === mail).map(h => ({
+          pnr: h.codigoReserva,
+          estado: h.status,
+          total: h.total,
+          fecha: h.createdAt,
+        })),
+        ...(hospSocios || []).map((s: any) => ({
+          pnr: s.codigo_reserva,
+          estado: s.estado,
+          total: s.total,
+          fecha: s.creado_en,
+        })),
+      ];
     }
 
     return {
@@ -499,7 +557,7 @@ export class AdminService {
         vuelos: vuelos.map(v => ({ pnr: v.pnr, estado: v.estado, fecha: v.fechaCreacion })),
         autos: autos.map(a => ({ pnr: a.id.substring(0,6).toUpperCase(), estado: a.status, fecha: a.createdAt })),
         atracciones: atracciones.map(a => ({ pnr: a.id.substring(0,6).toUpperCase(), estado: a.status, fecha: a.createdAt })),
-        hospedaje: hospedaje.map(h => ({ pnr: h.codigoReserva, estado: h.status, fecha: h.createdAt })),
+        hospedaje,
       }
     };
   }
@@ -508,13 +566,25 @@ export class AdminService {
     this.logger.log(`Admin: cancelando reserva ${tipo} ${id}`);
 
     if (tipo === 'hospedaje') {
-      // Se delega en el módulo de alojamientos: aplica sus reglas (no cancelar una
-      // estancia ya terminada, idempotencia, webhook ORDER_CANCELLED, telemetría).
-      // Antes era un UPDATE directo que se saltaba todo eso.
-      const reserva = await this.reservaAlojamientoRepo.findOne({ where: ES_UUID.test(id) ? { id } : { codigoReserva: id } });
-      if (!reserva) throw new NotFoundException(`La reserva de hospedaje '${id}' no existe.`);
-      await this.alojamientosService.cancelarReserva(reserva.id, { reason: 'Cancelada por el administrador' }, randomUUID());
-      return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
+      try {
+        await this.alojamientosService.cancelarReserva(id, { reason: 'Cancelada por el administrador' }, randomUUID());
+        return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
+      } catch (err: any) {
+        const rLocal = await this.reservaAlojamientoRepo.findOne({ where: { codigoReserva: id } });
+        if (rLocal) {
+          await this.alojamientosService.cancelarReserva(rLocal.id, { reason: 'Cancelada por el administrador' }, randomUUID());
+          return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
+        }
+        const [rSocio] = await this.dataSource.query(
+          `SELECT id FROM schema_alojamientos.alojamientos_reservas_socio WHERE codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 LIMIT 1`,
+          [id],
+        ).catch(() => []);
+        if (rSocio) {
+          await this.alojamientosService.cancelarReserva(rSocio.id, { reason: 'Cancelada por el administrador' }, randomUUID());
+          return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
+        }
+        throw new NotFoundException(`La reserva de hospedaje '${id}' no existe o no se pudo cancelar: ${err.message}`);
+      }
     }
 
     // Una reserva de aerolínea socia se cancela en la aerolínea (con su reembolso
@@ -564,6 +634,40 @@ export class AdminService {
         if (r) {
           const aloj: any = await this.alojamientoRepo.findOneBy({ id: r.alojamientoId as any }).catch(() => null);
           data = { pnr: r.codigoReserva, ...r, alojamiento: aloj ? { nombre: aloj.nombre, destino: aloj.destino } : r.alojamientoId };
+        } else {
+          const [s] = await this.dataSource.query(
+            `SELECT * FROM schema_alojamientos.alojamientos_reservas_socio 
+             WHERE id::text = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 
+             LIMIT 1`,
+            [id],
+          ).catch(() => []);
+          if (s) {
+            data = {
+              pnr: s.codigo_reserva,
+              id: s.id,
+              estado: s.estado,
+              total: s.total,
+              moneda: s.moneda || 'USD',
+              hotel: s.alojamiento_nombre,
+              destino: s.destino,
+              socio: s.codigo_nodo,
+              tipoHabitacion: s.tipo_nombre || s.tipo_codigo,
+              checkin: s.checkin,
+              checkout: s.checkout,
+              noches: s.noches,
+              huesped: s.cliente_nombre,
+              email: s.cliente_email,
+              telefono: s.cliente_telefono,
+              documento: `${s.documento_tipo || ''} ${s.documento_numero || ''}`.trim(),
+              orderIdSocio: s.order_id_socio,
+              externalOrderId: s.external_order_id,
+              peticionesEspeciales: s.peticiones_especiales,
+              checkinAt: s.checkin_at,
+              canceladaEn: s.cancelada_en,
+              reembolso: s.monto_reembolsado ? `${s.monto_reembolsado} USD (Ref: ${s.codigo_reembolso})` : null,
+              createdAt: s.creado_en,
+            };
+          }
         }
       }
       return { success: true, data };
