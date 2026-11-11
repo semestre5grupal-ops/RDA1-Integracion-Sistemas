@@ -81,6 +81,14 @@ const safeFormatearFecha = (val) => {
   return formatearFecha(str);
 };
 
+// El check-in es un paso de una sola vía: una vez hecho (o cancelada la reserva),
+// el botón ya no se muestra. Autos, atracciones y alojamientos tienen su propio flujo.
+const ESTADOS_SIN_CHECKIN = ['CANCELLED', 'CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'ENTREGADO', 'COMPLETED', 'BOARDED'];
+function puedeHacerCheckin(r) {
+  if (!r || ['auto', 'atraccion', 'alojamiento'].includes(r.tipo)) return false;
+  return !ESTADOS_SIN_CHECKIN.includes(String(r.status || '').toUpperCase());
+}
+
 export function MisReservasPage() {
   const [reservas, setReservas] = useState([]);
   const reservasRef = useRef([]);
@@ -1542,7 +1550,7 @@ export function MisReservasPage() {
                       <div className="trip-card-price">
                         {convertPrice(r.totalRaw)}
                       </div>
-                      {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
+                      {puedeHacerCheckin(r) && (
                         <button
                           type="button"
                           className="btn-card-checkin"
@@ -1582,7 +1590,7 @@ export function MisReservasPage() {
 
                         {activeMenuId === r.id && (
                           <div className="trip-dropdown-menu">
-                            {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
+                            {puedeHacerCheckin(r) && (
                               <button
                                 type="button"
                                 className="trip-dropdown-item"
@@ -1794,7 +1802,7 @@ export function MisReservasPage() {
                     </button>
                   </div>
 
-                  {selectedReserva.status !== 'CANCELLED' && selectedReserva.tipo !== 'auto' && selectedReserva.tipo !== 'atraccion' && selectedReserva.tipo !== 'alojamiento' && (
+                  {puedeHacerCheckin(selectedReserva) && (
                     <button
                       type="button"
                       onClick={() => {
