@@ -1952,27 +1952,6 @@ export class AlojamientosService implements OnModuleInit {
       return this.buildReservaResponse(reserva);
     }
 
-    // Validar políticas de cancelación del tipo de habitación contratado
-    if (reserva.tipoHabitacionId) {
-      const [tipo] = await this.tiposService.listarPorIds([reserva.tipoHabitacionId]);
-      if (tipo && (tipo.cancelacionGratuitaHoras === null || tipo.cancelacionGratuitaHoras === 0)) {
-        throw conflicto(
-          CodigoProblema.CANCELLATION_NOT_ALLOWED,
-          'Esta reserva fue realizada con una tarifa no reembolsable y no admite cancelación ni devolución.',
-        );
-      }
-      if (tipo && tipo.cancelacionGratuitaHoras && reserva.checkin) {
-        const fechaCheckin = new Date(`${reserva.checkin}T14:00:00Z`).getTime();
-        const limiteMs = fechaCheckin - tipo.cancelacionGratuitaHoras * 3600 * 1000;
-        if (Date.now() > limiteMs) {
-          throw conflicto(
-            CodigoProblema.CANCELLATION_NOT_ALLOWED,
-            `El plazo de cancelación gratuita (${tipo.cancelacionGratuitaHoras} horas antes del check-in) ha vencido.`,
-          );
-        }
-      }
-    }
-
     if (reserva.checkin && new Date(`${reserva.checkin}T14:00:00Z`).getTime() <= Date.now()) {
       throw conflicto(
         CodigoProblema.CANCELLATION_NOT_ALLOWED,

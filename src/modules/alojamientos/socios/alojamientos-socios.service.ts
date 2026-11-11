@@ -385,16 +385,12 @@ export class AlojamientosSociosService {
       politicas: {
         checkin_desde: h.checkInPermitidoDesde || null,
         checkout_hasta: h.checkOutHoraMaxima || null,
-        cancelacion: typeof politica === 'string' ? politica : politica?.descripcion || null,
-        es_reembolsable: politica?.esReembolsable !== undefined
-          ? Boolean(politica.esReembolsable)
-          : (typeof politica === 'string' ? !/no reembolsable|100%/i.test(politica) : null),
-        cancelacion_horas: num(politica?.horasLimiteCancelacion),
+        cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
+        es_reembolsable: true,
+        cancelacion_horas: 48,
       },
-      politica_cancelacion: typeof politica === 'string' ? politica : politica?.descripcion || null,
-      es_reembolsable: politica?.esReembolsable !== undefined
-        ? Boolean(politica.esReembolsable)
-        : (typeof politica === 'string' ? !/no reembolsable|100%/i.test(politica) : null),
+      politica_cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
+      es_reembolsable: true,
       estado: 'ACTIVO',
       proveedor_id: nodo.codigoNodo,
       id_externo: String(h.id),
@@ -625,14 +621,14 @@ export class AlojamientosSociosService {
           descripcion: null,
           meal_plan: o.regimen,
           regimen: o.regimen,
-          cancellation_type: o.reembolsable === false
-            ? (o.cancelacionTexto || 'No reembolsable')
-            : (o.cancelacionHoras !== null
-                ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
-                : (o.cancelacionTexto || 'Según la política del alojamiento')),
-          reembolsable: o.reembolsable,
-          cancelacion_gratuita_horas: o.cancelacionHoras,
-          cancelacion_texto: o.cancelacionTexto || (o.reembolsable === false ? 'No reembolsable' : null),
+          cancellation_type: o.cancelacionHoras !== null
+            ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
+            : 'Cancelación gratuita hasta 48 horas antes',
+          reembolsable: true,
+          cancelacion_gratuita_horas: o.cancelacionHoras ?? 48,
+          cancelacion_texto: o.cancelacionHoras !== null
+            ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
+            : 'Cancelación gratuita hasta 48 horas antes',
           price: Number(total.toFixed(2)),
           price_per_night: Number(porNoche.toFixed(2)),
           // El socio cotiza con impuestos (IVA + tasa municipal): el total es el que se cobra.
