@@ -239,6 +239,17 @@ export class AutosService implements OnModuleInit {
     }
   }
 
+  private normalizeSearch(str: string): string {
+    if (!str) return '';
+    return str
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   /**
    * Búsqueda avanzada de vehículos con filtros de categoría, horas de 30m, edad y exclusión de cooldown.
    */
@@ -329,25 +340,30 @@ export class AutosService implements OnModuleInit {
 
     let merged = [...formattedLocales, ...externalCars];
 
-    // 5b. Búsqueda flexible por marca, modelo o nombre del auto (además de ubicación)
-    const rawTerm = (dto.q || dto.pickup_location || '').trim().toLowerCase();
+    // 5b. Búsqueda flexible y estricta por marca, modelo o nombre del auto (además de ubicación)
+    const rawTerm = (dto.q || dto.pickup_location || '').trim();
+    const qNorm = this.normalizeSearch(rawTerm);
     const ciudadesPaises = [
-      'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'ecuador', 'uio', 'gye', 'cue'
+      'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'ecuador', 'uio', 'gye', 'cue',
+      'aeropuerto mariscal sucre', 'aeropuerto jose joaquin de olmedo', 'tababela'
     ];
-    const esSoloUbicacion = ciudadesPaises.includes(rawTerm);
+    const esSoloUbicacion = ciudadesPaises.includes(qNorm);
 
-    if (rawTerm && !esSoloUbicacion) {
-      const matchCars = merged.filter((c: any) => {
-        const marca = (c.marca || '').toLowerCase();
-        const modelo = (c.modelo || '').toLowerCase();
-        const cat = (c.categoria || '').toLowerCase();
-        const prov = (c.proveedor?.nombre || '').toLowerCase();
-        const fullDesc = `${marca} ${modelo} ${cat} ${prov}`;
-        return fullDesc.includes(rawTerm) || rawTerm.includes(marca) || (marca && rawTerm.includes(modelo));
-      });
-
-      if (matchCars.length > 0) {
-        merged = matchCars;
+    if (qNorm && !esSoloUbicacion) {
+      const tokens = qNorm.split(' ').filter(t => t.length > 0 && !ciudadesPaises.includes(t));
+      if (tokens.length > 0) {
+        merged = merged.filter((c: any) => {
+          const fullDesc = this.normalizeSearch([
+            c.marca,
+            c.modelo,
+            c.vehiculo,
+            c.nombre,
+            c.categoria,
+            c.proveedor?.nombre,
+            c.proveedor_nombre
+          ].filter(Boolean).join(' '));
+          return tokens.every(token => fullDesc.includes(token));
+        });
       }
     }
 
