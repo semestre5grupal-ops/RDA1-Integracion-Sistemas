@@ -95,22 +95,72 @@ const num = (v: unknown): number | null => {
   const n = Number(v);
   return v === undefined || v === null || v === '' || !Number.isFinite(n) ? null : n;
 };
-/** Extrae un número entero de un valor numérico o texto (ej. "3 camas", "1 cama doble" → 3 ó 1). */
-const extraerCamasNum = (v: unknown): number | null => {
+/** Extrae un número entero de un valor numérico, texto o array (ej. "3 camas", 2, [{cantidad: 2}] → 3 ó 2). */
+export const extraerCamasNum = (v: unknown): number | null => {
   if (v === undefined || v === null || v === '') return null;
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return v > 0 ? v : null;
+  if (Array.isArray(v)) {
+    let suma = 0;
+    for (const item of v) {
+      if (typeof item === 'number') suma += item;
+      else if (typeof item === 'object' && item !== null) {
+        const c = Number((item as any).cantidad ?? (item as any).count ?? (item as any).numero ?? (item as any).camas ?? 1);
+        suma += Number.isFinite(c) && c > 0 ? c : 1;
+      } else if (typeof item === 'string') {
+        const m = item.match(/\d+/);
+        suma += m ? parseInt(m[0], 10) : 1;
+      }
+    }
+    return suma > 0 ? suma : v.length;
+  }
+  if (typeof v === 'string') {
+    const nums = v.match(/\d+/g);
+    if (nums && nums.length > 1 && /(?:y|\+|,)/.test(v)) {
+      const suma = nums.reduce((acc, curr) => acc + parseInt(curr, 10), 0);
+      if (suma > 0) return suma;
+    } else if (nums && nums.length > 0) {
+      return parseInt(nums[0], 10);
+    }
+  }
   const match = String(v).match(/\d+/);
   return match ? parseInt(match[0], 10) : null;
 };
 
 /** Deduce una descripción de camas legible y precisa para hospitalidad (Booking.com style) */
 export function inferirDescripcionCamas(camasRaw: unknown, nombreTipo = '', capacidadAdultos: number | null = 2): string {
+  // 1. Si ya viene una descripción textual detallada (ej. "2 camas individuales", "1 cama matrimonial y 2 camas individuales")
   if (typeof camasRaw === 'string' && camasRaw.trim().length > 0 && !/^\d+$/.test(camasRaw.trim())) {
     return camasRaw.trim();
   }
+
+  // 2. Si viene un array estructurado de camas
+  if (Array.isArray(camasRaw) && camasRaw.length > 0) {
+    const descripciones = camasRaw.map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (typeof item === 'object' && item !== null) {
+        const cant = Number((item as any).cantidad ?? (item as any).count ?? (item as any).numero ?? 1);
+        const tipo = String((item as any).tipo ?? (item as any).nombre ?? (item as any).type ?? 'individual').toLowerCase();
+        return `${cant} ${cant === 1 ? 'cama' : 'camas'} ${tipo}`;
+      }
+      return '1 cama individual';
+    });
+    return descripciones.join(' y ');
+  }
+
   const num = extraerCamasNum(camasRaw);
   const n = (nombreTipo || '').toLowerCase();
-  
+
+  // 3. PRIORIDAD: Si hay varias camas (num > 1), NUNCA forzar "1 cama doble grande"
+  if (num && num > 1) {
+    if (n.includes('twin') || n.includes('dos camas') || n.includes('doble individual')) return `${num} camas individuales`;
+    if (n.includes('triple')) return `${num} camas individuales`;
+    if (n.includes('cuadruple') || n.includes('familiar')) {
+      return num === 2 ? '2 camas dobles' : (num === 3 ? '1 cama matrimonial y 2 camas individuales' : `${num} camas`);
+    }
+    return `${num} camas individuales`;
+  }
+
+  // 4. Si es 1 cama (o num == 1 o no especificado), deducir por el nombre y capacidad
   if (n.includes('king') || n.includes('presidencial')) return '1 cama doble extragrande (King)';
   if (n.includes('queen')) return '1 cama doble grande (Queen)';
   if (n.includes('twin') || n.includes('dos camas') || n.includes('doble individual')) return '2 camas individuales';
@@ -119,8 +169,7 @@ export function inferirDescripcionCamas(camasRaw: unknown, nombreTipo = '', capa
   if (n.includes('individual') || n.includes('single') || capacidadAdultos === 1) return '1 cama individual';
   if (n.includes('suite')) return '1 cama doble extragrande';
   if (n.includes('doble') || n.includes('matrimonial') || capacidadAdultos === 2) return '1 cama doble grande';
-  
-  if (num && num > 1) return `${num} camas individuales`;
+
   return '1 cama doble grande';
 }
 const desempacar = (b: any) => (b && typeof b === 'object' && b.data && !Array.isArray(b.data) ? b.data : b);
@@ -192,6 +241,9 @@ export class AlojamientosSociosService {
       if (nNorm === cNorm) return true;
       if (cNorm.includes('HABITAT') || cNorm === 'NODEALOHAB' || cNorm === 'HABITAT') {
         return nNorm.includes('HABITAT') || provNorm.includes('HABITAT') || nNorm.includes('NODEALOH');
+      }
+      if (cNorm.includes('KRL') || cNorm.includes('KAROL') || cNorm.includes('ESTADIA') || cNorm === 'NODEALOKRL') {
+        return nNorm.includes('KRL') || nNorm.includes('KAROL') || provNorm.includes('ESTADIA');
       }
       return nNorm.includes(cNorm) || cNorm.includes(nNorm);
     });
@@ -400,8 +452,8 @@ export class AlojamientosSociosService {
       capacidadAdultos: num(h.capacidadAdultos) ?? 2,
       capacidadNinos: num(h.capacidadNinos) ?? 0,
       habitaciones: num(h.habitaciones) ?? (tiposHabitacion?.length ? tiposHabitacion.reduce((acc: number, t: any) => acc + (t.cantidad || 1), 0) : 1),
-      camas: extraerCamasNum(h.camas) ?? (tiposHabitacion?.[0]?.camas ?? 1),
-      descripcion_camas: inferirDescripcionCamas(h.camas ?? tiposHabitacion?.[0]?.descripcion_camas, h.nombre, num(h.capacidadAdultos) ?? 2),
+      camas: extraerCamasNum(h.camas ?? h.numero_camas ?? h.numeroCamas ?? h.cantidad_camas) ?? (tiposHabitacion?.[0]?.camas ?? 1),
+      descripcion_camas: inferirDescripcionCamas(h.camas ?? h.numero_camas ?? h.numeroCamas ?? h.cantidad_camas ?? tiposHabitacion?.[0]?.descripcion_camas, h.nombre, num(h.capacidadAdultos) ?? 2),
       banos: num(h.banos) ?? 1,
       tienePiscina: Boolean(h.tienePiscina) || amenidades.some((a) => /piscina|pool/i.test(a)),
       estrellas: num(h.estrellas),
@@ -477,8 +529,9 @@ export class AlojamientosSociosService {
         const horas = num(pol?.horasLimiteCancelacion);
         const descPol = pol?.descripcion || (esReembolsable === false ? 'No reembolsable' : (horas !== null ? `Cancelación gratuita hasta ${horas} horas antes` : null));
         const codigo = String(t.codigo || t.id);
-        const numCamas = extraerCamasNum(t.camas) ?? 1;
-        const descCamas = inferirDescripcionCamas(t.camas ?? t.descripcionCamas ?? t.descripcion_camas, t.nombre, num(t.capacidadAdultos) ?? 2);
+        const rawCamas = t.camas ?? t.numero_camas ?? t.numeroCamas ?? t.cantidad_camas;
+        const numCamas = extraerCamasNum(rawCamas) ?? 1;
+        const descCamas = inferirDescripcionCamas(rawCamas ?? t.descripcionCamas ?? t.descripcion_camas, t.nombre, num(t.capacidadAdultos) ?? 2);
         return {
           id: codigo,
           codigo,
@@ -541,6 +594,9 @@ export class AlojamientosSociosService {
         const plan = o.planTarifaCodigo ? String(o.planTarifaCodigo) : null;
         const t = porCodigo.get(codigo);
         const remanentes = num(o.habitacionesRemanentes ?? o.available_rooms ?? o.stockDisponible) ?? 0;
+        const rawCamas = o.camas ?? o.numero_camas ?? o.numeroCamas ?? o.cantidad_camas;
+        const numCamas = t?.camas ?? extraerCamasNum(rawCamas) ?? 1;
+        const descCamas = t?.descripcion_camas ?? inferirDescripcionCamas(rawCamas, o.nombre ?? t?.nombre, o.capacidadAdultos ?? t?.capacidad_adultos);
         return {
           productId: plan ? `${codigo}@${plan}` : codigo,
           codigo,
@@ -559,8 +615,8 @@ export class AlojamientosSociosService {
           reembolsable: t?.reembolsable !== undefined && t?.reembolsable !== null
             ? t.reembolsable
             : (t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null),
-          camas: t?.camas ?? extraerCamasNum(o.camas) ?? 1,
-          descripcionCamas: t?.descripcion_camas ?? inferirDescripcionCamas(o.camas, o.nombre ?? t?.nombre, o.capacidadAdultos ?? t?.capacidad_adultos),
+          camas: numCamas,
+          descripcionCamas: descCamas,
           tamanoM2: t?.tamano_m2 ?? num(o.tamanoM2 ?? o.metrosCuadrados),
           amenidades: t?.amenidades ?? [],
           descripcion: t?.descripcion ?? null,

@@ -1,7 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'node:crypto';
-import { AlojamientosSociosService, OpcionSocio, inferirDescripcionCamas } from './alojamientos-socios.service';
+import { AlojamientosSociosService, OpcionSocio, inferirDescripcionCamas, extraerCamasNum } from './alojamientos-socios.service';
 import { trazaAlojamientos, PasoAlojamiento, ResultadoPaso } from './alojamientos-traza';
 import { CodigoProblema, conflicto, validacion } from '../../../core/errors/codigo-error';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
@@ -149,6 +149,20 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS estado_habitacion varchar(40) DEFAULT 'DISPONIBLE';
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS habitacion_asignada varchar(100);
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS checkout_at timestamptz;
+      `).catch(() => undefined);
+
+      await this.dataSource.query(`
+        INSERT INTO schema_proveedores.config_proveedor (
+          codigo_nodo, nombre_proveedor, vertical, base_url_rest, api_key, equipo, health_status, kill_switch_activo, circuit_breaker_estado
+        ) VALUES (
+          'NODE_ALO_KRL', 'Estadia — Karol Moreno', 'ALOJAMIENTOS',
+          'https://alojamiento-karol-puce-c7dcf7f9fhcncrak.spaincentral-01.azurewebsites.net/api/v2',
+          'booking-alojamiento-secure-key-2026', 'Karol Moreno', 'HEALTHY', false, 'CLOSED'
+        )
+        ON CONFLICT (codigo_nodo) DO UPDATE SET
+          base_url_rest = EXCLUDED.base_url_rest,
+          api_key = EXCLUDED.api_key,
+          health_status = 'HEALTHY';
       `).catch(() => undefined);
       this.tablaLista = true;
     } catch (e: any) {
@@ -654,6 +668,13 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     const cancelTexto = 'Cancelación gratuita hasta 48 horas antes del check-in';
     const puedeCancelar = f.estado !== ESTADO_CANCELADO && f.estado !== ESTADO_ASISTIDO;
 
+    const rawSocio = typeof f.respuesta_socio === 'string'
+      ? (() => { try { return JSON.parse(f.respuesta_socio); } catch { return {}; } })()
+      : (f.respuesta_socio || {});
+    const camasSocio = rawSocio?.camas ?? rawSocio?.numero_camas ?? rawSocio?.numeroCamas ?? rawSocio?.habitacion?.camas;
+    const numCamas = extraerCamasNum(camasSocio) ?? extraerCamasNum(f.tipo_nombre) ?? 1;
+    const descCamas = rawSocio?.descripcion_camas || rawSocio?.camas_descripcion || (typeof camasSocio === 'string' && isNaN(Number(camasSocio)) ? camasSocio : null) || inferirDescripcionCamas(camasSocio ?? numCamas, f.tipo_nombre, f.adultos);
+
     return {
       reservation_id: f.id,
       alojamiento_id: idAloj,
@@ -668,8 +689,8 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       adultos: f.adultos,
       ninos: f.ninos,
       habitaciones_count: f.habitaciones,
-      camas: 1,
-      descripcion_camas: inferirDescripcionCamas(null, f.tipo_nombre, f.adultos),
+      camas: numCamas,
+      descripcion_camas: descCamas,
       habitacion_asignada: f.habitacion_asignada || (f.checkin_at ? 'Habitación 204' : null),
       tipo_habitacion: {
         id: f.tipo_codigo,
