@@ -113,6 +113,26 @@ export async function getReservasAlojamientos() {
   }
 }
 
+/**
+ * Cancela una reserva de alojamiento tanto en Booking como en el socio del hotel.
+ * POST /alojamientos/reservations/{reservationId}/cancel
+ */
+export async function cancelarReservaAlojamiento(reservationId, { reason } = {}, idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cancel-${Date.now()}`)) {
+  const token = await obtenerAccessToken().catch(() => null);
+  const { data } = await api.post(
+    `/alojamientos/reservations/${encodeURIComponent(reservationId)}/cancel`,
+    { reason: reason || 'Cancelada por el cliente desde Mis Reservas' },
+    {
+      timeout: 45000,
+      headers: {
+        'idempotency-key': idempotencyKey,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    },
+  );
+  return data;
+}
+
 // ── Gestión del catálogo (panel de administración) ───────────────────────────
 // Van por el cliente AUTENTICADO (`apiAuth`), que añade el token del admin:
 // el backend rechaza estas operaciones sin sesión de administrador.

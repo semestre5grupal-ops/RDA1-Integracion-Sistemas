@@ -1397,6 +1397,8 @@ export class AlojamientosService implements OnModuleInit {
   }
 
   async cancelOrder(orderId: string, idempotencyKey: string, reason?: string): Promise<any> {
+    const deSocio = await this.sociosReservas?.cancelar(orderId, reason);
+    if (deSocio) return deSocio;
     return this.enSerie(() => this.cancelOrderEnSerie(orderId, idempotencyKey, reason));
   }
 

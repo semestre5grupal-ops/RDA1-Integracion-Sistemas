@@ -574,25 +574,23 @@ export class AdminService {
     this.logger.log(`Admin: cancelando reserva ${tipo} ${id}`);
 
     if (tipo === 'hospedaje') {
-      try {
-        await this.alojamientosService.cancelarReserva(id, { reason: 'Cancelada por el administrador' }, randomUUID());
+      const where = /^[0-9a-f-]{36}$/i.test(id) ? { id } : { codigoReserva: id };
+      const rLocal = await this.reservaAlojamientoRepo.findOne({ where }).catch(() => null);
+      if (rLocal) {
+        await this.alojamientosService.cancelarReserva(rLocal.id, { reason: 'Cancelada por el administrador' }, randomUUID());
         return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
-      } catch (err: any) {
-        const rLocal = await this.reservaAlojamientoRepo.findOne({ where: { codigoReserva: id } });
-        if (rLocal) {
-          await this.alojamientosService.cancelarReserva(rLocal.id, { reason: 'Cancelada por el administrador' }, randomUUID());
-          return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
-        }
-        const [rSocio] = await this.dataSource.query(
-          `SELECT id FROM schema_alojamientos.alojamientos_reservas_socio WHERE codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 LIMIT 1`,
-          [id],
-        ).catch(() => []);
-        if (rSocio) {
-          await this.alojamientosService.cancelarReserva(rSocio.id, { reason: 'Cancelada por el administrador' }, randomUUID());
-          return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
-        }
-        throw new NotFoundException(`La reserva de hospedaje '${id}' no existe o no se pudo cancelar: ${err.message}`);
       }
+      const [rSocio] = this.dataSource?.query
+        ? await this.dataSource.query(
+            `SELECT id FROM schema_alojamientos.alojamientos_reservas_socio WHERE id::text = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 LIMIT 1`,
+            [id],
+          ).catch(() => [])
+        : [];
+      if (rSocio) {
+        await this.alojamientosService.cancelarReserva(rSocio.id, { reason: 'Cancelada por el administrador' }, randomUUID());
+        return { success: true, message: 'Reserva hospedaje cancelada exitosamente' };
+      }
+      throw new NotFoundException(`La reserva de hospedaje '${id}' no existe.`);
     }
 
     // Una reserva de aerolínea socia se cancela en la aerolínea (con su reembolso
