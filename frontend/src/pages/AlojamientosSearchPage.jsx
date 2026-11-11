@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { getAlojamientos, searchAlojamientos } from '../services/alojamientosApi';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { DestinoAutocomplete } from '../components/DestinoAutocomplete';
-import { destinoExacto } from '../utils/destinos';
+import { destinoExacto, combinarDestinos } from '../utils/destinos';
 import {
   BedIcon,
   CalendarIcon,
@@ -45,6 +45,21 @@ export function AlojamientosSearchPage() {
 
   // Search Bar Form State
   const [destination, setDestination] = useState(initialDestination);
+  const [destinosCatalogo, setDestinosCatalogo] = useState(undefined);
+
+  // Destinos reales del catálogo (incluidos los de socios) para el autocompletado.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const resp = await getAlojamientos({ limit: 500 });
+        const arr = Array.isArray(resp) ? resp : resp?.data || [];
+        const nombres = arr.map((a) => a?.destino).filter(Boolean);
+        if (vivo && nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
+      } catch { /* usa la lista por defecto */ }
+    })();
+    return () => { vivo = false; };
+  }, []);
   const [destinationError, setDestinationError] = useState('');
   const [checkin, setCheckin] = useState(initialCheckin);
   const [checkout, setCheckout] = useState(initialCheckout);
@@ -365,6 +380,7 @@ export function AlojamientosSearchPage() {
                   onInvalidChars={() => setDestinationError('Solo se permiten letras, espacios y los signos , . - \' &')}
                   invalid={Boolean(destinationError)}
                   errorId="sr-destination-error"
+                  catalogo={destinosCatalogo}
                 />
               </div>
               {destinationError && (

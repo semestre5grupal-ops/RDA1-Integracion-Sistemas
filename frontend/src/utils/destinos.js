@@ -63,6 +63,23 @@ function puntuar(destino, consulta) {
 
 // Sugerencias para el texto escrito. Igual que Booking: al escribir "Quito" solo aparece Quito,
 // no cualquier destino que contenga esas letras en medio de una palabra.
+/**
+ * Combina los destinos conocidos (con región/país) con los destinos REALES del
+ * catálogo agregado (incluidos los de los socios, p. ej. Tulcán, Ibarra, Pujilí),
+ * sin duplicar. Así el autocompletado sugiere cualquier destino que ofrezca algún
+ * socio, no solo los locales.
+ */
+export function combinarDestinos(nombresCatalogo = []) {
+  const porNombre = new Map(DESTINOS.map((d) => [normalizarTexto(d.nombre), d]));
+  for (const nombre of nombresCatalogo) {
+    const n = String(nombre || '').trim();
+    if (!n) continue;
+    const clave = normalizarTexto(n);
+    if (clave && !porNombre.has(clave)) porNombre.set(clave, { nombre: n, pais: 'Ecuador' });
+  }
+  return [...porNombre.values()];
+}
+
 export function buscarDestinos(texto, catalogo = DESTINOS) {
   const consulta = normalizarTexto(texto);
   if (!consulta) return catalogo.filter((d) => d.popular).slice(0, MAX_SUGERENCIAS);

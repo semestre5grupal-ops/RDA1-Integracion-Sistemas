@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getAlojamientos, searchAlojamientos } from '../services/alojamientosApi';
 import { AlojamientoCard } from '../components/AlojamientoCard';
 import { DestinoAutocomplete } from '../components/DestinoAutocomplete';
-import { destinoExacto } from '../utils/destinos';
+import { destinoExacto, combinarDestinos } from '../utils/destinos';
 import { useCurrency } from '../hooks/CurrencyContext';
 import {
   EcuadorFlagIcon,
@@ -296,6 +296,9 @@ export function AlojamientosPage() {
   // Estados de datos
   const [alojamientos, setAlojamientos] = useState([]);
   const [loading, setLoading] = useState(true);
+  // Destinos para el autocompletado: locales + los reales de TODOS los socios
+  // (p. ej. Tulcán/Carchi, Ibarra), no solo los que tenemos nosotros.
+  const [destinosCatalogo, setDestinosCatalogo] = useState(undefined);
   const [error, setError] = useState(null);
 
   // Estados del SearchBox
@@ -356,6 +359,23 @@ export function AlojamientosPage() {
     const timer = setTimeout(() => fetchData(), destination ? 400 : 0);
     return () => clearTimeout(timer);
   }, [fetchData]);
+
+  // Carga una vez la lista de destinos reales del catálogo (incluidos los de los
+  // socios) para que el autocompletado los sugiera, no solo los locales.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const resp = await getAlojamientos({ limit: 500 });
+        const arr = Array.isArray(resp) ? resp : resp?.data || [];
+        const nombres = arr.map((a) => a?.destino).filter(Boolean);
+        if (vivo && nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
+      } catch {
+        /* si falla, el autocompletado usa la lista por defecto */
+      }
+    })();
+    return () => { vivo = false; };
+  }, []);
 
   // Accesibilidad WCAG 2.1: Cerrar popovers con tecla Escape
   useEffect(() => {
@@ -464,6 +484,7 @@ export function AlojamientosPage() {
                   onInvalidChars={() => setDestinationError('Solo se permiten letras, espacios y los signos , . - \' &')}
                   invalid={Boolean(destinationError)}
                   errorId="bk-destination-error"
+                  catalogo={destinosCatalogo}
                 />
               </div>
               {destinationError && (

@@ -36,6 +36,7 @@ export function DestinoAutocomplete({
   ariaLabel = 'Introduce un destino o nombre de alojamiento',
   invalid = false,
   errorId,
+  catalogo,
 }) {
   const generatedId = useId();
   const inputId = id || `destino-${generatedId}`;
@@ -43,7 +44,7 @@ export function DestinoAutocomplete({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  const sugerencias = useMemo(() => buscarDestinos(value), [value]);
+  const sugerencias = useMemo(() => buscarDestinos(value, catalogo && catalogo.length ? catalogo : undefined), [value, catalogo]);
   const mostrarLista = open;
   const titulo = value.trim() ? null : 'Destinos populares';
 
