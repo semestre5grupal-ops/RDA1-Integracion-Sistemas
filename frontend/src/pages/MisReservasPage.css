@@ -212,9 +212,11 @@
 
 .trip-card-status {
   font-size: 0.82rem;
-  font-weight: 600;
-  display: inline-block;
-  margin-top: 2px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
 }
 
 .trip-card-status.confirmed {
@@ -222,21 +224,43 @@
 }
 
 .trip-card-status.confirmado_asistido,
-.trip-card-status.checked_in,
+.trip-card-status.asistido {
+  color: #008009;
+}
+
+.trip-card-status.checked_in {
+  color: #006ce4;
+}
+
+.trip-card-status.checked_out {
+  color: #4b5563;
+}
+
 .trip-card-status.picked_up {
-  color: #15803d;
-  background: #dcfce7;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  border: 1px solid #86efac;
+  color: #006ce4;
 }
 
 .trip-card-status.cancelled {
-  color: #595959;
+  color: #6b7280;
 }
 
 .trip-card-status.pending {
   color: #b45309;
+}
+
+.trip-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #4b5563;
+  margin: 3px 0;
+  line-height: 1.35;
+}
+
+.trip-card-meta-subtle {
+  font-size: 0.78rem;
+  color: #6b7280;
 }
 
 .trip-card-right {
