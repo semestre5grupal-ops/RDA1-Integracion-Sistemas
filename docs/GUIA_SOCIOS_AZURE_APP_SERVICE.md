@@ -81,7 +81,7 @@ Ya tengo la sesión iniciada en Azure CLI con la suscripción "Azure for Student
    - Configura en las variables de entorno la conexión con Booking:
      * `BOOKING_REST_STOCK_URL=https://booking-core-api.azurewebsites.net/api/v3/inventory/stock`
      * `BOOKING_BASE_URL=https://booking-core-api.azurewebsites.net/api/v3`
-     * `BOOKING_RABBITMQ_URL=amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku`
+     * `BOOKING_RABBITMQ_URL=amqps://qkvqjvku:<contraseña: pídela a Booking por privado>@shark.rmq.cloudamqp.com/qkvqjvku`
 
 5. **Empaquetado y Primer Despliegue (Cuidado con Windows):**
    - En Windows NO uses `Compress-Archive` de PowerShell porque introduce barras invertidas (`\`) que dañan el zip en Linux.
@@ -166,7 +166,7 @@ Cuando se confirme o cancele una reserva en tu tienda, debes notificar el stock 
 - **Respuesta de Booking:** `200 OK` con `{ "acknowledged": true, "success": true, "source": "HTTP_REST" }`.
 
 ### Opción B: Event Bus RabbitMQ (CloudAMQP)
-- **URL Broker:** `amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku`
+- **URL Broker:** `amqps://qkvqjvku:<contraseña: pídela a Booking por privado>@shark.rmq.cloudamqp.com/qkvqjvku`
 - **Exchange:** `booking.events` (Tipo `topic`, durable)
 - **Routing Key:** `stock.updated`
 - **Payload CloudEvent / JSON:**

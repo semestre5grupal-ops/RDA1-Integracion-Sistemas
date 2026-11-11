@@ -1,6 +1,11 @@
 const amqp = require('amqplib');
 
-const BROKER_URL = 'amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku';
+// La URL del broker (con su contraseña) viene del entorno; nunca se escribe en el código.
+const BROKER_URL = process.env.RABBITMQ_URL;
+if (!BROKER_URL) {
+  console.error('Falta RABBITMQ_URL. Ejecuta: RABBITMQ_URL="amqps://..." node scripts/consume_stock_events.js');
+  process.exit(1);
+}
 const QUEUE_NAME = 'q.stock.actualizado';
 
 async function runStockConsumer() {

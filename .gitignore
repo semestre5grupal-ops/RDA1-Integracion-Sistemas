@@ -35,8 +35,17 @@ lerna-debug.log*
 
 # dotenv
 .env
-.env.test
-.env.production
+.env.*
+!.env.example
+!.env.demo.example
+
+# Credenciales y llaves: nunca al repositorio
+*.PublishSettings
+*.publishsettings
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Archivos de contexto OpenCode
 OPENCLOUD_*.md

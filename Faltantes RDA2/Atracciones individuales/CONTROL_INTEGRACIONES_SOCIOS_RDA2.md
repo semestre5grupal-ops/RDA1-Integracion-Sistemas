@@ -75,7 +75,7 @@
   - **Sincronización de Stock HTTP Inbound:** `POST https://booking-core-api.azurewebsites.net/api/v3/inventory/stock` probado exitosamente con HTTP 200 (`acknowledged: true`).
 * **Especificación para Avisos de Stock hacia Booking Central:**
   - **URL:** `POST https://booking-core-api.azurewebsites.net/api/v3/inventory/stock`
-  - **Headers:** `Content-Type: application/json` y `X-API-Key: LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA`
+  - **Headers:** `Content-Type: application/json` y `X-API-Key: <TU_API_KEY_REGISTRADA>`
   - **Body Canónico:**
     ```json
     {
