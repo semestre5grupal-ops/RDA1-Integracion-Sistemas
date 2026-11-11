@@ -1176,7 +1176,7 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
 
   const viewDetalles = async (tipo, id, socio = false) => {
     try {
-      if (socio) {
+      if (socio && tipo === 'vuelos') {
         // Datos vivos de la aerolínea (más la factura de Booking), con permiso de administrador.
         const { data } = await api.get(`/vuelos/bookings/${encodeURIComponent(id)}`);
         setModal({ type: 'detalles', vista: 'reserva', tipo, data, title: 'Detalle de la reserva (aerolínea)', subtitulo: id });
@@ -1309,7 +1309,7 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
                 <td style={{padding:'9px 14px',color:C.gray}}>{fmtDate(r.createdAt)}</td>
                 <td style={{padding:'9px 14px',display:'flex',gap:8}}>
                   {!['CANCELLED','CANCELADA','CANCELED','REFUNDED'].includes(String(r.estado||'').toUpperCase()) && (
-                    <button onClick={()=> r.socio ? cancelarVueloSocio(r) : requestConfirm("Cancelar reserva", vista==='hospedaje' ? `¿Cancelar la reserva ${r.pnr}? Se aplican las reglas de cancelación del módulo de alojamientos. No se puede deshacer.` : `¿Cancelar la reserva ${r.pnr}? Solo cambia su estado en Booking; no ejecuta reembolsos. No se puede deshacer.`, C.red, ()=>cancelarEnBackend(vista, r.id))} title="Cancelar reserva" style={btnStyle}>❌</button>
+                    <button onClick={()=> (r.socio && vista === 'vuelos') ? cancelarVueloSocio(r) : requestConfirm("Cancelar reserva", vista==='hospedaje' ? `¿Cancelar la reserva ${r.pnr}? Se aplican las reglas de cancelación del módulo de alojamientos. No se puede deshacer.` : `¿Cancelar la reserva ${r.pnr}? Solo cambia su estado en Booking; no ejecuta reembolsos. No se puede deshacer.`, C.red, ()=>cancelarEnBackend(vista, r.id))} title="Cancelar reserva" style={btnStyle}>❌</button>
                   )}
                   <button onClick={()=>viewDetalles(vista, r.id, !!r.socio)} title="Ver detalle" style={btnStyle}>👁️</button>
                 </td>
