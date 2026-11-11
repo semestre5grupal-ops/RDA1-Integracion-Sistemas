@@ -557,7 +557,7 @@ export function MisReservasPage() {
             cancellationPolicy: cancelTexto || (esReembolsable ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
             cancelacionGratuitaHoras: al.cancelacion_gratuita_horas ?? null,
             camas: al.camas,
-            descripcion_camas: al.descripcion_camas || al.camas || (al.tipo_habitacion?.nombre ? `1 Cama Queen / Matrimonial` : '1 Cama'),
+            descripcion_camas: al.descripcion_camas || (al.camas ? (Number(al.camas) === 1 ? '1 cama' : `${al.camas} camas`) : null) || (al.tipo_habitacion?.nombre ? `1 Cama Queen / Matrimonial` : '1 Cama'),
             habitaciones_count: habNum,
             raw: {
               createdAt: al.created_at || new Date().toISOString(),
@@ -605,10 +605,10 @@ export function MisReservasPage() {
           imagen: al.photoUrl || DEFAULT_IMAGES.alojamiento,
           link: al.alojamientoId ? `/alojamientos/${al.alojamientoId}` : '/',
           email: (al.email || al.customer_email || '').trim().toLowerCase(),
-          esReembolsable: !esNoReemLoc,
-          cancellationPolicy: cancelTextoLoc || (!esNoReemLoc ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
+          esReembolsable: esReemLoc,
+          cancellationPolicy: cancelTextoLoc || (esReemLoc ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
           camas: al.camas,
-          descripcion_camas: al.descripcion_camas || al.camas || '1 Cama Matrimonial',
+          descripcion_camas: al.descripcion_camas || (al.camas ? (Number(al.camas) === 1 ? '1 cama' : `${al.camas} camas`) : null) || '1 Cama Matrimonial',
           habitaciones_count: Number(al.habitaciones || 1),
           isLocal: true,
           raw: {
