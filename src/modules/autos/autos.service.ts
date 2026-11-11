@@ -239,6 +239,17 @@ export class AutosService implements OnModuleInit {
     }
   }
 
+  private normalizeSearch(str: string): string {
+    if (!str) return '';
+    return str
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   /**
    * Búsqueda avanzada de vehículos con filtros de categoría, horas de 30m, edad y exclusión de cooldown.
    */
@@ -329,25 +340,30 @@ export class AutosService implements OnModuleInit {
 
     let merged = [...formattedLocales, ...externalCars];
 
-    // 5b. Búsqueda flexible por marca, modelo o nombre del auto (además de ubicación)
-    const rawTerm = (dto.q || dto.pickup_location || '').trim().toLowerCase();
+    // 5b. Búsqueda flexible y estricta por marca, modelo o nombre del auto (además de ubicación)
+    const rawTerm = (dto.q || dto.pickup_location || '').trim();
+    const qNorm = this.normalizeSearch(rawTerm);
     const ciudadesPaises = [
-      'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'ecuador', 'uio', 'gye', 'cue'
+      'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'ecuador', 'uio', 'gye', 'cue',
+      'aeropuerto mariscal sucre', 'aeropuerto jose joaquin de olmedo', 'tababela'
     ];
-    const esSoloUbicacion = ciudadesPaises.includes(rawTerm);
+    const esSoloUbicacion = ciudadesPaises.includes(qNorm);
 
-    if (rawTerm && !esSoloUbicacion) {
-      const matchCars = merged.filter((c: any) => {
-        const marca = (c.marca || '').toLowerCase();
-        const modelo = (c.modelo || '').toLowerCase();
-        const cat = (c.categoria || '').toLowerCase();
-        const prov = (c.proveedor?.nombre || '').toLowerCase();
-        const fullDesc = `${marca} ${modelo} ${cat} ${prov}`;
-        return fullDesc.includes(rawTerm) || rawTerm.includes(marca) || (marca && rawTerm.includes(modelo));
-      });
-
-      if (matchCars.length > 0) {
-        merged = matchCars;
+    if (qNorm && !esSoloUbicacion) {
+      const tokens = qNorm.split(' ').filter(t => t.length > 0 && !ciudadesPaises.includes(t));
+      if (tokens.length > 0) {
+        merged = merged.filter((c: any) => {
+          const fullDesc = this.normalizeSearch([
+            c.marca,
+            c.modelo,
+            c.vehiculo,
+            c.nombre,
+            c.categoria,
+            c.proveedor?.nombre,
+            c.proveedor_nombre
+          ].filter(Boolean).join(' '));
+          return tokens.every(token => fullDesc.includes(token));
+        });
       }
     }
 
@@ -429,10 +445,14 @@ export class AutosService implements OnModuleInit {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
           // Verificar si tiene orden activa en memoria
           const isReservedMem = Array.from(this.memoryOrders.values()).some(
-            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED'
+            (o: any) =>
+              (o.auto_id === id || o.vehicle_id === id) &&
+              (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.estado === 'CONFIRMED' || o.estado === 'PENDING'),
           );
           if (isReservedMem) {
             foundExt.estado = 'RESERVADO';
+          } else {
+            foundExt.estado = 'DISPONIBLE';
           }
           return {
             ...foundExt,
@@ -445,10 +465,14 @@ export class AutosService implements OnModuleInit {
         if (fallbackExt) {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
           const isReservedMem = Array.from(this.memoryOrders.values()).some(
-            (o: any) => (o.auto_id === id || o.vehicle_id === id) && o.status !== 'CANCELLED',
+            (o: any) =>
+              (o.auto_id === id || o.vehicle_id === id) &&
+              (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.estado === 'CONFIRMED' || o.estado === 'PENDING'),
           );
           if (isReservedMem) {
             fallbackExt.estado = 'RESERVADO';
+          } else {
+            fallbackExt.estado = 'DISPONIBLE';
           }
           return {
             ...fallbackExt,
@@ -1656,6 +1680,9 @@ export class AutosService implements OnModuleInit {
       auto.estado = EstadoVehiculo.DISPONIBLE;
       this.logger.log(`[Reverso Saga Autos] Vehículo ${auto.marca} ${auto.modelo} (${auto.id}) liberado a DISPONIBLE tras cancelación.`);
     }
+    try {
+      await this.autoRepo.update({ id: autoId }, { estadoOperativo: 'DISPONIBLE' });
+    } catch (_) {}
 
     // 3. Generar reembolso financiero formal
     const refundId = `REF-AUTO-${Date.now().toString(36).toUpperCase()}`;

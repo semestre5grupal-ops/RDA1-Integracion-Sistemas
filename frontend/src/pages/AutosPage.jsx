@@ -39,6 +39,17 @@ const DESTINOS_ECUADOR = [
   },
 ];
 
+function normalizeSearchText(str) {
+  if (!str) return '';
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function AutosPage() {
   const navigate = useNavigate();
   const [autos, setAutos] = useState([]);
@@ -64,7 +75,7 @@ export function AutosPage() {
     { texto: 'Loja', tipo: 'ciudad', icono: '📍' },
     { texto: 'Machala', tipo: 'ciudad', icono: '📍' },
     { texto: 'Mercedes', tipo: 'auto', icono: '🚗' },
-    { texto: 'Mercedes RutaLibre Lunes', tipo: 'auto', icono: '🚗' },
+    { texto: 'Mercedes-Benz', tipo: 'auto', icono: '🚗' },
     { texto: 'Toyota', tipo: 'auto', icono: '🚗' },
     { texto: 'Toyota Yaris Cross', tipo: 'auto', icono: '🚗' },
     { texto: 'Chevrolet', tipo: 'auto', icono: '🚗' },
@@ -230,21 +241,28 @@ export function AutosPage() {
 
       const result = await searchAutos(requestPayload);
       let fetchedCars = result.data || [];
-      const termLower = (pickupLocation || '').trim().toLowerCase();
-      const ciudadesComunes = ['quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos'];
-      const esSoloCiudad = ciudadesComunes.includes(termLower);
+      const qNorm = normalizeSearchText(pickupLocation);
+      const ciudadesComunes = [
+        'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'uio', 'gye', 'cue',
+        'aeropuerto mariscal sucre', 'aeropuerto jose joaquin de olmedo', 'tababela', 'ecuador'
+      ];
+      const esSoloCiudad = ciudadesComunes.includes(qNorm);
 
-      if (termLower && !esSoloCiudad) {
-        const filtered = fetchedCars.filter(c => {
-          const marca = (c.marca || '').toLowerCase();
-          const modelo = (c.modelo || '').toLowerCase();
-          const catName = (c.categoria || '').toLowerCase();
-          const provName = (c.proveedor?.nombre || '').toLowerCase();
-          const fullText = `${marca} ${modelo} ${catName} ${provName}`;
-          return fullText.includes(termLower) || termLower.includes(marca) || (marca && termLower.includes(modelo));
-        });
-        if (filtered.length > 0) {
-          fetchedCars = filtered;
+      if (qNorm && !esSoloCiudad) {
+        const tokens = qNorm.split(' ').filter(t => t.length > 0 && !ciudadesComunes.includes(t));
+        if (tokens.length > 0) {
+          fetchedCars = fetchedCars.filter(c => {
+            const fullText = normalizeSearchText([
+              c.marca,
+              c.modelo,
+              c.vehiculo,
+              c.nombre,
+              c.categoria,
+              c.proveedor?.nombre,
+              c.proveedor_nombre
+            ].filter(Boolean).join(' '));
+            return tokens.every(token => fullText.includes(token));
+          });
         }
       }
       setAutos(fetchedCars);
@@ -776,9 +794,6 @@ export function AutosPage() {
           <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
             {/* Sidebar */}
             <div style={{ width: '280px', flexShrink: 0 }}>
-              <div style={{ background: '#e0e0e0', height: '150px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '15px' }}>
-                <button style={{ background: '#006ce4', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem' }}>Mostrar en el Mapa</button>
-              </div>
               <div style={{ border: '1px solid #e7e7e7', borderRadius: '4px', padding: '16px', background: 'white' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', margin: 0, color: '#333' }}>Filtrar</h3>
