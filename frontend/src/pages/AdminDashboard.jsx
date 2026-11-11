@@ -37,7 +37,17 @@ const TABS = [
 const ESTADOS_COBRADOS = new Set(['CONFIRMED', 'CONFIRMADA', 'PAGADA', 'PAID', 'TICKET_ISSUING', 'TICKETED', 'ISSUED', 'COMPLETED', 'CHECKED_IN', 'ACTIVA', 'COMPLETADA', 'CHECKED_OUT']);
 
 function fmt(n) { return typeof n === 'number' ? n.toLocaleString('es-EC',{minimumFractionDigits:2,maximumFractionDigits:2}) : '0.00'; }
-function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleString('es-EC',{dateStyle:'short',timeStyle:'short'}); }
+function fmtDate(d) {
+  if (!d) return '—';
+  const str = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const [y, m, dia] = str.slice(0, 10).split('-').map(Number);
+    if (!str.includes('T') || /T00:00:00(\.000)?Z?$/i.test(str)) {
+      return `${String(dia).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+    }
+  }
+  return new Date(d).toLocaleString('es-EC', { dateStyle: 'short', timeStyle: 'short' });
+}
 function estadoColor(s) {
   if (!s) return C.gray;
   const u = s.toUpperCase();
@@ -867,6 +877,11 @@ function Valor({ k, v, moneda }) {
   if (CLAVES_ESTADO.has(k)) return <Badge status={String(v)} />;
   if (CLAVES_DINERO.test(k) && Number.isFinite(Number(v))) return <span style={{ fontWeight: 600 }}>{fmtDinero(v, moneda)}</span>;
   if (typeof v === 'string' && ENUMS_ES[v]) return <span>{ENUMS_ES[v]}</span>;
+  if (['checkin', 'checkout', 'checkIn', 'checkOut', 'fechaInicio', 'fechaFin', 'date'].includes(k)) {
+    const s = String(v).slice(0, 10);
+    const [y, m, dia] = s.split('-').map(Number);
+    if (y && m && dia) return <span>{`${String(dia).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`}</span>;
+  }
   if (typeof v === 'string' && ISO_FECHA.test(v)) return <span>{fmtDate(v)}</span>;
   if (typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v)) return <span style={{ fontFamily: 'monospace', fontSize: '0.78rem', wordBreak: 'break-all' }}>{v}</span>;
   return <span style={{ wordBreak: 'break-word' }}>{String(v)}</span>;
