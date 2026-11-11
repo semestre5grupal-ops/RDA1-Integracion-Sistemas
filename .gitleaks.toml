@@ -1,0 +1,26 @@
+# Reglas de gitleaks para Booking: las predeterminadas + URLs con contraseña
+# (cadenas de conexión de PostgreSQL, RabbitMQ, etc., que las reglas por defecto no detectan).
+[extend]
+useDefault = true
+
+[[rules]]
+id = "url-con-contrasena"
+description = "Cadena de conexión con usuario y contraseña"
+regex = '''[a-z][a-z0-9+.-]*://[^:\s/'"@<]+:([^@\s'"<>]{4,})@'''
+secretGroup = 1
+keywords = ["://"]
+
+[allowlist]
+description = "Copias de páginas, compilados, logs y marcadores de ejemplo"
+paths = [
+  '''^html del booking original/''',
+  '''^dist/''',
+  '''^logs/''',
+  '''(^|/)node_modules/''',
+]
+regexTarget = "secret"
+regexes = [
+  '''^<[^>]*>$''',
+  '''^(\*+|password|contraseña|pass|clave|secret|postgres|guest|usuario|user|x{3,})$''',
+  '''^\$\{''',
+]

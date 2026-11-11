@@ -1,7 +1,12 @@
 const { Client } = require('pg');
 
+if (!process.env.DATABASE_URL) {
+  console.error('Falta DATABASE_URL. Ejecuta: DATABASE_URL="postgresql://..." node <script>  (nunca la escribas en el código).');
+  process.exit(1);
+}
+
 const client = new Client({
-  connectionString: 'postgresql://postgres.owseuntgcgvflqpnmwcc:Semestre%402026@aws-0-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true',
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
