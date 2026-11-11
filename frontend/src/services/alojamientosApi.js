@@ -133,6 +133,54 @@ export async function cancelarReservaAlojamiento(reservationId, { reason } = {},
   return data;
 }
 
+/**
+ * Check-in de alojamiento (recepción / mostrador o digital).
+ * Asigna habitación al huésped y pasa estado_habitacion a OCUPADA.
+ */
+export async function checkinAlojamiento(orderId, forzarLiberacion = true) {
+  const token = await obtenerAccessToken().catch(() => null);
+  const { data } = await api.post(
+    `/alojamientos/orders/${encodeURIComponent(orderId)}/checkin`,
+    { forzar_liberacion: forzarLiberacion },
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );
+  return data;
+}
+
+/**
+ * Check-out de alojamiento (salida del huésped, incluso anticipada).
+ * Pasa la orden a CHECKED_OUT y la habitación a EN_LIMPIEZA.
+ */
+export async function checkoutAlojamiento(orderId) {
+  const token = await obtenerAccessToken().catch(() => null);
+  const { data } = await api.post(
+    `/alojamientos/orders/${encodeURIComponent(orderId)}/checkout`,
+    {},
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );
+  return data;
+}
+
+/**
+ * Confirmación de limpieza por lencería / camarera de pisos.
+ * Cambia el estado de la habitación de EN_LIMPIEZA a DISPONIBLE.
+ */
+export async function marcarLimpiezaAlojamiento(orderId) {
+  const token = await obtenerAccessToken().catch(() => null);
+  const { data } = await api.post(
+    `/alojamientos/orders/${encodeURIComponent(orderId)}/limpieza`,
+    {},
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );
+  return data;
+}
+
 // ── Gestión del catálogo (panel de administración) ───────────────────────────
 // Van por el cliente AUTENTICADO (`apiAuth`), que añade el token del admin:
 // el backend rechaza estas operaciones sin sesión de administrador.

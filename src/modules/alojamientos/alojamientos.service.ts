@@ -85,7 +85,7 @@ import { esAdministrador, UsuarioSupabase } from '../../core/auth/administradore
 import { TraceContextService } from '../../core/tracing/trace-context.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { AlojamientosCircuitBreakerAdapter } from './acl/alojamientos-circuit-breaker.adapter';
-import { AlojamientosSociosService } from './socios/alojamientos-socios.service';
+import { AlojamientosSociosService, inferirDescripcionCamas } from './socios/alojamientos-socios.service';
 import { AlojamientosSociosReservasService } from './socios/alojamientos-socios-reservas.service';
 
 /** Máximo de alojamientos por petición de sincronización. */
@@ -1527,12 +1527,91 @@ export class AlojamientosService implements OnModuleInit {
       order_id: reserva.id,
       codigo_reserva: reserva.codigoReserva,
       estado: 'CHECKED_IN',
+      estado_habitacion: 'OCUPADA',
       checkin_liberado: true,
       fecha_checkin: checkinDateStr,
       hora_checkin: now.toISOString(),
       habitacion_asignada: habitacion,
       clave_acceso_digital: claveDigital,
       mensaje: '¡Check-in digital exitoso! Tu clave de acceso inteligente ha sido activada para abrir la cerradura de tu habitación.',
+    };
+  }
+
+  async checkout(orderId: string): Promise<any> {
+    let reserva = await this.reservaRepo.findOne({
+      where: [{ id: orderId }, { codigoReserva: orderId }],
+    });
+
+    if (!reserva && this.sociosReservas) {
+      const socioRes = await this.sociosReservas.porId(orderId);
+      if (socioRes) {
+        return this.sociosReservas.checkout(orderId);
+      }
+    }
+
+    if (!reserva) {
+      throw new NotFoundException(`La reserva o código '${orderId}' no fue localizada.`);
+    }
+
+    if (reserva.status === 'CANCELLED') {
+      throw new BadRequestException('No es posible realizar check-out de una reserva cancelada.');
+    }
+
+    const now = new Date();
+    reserva.status = 'CHECKED_OUT';
+    (reserva as any).checkoutCompletadoAt = now;
+    (reserva as any).estadoHabitacion = 'EN_LIMPIEZA';
+    await this.reservaRepo.save(reserva);
+
+    await this.registrarEventoYAuditoria(
+      'ALOJAMIENTO_CHECKOUT',
+      reserva.id,
+      {
+        order_id: reserva.id,
+        codigo_reserva: reserva.codigoReserva,
+        habitacion: reserva.habitacionAsignada,
+        estado_habitacion: 'EN_LIMPIEZA',
+        checkout_at: now.toISOString(),
+      },
+    );
+
+    return {
+      order_id: reserva.id,
+      codigo_reserva: reserva.codigoReserva,
+      estado: 'CHECKED_OUT',
+      estado_habitacion: 'EN_LIMPIEZA',
+      habitacion_asignada: reserva.habitacionAsignada,
+      fecha_checkout: now.toISOString(),
+      mensaje: `Check-out registrado exitosamente. La habitación ${reserva.habitacionAsignada || ''} pasa al estado EN_LIMPIEZA / PREPARACIÓN hasta que lencería confirme limpieza.`,
+    };
+  }
+
+  async marcarHabitacionLimpia(orderId: string): Promise<any> {
+    let reserva = await this.reservaRepo.findOne({
+      where: [{ id: orderId }, { codigoReserva: orderId }],
+    });
+
+    if (!reserva && this.sociosReservas) {
+      const socioRes = await this.sociosReservas.porId(orderId);
+      if (socioRes) {
+        return this.sociosReservas.marcarLimpia(orderId);
+      }
+    }
+
+    if (!reserva) {
+      throw new NotFoundException(`La reserva o código '${orderId}' no fue localizada.`);
+    }
+
+    (reserva as any).estadoHabitacion = 'DISPONIBLE';
+    await this.reservaRepo.save(reserva);
+
+    return {
+      order_id: reserva.id,
+      codigo_reserva: reserva.codigoReserva,
+      estado: reserva.status,
+      estado_habitacion: 'DISPONIBLE',
+      habitacion_asignada: reserva.habitacionAsignada,
+      mensaje: `La habitación ${reserva.habitacionAsignada || ''} ha sido limpiada y desinfectada. Vuelve a estar DISPONIBLE para recepción.`,
     };
   }
 
@@ -2439,6 +2518,10 @@ export class AlojamientosService implements OnModuleInit {
       adultos: reserva.adultos ?? reserva.huespedes,
       ninos: reserva.ninos ?? 0,
       habitaciones_count: reserva.habitacionesCount,
+      camas: extra.tipo?.camas ?? 1,
+      descripcion_camas: extra.tipo?.descripcionCamas || inferirDescripcionCamas(extra.tipo?.camas, extra.tipo?.nombre, reserva.adultos),
+      habitacion_asignada: reserva.habitacionAsignada || null,
+      estado_habitacion: (reserva as any).estadoHabitacion || (reserva.status === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (reserva.status === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
       tipo_habitacion: extra.tipo
         ? {
             id: extra.tipo.id,

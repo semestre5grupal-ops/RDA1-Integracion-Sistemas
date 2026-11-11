@@ -9,6 +9,7 @@ import { ReservaAlojamiento } from '../alojamientos/entities/reserva.entity';
 import { Alojamiento } from '../alojamientos/entities/alojamiento.entity';
 import { PAGADAS as ESTADOS_COBRADOS } from './admin-finanzas.service';
 import { AlojamientosService } from '../alojamientos/alojamientos.service';
+import { inferirDescripcionCamas } from '../alojamientos/socios/alojamientos-socios.service';
 import { randomUUID } from 'crypto';
 
 const ES_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,10 +48,7 @@ export class AdminService {
         .find({ order: { createdAt: 'DESC' }, ...(take ? { take } : {}) })
         .catch((e) => { this.logger.error(`Error hospedaje local: ${e.message}`); return [] as ReservaAlojamiento[]; }),
       this.dataSource.query(
-        `SELECT id, codigo_reserva, codigo_nodo, alojamiento_id_socio, alojamiento_nombre, destino,
-                tipo_codigo, tipo_nombre, checkin, checkout, total, moneda, estado, order_id_socio,
-                external_order_id, codigo_reserva_socio, usuario_id, cliente_nombre, cliente_email,
-                cliente_telefono, creado_en
+        `SELECT *
            FROM schema_alojamientos.alojamientos_reservas_socio
           ORDER BY creado_en DESC ${take ? `LIMIT ${take}` : 'LIMIT 100'}`,
       ).catch((e) => { this.logger.error(`Error hospedaje socios: ${e.message}`); return [] as any[]; }),
@@ -69,12 +67,16 @@ export class AdminService {
       return String(v).slice(0, 10);
     };
 
-    const listaLocales = reservasLocales.map((r) => ({
+    const listaLocales = reservasLocales.map((r: any) => ({
       ...r,
       nombreAlojamiento: nombres.get(String(r.alojamientoId)) || null,
       socio: false,
       checkin: aFechaIso(r.checkin),
       checkout: aFechaIso(r.checkout),
+      habitaciones: Number(r.habitacionesCount || 1),
+      camas: r.camas || inferirDescripcionCamas(null, '', r.adultos || 2),
+      habitacionAsignada: r.habitacionAsignada || (r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN' ? 'Habitación 101' : null),
+      estadoHabitacion: r.estadoHabitacion || (r.status === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
     }));
 
     const listaSocios = (reservasSocios || []).map((s: any) => ({
@@ -87,6 +89,11 @@ export class AdminService {
       customerName: s.cliente_nombre,
       customerEmail: s.cliente_email,
       nombreAlojamiento: s.alojamiento_nombre,
+      tipoNombre: s.tipo_nombre,
+      habitaciones: Number(s.habitaciones || 1),
+      camas: inferirDescripcionCamas(s.camas, s.tipo_nombre, s.adultos),
+      habitacionAsignada: s.habitacion_asignada || (s.checkin_at ? 'Habitación 204' : null),
+      estadoHabitacion: s.estado_habitacion || (s.checkout_at || s.estado === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (s.checkin_at || s.estado === 'CONFIRMADO_ASISTIDO' ? 'OCUPADA' : 'DISPONIBLE')),
       alojamientoId: `${s.codigo_nodo}~${s.alojamiento_id_socio}`,
       checkin: aFechaIso(s.checkin),
       checkout: aFechaIso(s.checkout),
@@ -111,6 +118,11 @@ export class AdminService {
       createdAt: h.createdAt || h.creado_en,
       cliente: h.customerEmail || h.customerName || h.cliente_email || h.cliente_nombre || '—',
       alojamiento: h.nombreAlojamiento || h.alojamiento_nombre || null,
+      tipoHabitacion: h.tipoNombre || h.tipo_nombre || null,
+      habitaciones: Number(h.habitaciones || h.habitacionesCount || 1),
+      camas: h.camas || inferirDescripcionCamas(null, h.tipoNombre || h.tipo_nombre || '', 2),
+      habitacionAsignada: h.habitacionAsignada || h.habitacion_asignada || (h.estado === 'CONFIRMADO_ASISTIDO' || h.estado === 'CHECKED_IN' ? 'Habitación 204' : null),
+      estadoHabitacion: h.estadoHabitacion || h.estado_habitacion || (h.estado === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (h.estado === 'CONFIRMADO_ASISTIDO' || h.estado === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
       checkin: h.checkin,
       checkout: h.checkout,
     };
@@ -613,6 +625,27 @@ export class AdminService {
     } catch (e) {
       throw new BadRequestException(e.message);
     }
+  }
+
+  async checkinReserva(tipo: string, id: string) {
+    if (tipo === 'hospedaje') {
+      return this.alojamientosService.checkinDigital(id, true);
+    }
+    throw new BadRequestException(`Check-in no soportado para ${tipo}`);
+  }
+
+  async checkoutReserva(tipo: string, id: string) {
+    if (tipo === 'hospedaje') {
+      return this.alojamientosService.checkout(id);
+    }
+    throw new BadRequestException(`Check-out no soportado para ${tipo}`);
+  }
+
+  async limpiezaReserva(tipo: string, id: string) {
+    if (tipo === 'hospedaje') {
+      return this.alojamientosService.marcarHabitacionLimpia(id);
+    }
+    throw new BadRequestException(`Limpieza no soportada para ${tipo}`);
   }
 
   async getReservaDetalles(tipo: string, id: string) {

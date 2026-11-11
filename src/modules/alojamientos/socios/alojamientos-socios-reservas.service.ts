@@ -1,7 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'node:crypto';
-import { AlojamientosSociosService, OpcionSocio } from './alojamientos-socios.service';
+import { AlojamientosSociosService, OpcionSocio, inferirDescripcionCamas } from './alojamientos-socios.service';
 import { trazaAlojamientos, PasoAlojamiento, ResultadoPaso } from './alojamientos-traza';
 import { CodigoProblema, conflicto, validacion } from '../../../core/errors/codigo-error';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
@@ -146,6 +146,9 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS order_id_socio varchar(100);
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS external_order_id varchar(100);
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS codigo_reserva_socio varchar(100);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS estado_habitacion varchar(40) DEFAULT 'DISPONIBLE';
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS habitacion_asignada varchar(100);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS checkout_at timestamptz;
       `).catch(() => undefined);
       this.tablaLista = true;
     } catch (e: any) {
@@ -612,12 +615,15 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       throw conflicto(CodigoProblema.CHECK_IN_NOT_AVAILABLE, 'La reserva está cancelada: no admite check-in.');
     }
     if (fila.estado === ESTADO_ASISTIDO) return { ...fila, ya_registrado: true };
+    const habAsignada = fila.habitacion_asignada || `Habitación ${Math.floor(Math.random() * 200) + 101}`;
     const act = primeraFila(await this.dataSource!.query(
       `UPDATE ${TABLA}
-          SET estado = $2, checkin_at = COALESCE($3::timestamptz, now()), checkin_admin = $4, actualizado_en = now()
+          SET estado = $2, checkin_at = COALESCE($3::timestamptz, now()), checkin_admin = $4,
+              estado_habitacion = 'OCUPADA', habitacion_asignada = COALESCE(habitacion_asignada, $5),
+              actualizado_en = now()
         WHERE id = $1
         RETURNING *`,
-      [fila.id, ESTADO_ASISTIDO, datos.fecha || null, datos.admin || null],
+      [fila.id, ESTADO_ASISTIDO, datos.fecha || null, datos.admin || null, habAsignada],
     ));
     trazaAlojamientos.registrar({
       correlacion: `checkin-${fila.codigo_reserva}`, paso: 'checkin', resultado: 'ok',
@@ -625,6 +631,39 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       nodo: fila.codigo_nodo, cliente: fila.cliente_email || 'invitado',
     });
     return act;
+  }
+
+  async checkout(ref: string): Promise<any | null> {
+    if (!ref || !(await this.asegurarTabla())) return null;
+    const fila = await this.porId(ref);
+    if (!fila) return null;
+    const act = primeraFila(await this.dataSource!.query(
+      `UPDATE ${TABLA}
+          SET estado = 'CHECKED_OUT', estado_habitacion = 'EN_LIMPIEZA', checkout_at = now(), actualizado_en = now()
+        WHERE id = $1
+        RETURNING *`,
+      [fila.id],
+    ));
+    trazaAlojamientos.registrar({
+      correlacion: `checkout-${fila.codigo_reserva}`, paso: 'checkin', resultado: 'ok',
+      detalle: `Check-out confirmado para ${fila.codigo_reserva}. Habitación pasa a EN_LIMPIEZA`,
+      nodo: fila.codigo_nodo, cliente: fila.cliente_email || 'invitado',
+    });
+    return this.respuesta(act || { ...fila, estado: 'CHECKED_OUT', estado_habitacion: 'EN_LIMPIEZA' });
+  }
+
+  async marcarLimpia(ref: string): Promise<any | null> {
+    if (!ref || !(await this.asegurarTabla())) return null;
+    const fila = await this.porId(ref);
+    if (!fila) return null;
+    const act = primeraFila(await this.dataSource!.query(
+      `UPDATE ${TABLA}
+          SET estado_habitacion = 'DISPONIBLE', actualizado_en = now()
+        WHERE id = $1
+        RETURNING *`,
+      [fila.id],
+    ));
+    return this.respuesta(act || { ...fila, estado_habitacion: 'DISPONIBLE' });
   }
 
   // ───────────────────────────── Formato ─────────────────────────────
@@ -650,6 +689,10 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       adultos: f.adultos,
       ninos: f.ninos,
       habitaciones_count: f.habitaciones,
+      camas: 1,
+      descripcion_camas: inferirDescripcionCamas(null, f.tipo_nombre, f.adultos),
+      habitacion_asignada: f.habitacion_asignada || (f.checkin_at ? 'Habitación 204' : null),
+      estado_habitacion: f.estado_habitacion || (f.checkout_at || f.estado === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (f.checkin_at || f.estado === ESTADO_ASISTIDO ? 'OCUPADA' : 'DISPONIBLE')),
       tipo_habitacion: {
         id: f.tipo_codigo,
         codigo: f.tipo_codigo,
