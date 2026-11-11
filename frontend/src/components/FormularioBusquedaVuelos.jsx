@@ -2,6 +2,9 @@ import { useId, useState, useRef, useEffect } from 'react';
 import { hoyEnIso } from '../services/formato';
 import { useTelemetry } from '../hooks/useTelemetry';
 
+// Destinos que las aerolíneas socias responden en sus búsquedas (verificado el 10-11-2026).
+// El contrato v2 no tiene un endpoint de destinos: si una aerolínea agrega una ruta
+// nueva, el cliente puede escribir el código IATA en "Otro aeropuerto".
 const AEROPUERTOS_ECUADOR = [
   { codigo: 'UIO', nombre: 'Quito (UIO)' },
   { codigo: 'GYE', nombre: 'Guayaquil (GYE)' },
@@ -9,9 +12,79 @@ const AEROPUERTOS_ECUADOR = [
   { codigo: 'MEC', nombre: 'Manta (MEC)' },
   { codigo: 'OCC', nombre: 'Coca (OCC)' },
   { codigo: 'LOH', nombre: 'Loja (LOH)' },
+  { codigo: 'ESM', nombre: 'Esmeraldas (ESM)' },
+  { codigo: 'LTX', nombre: 'Latacunga (LTX)' },
+  { codigo: 'MCH', nombre: 'Machala (MCH)' },
+  { codigo: 'TPC', nombre: 'Tarapoa (TPC)' },
   { codigo: 'GPS', nombre: 'Galápagos - Baltra (GPS)' },
   { codigo: 'SCY', nombre: 'Galápagos - San Cristóbal (SCY)' },
 ];
+
+const AEROPUERTOS_INTERNACIONALES = [
+  { codigo: 'BOG', nombre: 'Bogotá, Colombia (BOG)' },
+  { codigo: 'LIM', nombre: 'Lima, Perú (LIM)' },
+  { codigo: 'MIA', nombre: 'Miami, EE. UU. (MIA)' },
+  { codigo: 'MAD', nombre: 'Madrid, España (MAD)' },
+];
+
+const CODIGOS_CONOCIDOS = new Set([...AEROPUERTOS_ECUADOR, ...AEROPUERTOS_INTERNACIONALES].map((a) => a.codigo));
+const OTRO = '__otro__';
+const IATA = /^[A-Z]{3}$/;
+
+/**
+ * Lista de aeropuertos agrupada (Ecuador / Internacional) más la opción
+ * "Otro aeropuerto", que muestra un campo para escribir cualquier código IATA.
+ */
+function SelectorAeropuerto({ id, etiqueta, valor, onCambiar }) {
+  const esOtro = Boolean(valor) && !CODIGOS_CONOCIDOS.has(valor);
+  const [escribiendo, setEscribiendo] = useState(esOtro);
+  // Un código de la lista siempre se muestra en la lista (también después de invertir la ruta).
+  const mostrarCampo = esOtro || (escribiendo && !CODIGOS_CONOCIDOS.has(valor));
+  return (
+    <>
+      <label htmlFor={id}>{etiqueta}</label>
+      <select
+        id={id}
+        value={mostrarCampo ? OTRO : valor}
+        onChange={(e) => {
+          if (e.target.value === OTRO) {
+            setEscribiendo(true);
+            onCambiar('');
+          } else {
+            setEscribiendo(false);
+            onCambiar(e.target.value);
+          }
+        }}
+      >
+        <option value="" disabled>{`Selecciona ${etiqueta.toLowerCase()}`}</option>
+        <optgroup label="Ecuador">
+          {AEROPUERTOS_ECUADOR.map((a) => (
+            <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
+          ))}
+        </optgroup>
+        <optgroup label="Internacional">
+          {AEROPUERTOS_INTERNACIONALES.map((a) => (
+            <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
+          ))}
+        </optgroup>
+        <option value={OTRO}>Otro aeropuerto (código IATA)…</option>
+      </select>
+      {mostrarCampo && (
+        <input
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          maxLength={3}
+          placeholder="Ej.: PTY"
+          aria-label={`Código IATA de ${etiqueta.toLowerCase()}`}
+          value={valor}
+          onChange={(e) => onCambiar(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3))}
+          style={{ marginTop: 4, width: '6.5em', textTransform: 'uppercase', letterSpacing: '0.08em' }}
+        />
+      )}
+    </>
+  );
+}
 
 export function FormularioBusquedaVuelos({ onBuscar, cargando, origenInicial = '', destinoInicial = '' }) {
   const idBase = useId();
@@ -96,7 +169,9 @@ export function FormularioBusquedaVuelos({ onBuscar, cargando, origenInicial = '
     const nuevos = {};
 
     if (!origen) nuevos.origen = 'El origen es obligatorio.';
+    else if (!IATA.test(origen)) nuevos.origen = 'El origen debe ser un código IATA de 3 letras (por ejemplo, PTY).';
     if (!destino) nuevos.destino = 'El destino es obligatorio.';
+    else if (!IATA.test(destino)) nuevos.destino = 'El destino debe ser un código IATA de 3 letras (por ejemplo, PTY).';
     if (origen && destino && origen === destino) nuevos.destino = 'El destino debe ser distinto del origen.';
     
     if (!fecha) {
@@ -197,13 +272,7 @@ export function FormularioBusquedaVuelos({ onBuscar, cargando, origenInicial = '
               </svg>
             </div>
             <div className="av-input-field">
-              <label htmlFor={ids.origen}>Origen</label>
-              <select id={ids.origen} value={origen} onChange={(e) => setOrigen(e.target.value)}>
-                <option value="" disabled>Selecciona origen</option>
-                {AEROPUERTOS_ECUADOR.map((a) => (
-                  <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
-                ))}
-              </select>
+              <SelectorAeropuerto id={ids.origen} etiqueta="Origen" valor={origen} onCambiar={setOrigen} />
             </div>
           </div>
 
@@ -224,13 +293,7 @@ export function FormularioBusquedaVuelos({ onBuscar, cargando, origenInicial = '
               </svg>
             </div>
             <div className="av-input-field">
-              <label htmlFor={ids.destino}>Destino</label>
-              <select id={ids.destino} value={destino} onChange={(e) => setDestino(e.target.value)}>
-                <option value="" disabled>Selecciona destino</option>
-                {AEROPUERTOS_ECUADOR.map((a) => (
-                  <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
-                ))}
-              </select>
+              <SelectorAeropuerto id={ids.destino} etiqueta="Destino" valor={destino} onCambiar={setDestino} />
             </div>
           </div>
         </div>
