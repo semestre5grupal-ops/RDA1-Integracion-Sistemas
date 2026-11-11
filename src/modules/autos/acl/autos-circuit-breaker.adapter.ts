@@ -156,7 +156,9 @@ export class AutosCircuitBreakerAdapter {
     if (!Array.isArray(data)) return [];
     for (const r of data) {
       const st = (r.status || r.estado || '').toUpperCase();
-      if (st === 'CONFIRMADO_ASISTIDO' || r.rental_status === 'PICKED_UP' || r.checkin_status === 'COMPLETED') {
+      // Solo RodadoEc: su entrega queda como ENTREGADO; Booking la reconoce como CONFIRMADO_ASISTIDO.
+      const rodadoEntregado = def.clave === 'RODADO' && st === 'ENTREGADO';
+      if (st === 'CONFIRMADO_ASISTIDO' || r.rental_status === 'PICKED_UP' || r.checkin_status === 'COMPLETED' || rodadoEntregado) {
         r.status = 'CONFIRMADO_ASISTIDO';
         r.estado = 'CONFIRMADO_ASISTIDO';
       } else if (st === 'RESERVADO' || st === 'CONFIRMED') {
