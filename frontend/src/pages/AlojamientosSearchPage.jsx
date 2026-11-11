@@ -1175,7 +1175,7 @@ export function AlojamientosSearchPage() {
                       <div className="sr-room-details">
                         <div className="sr-room-name">{prop.tipo_alojamiento || 'Habitación Doble'}</div>
                         <div className="sr-bed-config">
-                          {prop.camas || 1} cama(s) ({prop.habitaciones || 1} hab.)
+                          {prop.descripcion_camas || `${prop.camas || 1} ${prop.camas === 1 ? 'cama' : 'camas'}`} ({prop.habitaciones || 1} hab.)
                         </div>
 
                         <div className="sr-perks-list">

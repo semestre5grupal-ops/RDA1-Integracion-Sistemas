@@ -75,6 +75,11 @@ export interface OpcionSocio {
   totalHabitaciones: number | null;
   cancelacionHoras: number | null;
   reembolsable: boolean | null;
+  camas?: number | null;
+  descripcionCamas?: string | null;
+  tamanoM2?: number | null;
+  amenidades?: string[];
+  descripcion?: string | null;
 }
 
 const RE_NODO = /^NODE_[A-Z0-9_]+$/i;
@@ -88,6 +93,13 @@ const money = (v: unknown): number | null => {
 const num = (v: unknown): number | null => {
   const n = Number(v);
   return v === undefined || v === null || v === '' || !Number.isFinite(n) ? null : n;
+};
+/** Extrae un número entero de un valor numérico o texto (ej. "3 camas", "1 cama doble" → 3 ó 1). */
+const extraerCamasNum = (v: unknown): number | null => {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const match = String(v).match(/\d+/);
+  return match ? parseInt(match[0], 10) : null;
 };
 const desempacar = (b: any) => (b && typeof b === 'object' && b.data && !Array.isArray(b.data) ? b.data : b);
 
@@ -347,8 +359,9 @@ export class AlojamientosSociosService {
       moneda: h.moneda || h.currency || 'USD',
       capacidadAdultos: num(h.capacidadAdultos) ?? 2,
       capacidadNinos: num(h.capacidadNinos) ?? 0,
-      habitaciones: num(h.habitaciones) ?? 1,
-      camas: num(h.camas) ?? 1,
+      habitaciones: num(h.habitaciones) ?? (tiposHabitacion?.length ? tiposHabitacion.reduce((acc: number, t: any) => acc + (t.cantidad || 1), 0) : 1),
+      camas: extraerCamasNum(h.camas) ?? (tiposHabitacion?.[0]?.camas ?? 1),
+      descripcion_camas: typeof h.camas === 'string' && h.camas.trim() ? h.camas.trim() : (tiposHabitacion?.[0]?.descripcion_camas || null),
       banos: num(h.banos) ?? 1,
       tienePiscina: Boolean(h.tienePiscina) || amenidades.some((a) => /piscina|pool/i.test(a)),
       estrellas: num(h.estrellas),
@@ -412,6 +425,10 @@ export class AlojamientosSociosService {
         const plan = Array.isArray(t.planesTarifa) ? t.planesTarifa.find((p: any) => p.esPlanPorDefecto) || t.planesTarifa[0] : null;
         const horas = num(plan?.politicaCancelacion?.horasLimiteCancelacion);
         const codigo = String(t.codigo || t.id);
+        const numCamas = extraerCamasNum(t.camas) ?? 1;
+        const descCamas = typeof t.camas === 'string' && t.camas.trim()
+          ? t.camas.trim()
+          : (t.descripcionCamas ?? t.descripcion_camas ?? (numCamas === 1 ? '1 cama' : `${numCamas} camas`));
         return {
           id: codigo,
           codigo,
@@ -419,9 +436,9 @@ export class AlojamientosSociosService {
           descripcion: t.descripcion ?? null,
           capacidad_adultos: num(t.capacidadAdultos) ?? 2,
           capacidad_ninos: num(t.capacidadNinos) ?? 0,
-          camas: num(t.camas) ?? 1,
-          descripcion_camas: typeof t.camas === 'string' ? t.camas : null,
-          tamano_m2: num(t.tamanoM2),
+          camas: numCamas,
+          descripcion_camas: descCamas,
+          tamano_m2: num(t.tamanoM2 ?? t.metrosCuadrados),
           precio_noche: money(t.precioBaseNoche ?? t.precioPorNoche ?? plan?.precioBaseNoche) ?? 0,
           cantidad: num(t.habitacionesTotales ?? t.cantidad ?? t.cantidadDisponible) ?? 0,
           regimen: plan?.regimen || t.regimen || null,
@@ -486,6 +503,11 @@ export class AlojamientosSociosService {
           totalHabitaciones: t?.cantidad ?? num(o.total_rooms ?? o.totalHabitaciones) ?? null,
           cancelacionHoras: t?.cancelacion_gratuita_horas ?? null,
           reembolsable: t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null,
+          camas: t?.camas ?? extraerCamasNum(o.camas) ?? 1,
+          descripcionCamas: t?.descripcion_camas ?? (typeof o.camas === 'string' ? o.camas : null),
+          tamanoM2: t?.tamano_m2 ?? num(o.tamanoM2 ?? o.metrosCuadrados),
+          amenidades: t?.amenidades ?? [],
+          descripcion: t?.descripcion ?? null,
         };
       });
     this.aplicarStockGrpc(sep.nodo, sep.id, checkin, opciones);
@@ -590,10 +612,10 @@ export class AlojamientosSociosService {
           currency: moneda,
           available_rooms: o.remanentes,
           capacidad: { adultos: o.capacidadAdultos ?? 2, ninos: o.capacidadNinos ?? 0 },
-          camas: 1,
-          descripcion_camas: null,
-          tamano_m2: null,
-          amenidades: [],
+          camas: o.camas ?? 1,
+          descripcion_camas: o.descripcionCamas ?? (o.camas === 1 ? '1 cama' : `${o.camas ?? 1} camas`),
+          tamano_m2: o.tamanoM2 ?? null,
+          amenidades: o.amenidades ?? [],
           photos: [],
         };
       });

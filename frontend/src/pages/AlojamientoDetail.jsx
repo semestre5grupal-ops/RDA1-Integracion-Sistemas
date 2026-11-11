@@ -1124,7 +1124,7 @@ export function AlojamientoDetail() {
                     <div className="dt-room-features-list">
                       <span>Departamento entero · {alojamiento.habitaciones || 2} dormitorios · 1 sala de estar · {alojamiento.banos || 2} baños</span>
                       <span>1 cocina · 95 m²</span>
-                      <span>{alojamiento.camas || 3} camas (2 individuales, 1 doble)</span>
+                      <span>{alojamiento.descripcion_camas || `${alojamiento.camas || 1} ${alojamiento.camas === 1 ? 'cama' : 'camas'}`}</span>
                       <span style={{ color: '#008009', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <CheckmarkIcon size={14} /> WiFi gratis incluido
                       </span>
