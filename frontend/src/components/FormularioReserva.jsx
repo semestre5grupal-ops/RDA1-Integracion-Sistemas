@@ -121,6 +121,20 @@ const TIPOS_DOCUMENTO = [
   { valor: 'PASSPORT', texto: 'Pasaporte' },
 ];
 
+// Aeropuertos de Ecuador: si algún tramo sale o llega fuera de esta lista, el
+// viaje es internacional y el contrato exige pasaporte (PASSPORT_REQUIRED_INTERNATIONAL).
+const AEROPUERTOS_ECUADOR = new Set([
+  'UIO', 'GYE', 'CUE', 'MEC', 'OCC', 'LOH', 'ESM', 'LTX', 'MCH', 'TPC', 'GPS', 'SCY',
+  'LGQ', 'SNC', 'TUA', 'XMS', 'ETR', 'PVO', 'ATF', 'IBB', 'JIP', 'SUQ',
+]);
+
+/** true si algún tramo del viaje sale o llega fuera de Ecuador. */
+export function esViajeInternacional(tramos) {
+  return (tramos ?? []).some((t) =>
+    (t?.origen && !AEROPUERTOS_ECUADOR.has(String(t.origen).toUpperCase()))
+    || (t?.destino && !AEROPUERTOS_ECUADOR.has(String(t.destino).toUpperCase())));
+}
+
 const GENEROS = [
   { valor: 'F', texto: 'F' },
   { valor: 'M', texto: 'M' },
@@ -188,6 +202,8 @@ function pasajeroVacio(tipo, indice, idsAdultos, nroInfante = 0) {
     lastName: '',
     documentType: 'NATIONAL_ID',
     documentNumber: '',
+    // Solo con pasaporte: debe estar vigente el día del viaje (contrato: DOCUMENT_EXPIRED).
+    documentExpiryDate: '',
     nationality: 'EC',
     birthDate: '',
     gender: '',
@@ -248,6 +264,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   // Día del primer vuelo (para las edades); si no se conoce, hoy en Ecuador.
   const fechaViaje = hold?.fechaViaje
     || new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(new Date());
+  // Vuelo internacional: todos los pasajeros (bebés incluidos) viajan con pasaporte.
+  const internacional = esViajeInternacional(hold?.tramos);
 
   // Salir sin comprar libera el cupo en la aerolínea: se pide confirmación
   // para que un clic fuera del formulario no lo suelte por accidente.
@@ -313,7 +331,11 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       idsAdultos.push(`pax-${i + 1}`);
     }
     let infantes = 0;
-    setLista(tipos.map((tipo, i) => pasajeroVacio(tipo, i, idsAdultos, tipo === 'INFANT' ? infantes++ : 0)));
+    const conPasaporte = esViajeInternacional(hold?.tramos);
+    setLista(tipos.map((tipo, i) => {
+      const p = pasajeroVacio(tipo, i, idsAdultos, tipo === 'INFANT' ? infantes++ : 0);
+      return conPasaporte ? { ...p, documentType: 'PASSPORT' } : p;
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [abierto, idCompra, tipos]);
 
@@ -555,6 +577,17 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         const mensaje = regla(p[campo], p);
         if (mensaje) nuevos[`${prefijo}.${campo}`] = mensaje;
       }
+      // Documento de viaje: internacional exige pasaporte; el pasaporte, vigente el día del viaje.
+      if (internacional && p.documentType !== 'PASSPORT') {
+        nuevos[`${prefijo}.documentType`] = 'Para vuelos internacionales se necesita pasaporte.';
+      }
+      if (p.documentType === 'PASSPORT') {
+        if (!p.documentExpiryDate) {
+          nuevos[`${prefijo}.documentExpiryDate`] = 'Indica la fecha de vencimiento del pasaporte.';
+        } else if (p.documentExpiryDate < fechaViaje) {
+          nuevos[`${prefijo}.documentExpiryDate`] = 'El pasaporte vence antes del viaje: debe estar vigente ese día.';
+        }
+      }
 
       if (p.passengerType === 'INFANT' && !p.associatedAdultId) {
         nuevos[`${prefijo}.associatedAdultId`] =
@@ -668,6 +701,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             lastName: p.lastName.trim(),
             documentType: p.documentType,
             documentNumber: p.documentNumber.trim(),
+            ...(p.documentType === 'PASSPORT' && p.documentExpiryDate ? { documentExpiryDate: p.documentExpiryDate } : {}),
             nationality: p.nationality.trim(),
             birthDate: p.birthDate,
             gender: p.gender,
@@ -797,6 +831,11 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
             Los datos deben coincidir con el documento de viaje. Esta demo no
             cobra: el pago se referencia, no se procesa.
           </p>
+          {internacional && pasoActual === 1 && (
+            <p className="modal-nota-bloque" role="note">
+              <strong>Vuelo internacional:</strong> cada pasajero, incluidos los bebés, necesita pasaporte vigente el día del viaje.
+            </p>
+          )}
 
           {pasoActual === 1 && lista.map((p, i) => {
             const err = (campo) => errores[`p${i}.${campo}`];
@@ -857,18 +896,48 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                       Tipo de documento <span aria-hidden="true">*</span>
                     </label>
                     <select
-                      className="modal-input"
+                      className={`modal-input ${err('documentType') ? 'es-error' : ''}`}
                       id={id('documentType')}
                       value={p.documentType}
                       onChange={(e) => cambiar(i, 'documentType', e.target.value)}
+                      aria-invalid={err('documentType') ? 'true' : 'false'}
                     >
                       {TIPOS_DOCUMENTO.map((t) => (
-                        <option key={t.valor} value={t.valor}>
-                          {t.texto}
+                        <option key={t.valor} value={t.valor} disabled={internacional && t.valor === 'NATIONAL_ID'}>
+                          {internacional && t.valor === 'NATIONAL_ID' ? `${t.texto} (solo vuelos nacionales)` : t.texto}
                         </option>
                       ))}
                     </select>
+                    {err('documentType') && (
+                      <span className="modal-error-campo" role="alert">
+                        {err('documentType')}
+                      </span>
+                    )}
                   </div>
+
+                  {p.documentType === 'PASSPORT' && (
+                    <div className="campo">
+                      <label className="modal-label" htmlFor={id('documentExpiryDate')}>
+                        Vencimiento del pasaporte <span aria-hidden="true">*</span>
+                      </label>
+                      <input
+                        className={`modal-input ${err('documentExpiryDate') ? 'es-error' : ''}`}
+                        id={id('documentExpiryDate')}
+                        type="date"
+                        min={fechaViaje}
+                        value={p.documentExpiryDate ?? ''}
+                        onChange={(e) => cambiar(i, 'documentExpiryDate', e.target.value)}
+                        aria-required="true"
+                        aria-invalid={err('documentExpiryDate') ? 'true' : 'false'}
+                        aria-describedby={enlazado('documentExpiryDate')}
+                      />
+                      {err('documentExpiryDate') && (
+                        <span className="modal-error-campo" role="alert">
+                          {err('documentExpiryDate')}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   <div className="campo">
                     <label className="modal-label" htmlFor={id('documentNumber')}>
