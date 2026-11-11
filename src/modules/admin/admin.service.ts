@@ -121,8 +121,6 @@ export class AdminService {
       tipoHabitacion: h.tipoNombre || h.tipo_nombre || null,
       habitaciones: Number(h.habitaciones || h.habitacionesCount || 1),
       camas: h.camas || inferirDescripcionCamas(null, h.tipoNombre || h.tipo_nombre || '', 2),
-      habitacionAsignada: h.habitacionAsignada || h.habitacion_asignada || (h.estado === 'CONFIRMADO_ASISTIDO' || h.estado === 'CHECKED_IN' ? 'Habitación 204' : null),
-      estadoHabitacion: h.estadoHabitacion || h.estado_habitacion || (h.estado === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (h.estado === 'CONFIRMADO_ASISTIDO' || h.estado === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
       checkin: h.checkin,
       checkout: h.checkout,
     };
@@ -625,27 +623,6 @@ export class AdminService {
     } catch (e) {
       throw new BadRequestException(e.message);
     }
-  }
-
-  async checkinReserva(tipo: string, id: string) {
-    if (tipo === 'hospedaje') {
-      return this.alojamientosService.checkinDigital(id, true);
-    }
-    throw new BadRequestException(`Check-in no soportado para ${tipo}`);
-  }
-
-  async checkoutReserva(tipo: string, id: string) {
-    if (tipo === 'hospedaje') {
-      return this.alojamientosService.checkout(id);
-    }
-    throw new BadRequestException(`Check-out no soportado para ${tipo}`);
-  }
-
-  async limpiezaReserva(tipo: string, id: string) {
-    if (tipo === 'hospedaje') {
-      return this.alojamientosService.marcarHabitacionLimpia(id);
-    }
-    throw new BadRequestException(`Limpieza no soportada para ${tipo}`);
   }
 
   async getReservaDetalles(tipo: string, id: string) {

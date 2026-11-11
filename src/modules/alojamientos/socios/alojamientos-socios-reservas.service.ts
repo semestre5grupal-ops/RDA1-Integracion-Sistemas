@@ -633,39 +633,6 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     return act;
   }
 
-  async checkout(ref: string): Promise<any | null> {
-    if (!ref || !(await this.asegurarTabla())) return null;
-    const fila = await this.porId(ref);
-    if (!fila) return null;
-    const act = primeraFila(await this.dataSource!.query(
-      `UPDATE ${TABLA}
-          SET estado = 'CHECKED_OUT', estado_habitacion = 'EN_LIMPIEZA', checkout_at = now(), actualizado_en = now()
-        WHERE id = $1
-        RETURNING *`,
-      [fila.id],
-    ));
-    trazaAlojamientos.registrar({
-      correlacion: `checkout-${fila.codigo_reserva}`, paso: 'checkin', resultado: 'ok',
-      detalle: `Check-out confirmado para ${fila.codigo_reserva}. Habitación pasa a EN_LIMPIEZA`,
-      nodo: fila.codigo_nodo, cliente: fila.cliente_email || 'invitado',
-    });
-    return this.respuesta(act || { ...fila, estado: 'CHECKED_OUT', estado_habitacion: 'EN_LIMPIEZA' });
-  }
-
-  async marcarLimpia(ref: string): Promise<any | null> {
-    if (!ref || !(await this.asegurarTabla())) return null;
-    const fila = await this.porId(ref);
-    if (!fila) return null;
-    const act = primeraFila(await this.dataSource!.query(
-      `UPDATE ${TABLA}
-          SET estado_habitacion = 'DISPONIBLE', actualizado_en = now()
-        WHERE id = $1
-        RETURNING *`,
-      [fila.id],
-    ));
-    return this.respuesta(act || { ...fila, estado_habitacion: 'DISPONIBLE' });
-  }
-
   // ───────────────────────────── Formato ─────────────────────────────
 
   /** Copia → mismo formato que `buildReservaResponse` de alojamientos (Mis Reservas). */
@@ -692,7 +659,6 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       camas: 1,
       descripcion_camas: inferirDescripcionCamas(null, f.tipo_nombre, f.adultos),
       habitacion_asignada: f.habitacion_asignada || (f.checkin_at ? 'Habitación 204' : null),
-      estado_habitacion: f.estado_habitacion || (f.checkout_at || f.estado === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (f.checkin_at || f.estado === ESTADO_ASISTIDO ? 'OCUPADA' : 'DISPONIBLE')),
       tipo_habitacion: {
         id: f.tipo_codigo,
         codigo: f.tipo_codigo,

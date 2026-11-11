@@ -59,7 +59,6 @@ function estados(d) {
   state "Recuperando por idempotency_key" as RECU
   state "RESERVADO · ${n('RESERVADO')}" as RESERVADO
   state "CONFIRMADO_ASISTIDO · ${n('CONFIRMADO_ASISTIDO')}" as ASISTIDO
-  state "CHECKED_OUT (Hab. En Limpieza) · ${n('CHECKED_OUT')}" as CHECKED_OUT
   state "CANCELADO · ${n('CANCELADO')}" as CANCELADO
   [*] --> BUSCA: disponibilidad en vivo
   BUSCA --> COTIZA: hay cupo
@@ -69,10 +68,9 @@ function estados(d) {
   RECU --> RESERVADO: orden recuperada
   CREA --> RESERVADO: el hotel confirma + copia guardada
   CREA --> CANCELADO: copia falla, se compensa en el hotel
-  RESERVADO --> ASISTIDO: Check-in recepción / digital (Habitación OCUPADA)
-  ASISTIDO --> CHECKED_OUT: Check-out salida (Habitación EN_LIMPIEZA)
-  CHECKED_OUT --> [*]: Lencería confirma limpieza (Habitación DISPONIBLE)
-  RESERVADO --> CANCELADO: Cancelar + Reembolso 100% (antes de check-in)
+  RESERVADO --> ASISTIDO: check-in del hotel (Flujo 2, su X-API-Key)
+  RESERVADO --> CANCELADO: cancelar + reembolso 100%
+  ASISTIDO --> [*]
   CANCELADO --> [*]`;
 }
 
@@ -169,10 +167,9 @@ const GRAFOS = [
     def: (d) => estados(d),
     metodo: 'Se buscan flechas que el negocio prohíbe pero el código permite, y estados de los que nada te saca.',
     hallazgos: [
-      ['ok', 'El check-in asigna habitación y pasa estado de habitación a OCUPADA (recepción o API con X-API-Key).'],
-      ['ok', 'El check-out registra la salida (incluso anticipada) y pasa habitación a EN_LIMPIEZA / PREPARACIÓN.'],
-      ['ok', 'Lencería cambia manualmente el estado de EN_LIMPIEZA a DISPONIBLE para volver a asignarse en recepción.'],
+      ['ok', 'El check-in solo lo confirma el hotel dueño con su X-API-Key (Flujo 2): otra clave da 401.'],
       ['ok', 'Una reserva con check-in (CONFIRMADO_ASISTIDO) ya no se puede cancelar.'],
+      ['media', 'Cancelaciones hechas en la web del socio: el cupo se ve bien en vivo, pero la copia sigue en RESERVADO hasta leer el feed de eventos.'],
     ],
   },
   {

@@ -1159,36 +1159,6 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
     } catch (e) { alert(`No se pudo cancelar: ${apiErrorMsg(e)}`); }
   };
 
-  const ejecutarCheckinHospedaje = async (id) => {
-    try {
-      await api.put(`/admin/reservas/hospedaje/${encodeURIComponent(id)}/checkin`);
-      alert('¡Check-in registrado exitosamente! La habitación pasa a estado OCUPADA.');
-      onRefresh();
-    } catch (e) {
-      alert(`No se pudo hacer check-in: ${apiErrorMsg(e)}`);
-    }
-  };
-
-  const ejecutarCheckoutHospedaje = async (id) => {
-    try {
-      await api.put(`/admin/reservas/hospedaje/${encodeURIComponent(id)}/checkout`);
-      alert('¡Check-out registrado! El huésped ha salido. La habitación pasa a EN_LIMPIEZA / PREPARACIÓN.');
-      onRefresh();
-    } catch (e) {
-      alert(`No se pudo hacer check-out: ${apiErrorMsg(e)}`);
-    }
-  };
-
-  const ejecutarLimpiezaHospedaje = async (id) => {
-    try {
-      await api.put(`/admin/reservas/hospedaje/${encodeURIComponent(id)}/limpieza`);
-      alert('¡Limpieza confirmada por lencería! La habitación vuelve a estar DISPONIBLE en recepción.');
-      onRefresh();
-    } catch (e) {
-      alert(`No se pudo confirmar la limpieza: ${apiErrorMsg(e)}`);
-    }
-  };
-
   /**
    * Reserva en una aerolínea socia: se cancela en la aerolínea con su
    * cotización (el panel muestra el reembolso real antes de confirmar) y Booking
@@ -1322,7 +1292,7 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
     const isHospedaje = vista === 'hospedaje';
     const totalIngresos = rows.filter((r) => ESTADOS_COBRADOS.has(String(r.estado || '').toUpperCase())).reduce((s, r) => s + Number(r.total) - Number(r.reembolsado || 0), 0);
 
-    const headersHospedaje = ['PNR / ID', 'Alojamiento & Tipo', 'Camas / Habitación', 'Estado Reserva', 'Habitación', 'Total (USD)', 'Cliente', 'Fecha', 'Acciones (Recepción)'];
+    const headersHospedaje = ['PNR / ID', 'Alojamiento & Tipo', 'Camas / Habitación', 'Estado', 'Total (USD)', 'Cliente', 'Fecha', 'Acciones'];
     const headersEstandar = ['PNR / ID', 'Estado', 'Total (USD)', isVuelos ? 'Aerolínea' : vista === 'atracciones' ? 'Cliente' : 'Moneda', 'Fecha', 'Acciones'];
     const headers = isHospedaje ? headersHospedaje : headersEstandar;
 
@@ -1362,50 +1332,22 @@ function GestionTab({users,usersError,onRetryUsers,reservas,reservasError,loadin
                 {isHospedaje && (
                   <td style={{padding:'9px 14px'}}>
                     <div style={{fontWeight:600,color:'#6d28d9',fontSize:'0.8rem'}}>🛏️ {r.camas || '1 Cama'}</div>
-                    <div style={{fontSize:'0.75rem',color:C.gray}}>🚪 {r.habitaciones || 1} Hab. {r.habitacionAsignada ? `(${r.habitacionAsignada})` : ''}</div>
+                    <div style={{fontSize:'0.75rem',color:C.gray}}>🚪 {r.habitaciones || 1} Hab.</div>
                   </td>
                 )}
                 <td style={{padding:'9px 14px'}}><Badge status={r.estado}/></td>
-                {isHospedaje && (
-                  <td style={{padding:'9px 14px'}}>
-                    <span style={{
-                      display: 'inline-block',
-                      padding: '3px 8px',
-                      borderRadius: 12,
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      background: r.estadoHabitacion === 'OCUPADA' ? '#fee2e2' : r.estadoHabitacion === 'EN_LIMPIEZA' ? '#fef3c7' : '#dcfce7',
-                      color: r.estadoHabitacion === 'OCUPADA' ? '#991b1b' : r.estadoHabitacion === 'EN_LIMPIEZA' ? '#92400e' : '#15803d',
-                    }}>
-                      {r.estadoHabitacion === 'EN_LIMPIEZA' ? '🧹 EN LIMPIEZA' : r.estadoHabitacion === 'OCUPADA' ? '🚪 OCUPADA' : '✨ DISPONIBLE'}
-                    </span>
-                  </td>
-                )}
                 <td style={{padding:'9px 14px',fontWeight:600}}>${fmt(r.total)}</td>
                 <td style={{padding:'9px 14px',color:C.gray}}>{isVuelos?(r.socio?r.aerolinea:'Inventario local'):(vista==='atracciones'||vista==='hospedaje')?(r.cliente||'—'):(r.moneda||'USD')}</td>
                 <td style={{padding:'9px 14px',color:C.gray}}>{fmtDate(r.createdAt)}</td>
-                <td style={{padding:'9px 14px',display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
-                  {isHospedaje && !['CANCELLED','CANCELADA','CANCELED','REFUNDED'].includes(String(r.estado||'').toUpperCase()) && (
-                    <>
-                      {r.estado !== 'CHECKED_OUT' && r.estado !== 'CONFIRMADO_ASISTIDO' && r.estado !== 'CHECKED_IN' && (
-                        <button onClick={()=>ejecutarCheckinHospedaje(r.id)} title="Hacer Check-in (asigna habitación y marca OCUPADA)" style={{...btnStyle, background:'#e0f2fe', color:'#0369a1', borderColor:'#bae6fd', fontSize:'0.75rem', fontWeight:700, padding:'4px 8px'}}>🔑 In</button>
-                      )}
-                      {(r.estado === 'CONFIRMADO_ASISTIDO' || r.estado === 'CHECKED_IN' || r.estadoHabitacion === 'OCUPADA') && r.estado !== 'CHECKED_OUT' && (
-                        <button onClick={()=>requestConfirm("Check-out del huésped", `¿Registrar salida / check-out del huésped ${r.cliente}? La habitación ${r.habitacionAsignada || ''} pasará a estado EN_LIMPIEZA / PREPARACIÓN.`, C.orange, ()=>ejecutarCheckoutHospedaje(r.id))} title="Hacer Check-out (salida, pasa habitación a EN_LIMPIEZA)" style={{...btnStyle, background:'#fef3c7', color:'#92400e', borderColor:'#fde68a', fontSize:'0.75rem', fontWeight:700, padding:'4px 8px'}}>🚪 Out</button>
-                      )}
-                      {r.estadoHabitacion === 'EN_LIMPIEZA' && (
-                        <button onClick={()=>ejecutarLimpiezaHospedaje(r.id)} title="Confirmar limpieza por lencería (pasa a DISPONIBLE)" style={{...btnStyle, background:'#dcfce7', color:'#15803d', borderColor:'#bbf7d0', fontSize:'0.75rem', fontWeight:700, padding:'4px 8px'}}>🧹 Limpia</button>
-                      )}
-                    </>
-                  )}
-                  {!['CANCELLED','CANCELADA','CANCELED','REFUNDED'].includes(String(r.estado||'').toUpperCase()) && (!isHospedaje || (r.estado !== 'CHECKED_IN' && r.estado !== 'CONFIRMADO_ASISTIDO' && r.estado !== 'CHECKED_OUT')) && (
-                    <button onClick={()=> (r.socio && vista === 'vuelos') ? cancelarVueloSocio(r) : requestConfirm("Cancelar reserva", isHospedaje ? `¿Cancelar la reserva ${r.pnr}? Se aplican las reglas de cancelación del módulo de alojamientos. No se puede deshacer.` : `¿Cancelar la reserva ${r.pnr}? Solo cambia su estado en Booking; no ejecuta reembolsos. No se puede deshacer.`, C.red, ()=>cancelarEnBackend(vista, r.id))} title="Cancelar reserva" style={btnStyle}>❌</button>
+                <td style={{padding:'9px 14px',display:'flex',gap:8}}>
+                  {!['CANCELLED','CANCELADA','CANCELED','REFUNDED'].includes(String(r.estado||'').toUpperCase()) && (
+                    <button onClick={()=> (r.socio && vista === 'vuelos') ? cancelarVueloSocio(r) : requestConfirm("Cancelar reserva", vista==='hospedaje' ? `¿Cancelar la reserva ${r.pnr}? Se aplican las reglas de cancelación del módulo de alojamientos. No se puede deshacer.` : `¿Cancelar la reserva ${r.pnr}? Solo cambia su estado en Booking; no ejecuta reembolsos. No se puede deshacer.`, C.red, ()=>cancelarEnBackend(vista, r.id))} title="Cancelar reserva" style={btnStyle}>❌</button>
                   )}
                   <button onClick={()=>viewDetalles(vista, r.id, !!r.socio)} title="Ver detalle" style={btnStyle}>👁️</button>
                 </td>
               </tr>
             ))}
-            {rows.length===0&&!reservasError&&(<tr><td colSpan={isHospedaje ? 9 : 6} style={{padding:24,textAlign:'center',color:C.gray}}>Sin registros</td></tr>)}
+            {rows.length===0&&!reservasError&&(<tr><td colSpan={isHospedaje ? 8 : 6} style={{padding:24,textAlign:'center',color:C.gray}}>Sin registros</td></tr>)}
           </tbody>
         </table>
       </div>

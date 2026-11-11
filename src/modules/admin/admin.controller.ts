@@ -202,30 +202,6 @@ export class AdminController {
     return res;
   }
 
-  @Put('reservas/:tipo/:id/checkin')
-  @ApiOperation({ summary: 'Realizar check-in de una reserva de hospedaje (asigna habitación y estado OCUPADA)' })
-  async checkinReserva(@Param('tipo') tipo: string, @Param('id') id: string, @Req() req: any) {
-    const res = await this.adminService.checkinReserva(tipo, id);
-    await this.auditService.registrar(actorDesdeRequest(req), 'Check-in realizado', `reserva-${tipo}`, id);
-    return res;
-  }
-
-  @Put('reservas/:tipo/:id/checkout')
-  @ApiOperation({ summary: 'Realizar check-out de una reserva de hospedaje (pasa habitación a EN_LIMPIEZA)' })
-  async checkoutReserva(@Param('tipo') tipo: string, @Param('id') id: string, @Req() req: any) {
-    const res = await this.adminService.checkoutReserva(tipo, id);
-    await this.auditService.registrar(actorDesdeRequest(req), 'Check-out realizado', `reserva-${tipo}`, id);
-    return res;
-  }
-
-  @Put('reservas/:tipo/:id/limpieza')
-  @ApiOperation({ summary: 'Confirmar limpieza de habitación (pasa habitación a DISPONIBLE)' })
-  async limpiezaReserva(@Param('tipo') tipo: string, @Param('id') id: string, @Req() req: any) {
-    const res = await this.adminService.limpiezaReserva(tipo, id);
-    await this.auditService.registrar(actorDesdeRequest(req), 'Limpieza confirmada', `reserva-${tipo}`, id);
-    return res;
-  }
-
   @Get('reservas/:tipo/:id/detalles')
   @ApiOperation({ summary: 'Obtener detalles técnicos de una reserva' })
   async getReservaDetalles(@Param('tipo') tipo: string, @Param('id') id: string) {

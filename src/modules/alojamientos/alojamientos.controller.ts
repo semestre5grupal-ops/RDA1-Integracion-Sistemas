@@ -352,36 +352,6 @@ export class AlojamientosController {
     return this.alojamientosService.checkinDigital(orderId, body?.forzar_liberacion);
   }
 
-  @Post('orders/:orderId/checkout')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Check-out y pase de habitación a estado EN_LIMPIEZA / PREPARACIÓN' })
-  @ApiParam({ name: 'orderId', description: 'UUID o Código de la orden' })
-  async checkout(@Param('orderId') orderId: string) {
-    return this.alojamientosService.checkout(orderId);
-  }
-
-  @Post('reservas/:orderId/checkout')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Check-out y pase de habitación a estado EN_LIMPIEZA / PREPARACIÓN (Alias)' })
-  async checkoutAlias(@Param('orderId') orderId: string) {
-    return this.alojamientosService.checkout(orderId);
-  }
-
-  @Post('orders/:orderId/limpieza')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Confirmar limpieza completada y dejar habitación DISPONIBLE' })
-  @ApiParam({ name: 'orderId', description: 'UUID o Código de la orden' })
-  async marcarLimpia(@Param('orderId') orderId: string) {
-    return this.alojamientosService.marcarHabitacionLimpia(orderId);
-  }
-
-  @Post('reservas/:orderId/limpieza')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Confirmar limpieza completada y dejar habitación DISPONIBLE (Alias)' })
-  async marcarLimpiaAlias(@Param('orderId') orderId: string) {
-    return this.alojamientosService.marcarHabitacionLimpia(orderId);
-  }
-
   // =========================================================================
   // WEBHOOKS
   // =========================================================================

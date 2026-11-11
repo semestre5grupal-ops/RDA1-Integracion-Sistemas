@@ -9,7 +9,7 @@ import {
 } from '../services/vuelosApi';
 import { getOrdersAuto, cancelOrderAuto } from '../services/autosApi';
 import { getReservas as getReservasAtracciones, cancelarReservaAtraccion } from '../services/atraccionesApi';
-import { getReservasAlojamientos, cancelarReservaAlojamiento, checkinAlojamiento } from '../services/alojamientosApi';
+import { getReservasAlojamientos, cancelarReservaAlojamiento } from '../services/alojamientosApi';
 import { descargarFactura } from '../utils/facturaPdf';
 import { formatearFecha } from '../services/formato';
 import { useCurrency } from '../hooks/CurrencyContext';
@@ -245,31 +245,6 @@ export function MisReservasPage() {
             vertical: 'vuelo',
             success: false,
             mensaje: datos.detail || datos.title || 'La aerolínea no aceptó el check-in. Inténtalo de nuevo.',
-          });
-        }
-      } else if (reserva.tipo === 'alojamiento') {
-        try {
-          const res = await checkinAlojamiento(reserva.id || reserva.pnr, true);
-          setCheckinStepResult({
-            vertical: 'alojamiento',
-            success: true,
-            mensaje: res.mensaje || '¡Check-in realizado con éxito! Habitación asignada y clave activa.',
-            habitacion: res.habitacion_asignada || 'Habitación 204',
-            clave: res.clave_acceso_digital || '5829#',
-            pnr: reserva.pnr,
-          });
-          updateCheckinState(reserva.id || reserva.pnr, 'CHECKED_IN', {
-            habitacion_asignada: res.habitacion_asignada || 'Habitación 204',
-            estado_habitacion: 'OCUPADA',
-            checkin: res,
-          });
-          cargarTodasLasReservas(true);
-        } catch (fallo) {
-          const datos = fallo?.response?.data ?? {};
-          setCheckinStepResult({
-            vertical: 'alojamiento',
-            success: false,
-            mensaje: datos.detail || datos.title || datos.message || 'No se pudo completar el check-in en este momento. Consulta en recepción.',
           });
         }
       }
@@ -559,8 +534,6 @@ export function MisReservasPage() {
             cancelacionGratuitaHoras: al.cancelacion_gratuita_horas ?? null,
             camas: al.camas,
             descripcion_camas: al.descripcion_camas || al.camas || (al.tipo_habitacion?.nombre ? `1 Cama Queen / Matrimonial` : '1 Cama'),
-            habitacion_asignada: al.habitacion_asignada || al.habitacion || null,
-            estado_habitacion: al.estado_habitacion || (al.status === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (al.status === 'CONFIRMADO_ASISTIDO' || al.status === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
             habitaciones_count: habNum,
             raw: {
               createdAt: al.created_at || new Date().toISOString(),
@@ -612,8 +585,6 @@ export function MisReservasPage() {
           cancellationPolicy: cancelTextoLoc || (!esNoReemLoc ? 'Cancelación sujeta a políticas' : 'No reembolsable'),
           camas: al.camas,
           descripcion_camas: al.descripcion_camas || al.camas || '1 Cama Matrimonial',
-          habitacion_asignada: al.habitacion_asignada || null,
-          estado_habitacion: al.estado_habitacion || (al.status === 'CHECKED_OUT' ? 'EN_LIMPIEZA' : (al.status === 'CONFIRMADO_ASISTIDO' || al.status === 'CHECKED_IN' ? 'OCUPADA' : 'DISPONIBLE')),
           habitaciones_count: Number(al.habitaciones || 1),
           isLocal: true,
           raw: {
@@ -1488,20 +1459,6 @@ export function MisReservasPage() {
                               🛏️ {r.descripcion_camas}
                             </span>
                           )}
-                          {r.tipo === 'alojamiento' && r.habitacion_asignada && (
-                            <span style={{ background: '#ecfdf5', color: '#047857', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              🚪 Hab: {r.habitacion_asignada}
-                            </span>
-                          )}
-                          {r.tipo === 'alojamiento' && r.estado_habitacion && (
-                            <span style={{
-                              background: r.estado_habitacion === 'OCUPADA' ? '#fee2e2' : r.estado_habitacion === 'EN_LIMPIEZA' ? '#fef3c7' : '#e0e7ff',
-                              color: r.estado_habitacion === 'OCUPADA' ? '#991b1b' : r.estado_habitacion === 'EN_LIMPIEZA' ? '#92400e' : '#3730a3',
-                              padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px'
-                            }}>
-                              {r.estado_habitacion === 'EN_LIMPIEZA' ? '🧹 En preparación/limpieza' : r.estado_habitacion === 'OCUPADA' ? '🚪 Habitación ocupada' : '✨ Habitación lista'}
-                            </span>
-                          )}
                         </div>
 
                         <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
@@ -1509,7 +1466,7 @@ export function MisReservasPage() {
                         </span>
                         {(r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN') && (
                           <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
-                            • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : r.tipo === 'alojamiento' ? `Check-in completado · ${r.habitacion_asignada ? `Hab. ${r.habitacion_asignada}` : 'Habitación asignada'}` : 'Asistencia confirmada (Sí asistió)'}
+                            • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
                           </span>
                         )}
                       </div>
@@ -1519,7 +1476,7 @@ export function MisReservasPage() {
                       <div className="trip-card-price">
                         {convertPrice(r.totalRaw)}
                       </div>
-                      {r.status !== 'CANCELLED' && r.status !== 'CHECKED_IN' && r.status !== 'CONFIRMADO_ASISTIDO' && r.status !== 'CHECKED_OUT' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                      {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
                         <button
                           type="button"
                           className="btn-card-checkin"
@@ -1559,7 +1516,7 @@ export function MisReservasPage() {
 
                         {activeMenuId === r.id && (
                           <div className="trip-dropdown-menu">
-                            {r.status !== 'CANCELLED' && r.status !== 'CHECKED_IN' && r.status !== 'CONFIRMADO_ASISTIDO' && r.status !== 'CHECKED_OUT' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                            {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
                               <button
                                 type="button"
                                 className="trip-dropdown-item"
@@ -2327,67 +2284,8 @@ export function MisReservasPage() {
                 </div>
               )}
 
-              {/* VERTICAL: ALOJAMIENTOS */}
-              {checkinReserva.tipo === 'alojamiento' && (
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '1.05rem', color: '#1a1a1a' }}>
-                    {checkinReserva.titulo}
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '16px' }}>
-                    Recepción y registro de llegada: asignación de habitación, confirmación de estancia y clave digital inteligente.
-                  </p>
-
-                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', marginBottom: '16px', fontSize: '0.88rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ color: '#64748b' }}>Titular:</span>
-                      <strong>{user?.user_metadata?.nombre || checkinReserva.customerName || 'Titular de la reserva'}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ color: '#64748b' }}>Habitaciones:</span>
-                      <strong>🚪 {checkinReserva.habitaciones_count || 1} Habitación(es)</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ color: '#64748b' }}>Configuración Camas:</span>
-                      <strong>🛏️ {checkinReserva.descripcion_camas || '1 Cama King / Matrimonial'}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Estadía:</span>
-                      <strong>{checkinReserva.fechasTexto}</strong>
-                    </div>
-                  </div>
-
-                  {checkinStepResult?.success ? (
-                    <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '1.8rem' }}>🔑</span>
-                      <strong style={{ display: 'block', color: '#047857', marginTop: '6px', fontSize: '1rem' }}>
-                        {checkinStepResult.mensaje}
-                      </strong>
-                      <div style={{ margin: '14px 0', background: '#fff', padding: '12px', borderRadius: '6px', border: '1px dashed #003580' }}>
-                        <div style={{ fontSize: '0.9rem', color: '#334155' }}>Habitación Asignada: <strong style={{ color: '#003580', fontSize: '1.05rem' }}>{checkinStepResult.habitacion}</strong></div>
-                        <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '4px' }}>Clave de Cerradura Inteligente: <code style={{ fontSize: '1.1rem', fontWeight: 800, color: '#059669', background: '#f0fdf4', padding: '2px 8px', borderRadius: '4px' }}>{checkinStepResult.clave}</code></div>
-                      </div>
-                      <p style={{ fontSize: '0.78rem', color: '#065f46', margin: 0 }}>
-                        La habitación ha pasado a estado <strong>OCUPADA</strong> en el sistema de administración del hotel.
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      {checkinStepResult?.vertical === 'alojamiento' && checkinStepResult.success === false && (
-                        <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
-                          {checkinStepResult.mensaje}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => handleExecuteCheckin(checkinReserva)}
-                        disabled={checkinProcessing}
-                        style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
-                      >
-                        {checkinProcessing ? 'Confirmando check-in…' : '🔑 Confirmar Check-in y Activar Llave'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+              {/* El check-in de alojamientos lo realiza el hotel directamente en su recepción (Flujo 2),
+                  no el huésped: por eso no hay check-in digital en Mis Reservas. */}
 
               {/* VERTICAL: VUELOS */}
               {checkinReserva.tipo === 'vuelo' && (
