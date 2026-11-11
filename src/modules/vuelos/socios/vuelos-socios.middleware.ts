@@ -148,7 +148,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // `holdId` en el mapa de asientos es de Booking (saber qué bloqueos son míos): no va a la aerolínea.
     const esMapa = metodo === 'GET' && segmentos[0] === 'offers' && segmentos[2] === 'seatmap';
     const params = new URLSearchParams(query);
-    const holdMapa = esMapa ? params.get('holdId') : null;
+    const holdMapa = esMapa && params.get('holdId') ? this.bloqueos.actual(String(params.get('holdId'))).holdId : null;
     if (esMapa) params.delete('holdId');
     const rg = await this.socios.reenviar(nodo, metodo, segmentos, esMapa ? params.toString() : query, req.body, entrantes);
     if (esMapa && rg.status >= 200 && rg.status < 300 && rg.body && typeof rg.body === 'object') {
@@ -161,8 +161,16 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     }
     // Hold liberado por el cliente: se sueltan también sus asientos.
     if (metodo === 'DELETE' && segmentos[0] === 'offers' && segmentos[1] === 'hold' && segmentos[2]) {
-      await this.bloqueos.liberar(decodeURIComponent(segmentos[2]));
-      void this.bloqueos.olvidarHold(decodeURIComponent(segmentos[2]));
+      const pedido = decodeURIComponent(segmentos[2]);
+      await this.bloqueos.liberar(pedido);
+      void this.bloqueos.olvidarHold(pedido);
+      // Si la pantalla soltó un hold ya reemplazado, se suelta también el vigente.
+      const vigente = this.bloqueos.actual(pedido).holdId;
+      if (vigente !== pedido) {
+        await this.bloqueos.liberar(vigente);
+        void this.bloqueos.olvidarHold(vigente);
+        void this.socios.reenviar(nodo, 'DELETE', ['offers', 'hold', vigente], '', null, entrantes).catch(() => undefined);
+      }
     }
     // Hold (crear o consultar): Booking agrega lo que cobrará al cliente.
     if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && rg.status < 300 && rg.body?.lockedPrice?.total != null) {
@@ -235,7 +243,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       this.enviar(res, problema(400, 'Falta Idempotency-Key', 'La cabecera Idempotency-Key es obligatoria para reservar.'));
       return;
     }
-    const holdId = String(req.body?.holdId || '');
+    // Si la pantalla quedó con un hold ya reemplazado (cambio de asiento), se usa el vigente.
+    const holdId = this.bloqueos.actual(String(req.body?.holdId || '')).holdId;
+    if (req.body && typeof req.body === 'object' && holdId && req.body.holdId !== holdId) req.body = { ...req.body, holdId };
 
     // 1) Monto: se toma del hold de la aerolínea (precio congelado), no del cliente.
     const hold = await this.socios.reenviar(nodo, 'GET', ['offers', 'hold', holdId], '', null, entrantes);
@@ -523,7 +533,12 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
    */
   private async bloqueoAsientos(req: Request, res: Response, nodo: string, metodo: string, entrantes: Record<string, any>) {
     const q = req.query as Record<string, string | undefined>;
-    const holdId = String((metodo === 'PUT' ? req.body?.holdId : q.holdId) ?? '').trim().slice(0, 200);
+    const pedido = String((metodo === 'PUT' ? req.body?.holdId : q.holdId) ?? '').trim().slice(0, 200);
+    // La pantalla puede llegar con un hold que Booking ya reemplazó: se trabaja con el vigente
+    // y se le devuelve, para que no queden asientos bloqueados a nombre de un hold que ya no existe.
+    const vigente = pedido ? this.bloqueos.actual(pedido) : { holdId: '', hold: null };
+    const holdId = vigente.holdId;
+    const holdParaPantalla = pedido && holdId !== pedido ? vigente.hold : null;
     if (metodo === 'GET') {
       const locks = await this.bloqueos.deOtros(nodo, holdId || null, q.segmentId || null);
       res.setHeader('Cache-Control', 'no-store');
@@ -564,7 +579,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     }
     if (taken.length) {
       const r = asientoTomado(taken, 'Elige otro asiento.');
-      r.body = { ...r.body, locked, expiresAt: expira.toISOString() };
+      r.body = { ...r.body, locked, expiresAt: expira.toISOString(), holdId, ...(holdParaPantalla ? { hold: holdParaPantalla } : {}) };
       this.enviar(res, r);
       return;
     }
@@ -575,7 +590,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     if (enAerolinea.tomados) {
       await this.bloqueos.fijar(nodo, holdId, enAerolinea.previos, expira);
       const r = asientoTomado(enAerolinea.tomados, 'Elige otro asiento.');
-      r.body = { ...r.body, holdId, airlineHold: true };
+      r.body = { ...r.body, holdId, airlineHold: true, ...(holdParaPantalla ? { hold: holdParaPantalla } : {}) };
       this.enviar(res, r);
       return;
     }
@@ -588,7 +603,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       res.status(200).json({ holdId: String(nuevo.holdId), previousHoldId: holdId, hold: nuevo, locked: asientos, taken: [], expiresAt: hasta.toISOString(), ttlMinutes: minutosBloqueo(), airlineHold: true });
       return;
     }
-    res.status(200).json({ holdId, locked, taken: [], expiresAt: expira.toISOString(), ttlMinutes: minutosBloqueo(), airlineHold: enAerolinea.apartado });
+    res.status(200).json({ holdId, ...(holdParaPantalla ? { hold: holdParaPantalla } : {}), locked, taken: [], expiresAt: expira.toISOString(), ttlMinutes: minutosBloqueo(), airlineHold: enAerolinea.apartado });
   }
 
   /** Aerolíneas que todavía no aceptan `assignedSeats` en el hold (se vuelve a probar cada 10 min). */
@@ -616,6 +631,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       this.sinAsientoEnHold.delete(nodo);
       const nuevoId = String(r.body.holdId);
       await this.bloqueos.guardarHold(nuevoId, nodo, guardado.cuerpo, asientos);
+      this.holdsVistos.delete(holdId);
       // El hold anterior se suelta en la aerolínea (si falla, vence solo).
       void this.socios.reenviar(nodo, 'DELETE', ['offers', 'hold', holdId], '', null, entrantes).catch(() => undefined);
       void this.bloqueos.olvidarHold(holdId);
@@ -623,6 +639,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       if (Number.isFinite(base) && base > 0) {
         r.body = { ...r.body, bookingPrice: precioBooking(precioConRecargo(base, await this.reservas.recargoPct()), r.body.lockedPrice.currency) };
       }
+      this.bloqueos.registrarReemplazo(holdId, nuevoId, r.body);
       this.traza(entrantes, 'asiento', 'ok',
         asientos.length
           ? `Asiento ${asientos.map((a) => a.seatNumber).join(', ')} apartado también en la aerolínea (hold ${nuevoId.split('~').pop()?.slice(0, 8)})`
