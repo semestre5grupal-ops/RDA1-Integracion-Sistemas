@@ -151,19 +151,6 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS checkout_at timestamptz;
       `).catch(() => undefined);
 
-      await this.dataSource.query(`
-        INSERT INTO schema_proveedores.config_proveedor (
-          codigo_nodo, nombre_proveedor, vertical, base_url_rest, api_key, equipo, health_status, kill_switch_activo, circuit_breaker_estado
-        ) VALUES (
-          'NODE_ALO_KRL', 'Estadia — Karol Moreno', 'ALOJAMIENTOS',
-          'https://alojamiento-karol-puce-c7dcf7f9fhcncrak.spaincentral-01.azurewebsites.net/api/v2',
-          'booking-alojamiento-secure-key-2026', 'Karol Moreno', 'HEALTHY', false, 'CLOSED'
-        )
-        ON CONFLICT (codigo_nodo) DO UPDATE SET
-          base_url_rest = EXCLUDED.base_url_rest,
-          api_key = EXCLUDED.api_key,
-          health_status = 'HEALTHY';
-      `).catch(() => undefined);
       this.tablaLista = true;
     } catch (e: any) {
       this.logger.error(`[alojamientos-socios] No se pudo crear o migrar ${TABLA}: ${e?.message}`);
