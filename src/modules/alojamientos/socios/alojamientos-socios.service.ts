@@ -74,6 +74,7 @@ export interface OpcionSocio {
   capacidadNinos: number | null;
   totalHabitaciones: number | null;
   cancelacionHoras: number | null;
+  cancelacionTexto?: string | null;
   reembolsable: boolean | null;
   camas?: number | null;
   descripcionCamas?: string | null;
@@ -385,7 +386,15 @@ export class AlojamientosSociosService {
         checkin_desde: h.checkInPermitidoDesde || null,
         checkout_hasta: h.checkOutHoraMaxima || null,
         cancelacion: typeof politica === 'string' ? politica : politica?.descripcion || null,
+        es_reembolsable: politica?.esReembolsable !== undefined
+          ? Boolean(politica.esReembolsable)
+          : (typeof politica === 'string' ? !/no reembolsable|100%/i.test(politica) : null),
+        cancelacion_horas: num(politica?.horasLimiteCancelacion),
       },
+      politica_cancelacion: typeof politica === 'string' ? politica : politica?.descripcion || null,
+      es_reembolsable: politica?.esReembolsable !== undefined
+        ? Boolean(politica.esReembolsable)
+        : (typeof politica === 'string' ? !/no reembolsable|100%/i.test(politica) : null),
       estado: 'ACTIVO',
       proveedor_id: nodo.codigoNodo,
       id_externo: String(h.id),
@@ -419,11 +428,19 @@ export class AlojamientosSociosService {
   private tiposDesdeHabitaciones(rh: RespuestaSocio, ficha?: any): any[] {
     const b = rh.status === 200 ? desempacar(rh.body) : null;
     const lista: any[] = Array.isArray(b) ? b : b?.habitaciones || ficha?.habitaciones || [];
+    const polFicha = ficha?.politicaCancelacion;
     return lista
       .filter((t) => t && (t.codigo || t.id))
       .map((t, i) => {
         const plan = Array.isArray(t.planesTarifa) ? t.planesTarifa.find((p: any) => p.esPlanPorDefecto) || t.planesTarifa[0] : null;
-        const horas = num(plan?.politicaCancelacion?.horasLimiteCancelacion);
+        const pol = plan?.politicaCancelacion || t?.politicaCancelacion || polFicha;
+        const esReembolsable = pol?.esReembolsable !== undefined
+          ? Boolean(pol.esReembolsable)
+          : (pol?.horasLimiteCancelacion !== undefined && pol?.horasLimiteCancelacion !== null
+              ? Number(pol.horasLimiteCancelacion) > 0
+              : (typeof pol?.descripcion === 'string' ? !/no reembolsable|100%/i.test(pol.descripcion) : null));
+        const horas = num(pol?.horasLimiteCancelacion);
+        const descPol = pol?.descripcion || (esReembolsable === false ? 'No reembolsable' : (horas !== null ? `Cancelación gratuita hasta ${horas} horas antes` : null));
         const codigo = String(t.codigo || t.id);
         const numCamas = extraerCamasNum(t.camas) ?? 1;
         const descCamas = typeof t.camas === 'string' && t.camas.trim()
@@ -444,7 +461,8 @@ export class AlojamientosSociosService {
           regimen: plan?.regimen || t.regimen || null,
           regimen_texto: plan?.regimen || t.regimen || null,
           cancelacion_gratuita_horas: horas,
-          cancelacion_texto: horas !== null ? `Cancelación gratuita hasta ${horas} horas antes` : null,
+          cancelacion_texto: descPol,
+          reembolsable: esReembolsable,
           amenidades: Array.isArray(t.amenidades) ? t.amenidades : [],
           photos: [],
           activo: true,
@@ -466,16 +484,18 @@ export class AlojamientosSociosService {
     // capacidad no ofrece «4 adultos en 1 habitación» aunque sí «4 adultos en 4».
     const rooms = Math.max(1, habitaciones);
     const q = `checkin=${checkin}&checkout=${checkout}&adults=${adultos}&rooms=${rooms}`;
-    const [disp, hab] = await Promise.all([
+    const [disp, hab, fichaResp] = await Promise.all([
       this.llamar(nodo, 'GET', `/alojamientos/${id}/availability?${q}`),
       this.llamar(nodo, 'GET', `/alojamientos/${id}/habitaciones`),
+      this.llamar(nodo, 'GET', `/alojamientos/${id}`),
     ]);
     let r = disp;
     if (r.status === 404 || r.status === 405) {
       const alias = await this.llamar(nodo, 'GET', `/alojamientos/${id}/disponibilidad?${q}&adultos=${adultos}`);
       if (alias.status === 200) r = alias;
     }
-    const tipos = this.tiposDesdeHabitaciones(hab);
+    const ficha = fichaResp?.status === 200 ? desempacar(fichaResp.body) : null;
+    const tipos = this.tiposDesdeHabitaciones(hab, ficha);
     const porCodigo = new Map(tipos.map((t) => [t.codigo, t]));
     const b = r.status === 200 ? desempacar(r.body) : null;
     // El contrato v2.2.0 (Posada) devuelve `opciones`. Otros socios exponen la
@@ -502,7 +522,10 @@ export class AlojamientosSociosService {
           capacidadNinos: t?.capacidad_ninos ?? num(o.capacidadNinos) ?? null,
           totalHabitaciones: t?.cantidad ?? num(o.total_rooms ?? o.totalHabitaciones) ?? null,
           cancelacionHoras: t?.cancelacion_gratuita_horas ?? null,
-          reembolsable: t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null,
+          cancelacionTexto: t?.cancelacion_texto ?? null,
+          reembolsable: t?.reembolsable !== undefined && t?.reembolsable !== null
+            ? t.reembolsable
+            : (t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null),
           camas: t?.camas ?? extraerCamasNum(o.camas) ?? 1,
           descripcionCamas: t?.descripcion_camas ?? (typeof o.camas === 'string' ? o.camas : null),
           tamanoM2: t?.tamano_m2 ?? num(o.tamanoM2 ?? o.metrosCuadrados),
@@ -602,9 +625,14 @@ export class AlojamientosSociosService {
           descripcion: null,
           meal_plan: o.regimen,
           regimen: o.regimen,
-          cancellation_type: o.cancelacionHoras !== null ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes` : 'Según la política del alojamiento',
+          cancellation_type: o.reembolsable === false
+            ? (o.cancelacionTexto || 'No reembolsable')
+            : (o.cancelacionHoras !== null
+                ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
+                : (o.cancelacionTexto || 'Según la política del alojamiento')),
           reembolsable: o.reembolsable,
           cancelacion_gratuita_horas: o.cancelacionHoras,
+          cancelacion_texto: o.cancelacionTexto || (o.reembolsable === false ? 'No reembolsable' : null),
           price: Number(total.toFixed(2)),
           price_per_night: Number(porNoche.toFixed(2)),
           // El socio cotiza con impuestos (IVA + tasa municipal): el total es el que se cobra.
