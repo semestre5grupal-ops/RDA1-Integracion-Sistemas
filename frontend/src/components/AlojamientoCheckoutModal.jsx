@@ -333,8 +333,8 @@ export function AlojamientoCheckoutModal({
         {
           firstName: nombre || 'Huésped',
           lastName: apellidos || '',
-          documentNumber: user?.user_metadata?.cedula || '',
-          email: email.trim() || user?.email || '',
+          documentNumber: documentoNumero.trim() || user?.user_metadata?.cedula || '',
+          email: email.trim() || (esCorreoTecnico ? '' : user?.email || ''),
         },
       ],
     };
