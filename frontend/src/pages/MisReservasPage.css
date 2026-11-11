@@ -239,6 +239,51 @@
   color: #b45309;
 }
 
+/* Estilos minimalistas exclusivos para Alojamientos (Booking.com nativo sin pastillas) */
+.trip-card-alojamiento-status {
+  font-size: 0.82rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.trip-card-alojamiento-status.confirmed {
+  color: #008009;
+}
+
+.trip-card-alojamiento-status.checked_in {
+  color: #006ce4;
+}
+
+.trip-card-alojamiento-status.checked_out {
+  color: #4b5563;
+}
+
+.trip-card-alojamiento-status.cancelled {
+  color: #6b7280;
+}
+
+.trip-card-alojamiento-status.pending {
+  color: #b45309;
+}
+
+.trip-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #4b5563;
+  margin: 3px 0;
+  line-height: 1.35;
+}
+
+.trip-card-meta-subtle {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
 .trip-card-right {
   display: flex;
   align-items: center;

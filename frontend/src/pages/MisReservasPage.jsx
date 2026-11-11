@@ -19,16 +19,19 @@ import { api } from '../services/api';
 import {
   MoreVerticalIcon,
   CheckmarkIcon,
+  CheckCircleIcon,
   CloseIcon,
   InfoIcon,
   PinIcon,
   BedIcon,
+  CalendarIcon,
 } from '../components/BookingIcons';
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
   CONFIRMED: 'Confirmada',
   CHECKED_IN: 'Check-in Realizado (Sí asistió)',
+  CHECKED_OUT: 'Check-out completado',
   CONFIRMADO_ASISTIDO: 'Check-in Realizado (Sí asistió)',
   ASISTIDO: 'Sí asistió',
   PICKED_UP: 'Vehículo Entregado (En curso)',
@@ -43,6 +46,27 @@ const ESTADOS_ES = {
   CANCELLED: 'Cancelada',
   PENDING_OFFLINE: 'Pendiente (Offline)',
 };
+
+function getAlojamientoStatus(r) {
+  if (!r) return { text: '', cls: '' };
+  if (r.status === 'CANCELLED') {
+    return { text: 'Cancelada', cls: 'cancelled' };
+  }
+  if (r.status === 'CHECKED_OUT') {
+    return { text: 'Check-out completado', cls: 'checked_out' };
+  }
+  const isPast = r.checkoutRaw && new Date(r.checkoutRaw).getTime() < Date.now();
+  if (isPast) {
+    return { text: 'Check-out completado', cls: 'checked_out' };
+  }
+  if (r.status === 'CHECKED_IN') {
+    return { text: 'Check-in realizado', cls: 'checked_in' };
+  }
+  if (r.status === 'CONFIRMED' || r.status === 'CONFIRMADO_ASISTIDO') {
+    return { text: 'Confirmada', cls: 'confirmed' };
+  }
+  return { text: ESTADOS_ES[r.status] ?? r.status, cls: (r.status || '').toLowerCase() };
+}
 
 const DEFAULT_IMAGES = {
   alojamiento: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/833148758.jpg?k=4af6fee87e75cf2bdb688cfa67e30d77b3282140a0ed4ee22ac61e5be30b95dd&o=&hp=1',
@@ -1425,49 +1449,96 @@ export function MisReservasPage() {
                       </div>
                       <div className="trip-card-info">
                         <h3 className="trip-card-title">{r.titulo}</h3>
-                        <p className="trip-card-subtitle">
-                          <span>{r.fechasTexto}</span>
-                          <span>·</span>
-                          <span>{r.destino}</span>
-                          <span style={{ color: '#006ce4', fontWeight: 600 }}>({r.pnr})</span>
-                        </p>
 
-                        {/* Metadatos detallados de Cantidad y Fechas */}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '4px 0 6px 0', fontSize: '0.78rem' }}>
-                          {r.cantidadTexto && (
-                            <span style={{ background: '#eef2ff', color: '#3730a3', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {r.tipo === 'auto' ? '🚗' : r.tipo === 'atraccion' ? '🎟️' : r.tipo === 'vuelo' ? '✈️' : '🏨'} {r.cantidadTexto}
-                            </span>
-                          )}
-                          {r.fechaReserva && (
-                            <span style={{ background: '#f3f4f6', color: '#4b5563', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              📅 Reservado: {r.fechaReserva}
-                            </span>
-                          )}
-                          {r.fechaEntrega && (
-                            <span style={{ background: '#ecfdf5', color: '#065f46', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {r.tipo === 'auto' ? '🔑 Retiro' : r.tipo === 'atraccion' ? '🎟️ Visita' : r.tipo === 'vuelo' ? '🛫 Salida' : '📥 Check-in'}: {r.fechaEntrega}
-                            </span>
-                          )}
-                          {r.fechaDevolucion && (
-                            <span style={{ background: '#fffbeb', color: '#92400e', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {r.tipo === 'auto' ? '🔄 Devolución' : r.tipo === 'alojamiento' ? '📤 Check-out' : '🛬 Retorno'}: {r.fechaDevolucion}
-                            </span>
-                          )}
-                          {r.tipo === 'alojamiento' && r.descripcion_camas && (
-                            <span style={{ background: '#f5f3ff', color: '#6d28d9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              🛏️ {r.descripcion_camas}
-                            </span>
-                          )}
-                        </div>
+                        {r.tipo === 'alojamiento' ? (
+                          /* ALOJAMIENTOS: Minimalista estilo Booking.com (Sin pastillas, sin emojis, con SVGs limpios) */
+                          <>
+                            <p className="trip-card-subtitle">
+                              <span>{r.destino}</span>
+                              <span>·</span>
+                              <span style={{ color: '#006ce4', fontWeight: 600 }}>PNR: {r.pnr}</span>
+                            </p>
 
-                        <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
-                          {ESTADOS_ES[r.status] ?? r.status}
-                        </span>
-                        {(r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN') && (
-                          <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
-                            • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
-                          </span>
+                            <div className="trip-card-meta-row">
+                              <CalendarIcon size={14} color="#4b5563" />
+                              <span>
+                                <strong>Check-in:</strong> {r.fechaEntrega || r.fechasTexto || '—'}
+                              </span>
+                              <span>·</span>
+                              <span>
+                                <strong>Check-out:</strong> {r.fechaDevolucion || '—'}
+                              </span>
+                            </div>
+
+                            <div className="trip-card-meta-row">
+                              <BedIcon size={14} color="#4b5563" />
+                              <span>{r.cantidadTexto || '1 habitación'}</span>
+                              {r.descripcion_camas && (
+                                <>
+                                  <span>·</span>
+                                  <span className="trip-card-meta-subtle">{r.descripcion_camas}</span>
+                                </>
+                              )}
+                            </div>
+
+                            {(() => {
+                              const st = getAlojamientoStatus(r);
+                              return (
+                                <span className={`trip-card-alojamiento-status ${st.cls}`}>
+                                  <CheckCircleIcon size={13} color="currentColor" />
+                                  <span>{st.text}</span>
+                                </span>
+                              );
+                            })()}
+                          </>
+                        ) : (
+                          /* OTROS MÓDULOS (Vuelos, Autos, Atracciones): 100% INTACTOS como estaban originalmente */
+                          <>
+                            <p className="trip-card-subtitle">
+                              <span>{r.fechasTexto}</span>
+                              <span>·</span>
+                              <span>{r.destino}</span>
+                              <span style={{ color: '#006ce4', fontWeight: 600 }}>({r.pnr})</span>
+                            </p>
+
+                            {/* Metadatos detallados de Cantidad y Fechas */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '4px 0 6px 0', fontSize: '0.78rem' }}>
+                              {r.cantidadTexto && (
+                                <span style={{ background: '#eef2ff', color: '#3730a3', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {r.tipo === 'auto' ? '🚗' : r.tipo === 'atraccion' ? '🎟️' : r.tipo === 'vuelo' ? '✈️' : '🏨'} {r.cantidadTexto}
+                                </span>
+                              )}
+                              {r.fechaReserva && (
+                                <span style={{ background: '#f3f4f6', color: '#4b5563', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  📅 Reservado: {r.fechaReserva}
+                                </span>
+                              )}
+                              {r.fechaEntrega && (
+                                <span style={{ background: '#ecfdf5', color: '#065f46', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {r.tipo === 'auto' ? '🔑 Retiro' : r.tipo === 'atraccion' ? '🎟️ Visita' : r.tipo === 'vuelo' ? '🛫 Salida' : '📥 Check-in'}: {r.fechaEntrega}
+                                </span>
+                              )}
+                              {r.fechaDevolucion && (
+                                <span style={{ background: '#fffbeb', color: '#92400e', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  {r.tipo === 'auto' ? '🔄 Devolución' : r.tipo === 'alojamiento' ? '📤 Check-out' : '🛬 Retorno'}: {r.fechaDevolucion}
+                                </span>
+                              )}
+                              {r.tipo === 'alojamiento' && r.descripcion_camas && (
+                                <span style={{ background: '#f5f3ff', color: '#6d28d9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  🛏️ {r.descripcion_camas}
+                                </span>
+                              )}
+                            </div>
+
+                            <span className={`trip-card-status ${(r.status || '').toLowerCase()}`}>
+                              {ESTADOS_ES[r.status] ?? r.status}
+                            </span>
+                            {(r.status === 'CONFIRMADO_ASISTIDO' || r.status === 'CHECKED_IN') && (
+                              <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>
+                                • {r.tipo === 'auto' ? `Llaves entregadas ${r.placa ? `(Placa: ${r.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -1644,13 +1715,27 @@ export function MisReservasPage() {
                     <h3 style={{ fontSize: '1.35rem', fontWeight: 800, margin: '4px 0 6px 0', color: '#1a1a1a' }}>
                       {selectedReserva.titulo}
                     </h3>
-                    <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
-                      {ESTADOS_ES[selectedReserva.status] ?? selectedReserva.status}
-                    </span>
-                    {(selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'CHECKED_IN') && (
-                      <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
-                        • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
-                      </span>
+                    {selectedReserva.tipo === 'alojamiento' ? (
+                      (() => {
+                        const st = getAlojamientoStatus(selectedReserva);
+                        return (
+                          <span className={`trip-card-alojamiento-status ${st.cls}`} style={{ marginTop: '6px' }}>
+                            <CheckCircleIcon size={14} color="currentColor" />
+                            <span>{st.text}</span>
+                          </span>
+                        );
+                      })()
+                    ) : (
+                      <>
+                        <span className={`trip-card-status ${(selectedReserva.status || '').toLowerCase()}`}>
+                          {ESTADOS_ES[selectedReserva.status] ?? selectedReserva.status}
+                        </span>
+                        {(selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'CHECKED_IN') && (
+                          <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
+                            • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
 
