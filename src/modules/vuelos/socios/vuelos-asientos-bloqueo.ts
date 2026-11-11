@@ -88,6 +88,34 @@ export class VuelosAsientosBloqueo {
   /** Respaldo en memoria: clave `nodo|segmento|asiento`. */
   private readonly memoria = new Map<string, { holdId: string; expira: number }>();
   private readonly holds = new Map<string, HoldGuardado & { t: number }>();
+  /** Hold viejo → hold que lo reemplazó en la aerolínea (al elegir asiento). */
+  private readonly reemplazos = new Map<string, { nuevo: string; hold: any; t: number }>();
+
+  /** Anota que `viejo` se reemplazó por `nuevo` (con la respuesta de la aerolínea). */
+  registrarReemplazo(viejo: string, nuevo: string, hold: any): void {
+    if (!viejo || !nuevo || viejo === nuevo) return;
+    if (this.reemplazos.size > 2_000) {
+      const limite = Date.now() - 2 * 3_600_000;
+      for (const [k, v] of this.reemplazos) if (v.t < limite) this.reemplazos.delete(k);
+    }
+    this.reemplazos.set(viejo, { nuevo, hold, t: Date.now() });
+  }
+
+  /**
+   * El hold vigente de una compra: si el cliente envía un hold que Booking ya
+   * reemplazó (porque su pantalla aún no se enteró), devuelve el último y sus datos.
+   */
+  actual(holdId: string): { holdId: string; hold: any | null } {
+    let id = holdId;
+    let hold: any = null;
+    for (let i = 0; i < 20; i++) {
+      const r = this.reemplazos.get(id);
+      if (!r) break;
+      id = r.nuevo;
+      hold = r.hold;
+    }
+    return { holdId: id, hold };
+  }
 
   constructor(@Optional() private readonly dataSource?: DataSource) {}
 
