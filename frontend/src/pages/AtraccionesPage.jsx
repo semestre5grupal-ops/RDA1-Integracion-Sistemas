@@ -2,59 +2,61 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAtracciones } from '../services/atraccionesApi';
 import { useAuth } from '../hooks/useAuth';
+import { AtraccionesLoadingView } from '../components/AtraccionesLoadingView';
+import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
 
-// Datos Mock para Destinos Top en Ecuador
+// Datos para Destinos Top en Ecuador con imágenes curadas de alta resolución
 const DESTINOS_TOP = [
-  { id: 1, nombre: 'Quito', cosas: '245 cosas que hacer', img: 'https://picsum.photos/id/28/800/600' },
-  { id: 2, nombre: 'Guayaquil', cosas: '128 cosas que hacer', img: 'https://picsum.photos/id/29/800/600' },
-  { id: 3, nombre: 'Cuenca', cosas: '184 cosas que hacer', img: 'https://picsum.photos/id/38/800/600' },
-  { id: 4, nombre: 'Baños', cosas: '312 cosas que hacer', img: 'https://picsum.photos/id/49/800/600' },
-  { id: 5, nombre: 'Galápagos', cosas: '89 cosas que hacer', img: 'https://picsum.photos/id/58/800/600' }
+  { id: 'uio', nombre: 'Quito', cosas: '245 cosas que hacer', img: 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop' },
+  { id: 'gye', nombre: 'Guayaquil', cosas: '128 cosas que hacer', img: 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&auto=format&fit=crop' },
+  { id: 'cue', nombre: 'Cuenca', cosas: '184 cosas que hacer', img: 'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?w=800&auto=format&fit=crop' },
+  { id: 'ban', nombre: 'Baños', cosas: '312 cosas que hacer', img: 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop' },
+  { id: 'gal', nombre: 'Galápagos', cosas: '89 cosas que hacer', img: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop' }
 ];
 
 const EXPLORA_TABS = ['Pichincha', 'Guayas', 'Azuay', 'Tungurahua', 'Manabí', 'Imbabura', 'Galápagos'];
 const DESTINOS_POR_PROVINCIA = {
   Pichincha: [
-    { nombre: 'Mitad del Mundo', cosas: '45 cosas que hacer', img: 'https://picsum.photos/id/111/800/600' },
-    { nombre: 'Mindo Bosque Nublado', cosas: '78 cosas que hacer', img: 'https://picsum.photos/id/112/800/600' },
-    { nombre: 'Sangolquí & Valle', cosas: '12 cosas que hacer', img: 'https://picsum.photos/id/113/800/600' },
-    { nombre: 'Machachi & Volcanes', cosas: '24 cosas que hacer', img: 'https://picsum.photos/id/114/800/600' },
+    { nombre: 'Mitad del Mundo', cosas: '45 cosas que hacer', img: 'https://images.unsplash.com/photo-1598971861713-54ad16a7e72e?w=800&auto=format&fit=crop' },
+    { nombre: 'Mindo Bosque Nublado', cosas: '78 cosas que hacer', img: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&auto=format&fit=crop' },
+    { nombre: 'Sangolquí & Valle', cosas: '12 cosas que hacer', img: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop' },
+    { nombre: 'Machachi & Volcanes', cosas: '24 cosas que hacer', img: 'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop' },
   ],
   Guayas: [
-    { nombre: 'Malecón 2000', cosas: '52 cosas que hacer', img: 'https://picsum.photos/id/29/800/600' },
-    { nombre: 'Barrio Las Peñas', cosas: '34 cosas que hacer', img: 'https://picsum.photos/id/164/800/600' },
-    { nombre: 'Parque de las Iguanas', cosas: '18 cosas que hacer', img: 'https://picsum.photos/id/169/800/600' },
-    { nombre: 'Isla Santay', cosas: '22 cosas que hacer', img: 'https://picsum.photos/id/175/800/600' },
+    { nombre: 'Malecón 2000', cosas: '52 cosas que hacer', img: 'https://images.unsplash.com/photo-1516483638261-f4dbaf036963?w=800&auto=format&fit=crop' },
+    { nombre: 'Barrio Las Peñas', cosas: '34 cosas que hacer', img: 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&auto=format&fit=crop' },
+    { nombre: 'Parque de las Iguanas', cosas: '18 cosas que hacer', img: 'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=800&auto=format&fit=crop' },
+    { nombre: 'Isla Santay', cosas: '22 cosas que hacer', img: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop' },
   ],
   Azuay: [
-    { nombre: 'Catedral Nueva de Cuenca', cosas: '38 cosas que hacer', img: 'https://picsum.photos/id/38/800/600' },
-    { nombre: 'Parque Nacional Cajas', cosas: '65 cosas que hacer', img: 'https://picsum.photos/id/184/800/600' },
-    { nombre: 'Mirador de Turi', cosas: '19 cosas que hacer', img: 'https://picsum.photos/id/191/800/600' },
-    { nombre: 'Barranco del Río Tomebamba', cosas: '27 cosas que hacer', img: 'https://picsum.photos/id/195/800/600' },
+    { nombre: 'Catedral Nueva de Cuenca', cosas: '38 cosas que hacer', img: 'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?w=800&auto=format&fit=crop' },
+    { nombre: 'Parque Nacional Cajas', cosas: '65 cosas que hacer', img: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=800&auto=format&fit=crop' },
+    { nombre: 'Mirador de Turi', cosas: '19 cosas que hacer', img: 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=800&auto=format&fit=crop' },
+    { nombre: 'Barranco del Río Tomebamba', cosas: '27 cosas que hacer', img: 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&auto=format&fit=crop' },
   ],
   Tungurahua: [
-    { nombre: 'Pailón del Diablo (Baños)', cosas: '94 cosas que hacer', img: 'https://picsum.photos/id/49/800/600' },
-    { nombre: 'Casa del Árbol & Columpio', cosas: '41 cosas que hacer', img: 'https://picsum.photos/id/201/800/600' },
-    { nombre: 'Cascada Manto de la Novia', cosas: '32 cosas que hacer', img: 'https://picsum.photos/id/204/800/600' },
-    { nombre: 'Ruta de las Cascadas en Chiva', cosas: '56 cosas que hacer', img: 'https://picsum.photos/id/208/800/600' },
+    { nombre: 'Pailón del Diablo (Baños)', cosas: '94 cosas que hacer', img: 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop' },
+    { nombre: 'Casa del Árbol & Columpio', cosas: '41 cosas que hacer', img: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop' },
+    { nombre: 'Cascada Manto de la Novia', cosas: '32 cosas que hacer', img: 'https://images.unsplash.com/photo-1533240332313-0db49b459ad6?w=800&auto=format&fit=crop' },
+    { nombre: 'Ruta de las Cascadas en Chiva', cosas: '56 cosas que hacer', img: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop' },
   ],
   Manabí: [
-    { nombre: 'Playa Los Frailes', cosas: '29 cosas que hacer', img: 'https://picsum.photos/id/214/800/600' },
-    { nombre: 'Parque Nacional Machalilla', cosas: '48 cosas que hacer', img: 'https://picsum.photos/id/218/800/600' },
-    { nombre: 'Isla de la Plata', cosas: '31 cosas que hacer', img: 'https://picsum.photos/id/222/800/600' },
-    { nombre: 'Canoa & Clases de Surf', cosas: '23 cosas que hacer', img: 'https://picsum.photos/id/225/800/600' },
+    { nombre: 'Playa Los Frailes', cosas: '29 cosas que hacer', img: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop' },
+    { nombre: 'Parque Nacional Machalilla', cosas: '48 cosas que hacer', img: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop' },
+    { nombre: 'Isla de la Plata', cosas: '31 cosas que hacer', img: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop' },
+    { nombre: 'Canoa & Clases de Surf', cosas: '23 cosas que hacer', img: 'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=800&auto=format&fit=crop' },
   ],
   Imbabura: [
-    { nombre: 'Laguna de Cuicocha', cosas: '35 cosas que hacer', img: 'https://picsum.photos/id/231/800/600' },
-    { nombre: 'Mercado de Ponchos Otavalo', cosas: '60 cosas que hacer', img: 'https://picsum.photos/id/235/800/600' },
-    { nombre: 'Cascada de Peguche', cosas: '21 cosas que hacer', img: 'https://picsum.photos/id/239/800/600' },
-    { nombre: 'Paseo en Lago San Pablo', cosas: '26 cosas que hacer', img: 'https://picsum.photos/id/243/800/600' },
+    { nombre: 'Laguna de Cuicocha', cosas: '35 cosas que hacer', img: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&auto=format&fit=crop' },
+    { nombre: 'Mercado de Ponchos Otavalo', cosas: '60 cosas que hacer', img: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800&auto=format&fit=crop' },
+    { nombre: 'Cascada de Peguche', cosas: '21 cosas que hacer', img: 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop' },
+    { nombre: 'Paseo en Lago San Pablo', cosas: '26 cosas que hacer', img: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&auto=format&fit=crop' },
   ],
   Galápagos: [
-    { nombre: 'Estación Charles Darwin', cosas: '42 cosas que hacer', img: 'https://picsum.photos/id/58/800/600' },
-    { nombre: 'Tortuga Bay (Santa Cruz)', cosas: '39 cosas que hacer', img: 'https://picsum.photos/id/249/800/600' },
-    { nombre: 'Túneles de Lava en Isabela', cosas: '51 cosas que hacer', img: 'https://picsum.photos/id/253/800/600' },
-    { nombre: 'Snorkel en Kicker Rock', cosas: '28 cosas que hacer', img: 'https://picsum.photos/id/257/800/600' },
+    { nombre: 'Estación Charles Darwin', cosas: '42 cosas que hacer', img: 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop' },
+    { nombre: 'Tortuga Bay (Santa Cruz)', cosas: '39 cosas que hacer', img: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop' },
+    { nombre: 'Túneles de Lava en Isabela', cosas: '51 cosas que hacer', img: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop' },
+    { nombre: 'Snorkel en Kicker Rock', cosas: '28 cosas que hacer', img: 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop' },
   ],
 };
 
@@ -231,6 +233,10 @@ export function AtraccionesPage() {
     return nombre.includes(term) || ciudad.includes(term) || descripcion.includes(term) || inclusiones.includes(term);
   });
 
+  if (loading) {
+    return <AtraccionesLoadingView titulo="Buscando las mejores ofertas entre cientos de experiencias" />;
+  }
+
   return (
     <main id="contenido-principal">
       {/* HERO SECTION */}
@@ -327,30 +333,39 @@ export function AtraccionesPage() {
             </div>
           </div>
 
-          {loading && <div className="spinner"></div>}
-          {!loading && error && <p style={{color: '#d32f2f'}}>{error}</p>}
+          {error && <p style={{color: '#d32f2f'}}>{error}</p>}
           
           <div className="atracciones-horizontal-scroll">
-            {atraccionesFiltradas.slice(0, 5).map((atraccion, idx) => (
-              <div 
-                key={atraccion.id} 
-                className="atraccion-scroll-card"
-                onClick={() => navigate(`/atracciones/${atraccion.id}`)}
-                style={{ cursor: 'pointer' }}
-              >
-                <div className="asc-img-wrapper">
-                  <span className="asc-badge">#{idx + 1} Más vendido</span>
-                  <img src={getEcuadorImage(idx)} alt={atraccion.nombre} />
-                  <div className="asc-info">
-                    <h3 className="asc-title">{atraccion.nombre || atraccion.name || atraccion.title}</h3>
-                    <div className="asc-rating">
-                      <span className="score">{(Math.random() * 2 + 8).toFixed(1)}</span>
-                      <span className="text">Excepcional ({Math.floor(Math.random() * 500) + 50})</span>
+            {atraccionesFiltradas.slice(0, 8).map((atraccion, idx) => {
+              const foto = resolverImagenAtraccion(atraccion, idx);
+              return (
+                <div 
+                  key={atraccion.id} 
+                  className="atraccion-scroll-card"
+                  onClick={() => navigate(`/atracciones/${atraccion.id}`)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="asc-img-wrapper">
+                    <span className="asc-badge">#{idx + 1} Más vendido</span>
+                    <img 
+                      src={foto} 
+                      alt={atraccion.nombre} 
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = resolverImagenAtraccion(atraccion, idx + 2);
+                      }}
+                    />
+                    <div className="asc-info">
+                      <h3 className="asc-title">{atraccion.nombre || atraccion.name || atraccion.title}</h3>
+                      <div className="asc-rating">
+                        <span className="score">{(Math.random() * 2 + 8).toFixed(1)}</span>
+                        <span className="text">Excepcional ({Math.floor(Math.random() * 500) + 50})</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 

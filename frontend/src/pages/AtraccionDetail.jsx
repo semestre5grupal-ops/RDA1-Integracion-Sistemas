@@ -9,6 +9,8 @@ import { useCurrency } from '../hooks/CurrencyContext';
 import { ReportModal } from '../components/ReportModal';
 import { OfflineReservaModal } from '../components/OfflineReservaModal';
 import { VoucherModal } from '../components/VoucherModal';
+import { AtraccionesLoadingView } from '../components/AtraccionesLoadingView';
+import { resolverGaleriaAtraccion } from '../utils/atraccionImagenes';
 
 export function AtraccionDetail() {
   const todayStr = new Date().toISOString().split('T')[0];
@@ -330,9 +332,11 @@ export function AtraccionDetail() {
     }
   };
 
-  if (loading) return <main id="contenido-principal" className="state-container"><h1 className="sr-only">Cargando atracción</h1><div className="spinner" /></main>;
+  if (loading) return <AtraccionesLoadingView titulo="Cargando detalles de la experiencia..." />;
   if (error) return <main id="contenido-principal" className="state-container"><h1 className="sr-only">Error al cargar atracción</h1><div className="error-icon">⚠️</div><p className="state-subtitle">{error}</p><button className="retry-btn" onClick={() => navigate('/')}>Volver</button></main>;
   if (!atraccion) return null;
+
+  const fotosGaleria = resolverGaleriaAtraccion(atraccion);
 
   return (
     <div className="search-page-wrapper">
@@ -364,7 +368,7 @@ export function AtraccionDetail() {
 
           <div className="gallery-grid">
             <div className="gallery-main">
-              <img src={atraccion.photos?.[0]?.url || `https://picsum.photos/seed/${atraccion.id}/800/600`} onError={(e) => { e.target.onerror = null; e.target.src = `https://picsum.photos/seed/${atraccion.id}/800/600`; }} alt="Main" />
+              <img src={fotosGaleria[0]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[1]; }} alt="Main" />
               <div className="gallery-badge-overlay">
                 <div className="gb-score">9.8</div>
                 <div className="gb-text">
@@ -374,11 +378,11 @@ export function AtraccionDetail() {
               </div>
             </div>
             <div className="gallery-side">
-              <img src={atraccion.photos?.[1]?.url || `https://picsum.photos/seed/${atraccion.id}1/400/300`} onError={(e) => { e.target.onerror = null; e.target.src = `https://picsum.photos/seed/${atraccion.id}1/400/300`; }} alt="Gallery 1" />
-              <img src={atraccion.photos?.[2]?.url || `https://picsum.photos/seed/${atraccion.id}2/400/300`} onError={(e) => { e.target.onerror = null; e.target.src = `https://picsum.photos/seed/${atraccion.id}2/400/300`; }} alt="Gallery 2" />
-              <img src={atraccion.photos?.[3]?.url || `https://picsum.photos/seed/${atraccion.id}3/400/300`} onError={(e) => { e.target.onerror = null; e.target.src = `https://picsum.photos/seed/${atraccion.id}3/400/300`; }} alt="Gallery 3" />
+              <img src={fotosGaleria[1]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[0]; }} alt="Gallery 1" />
+              <img src={fotosGaleria[2]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[0]; }} alt="Gallery 2" />
+              <img src={fotosGaleria[3]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[1]; }} alt="Gallery 3" />
               <div className="gallery-more">
-                <img src={atraccion.photos?.[4]?.url || `https://picsum.photos/seed/${atraccion.id}4/400/300`} onError={(e) => { e.target.onerror = null; e.target.src = `https://picsum.photos/seed/${atraccion.id}4/400/300`; }} alt="Gallery 4" />
+                <img src={fotosGaleria[4]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[2]; }} alt="Gallery 4" />
                 <div className="more-overlay">🖼️ Ver todas las imágenes</div>
               </div>
             </div>

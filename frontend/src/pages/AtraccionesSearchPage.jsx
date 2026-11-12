@@ -3,6 +3,8 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { getAtracciones } from '../services/atraccionesApi';
 import { api } from '../services/api';
 import { formatearMoneda } from '../services/formato';
+import { AtraccionesLoadingView } from '../components/AtraccionesLoadingView';
+import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
 
 export function AtraccionesSearchPage() {
   const [searchParams] = useSearchParams();
@@ -176,6 +178,10 @@ export function AtraccionesSearchPage() {
   const totalCalculatedPages = Math.max(1, Math.ceil(sortedItems.length / limit));
   const displayedItems = sortedItems.slice((page - 1) * limit, page * limit);
 
+  if (loading && atracciones.length === 0) {
+    return <AtraccionesLoadingView titulo={`Buscando ofertas y experiencias en ${busqueda || 'Ecuador'}...`} />;
+  }
+
   return (
     <div className="search-page-wrapper">
       {/* HEADER BUSCADOR REDUCIDO */}
@@ -346,11 +352,20 @@ export function AtraccionesSearchPage() {
               ) : (
                 displayedItems.map((a, idx) => {
                   const navigateToDetail = () => window.location.href = `/atracciones/${a.id}`;
-                  const fotoUrl = a.photos?.[0]?.url || a.foto_url || a.fotos_urls?.[0] || 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800';
+                  const fotoIndex = idx + (page - 1) * limit;
+                  const fotoUrl = resolverImagenAtraccion(a, fotoIndex);
                   return (
                     <div key={a.id} className="search-result-card" onClick={navigateToDetail} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateToDetail(); } }} style={{cursor: 'pointer'}}>
                       <div className="sr-image">
-                        <img loading="lazy" src={fotoUrl} onError={(e) => { e.target.onerror = null; e.target.src = 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800'; }} alt={a.name || a.nombre} />
+                        <img 
+                          loading="lazy" 
+                          src={fotoUrl} 
+                          onError={(e) => { 
+                            e.target.onerror = null; 
+                            e.target.src = resolverImagenAtraccion(a, fotoIndex + 3); 
+                          }} 
+                          alt={a.name || a.nombre} 
+                        />
                       </div>
                       <div className="sr-content">
                         <div className="sr-main-info">

@@ -26,6 +26,7 @@ import {
   BedIcon,
   CalendarIcon,
 } from '../components/BookingIcons';
+import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
@@ -542,7 +543,7 @@ export function MisReservasPage() {
             rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
             status: at.status || 'CONFIRMED',
             totalRaw: at.total_price?.total || at.total_price || 55.00,
-            imagen: at.photoUrl || at.foto_url || DEFAULT_IMAGES.atraccion,
+            imagen: at.photoUrl || at.foto_url || resolverImagenAtraccion({ nombre: at.atraccionTitulo || at.titulo || at.nombre, ciudad: at.ciudad, photos: at.photos }, idx),
             email: (at.customer_email || at.email || at.customer?.email || at.userEmail || '').trim().toLowerCase(),
             documentId: (at.documentId || at.document_id || at.customer?.document_id || '').trim(),
             link: at.atraccionId ? `/atracciones/${at.atraccionId}` : '/',
@@ -577,7 +578,7 @@ export function MisReservasPage() {
           rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
           status: at.status || 'CONFIRMED',
           totalRaw: at.totalPrice?.total || at.total || 55.00,
-          imagen: at.photoUrl || DEFAULT_IMAGES.atraccion,
+          imagen: at.photoUrl || resolverImagenAtraccion({ nombre: at.atraccionTitulo || at.titulo || at.nombre, ciudad: at.ciudad }, idx),
           email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
           documentId: (at.document_id || at.documentId || '').trim(),
           link: '/',
