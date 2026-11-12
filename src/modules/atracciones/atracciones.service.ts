@@ -37,6 +37,11 @@ export class AtraccionesService implements OnModuleInit {
     try {
       await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
     } catch (_) {}
+
+    // Sincronización inicial en segundo plano para poblar fotos de socios al arrancar
+    setTimeout(() => {
+      this.syncAllCatalogs(true).catch(() => {});
+    }, 2000);
   }
 
   constructor(
@@ -314,14 +319,23 @@ export class AtraccionesService implements OnModuleInit {
       precio = Number(item.precio_unitario_adulto || item.precio_base || item.precio);
     }
 
-    const rawPhoto =
-      (item.photos && (typeof item.photos[0] === 'string' ? item.photos[0] : item.photos[0]?.url)) ||
-      (item.fotos_urls && item.fotos_urls[0]) ||
-      item.foto_url;
-    const photo =
-      typeof rawPhoto === 'string' && rawPhoto.startsWith('http')
-        ? rawPhoto
-        : 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800';
+    const rawList = item.photos || item.fotos_urls || (item.foto_url ? [item.foto_url] : []);
+    const fotosExtraidas: string[] = [];
+
+    if (Array.isArray(rawList)) {
+      for (const p of rawList) {
+        const u = typeof p === 'string' ? p : p?.url;
+        if (typeof u === 'string' && u.startsWith('http') && !u.includes('[object') && !fotosExtraidas.includes(u)) {
+          fotosExtraidas.push(u);
+        }
+      }
+    } else if (typeof rawList === 'string' && rawList.startsWith('http')) {
+      fotosExtraidas.push(rawList);
+    }
+
+    if (item.foto_url && typeof item.foto_url === 'string' && item.foto_url.startsWith('http') && !fotosExtraidas.includes(item.foto_url)) {
+      fotosExtraidas.push(item.foto_url);
+    }
 
     const ciudad =
       item.ciudad ||
@@ -398,7 +412,7 @@ export class AtraccionesService implements OnModuleInit {
         puntoEncuentro,
         lat,
         lon,
-        [photo],
+        fotosExtraidas,
         inclusiones,
         provCod,
       ],
@@ -460,9 +474,25 @@ export class AtraccionesService implements OnModuleInit {
         }),
       );
       const items = Array.isArray(data) ? data : (data?.items || data?.data || []);
-      for (const item of items) {
-        await this.upsertPartnerAttraction(item, 'NODE_ATR_MOLINA');
-      }
+      // Enriquecer fotos reales consultando el detalle de cada atracción de Michael en paralelo
+      await Promise.allSettled(
+        items.map(async (item) => {
+          if (!item.photos || item.photos.length === 0) {
+            try {
+              const detailRes = await firstValueFrom(
+                this.httpService.get(`https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/${item.id}`, {
+                  headers: { 'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w' },
+                  timeout: 4000,
+                }),
+              );
+              if (detailRes.data?.photos && Array.isArray(detailRes.data.photos) && detailRes.data.photos.length > 0) {
+                item.photos = detailRes.data.photos;
+              }
+            } catch (_) {}
+          }
+          await this.upsertPartnerAttraction(item, 'NODE_ATR_MOLINA');
+        }),
+      );
     } catch (e: any) {
       this.logger.warn(`Error al sincronizar catálogo con Michael: ${e.message}`);
     }
@@ -534,10 +564,10 @@ export class AtraccionesService implements OnModuleInit {
 
   private lastGlobalSync = 0;
   private isSyncingCatalogs = false;
-  async syncAllCatalogs(): Promise<void> {
+  async syncAllCatalogs(force = false): Promise<void> {
     const now = Date.now();
     if (this.isSyncingCatalogs) return;
-    if (now - this.lastGlobalSync < 30000) return; // 30s throttle
+    if (!force && now - this.lastGlobalSync < 30000) return; // 30s throttle
     this.lastGlobalSync = now;
     this.isSyncingCatalogs = true;
     try {
@@ -973,7 +1003,7 @@ export class AtraccionesService implements OnModuleInit {
     this.logger.log(`Consultando detalle de atracción ${id} en schema_atracciones`);
     let item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
 
-    if (!item) {
+    if (!item || !item.fotosUrls || item.fotosUrls.length === 0) {
       // Probar directamente por ID contra todos los socios en PARALELO ultra rápido (3500ms timeout)
       const partnersToProbe = [
         { code: 'NODE_ATR_MOLINA', url: `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/${id}`, key: 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w' },

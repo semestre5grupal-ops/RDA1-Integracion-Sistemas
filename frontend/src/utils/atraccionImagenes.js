@@ -99,12 +99,13 @@ export function resolverImagenAtraccion(atraccion, index = 0) {
   const rawUrl =
     (atraccion.photos && atraccion.photos[0] && (typeof atraccion.photos[0] === 'string' ? atraccion.photos[0] : atraccion.photos[0].url)) ||
     (atraccion.fotos_urls && atraccion.fotos_urls[0]) ||
-    atraccion.foto_url;
+    atraccion.foto_url ||
+    atraccion.photoUrl ||
+    atraccion.imagen;
 
-  // Si existe una foto real que no sea el comodín repetido ni un string roto
+  // Si existe una foto real provista por el socio (cualquier origen del socio: Vercel, Wikimedia, Pinterest, Picsum, Google, etc.)
   const isDuplicatePlaceholder = typeof rawUrl === 'string' && rawUrl.includes(DUPLICATE_BASILICA_URL);
-  const isPicsum = typeof rawUrl === 'string' && rawUrl.includes('picsum.photos');
-  const isValidCustomUrl = typeof rawUrl === 'string' && rawUrl.startsWith('http') && !isDuplicatePlaceholder && !isPicsum && !rawUrl.includes('[object');
+  const isValidCustomUrl = typeof rawUrl === 'string' && rawUrl.startsWith('http') && !isDuplicatePlaceholder && !rawUrl.includes('[object');
 
   if (isValidCustomUrl) {
     return rawUrl;
@@ -161,57 +162,35 @@ export function resolverImagenAtraccion(atraccion, index = 0) {
 }
 
 /**
- * Resuelve una galería completa de 5 imágenes temáticas para la página de detalle.
+ * Resuelve la galería de imágenes reales provistas por el socio para la página de detalle.
+ * Retorna las fotos reales del socio; si solo hay 1 foto, retorna solo esa foto.
  * 
  * @param {Object} atraccion - Objeto atracción
- * @returns {string[]} Array de 5 URLs de imágenes
+ * @returns {string[]} Array con las URLs reales del socio
  */
 export function resolverGaleriaAtraccion(atraccion) {
-  const main = resolverImagenAtraccion(atraccion, 0);
-  const texto = `${atraccion?.nombre || ''} ${atraccion?.ciudad || ''}`.toLowerCase();
-  const seed = hashString(atraccion?.id || atraccion?.nombre || 'galeria');
-
-  // Buscar si el socio entregó fotos válidas adicionales
   const fotosSocio = [];
-  if (Array.isArray(atraccion?.photos)) {
-    for (const p of atraccion.photos) {
+
+  const rawList = atraccion?.photos || atraccion?.fotos_urls || [];
+  if (Array.isArray(rawList)) {
+    for (const p of rawList) {
       const u = typeof p === 'string' ? p : p?.url;
-      if (u && typeof u === 'string' && u.startsWith('http') && !u.includes(DUPLICATE_BASILICA_URL) && !u.includes('picsum.photos') && !fotosSocio.includes(u)) {
+      if (u && typeof u === 'string' && u.startsWith('http') && !u.includes(DUPLICATE_BASILICA_URL) && !fotosSocio.includes(u)) {
         fotosSocio.push(u);
       }
     }
   }
 
-  // Pool de relleno
-  const pool = [
-    ...IMAGENES_ECUADOR.quito,
-    ...IMAGENES_ECUADOR.mitadDelMundo,
-    ...IMAGENES_ECUADOR.cotopaxi,
-    ...IMAGENES_ECUADOR.banos,
-    ...IMAGENES_ECUADOR.galapagos,
-    ...IMAGENES_ECUADOR.cuenca,
-    ...IMAGENES_ECUADOR.guayaquil,
-    ...IMAGENES_ECUADOR.mindo,
-    ...IMAGENES_ECUADOR.otavalo,
-    ...IMAGENES_ECUADOR.amazonia,
-  ];
-
-  const gallery = [main];
-  for (const f of fotosSocio) {
-    if (gallery.length < 5 && !gallery.includes(f)) {
-      gallery.push(f);
-    }
+  if (atraccion?.foto_url && typeof atraccion.foto_url === 'string' && atraccion.foto_url.startsWith('http') && !atraccion.foto_url.includes(DUPLICATE_BASILICA_URL) && !fotosSocio.includes(atraccion.foto_url)) {
+    fotosSocio.push(atraccion.foto_url);
   }
 
-  let offset = 1;
-  while (gallery.length < 5) {
-    const candidate = pool[(seed + offset * 7) % pool.length];
-    if (!gallery.includes(candidate)) {
-      gallery.push(candidate);
-    }
-    offset++;
+  // Si el socio no entregó ninguna foto válida en su sistema, proveer una imagen contextual
+  if (fotosSocio.length === 0) {
+    const fallback = resolverImagenAtraccion(atraccion, 0);
+    return [fallback];
   }
 
-  return gallery;
+  return fotosSocio;
 }
 
