@@ -377,11 +377,12 @@ export class AlojamientosSociosService {
     nodo: ConfigProveedor,
     metodo: 'GET' | 'POST',
     ruta: string,
-    opciones: { body?: any; idempotencyKey?: string; correlationId?: string; extra?: Record<string, string> } = {},
+    opciones: { body?: any; idempotencyKey?: string; correlationId?: string; extra?: Record<string, string>; timeoutMs?: number } = {},
   ): Promise<RespuestaSocio> {
     const base = AlojamientosSociosService.base(nodo.baseUrlRest);
     const t0 = Date.now();
     if (!base) return { status: 0, body: null, headers: {}, ms: 0, error: 'URL del socio inválida' };
+    const duracionTimeout = opciones.timeoutMs ?? this.timeoutMs();
     try {
       const headers: Record<string, string> = {
         Accept: 'application/json',
@@ -396,7 +397,7 @@ export class AlojamientosSociosService {
         method: metodo,
         headers,
         body: opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
-        signal: AbortSignal.timeout(this.timeoutMs()),
+        signal: AbortSignal.timeout(duracionTimeout),
       });
       const texto = await res.text();
       let body: any = texto;
@@ -415,13 +416,57 @@ export class AlojamientosSociosService {
 
   // ───────────────────────────── Catálogo ─────────────────────────────
 
-  /** Catálogo agregado de todos los socios (caché corta, y una sola carga a la vez). */
+  /** Catálogo agregado de todos los socios (caché con stale-while-revalidate, y una sola carga a la vez). */
   async catalogo(): Promise<{ hoteles: any[]; fuentes: ResumenSocio[] }> {
+    // 1. Caché vigente: responder de inmediato
     if (this.cacheCatalogo && this.cacheCatalogo.expira > Date.now()) return this.cacheCatalogo;
+
+    // 2. Si ya hay una caché anterior disponible (stale-while-revalidate):
+    // devolver la caché previa al cliente de inmediato para evitar bloqueos y timeouts,
+    // refrescando en segundo plano sin trabar al usuario.
+    if (this.cacheCatalogo && this.cacheCatalogo.hoteles.length > 0) {
+      if (!this.catalogoEnCurso) {
+        this.iniciarCargaCatalogo().catch((e: any) =>
+          this.logger.warn(`[alojamientos-socios] Refresco en segundo plano del catálogo falló: ${e?.message}`),
+        );
+      }
+      return this.cacheCatalogo;
+    }
+
+    // 3. Si no hay nada en caché (arranque en frío o post invalidación), esperar la carga
+    return this.iniciarCargaCatalogo();
+  }
+
+  private iniciarCargaCatalogo(): Promise<{ hoteles: any[]; fuentes: ResumenSocio[] }> {
     if (this.catalogoEnCurso) return this.catalogoEnCurso;
     this.catalogoEnCurso = (async () => {
       const nodos = await this.nodosActivos();
-      const resultados = await Promise.all(nodos.map((n) => this.catalogoDeNodo(n)));
+      // Envolver cada nodo en un timeout duro individual (máx 4500ms) para que ningún nodo colgado frene a los demás
+      const resultados = await Promise.all(
+        nodos.map((n) =>
+          Promise.race([
+            this.catalogoDeNodo(n),
+            new Promise<{ hoteles: any[]; resumen: ResumenSocio }>((resolve) =>
+              setTimeout(
+                () =>
+                  resolve({
+                    hoteles: [],
+                    resumen: {
+                      codigoNodo: n.codigoNodo,
+                      nombre: n.nombreProveedor,
+                      ok: false,
+                      status: 0,
+                      ms: 4500,
+                      alojamientos: 0,
+                      error: 'Timeout de nodo superado (4.5s)',
+                    },
+                  }),
+                4500,
+              ).unref?.(),
+            ),
+          ]),
+        ),
+      );
       const hoteles = resultados.flatMap((r) => r.hoteles);
       const fuentes = resultados.map((r) => r.resumen);
       this.cacheCatalogo = { expira: Date.now() + this.cacheMs(), hoteles, fuentes };
@@ -439,8 +484,10 @@ export class AlojamientosSociosService {
     const t0 = Date.now();
     const crudos: any[] = [];
     let ultimo: RespuestaSocio | null = null;
-    for (let page = 1; page <= 10; page++) {
-      ultimo = await this.llamar(nodo, 'GET', `/alojamientos?page=${page}&limit=50`);
+    const maxPaginas = 3;
+    for (let page = 1; page <= maxPaginas; page++) {
+      if (Date.now() - t0 > 3800) break; // Si ya tardó 3.8s, no pedir más páginas
+      ultimo = await this.llamar(nodo, 'GET', `/alojamientos?page=${page}&limit=50`, { timeoutMs: 3000 });
       if (ultimo.status !== 200) break;
       const b = ultimo.body;
       const items: any[] = Array.isArray(b) ? b : b?.data || b?.items || b?.alojamientos || [];
