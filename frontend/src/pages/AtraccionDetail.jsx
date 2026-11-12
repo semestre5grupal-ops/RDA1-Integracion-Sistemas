@@ -572,7 +572,7 @@ export function AtraccionDetail() {
             <h2>Preguntas frecuentes</h2>
             <details><summary>¿Cómo accedo al tour una vez completado el pago?</summary><p>Inmediatamente tras el pago recibes tu voucher digital con código QR dinámico. Puedes guardarlo en tu teléfono o realizar el check-in presencial en un clic.</p></details>
             <details><summary>¿Qué pasa si llueve o cambia el clima en Quito?</summary><p>Nuestros buses panorámicos cuentan con techo retráctil hermético y los guías adaptan las paradas peatonales sin comprometer el itinerario.</p></details>
-            <details><summary>¿Puedo cancelar y recibir reembolso?</summary><p>Sí, dispones de cancelación gratuita con reembolso íntegro (100%) hasta 24 horas antes del inicio de tu turno seleccionado, ejecutado mediante protocolo compensatorio Saga.</p></details>
+            <details><summary>¿Puedo cancelar y recibir reembolso?</summary><p>Sí, dispones de cancelación gratuita con reembolso íntegro (100%) hasta 24 horas antes del inicio de tu turno seleccionado, acreditado a tu método de pago original.</p></details>
             <details><summary>¿Qué tipo de vestimenta o equipamiento debo llevar?</summary><p>Recomendamos calzado cómodo con suela antideslizante para caminar sobre adoquines coloniales, chaqueta abrigada ligera (capas) por el viento andino, protector solar y cámara fotográfica.</p></details>
             <details><summary>¿Qué documentación debo presentar ante el guía?</summary><p>Presenta tu cédula de identidad física o pasaporte vigente, junto con el código QR de confirmación desde la pantalla de tu dispositivo móvil en la sección Mis Reservas.</p></details>
           </div>

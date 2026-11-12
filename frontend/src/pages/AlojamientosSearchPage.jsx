@@ -32,7 +32,6 @@ const HISTOGRAM_BARS = [
 const PRESUPUESTO_SIN_LIMITE = 250;
 
 const POPULAR_FILTER_LABELS = {
-  bathroom: 'Baño privado',
   kitchen: 'Cocina / zona de cocina',
   '5stars': '5 estrellas',
   spa: 'Spa y bienestar',
@@ -67,7 +66,15 @@ const POLICY_LABELS = {
   freecancel: 'Cancelación gratis',
 };
 
-const getPropPrice = (p) => {
+const getPropPrice = (p, noches = 1) => {
+  const disp = p?.disponibilidad;
+  const n = Number(disp?.nights) || Number(noches) || 1;
+  if (disp?.price_per_night != null && Number(disp.price_per_night) > 0) {
+    return Number(disp.price_per_night);
+  }
+  if (disp?.total_price != null && Number(disp.total_price) > 0) {
+    return Number(disp.total_price) / n;
+  }
   if (typeof p?.precio_por_noche === 'object' && p?.precio_por_noche?.total != null) {
     return Number(p.precio_por_noche.total);
   }
@@ -158,7 +165,6 @@ export function AlojamientosSearchPage() {
   const [selectedNeighbourhoods, setSelectedNeighbourhoods] = useState([]);
   const [selectedPolicies, setSelectedPolicies] = useState([]);
   const [bedroomsCount, setBedroomsCount] = useState(0);
-  const [bathroomsCount, setBathroomsCount] = useState(0);
 
   // Expanded toggles for long filter lists
   const [showAllFacilities, setShowAllFacilities] = useState(false);
@@ -371,7 +377,6 @@ export function AlojamientosSearchPage() {
     setSelectedNeighbourhoods([]);
     setSelectedPolicies([]);
     setBedroomsCount(0);
-    setBathroomsCount(0);
   };
 
   const hasActiveFilters = Boolean(
@@ -383,8 +388,7 @@ export function AlojamientosSearchPage() {
     minReviewScore !== null ||
     selectedNeighbourhoods.length > 0 ||
     selectedPolicies.length > 0 ||
-    bedroomsCount > 0 ||
-    bathroomsCount > 0
+    bedroomsCount > 0
   );
 
   // Dynamic filter counters computed from current properties list
@@ -411,7 +415,6 @@ export function AlojamientosSearchPage() {
       const polText = `${typeof p.politicas === 'string' ? p.politicas : JSON.stringify(p.politicas || {})} ${p.normas || ''}`.toLowerCase();
 
       // Popular
-      if ((Number(p.banos) || 0) >= 1 || ams.some((a) => a.includes('baño') || a.includes('bano'))) counts.popular.bathroom = (counts.popular.bathroom || 0) + 1;
       if (ams.some((a) => a.includes('cocina') || a.includes('kitchenette'))) counts.popular.kitchen = (counts.popular.kitchen || 0) + 1;
       if (stars === 5) counts.popular['5stars'] = (counts.popular['5stars'] || 0) + 1;
       if (ams.some((a) => a.includes('spa') || a.includes('bienestar'))) counts.popular.spa = (counts.popular.spa || 0) + 1;
@@ -468,9 +471,9 @@ export function AlojamientosSearchPage() {
   const filteredProperties = useMemo(() => {
     let result = [...properties];
 
-    // 1. Budget Filter
+    // 1. Budget Filter (por noche)
     if (maxBudget < PRESUPUESTO_SIN_LIMITE) {
-      result = result.filter((p) => getPropPrice(p) <= maxBudget);
+      result = result.filter((p) => getPropPrice(p, nightsCount) <= maxBudget);
     }
 
     // 2. Property Type Filter
@@ -507,7 +510,6 @@ export function AlojamientosSearchPage() {
         const name = (p.nombre || '').toLowerCase();
 
         return selectedPopular.every((pop) => {
-          if (pop === 'bathroom') return (Number(p.banos) || 0) >= 1 || ams.some((a) => a.includes('baño') || a.includes('bano'));
           if (pop === 'kitchen') return ams.some((a) => a.includes('cocina') || a.includes('kitchenette'));
           if (pop === '5stars') return stars === 5;
           if (pop === 'spa') return ams.some((a) => a.includes('spa') || a.includes('bienestar'));
@@ -559,12 +561,7 @@ export function AlojamientosSearchPage() {
       result = result.filter((p) => (Number(p.habitaciones) || 1) >= bedroomsCount);
     }
 
-    // 8. Bathrooms count stepper
-    if (bathroomsCount > 0) {
-      result = result.filter((p) => (Number(p.banos) || 1) >= bathroomsCount);
-    }
-
-    // 9. Neighbourhoods
+    // 8. Neighbourhoods
     if (selectedNeighbourhoods.length > 0) {
       result = result.filter((p) => {
         const loc = `${p.direccion || ''} ${p.ubicacion?.address || ''} ${p.ubicacion || ''} ${p.barrio || ''} ${p.nombre || ''} ${p.destino || ''}`.toLowerCase();
@@ -629,7 +626,6 @@ export function AlojamientosSearchPage() {
     selectedNeighbourhoods,
     selectedPolicies,
     bedroomsCount,
-    bathroomsCount,
     sortBy,
   ]);
 
@@ -890,26 +886,7 @@ export function AlojamientosSearchPage() {
       <div className="sr-main-container">
         {/* ================= LEFT SIDEBAR FILTERS ================= */}
         <aside className="sr-sidebar">
-          {/* 1. Map preview card */}
-          <div
-            className="sr-map-entry"
-            style={{
-              backgroundImage:
-                'url("https://maps.googleapis.com/maps/api/staticmap?size=264x150&center=-0.1838,-78.4919&zoom=13&scale=2&sensor=false")',
-              backgroundColor: '#e5e3df',
-            }}
-          >
-            <button
-              type="button"
-              className="sr-map-btn"
-              onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destination || 'Ecuador')}`, '_blank')}
-            >
-              <PinIcon size={18} color="currentColor" />
-              <span>Mostrar en el mapa</span>
-            </button>
-          </div>
-
-          {/* 2. Filters Box */}
+          {/* Filters Box */}
           <div className="sr-filters-box">
             <h2 className="sr-filters-heading">Filtrar por:</h2>
 
@@ -920,8 +897,13 @@ export function AlojamientosSearchPage() {
               </div>
               <div className="sr-price-inputs">
                 <span>US$5</span>
-                <span>US${maxBudget}{maxBudget >= PRESUPUESTO_SIN_LIMITE ? '+' : ''}</span>
+                <span>US${maxBudget}{maxBudget >= PRESUPUESTO_SIN_LIMITE ? '+' : ''} / noche</span>
               </div>
+              {nightsCount > 1 && maxBudget < PRESUPUESTO_SIN_LIMITE && (
+                <div style={{ fontSize: '0.74rem', color: '#595959', marginTop: '3px', textAlign: 'right' }}>
+                  Hasta US${maxBudget * nightsCount} total ({nightsCount} noches)
+                </div>
+              )}
 
               {/* Histogram bars */}
               <div className="sr-histogram-container">
@@ -1004,11 +986,11 @@ export function AlojamientosSearchPage() {
               ))}
             </div>
 
-            {/* Bedrooms and bathrooms stepper */}
+            {/* Bedrooms stepper */}
             <div className="sr-filter-group">
-              <div className="sr-filter-title">Habitaciones y baños</div>
+              <div className="sr-filter-title">Dormitorios</div>
               <div className="sr-stepper-filter-row">
-                <span className="sr-stepper-filter-label">Habitaciones</span>
+                <span className="sr-stepper-filter-label">Dormitorios</span>
                 <div className="sr-stepper-control">
                   <button
                     type="button"
@@ -1019,22 +1001,6 @@ export function AlojamientosSearchPage() {
                   </button>
                   <span>{bedroomsCount}</span>
                   <button type="button" onClick={() => setBedroomsCount((b) => b + 1)}>
-                    +
-                  </button>
-                </div>
-              </div>
-              <div className="sr-stepper-filter-row">
-                <span className="sr-stepper-filter-label">Baños</span>
-                <div className="sr-stepper-control">
-                  <button
-                    type="button"
-                    disabled={bathroomsCount <= 0}
-                    onClick={() => setBathroomsCount((b) => Math.max(0, b - 1))}
-                  >
-                    −
-                  </button>
-                  <span>{bathroomsCount}</span>
-                  <button type="button" onClick={() => setBathroomsCount((b) => b + 1)}>
                     +
                   </button>
                 </div>
@@ -1406,25 +1372,6 @@ export function AlojamientosSearchPage() {
                   <CloseIcon size={12} color="#0369a1" />
                 </span>
               )}
-              {bathroomsCount > 0 && (
-                <span
-                  style={{
-                    background: '#e0f2fe',
-                    color: '#0369a1',
-                    fontSize: '0.75rem',
-                    padding: '3px 8px',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                  onClick={() => setBathroomsCount(0)}
-                >
-                  <span>{bathroomsCount}+ baños</span>
-                  <CloseIcon size={12} color="#0369a1" />
-                </span>
-              )}
               <button
                 type="button"
                 onClick={resetAllFilters}
@@ -1507,8 +1454,12 @@ export function AlojamientosSearchPage() {
               // Precio y disponibilidad REALES del backend para estas fechas (por
               // habitación); se multiplica por las habitaciones pedidas.
               const disp = prop.disponibilidad;
-              const noches = disp?.nights || nightsCount;
-              const pricePerNight = Number(prop.precioPorNoche || prop.precio_noche || 45);
+              const noches = disp?.nights || nightsCount || 1;
+              const pricePerNight = disp?.price_per_night
+                ? Number(disp.price_per_night)
+                : (disp?.total_price && noches > 0
+                    ? Math.round((disp.total_price / noches) * 100) / 100
+                    : Number(prop.precioPorNoche || prop.precio_noche || 45));
               const totalPrice = disp
                 ? Math.round(disp.total_price * rooms * 100) / 100
                 : Math.round(pricePerNight * noches * rooms);
@@ -1595,6 +1546,11 @@ export function AlojamientosSearchPage() {
                       {/* Room & perks summary (Estilo Booking.com real: sin forzar camas individuales a nivel de hotel antes de ingresar) */}
                       <div className="sr-room-details">
                         <div className="sr-room-name">{nombreUnidad}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#595959', margin: '2px 0 6px 0', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span>{prop.habitaciones || 1} {Number(prop.habitaciones) === 1 ? 'habitación' : 'habitaciones'}</span>
+                          <span>·</span>
+                          <span>{prop.camas || 1} {Number(prop.camas) === 1 ? 'cama' : 'camas'}</span>
+                        </div>
 
                         <div className="sr-perks-list">
                           {tieneDesayuno && (
@@ -1658,6 +1614,11 @@ export function AlojamientosSearchPage() {
                       <span className="sr-final-price">
                         {currency} {convertPrice(totalPrice)}
                       </span>
+                      {noches > 1 && (
+                        <span style={{ fontSize: '0.82rem', color: '#595959', display: 'block', textAlign: 'right', marginTop: '2px' }}>
+                          {currency} {convertPrice(Math.round(totalPrice / (noches * rooms)))} por noche
+                        </span>
+                      )}
                       <span className="sr-taxes-note">
                         +{currency} {convertPrice(taxes)} de impuestos y cargos
                       </span>

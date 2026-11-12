@@ -126,6 +126,23 @@ export const extraerCamasNum = (v: unknown): number | null => {
   return match ? parseInt(match[0], 10) : null;
 };
 
+/** Extrae el número de baños de un número, string ("2 baños", "1.5 baths") o array. */
+export const extraerBanosNum = (v: unknown): number | null => {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v > 0 ? v : null;
+  if (typeof v === 'string') {
+    const match = v.match(/(\d+(?:\.\d+)?)\s*(?:baño|bano|bath|cuarto de baño)?/i);
+    if (match) {
+      const n = parseFloat(match[1]);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+  }
+  if (Array.isArray(v)) {
+    return v.length > 0 ? v.length : null;
+  }
+  return null;
+};
+
 /** Deduce una descripción de camas legible y precisa para hospitalidad (Booking.com style) */
 export function inferirDescripcionCamas(camasRaw: unknown, nombreTipo = '', capacidadAdultos: number | null = 2): string {
   // 1. Si ya viene una descripción textual detallada (ej. "2 camas individuales", "1 cama matrimonial y 2 camas individuales")
@@ -478,7 +495,8 @@ export class AlojamientosSociosService {
       habitaciones: num(h.habitaciones) ?? (tiposHabitacion?.length ? tiposHabitacion.reduce((acc: number, t: any) => acc + (t.cantidad || 1), 0) : 1),
       camas: extraerCamasNum(h.camas ?? h.numero_camas ?? h.numeroCamas ?? h.cantidad_camas) ?? (tiposHabitacion?.[0]?.camas ?? 1),
       descripcion_camas: inferirDescripcionCamas(h.camas ?? h.numero_camas ?? h.numeroCamas ?? h.cantidad_camas ?? tiposHabitacion?.[0]?.descripcion_camas, h.nombre, num(h.capacidadAdultos) ?? 2),
-      banos: num(h.banos) ?? 1,
+      banos: extraerBanosNum(h.banos ?? h.numeroBanos ?? h.numero_banos ?? h.cantidadBanos ?? h.cantidad_banos ?? h.bathrooms ?? h.baths ?? tiposHabitacion?.[0]?.banos)
+        ?? (amenidades.some((a) => /baño|bano|bath/i.test(a)) ? 1 : 1),
       tienePiscina: Boolean(h.tienePiscina) || amenidades.some((a) => /piscina|pool/i.test(a)),
       estrellas: num(h.estrellas),
       host: { id: nodo.codigoNodo, nombre: nodo.nombreProveedor },
@@ -642,6 +660,8 @@ export class AlojamientosSociosService {
         const rawCamas = t.camas ?? t.numero_camas ?? t.numeroCamas ?? t.cantidad_camas;
         const numCamas = extraerCamasNum(rawCamas) ?? 1;
         const descCamas = inferirDescripcionCamas(rawCamas ?? t.descripcionCamas ?? t.descripcion_camas, t.nombre, num(t.capacidadAdultos) ?? 2);
+        const rawBanos = t.banos ?? t.numeroBanos ?? t.numero_banos ?? t.cantidadBanos ?? t.bathrooms ?? t.baths;
+        const numBanos = extraerBanosNum(rawBanos) ?? (Array.isArray(t.amenidades) && t.amenidades.some((a: string) => /baño|bano|bath/i.test(a)) ? 1 : 1);
         return {
           id: codigo,
           codigo,
@@ -651,6 +671,7 @@ export class AlojamientosSociosService {
           capacidad_ninos: num(t.capacidadNinos) ?? 0,
           camas: numCamas,
           descripcion_camas: descCamas,
+          banos: numBanos,
           tamano_m2: num(t.tamanoM2 ?? t.metrosCuadrados),
           precio_noche: money(t.precioBaseNoche ?? t.precioPorNoche ?? plan?.precioBaseNoche) ?? 0,
           cantidad: num(t.habitacionesTotales ?? t.cantidad ?? t.cantidadDisponible) ?? 0,

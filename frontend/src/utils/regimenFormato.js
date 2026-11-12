@@ -30,3 +30,4 @@ export function formatearRegimen(plan) {
   }
   return raw;
 }
+
