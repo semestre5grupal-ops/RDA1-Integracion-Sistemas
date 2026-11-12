@@ -31,6 +31,7 @@ export const ESTADOS_RESERVA = {
   CONFIRMED: { texto: 'Confirmada', color: '#0d7a2f', fondo: '#e8f5ee' },
   TICKETED: { texto: 'Emitida', color: '#0d7a2f', fondo: '#e8f5ee' },
   CHECKED_IN: { texto: 'Check-in realizado', color: '#1d4ed8', fondo: '#eff6ff' },
+  CONFIRMADO_ASISTIDO: { texto: 'Check-in realizado', color: '#1d4ed8', fondo: '#eff6ff' },
   CANCELLED: { texto: 'Cancelada', color: '#b42318', fondo: '#fde7e5' },
   PENDING: { texto: 'Pendiente', color: '#9a5b00', fondo: '#fdf1dc' },
 };
