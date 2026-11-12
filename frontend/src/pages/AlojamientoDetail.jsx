@@ -6,6 +6,7 @@ import { API_BASE } from '../services/api';
 import { getAtracciones } from '../services/atraccionesApi';
 import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
+import { formatearRegimen } from '../utils/regimenFormato';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
 import { ReportModal } from '../components/ReportModal';
 
@@ -1167,7 +1168,7 @@ export function AlojamientoDetail() {
                       </td>
                       <td>
                         <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <CheckmarkIcon size={14} /> {p.meal_plan}
+                          <CheckmarkIcon size={14} /> {formatearRegimen(p.meal_plan)}
                         </div>
                         <div style={{ color: p.reembolsable === false ? '#d4111e' : (p.reembolsable ? '#008009' : '#595959'), fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                           {p.reembolsable ? <CheckmarkIcon size={14} /> : (p.reembolsable === false ? '✕' : null)} {p.cancellation_type || (p.reembolsable === false ? 'No reembolsable' : 'Cancelación gratis')}
@@ -1248,7 +1249,7 @@ export function AlojamientoDetail() {
                   </td>
                   <td>
                     <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <CheckmarkIcon size={14} /> {cotizacion?.producto?.meal_plan || 'Desayuno incluido'}
+                      <CheckmarkIcon size={14} /> {formatearRegimen(cotizacion?.producto?.meal_plan || 'Desayuno incluido')}
                     </div>
                     <div style={{ color: cotizacion?.producto?.reembolsable === false ? '#d4111e' : '#008009', fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       {cotizacion?.producto?.reembolsable !== false && <CheckmarkIcon size={14} />} {cotizacion?.producto?.cancellation_type || (cotizacion?.producto?.reembolsable === false ? 'No reembolsable' : 'Cancelación gratis')}

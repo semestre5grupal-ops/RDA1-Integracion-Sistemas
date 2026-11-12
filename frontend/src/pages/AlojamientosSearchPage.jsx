@@ -20,6 +20,7 @@ import {
 } from '../components/BookingIcons';
 import './AlojamientosSearchPage.css';
 import { fechaLocal } from '../utils/fechas';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 // Histogram bar heights to replicate Booking.com desktop distribution curve
 const HISTOGRAM_BARS = [
@@ -279,6 +280,7 @@ export function AlojamientosSearchPage() {
     if (typeParam) {
       setSelectedTypes([typeParam]);
     }
+    setProperties([]);
 
     const currentQuery = {
       destino: dest,
@@ -296,7 +298,7 @@ export function AlojamientosSearchPage() {
       if (isCancelled) return;
       await fetchResults(currentQuery, silent);
       if (!isCancelled) {
-        timer = setTimeout(() => runPoll(true), 8000);
+        timer = setTimeout(() => runPoll(true), 5000);
       }
     };
 
@@ -630,6 +632,10 @@ export function AlojamientosSearchPage() {
     bathroomsCount,
     sortBy,
   ]);
+
+  if (loading && properties.length === 0) {
+    return <AlojamientosLoadingView destino={destination} />;
+  }
 
   return (
     <main id="contenido-principal" className="sr-page-wrapper">

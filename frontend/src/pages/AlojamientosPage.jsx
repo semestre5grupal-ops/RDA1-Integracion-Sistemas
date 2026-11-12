@@ -387,7 +387,7 @@ export function AlojamientosPage() {
   }, [destination]);
 
   // Espera a que el usuario deje de escribir antes de consultar al servidor
-  // y mantiene sondeo silencioso en segundo plano cada 10 segundos
+  // y mantiene sondeo silencioso en segundo plano cada 5 segundos
   useEffect(() => {
     let timer = null;
     let isCancelled = false;
@@ -397,7 +397,7 @@ export function AlojamientosPage() {
         if (isCancelled) return;
         await fetchData(undefined, silent);
         if (!isCancelled) {
-          timer = setTimeout(() => runPoll(true), 10000);
+          timer = setTimeout(() => runPoll(true), 5000);
         }
       };
       runPoll(false);
