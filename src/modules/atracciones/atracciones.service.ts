@@ -3032,11 +3032,28 @@ export class AtraccionesService implements OnModuleInit {
     }
 
     if (reserva && reserva.status === 'CANCELLED') {
+      const existingCancelCode = reserva.cancelCode || `REF-ATR-${reserva.id.slice(0, 8).toUpperCase()}`;
+      const amount = Number(reserva.totalAmount || 55.0);
       return {
         reservation_id: reservationId,
         status: 'CANCELLED',
+        cancel_code: existingCancelCode,
+        reembolso_id: existingCancelCode,
+        monto_reembolsado: amount,
+        refund: {
+          refund_id: existingCancelCode,
+          refund_code: existingCancelCode,
+          status: 'PROCESSED',
+          amount,
+          currency: 'USD',
+          message: 'La reserva ya fue cancelada previamente. El reembolso ya fue emitido.',
+        },
+        stock_restoration: {
+          status: 'RESTORED',
+          restored_spots: reserva.ticketCount || 0,
+          message: 'Cupos reincorporados a la disponibilidad del operador local.',
+        },
         message: 'La reserva ya fue cancelada previamente. El reembolso ya fue emitido.',
-        cancel_code: reserva.cancelCode || `REF-ATR-${reserva.id}`,
       };
     }
 
@@ -3290,12 +3307,20 @@ export class AtraccionesService implements OnModuleInit {
       reservation_id: reservationId,
       status: 'CANCELLED',
       cancel_code: cancelCode,
+      reembolso_id: cancelCode,
+      monto_reembolsado: refundAmount,
       refund: {
+        refund_id: cancelCode,
+        refund_code: cancelCode,
         status: 'PROCESSED',
         amount: refundAmount,
         currency: 'USD',
-        refund_code: cancelCode,
         message: 'Reembolso del 100% procesado sin penalización conforme al contrato Saga.',
+      },
+      stock_restoration: {
+        status: 'RESTORED',
+        restored_spots: reserva?.ticketCount || 0,
+        message: 'Cupos reincorporados a la disponibilidad del operador local.',
       },
       message: 'Reserva cancelada exitosamente y cupos restituidos a la disponibilidad operativa.',
     };

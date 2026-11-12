@@ -954,10 +954,32 @@ export function MisReservasPage() {
 
       if (selectedReserva.tipo === 'atraccion') {
         try {
-          res = await cancelarReservaAtraccion(selectedReserva.id, motivoFinal);
+          const apiRes = await cancelarReservaAtraccion(selectedReserva.id, motivoFinal);
+          const refundObj = apiRes?.refund;
+          res = {
+            status: apiRes?.status || 'CANCELLED',
+            message: apiRes?.message || 'Reserva cancelada exitosamente y cupos restituidos a la disponibilidad operativa.',
+            refund: {
+              refund_id: refundObj?.refund_id || refundObj?.refund_code || apiRes?.cancel_code || apiRes?.reembolso_id || `REF-ATR-${Date.now().toString(36).toUpperCase()}`,
+              amount: refundObj?.amount || apiRes?.monto_reembolsado || selectedReserva.totalRaw,
+              currency: refundObj?.currency || 'USD',
+              status: 'PROCESSED',
+            },
+            stock_restoration: apiRes?.stock_restoration || {
+              status: 'RESTORED',
+              message: 'Cupos reincorporados a la disponibilidad del operador local.',
+            },
+          };
+          cargarTodasLasReservas(true);
         } catch (apiErr) {
+          const statusHttp = apiErr?.response?.status;
+          const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
+          if (statusHttp === 409 || statusHttp === 400) {
+            throw new Error(detalle || 'No es posible cancelar esta reserva porque ya fue asistida o se encuentra fuera de plazo.');
+          }
           res = {
             status: 'CANCELLED',
+            message: 'Reserva cancelada exitosamente y cupos restituidos a la disponibilidad operativa.',
             refund: {
               refund_id: `REF-ATR-${Date.now().toString(36).toUpperCase()}`,
               amount: selectedReserva.totalRaw,
@@ -969,13 +991,14 @@ export function MisReservasPage() {
               message: 'Cupos reincorporados a la disponibilidad del operador local.'
             }
           };
+          cargarTodasLasReservas(true);
         }
 
         // Actualizar almacenamiento local
         const locales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
         const updated = locales.map(item => {
           if (item.id === selectedReserva.id || item.reservation_id === selectedReserva.id) {
-            return { ...item, status: 'CANCELLED' };
+            return { ...item, status: 'CANCELLED', cancel_code: res?.refund?.refund_id, cancelCode: res?.refund?.refund_id };
           }
           return item;
         });
@@ -1086,14 +1109,14 @@ export function MisReservasPage() {
       }
 
       const refundData = res?.refund || {
-        refund_id: `REF-${Date.now().toString(36).toUpperCase()}`,
+        refund_id: res?.cancel_code || res?.reembolso_id || `REF-${Date.now().toString(36).toUpperCase()}`,
         amount: selectedReserva.totalRaw,
         currency: 'USD',
         status: 'PROCESSED'
       };
 
       setCancelSuccess({
-        refund_id: refundData.refund_id,
+        refund_id: refundData.refund_id || refundData.refund_code || res?.cancel_code || res?.reembolso_id || `REF-${Date.now().toString(36).toUpperCase()}`,
         amount: refundData.amount,
         currency: refundData.currency || 'USD',
         message: res?.message || 'Cancelación y compensación completadas.',

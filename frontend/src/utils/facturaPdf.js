@@ -288,6 +288,21 @@ export function construirFacturaPdf(reserva) {
     yExtra += 5;
   }
 
+  // Soporte canónico para cancelaciones compensadas en Atracciones / Alojamientos / Autos (RDA2)
+  const esCancelada = reserva.status === 'CANCELLED' || reserva.raw?.status === 'CANCELLED';
+  const refundId = reserva.cancelCode || reserva.reembolso_id || reserva.raw?.cancel_code || reserva.raw?.cancelCode || reserva.raw?.reembolso_id;
+  if ((!fac?.notasCredito || fac.notasCredito.length === 0) && (esCancelada || refundId)) {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(180, 20, 20);
+    doc.text(sanear('COMPROBANTE ANULADO POR CANCELACION / REVERSION SAGA'), 17, yExtra);
+    yExtra += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    const idNotaCredito = refundId || `REF-${reserva.tipo === 'atraccion' ? 'ATR' : reserva.tipo === 'auto' ? 'AUTO' : 'GEN'}-${pnr}`;
+    doc.text(sanear(`Nota de crédito ${idNotaCredito}: -${total.toFixed(2)} USD (Reembolso 100% procesado)`), 17, yExtra);
+    yExtra += 5;
+  }
+
   return doc;
 }
 
