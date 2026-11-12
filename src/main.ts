@@ -93,14 +93,23 @@ async function bootstrap() {
   // activarlo, el navegador exige que `origin` sea un valor EXACTO (nunca `*`),
   // por eso se mantiene la lista de origenes concreta en lugar de un comodin.
   app.enableCors({
-    origin: [
-      /^http:\/\/localhost:\d+$/,
-      /^http:\/\/127\.0\.0\.1:\d+$/,
-      /^https:\/\/.*\.vercel\.app$/,
-      /^https:\/\/.*\.onrender\.com$/
-    ],
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = [
+        /^http:\/\/localhost:\d+$/,
+        /^http:\/\/127\.0\.0\.1:\d+$/,
+        /^https:\/\/.*\.vercel\.app$/,
+        /^https:\/\/.*\.onrender\.com$/,
+        /^https:\/\/.*\.azurewebsites\.net$/,
+      ];
+      if (allowed.some((regex) => regex.test(origin)) || origin === 'https://rda1-api.onrender.com') {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
     allowedHeaders: [
+      '*',
       'Content-Type',
       'Authorization',
       'idempotency-key',
@@ -111,11 +120,16 @@ async function bootstrap() {
       'node_id',
       'x-device-fingerprint',
       'X-Device-Fingerprint',
-      // API key de los sistemas de proveedores (sincronización de alojamientos).
       'x-api-key',
       'X-Api-Key',
       'x-webhook-signature',
       'X-Webhook-Signature',
+      'x-admin-key',
+      'X-Admin-Key',
+      'x-role',
+      'X-Role',
+      'apikey',
+      'X-Client-Info',
     ],
     exposedHeaders: ['X-Correlation-Id', 'traceparent', 'node_id', 'Idempotent-Replayed'],
     credentials: true,

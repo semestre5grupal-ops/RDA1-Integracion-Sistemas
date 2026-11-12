@@ -96,6 +96,7 @@ export function AlojamientosSearchPage() {
   const [viewMode, setViewMode] = useState('list');
   const [sortBy, setSortBy] = useState('popularity');
   const [wishlist, setWishlist] = useState(new Set());
+  const isFetchingRef = useRef(false);
 
   // Filter States
   // El extremo derecho del control ("US$250+") significa SIN LÍMITE, como en Booking.
@@ -146,9 +147,13 @@ export function AlojamientosSearchPage() {
   }, [checkin, checkout]);
 
   // Fetch properties from backend API
-  const fetchResults = async (params) => {
-    setLoading(true);
-    setError(null);
+  const fetchResults = async (params, isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    if (!isSilent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const destQuery = params?.destino || (typeof params === 'string' ? params : destination);
       const cIn = params?.checkin || checkin;
@@ -167,19 +172,48 @@ export function AlojamientosSearchPage() {
       });
 
       const items = res.data || res;
-      setProperties(Array.isArray(items) ? items : []);
+      const list = Array.isArray(items) ? items : [];
+      setProperties((prev) => {
+        if (prev && prev.length === list.length) {
+          let hasDiff = false;
+          for (let i = 0; i < list.length; i++) {
+            const p = prev[i];
+            const n = list[i];
+            const pId = p.id || p.alojamiento_id || p._id;
+            const nId = n.id || n.alojamiento_id || n._id;
+            const pPrice = typeof p.precio_por_noche === 'object' ? p.precio_por_noche?.total : (p.precio_por_noche || p.precio_noche || p.price);
+            const nPrice = typeof n.precio_por_noche === 'object' ? n.precio_por_noche?.total : (n.precio_por_noche || n.precio_noche || n.price);
+            const pStock = p.habitaciones_disponibles || p.cupos || p.disponibilidad;
+            const nStock = n.habitaciones_disponibles || n.cupos || n.disponibilidad;
+            if (pId !== nId || pPrice !== nPrice || pStock !== nStock || (p.nombre || p.name) !== (n.nombre || n.name)) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+        return list;
+      });
+      if (isSilent) setError(null);
     } catch (err) {
       // Fallback to general list
       try {
         const destQuery = params?.destino || (typeof params === 'string' ? params : destination);
         const fallback = await getAlojamientos({ limit: 25, destino: destQuery });
         const items = fallback.data || fallback;
-        setProperties(Array.isArray(items) ? items : []);
+        const list = Array.isArray(items) ? items : [];
+        setProperties(list);
       } catch (e) {
-        setError('Error al conectar con el servidor.');
+        console.warn('[AlojamientosSearchPage] Error transitorio en refresco silencioso:', err?.message || err);
+        if (!isSilent) {
+          setError('Error al conectar con el servidor.');
+        }
       }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!isSilent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -202,14 +236,32 @@ export function AlojamientosSearchPage() {
       setSelectedTypes([typeParam]);
     }
 
-    fetchResults({
+    const currentQuery = {
       destino: dest,
       checkin: cin,
       checkout: cout,
       adultos: ad,
       ninos: ch,
       habitaciones: rm,
-    });
+    };
+
+    let timer = null;
+    let isCancelled = false;
+
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      await fetchResults(currentQuery, silent);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 8000);
+      }
+    };
+
+    runPoll(false);
+
+    return () => {
+      isCancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [searchParams]);
 
   // Handle Search Submission

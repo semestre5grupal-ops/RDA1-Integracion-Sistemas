@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { getAtracciones } from '../services/atraccionesApi';
 import { api } from '../services/api';
@@ -42,23 +42,79 @@ export function AtraccionesSearchPage() {
     fetchArbol();
   }, []);
 
-  const fetchData = useCallback(async (query) => {
-    setLoading(true);
-    setError(null);
+  const isFetchingRef = useRef(false);
+
+  const fetchData = useCallback(async (query, isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    if (!isSilent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const result = await getAtracciones({ page: 1, limit: 100 });
       let items = result.data || result;
       if (!Array.isArray(items)) items = [];
-      setAtracciones(items);
+      setAtracciones((prev) => {
+        if (prev && prev.length === items.length) {
+          let hasDiff = false;
+          for (let i = 0; i < items.length; i++) {
+            const p = prev[i];
+            const n = items[i];
+            const pId = p.id || p._id || p.atraccion_id;
+            const nId = n.id || n._id || n.atraccion_id;
+            const pPrice = typeof p.price === 'object' ? p.price?.total : (p.precio || p.price);
+            const nPrice = typeof n.price === 'object' ? n.price?.total : (n.precio || n.price);
+            const pStock = p.cupos || p.cupos_disponibles || p.stock;
+            const nStock = n.cupos || n.cupos_disponibles || n.stock;
+            if (
+              pId !== nId ||
+              pPrice !== nPrice ||
+              pStock !== nStock ||
+              (p.nombre || p.name) !== (n.nombre || n.name) ||
+              (p.ciudad || p.city) !== (n.ciudad || n.city)
+            ) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+        return items;
+      });
+      if (isSilent) setError(null);
     } catch (err) {
-      setError('Error al cargar atracciones.');
+      console.warn('[AtraccionesSearchPage] Error transitorio en refresco silencioso:', err?.message || err);
+      if (!isSilent) {
+        setError('Error al cargar atracciones.');
+      }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!isSilent) {
+        setLoading(false);
+      }
     }
   }, []);
 
+  // Polling silencioso en segundo plano cada 8 segundos
   useEffect(() => {
-    fetchData(destinoOriginal);
+    let timer = null;
+    let isCancelled = false;
+
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      await fetchData(destinoOriginal, silent);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 8000);
+      }
+    };
+
+    runPoll(false);
+
+    return () => {
+      isCancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [fetchData, destinoOriginal]);
 
   const handleSearch = () => {

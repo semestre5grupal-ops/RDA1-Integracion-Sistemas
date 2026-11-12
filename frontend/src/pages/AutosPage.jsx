@@ -202,6 +202,7 @@ export function AutosPage() {
     setShowSuggestions(false);
     // Scroll to top (form) and trigger search
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    shouldScrollRef.current = true;
     setTimeout(() => {
       fetchData();
     }, 400);
@@ -216,9 +217,16 @@ export function AutosPage() {
     return diffDays > 0 ? diffDays : 1;
   };
 
-  const fetchData = useCallback(async (catOverride = null, transOverride = null) => {
-    setLoading(true);
-    setError(null);
+  const isFetchingRef = useRef(false);
+  const shouldScrollRef = useRef(false);
+
+  const fetchData = useCallback(async (catOverride = null, transOverride = null, isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    if (!isSilent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const cat = catOverride !== null ? catOverride : selectedCategory;
       const trans = transOverride !== null ? transOverride : selectedTransmission;
@@ -265,22 +273,72 @@ export function AutosPage() {
           });
         }
       }
-      setAutos(fetchedCars);
+
+      setAutos((prev) => {
+        if (prev && prev.length === fetchedCars.length) {
+          let hasDiff = false;
+          for (let i = 0; i < fetchedCars.length; i++) {
+            const p = prev[i];
+            const n = fetchedCars[i];
+            const pId = p.id || p.auto_id || p.vehiculo_id;
+            const nId = n.id || n.auto_id || n.vehiculo_id;
+            const pEstado = p.estado || p.status;
+            const nEstado = n.estado || n.status;
+            const pPrice = typeof p.precio_por_dia === 'object' ? p.precio_por_dia?.total : (p.precio_por_dia || p.price);
+            const nPrice = typeof n.precio_por_dia === 'object' ? n.precio_por_dia?.total : (n.precio_por_dia || n.price);
+            if (pId !== nId || pEstado !== nEstado || pPrice !== nPrice) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+        return fetchedCars;
+      });
       setMetadata(result.metadata || null);
+      if (isSilent) setError(null);
     } catch (err) {
-      console.error('Error al consultar autos:', err);
-      setError('No se pudo conectar con el servicio de autos o los filtros no arrojaron resultados.');
+      console.warn('[AutosPage] Error transitorio en refresco silencioso de autos:', err?.message || err);
+      if (!isSilent) {
+        setError('No se pudo conectar con el servicio de autos o los filtros no arrojaron resultados.');
+      }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!isSilent) {
+        setLoading(false);
+      }
       setHasSearched(true);
+      if (shouldScrollRef.current) {
+        shouldScrollRef.current = false;
+        setTimeout(() => {
+          if (resultsRef.current) {
+            resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 100);
+      }
     }
   }, [pickupLocation, dropoffLocation, sameDropoff, startDate, endDate, pickupTime, dropoffTime, driverAge, customAge, selectedCategory, selectedTransmission]);
 
+  // Carga inicial y polling en segundo plano cada 8 segundos (RDA2 Tiempo Real)
   useEffect(() => {
-    if (hasSearched && !loading && resultsRef.current) {
-      resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [hasSearched, loading]);
+    let timer = null;
+    let isCancelled = false;
+
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      await fetchData(null, null, silent);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 8000);
+      }
+    };
+
+    runPoll(false);
+
+    return () => {
+      isCancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchData]);
 
   const timeOptions = [];
   for(let i=0; i<24; i++) {
@@ -331,6 +389,7 @@ export function AutosPage() {
     }
     
     setFormError('');
+    shouldScrollRef.current = true;
     fetchData();
   };
 
