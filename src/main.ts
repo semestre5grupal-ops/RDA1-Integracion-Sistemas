@@ -17,7 +17,6 @@ import { TraceContextInterceptor } from './core/tracing/trace-context.intercepto
 import { TraceContextService } from './core/tracing/trace-context.service';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import * as path from 'path';
-import compression = require('compression');
 import * as fs from 'fs';
 
 /**
@@ -60,9 +59,14 @@ async function bootstrap() {
     { bodyParser: false },
   );
 
-  // Respuestas comprimidas (gzip) cuando el cliente lo acepta: la búsqueda de
-  // vuelos baja de ~47 KB a ~6 KB y los listados del admin igual.
-  app.use(compression({ threshold: 1024 }));
+  // Respuestas comprimidas (gzip) si el módulo se encuentra disponible
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const compression = require('compression');
+    if (typeof compression === 'function') {
+      app.use(compression({ threshold: 1024 }));
+    }
+  } catch (_) {}
 
   app.use((req: any, res: any, next: any) => {
     const correlationId =
