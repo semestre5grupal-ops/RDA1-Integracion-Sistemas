@@ -660,9 +660,20 @@ export class AlojamientosSociosService {
 
   /** Mismo formato que `AlojamientosService.getAvailability` (GET /{id}/availability). */
   disponibilidadBooking(idCompuesto: string, checkin: string, checkout: string, opciones: OpcionSocio[]) {
-    // Un tipo con varios planes comparte el cupo: se cuenta una vez por tipo.
+    // Un tipo con varios planes comparte el cupo: se cuenta una vez por tipo físico de habitación.
+    // Si el socio devuelve varios planes tarifarios de la misma habitación (p. ej. solo alojamiento
+    // vs con desayuno), ambos reflejan el MISMO inventario disponible y no deben sumarse.
     const porTipo = new Map<string, OpcionSocio>();
-    for (const o of opciones) if (!porTipo.has(o.codigo)) porTipo.set(o.codigo, o);
+    for (const o of opciones) {
+      const codBase = (o.codigo ? o.codigo.split('@')[0].trim().toLowerCase() : '');
+      const nombreNorm = (o.nombre || '').trim().toLowerCase();
+      const existente = [...porTipo.entries()].find(([k, v]) =>
+        (codBase && k === codBase) || (nombreNorm && (v.nombre || '').trim().toLowerCase() === nombreNorm)
+      );
+      if (!existente) {
+        porTipo.set(codBase || nombreNorm || o.codigo, { ...o });
+      }
+    }
     const tipos = [...porTipo.values()].map((o) => {
       const total = Math.max(o.totalHabitaciones ?? o.remanentes, o.remanentes);
       return {

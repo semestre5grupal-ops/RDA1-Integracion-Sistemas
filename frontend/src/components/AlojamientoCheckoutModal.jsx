@@ -62,10 +62,10 @@ export function AlojamientoCheckoutModal({
   edadesNinos = [],
   // Tipo de habitación elegido en la ficha (producto de /availability).
   tipoHabitacion = null,
-  nightsCount = 6,
-  originalPrice = 257.40,
-  totalPrice = 205.92,
-  taxes = 50.89,
+  nightsCount = 1,
+  originalPrice = 0,
+  totalPrice = 0,
+  taxes = 0,
   currency = 'USD',
   convertPrice = (p) => p,
   user = null,
@@ -156,11 +156,12 @@ export function AlojamientoCheckoutModal({
   const discountAmount = Math.max(0, originalPrice - totalPrice);
   const cancellationCost = Math.round(totalPrice * 0.5 * 100) / 100;
   const ivaAmount = Math.round(totalPrice * 0.15 * 100) / 100;
-  const cleaningFee = Math.max(0, Math.round((taxes - ivaAmount) * 100) / 100) || 20.00;
+  const cleaningFee = Math.max(0, Math.round((taxes - ivaAmount) * 100) / 100);
 
   // Safe hotel address formatting (handles string, object with address/city/country)
   const hotelAddress = useMemo(() => {
-    if (!alojamiento?.ubicacion) return 'Quito, Ecuador';
+    const fallbackDest = alojamiento?.destino || 'Quito, Ecuador';
+    if (!alojamiento?.ubicacion) return fallbackDest;
     if (typeof alojamiento.ubicacion === 'string') return alojamiento.ubicacion;
     if (typeof alojamiento.ubicacion === 'object') {
       const parts = [
@@ -168,10 +169,10 @@ export function AlojamientoCheckoutModal({
         alojamiento.ubicacion.city,
         alojamiento.ubicacion.country,
       ].filter(Boolean);
-      return parts.length > 0 ? parts.join(', ') : 'Quito, Ecuador';
+      return parts.length > 0 ? parts.join(', ') : fallbackDest;
     }
-    return 'Quito, Ecuador';
-  }, [alojamiento?.ubicacion]);
+    return fallbackDest;
+  }, [alojamiento?.ubicacion, alojamiento?.destino]);
 
   // Paso 1 → paso 2 (pago)
   const handleAvanzarPaso2 = (e) => {
@@ -659,7 +660,7 @@ export function AlojamientoCheckoutModal({
                 PIN de seguridad
               </span>
               <div style={{ fontSize: '18px', fontWeight: 700, color: '#334155' }}>
-                8492
+                {bookingConfirmed.pin || String(Math.abs(String(bookingConfirmed.reservationId || bookingConfirmed.id).split('').reduce((acc, c) => acc * 31 + c.charCodeAt(0), 7)) % 9000 + 1000)}
               </div>
             </div>
           </div>
@@ -683,7 +684,11 @@ export function AlojamientoCheckoutModal({
             </div>
             <div className="bkg-confirmed-detail-item">
               <strong>Estancia</strong>
-              <span>{nightsCount} noches, {rooms} habitación</span>
+              <span>
+                {nightsCount} {nightsCount === 1 ? 'noche' : 'noches'}, {rooms} {Number(rooms) === 1
+                  ? (alojamiento?.tipo_propiedad === 'APARTAMENTO' ? 'apartamento' : 'habitación')
+                  : (alojamiento?.tipo_propiedad === 'APARTAMENTO' ? 'apartamentos' : 'habitaciones')}
+              </span>
             </div>
             <div className="bkg-confirmed-detail-item">
               <strong>Total</strong>
@@ -722,41 +727,69 @@ export function AlojamientoCheckoutModal({
             {/* HOTEL DETAILS CARD */}
             <div className="bkg-card">
               <img
-                src={alojamiento.fotos?.[0] || 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600'}
+                src={alojamiento.fotos?.[0] || alojamiento.photos?.[0]?.url || 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600'}
                 alt={alojamiento.nombre}
                 className="bkg-hotel-card-thumb"
               />
-              <div className="bkg-hotel-stars">
-                <StarFilledIcon size={14} color="#febb02" />
-                <StarFilledIcon size={14} color="#febb02" />
-                <StarFilledIcon size={14} color="#febb02" />
-                <span style={{ background: '#febb02', color: '#1a1a1a', fontSize: '10px', padding: '2px 5px', borderRadius: '2px', display: 'inline-flex', alignItems: 'center', gap: '2px', fontWeight: 700, marginLeft: '4px' }}>
-                  <ThumbsUpIcon size={11} color="#1a1a1a" />
-                </span>
-              </div>
+              {Number(alojamiento.estrellas) > 0 && (
+                <div className="bkg-hotel-stars">
+                  {Array.from({ length: Math.min(5, Math.max(1, parseInt(alojamiento.estrellas, 10) || 1)) }).map((_, i) => (
+                    <StarFilledIcon key={i} size={14} color="#febb02" />
+                  ))}
+                  {(Number(alojamiento.ratings?.score) >= 8.5 || Number(alojamiento.estrellas) >= 4) && (
+                    <span style={{ background: '#febb02', color: '#1a1a1a', fontSize: '10px', padding: '2px 5px', borderRadius: '2px', display: 'inline-flex', alignItems: 'center', gap: '2px', fontWeight: 700, marginLeft: '4px' }} title="Programa Preferente de Calidad">
+                      <ThumbsUpIcon size={11} color="#1a1a1a" />
+                    </span>
+                  )}
+                </div>
+              )}
               <h3 className="bkg-hotel-name">{alojamiento.nombre}</h3>
               <p className="bkg-hotel-address">{hotelAddress}</p>
-              <div className="bkg-hotel-location-score">Excelente ubicación — 9.5</div>
+              {alojamiento.ratings?.ubicacion ? (
+                <div className="bkg-hotel-location-score">
+                  {Number(alojamiento.ratings.ubicacion) >= 9 ? 'Excelente ubicación' : 'Muy buena ubicación'} — {alojamiento.ratings.ubicacion}
+                </div>
+              ) : alojamiento.ubicacion ? (
+                <div className="bkg-hotel-location-score">
+                  Ubicación valorada por los clientes
+                </div>
+              ) : null}
 
-              <div className="bkg-score-badge-row">
-                <span className="bkg-score-badge">8.6</span>
-                <span className="bkg-score-text"><strong>Fabuloso</strong> · 820 comentarios</span>
-              </div>
+              {(() => {
+                const scoreNum = Number(alojamiento.ratings?.score ?? alojamiento.calificacion);
+                const tieneScore = Number.isFinite(scoreNum) && scoreNum > 0;
+                const reviews = Number(alojamiento.ratings?.number_of_reviews ?? 0);
+                if (!tieneScore) return null;
+                const scoreLabel = scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Fabuloso' : scoreNum >= 7 ? 'Muy bien' : 'Aceptable';
+                return (
+                  <div className="bkg-score-badge-row">
+                    <span className="bkg-score-badge">{scoreNum.toFixed(1)}</span>
+                    <span className="bkg-score-text">
+                      <strong>{scoreLabel}</strong>
+                      {reviews > 0 ? ` · ${reviews} ${reviews === 1 ? 'comentario' : 'comentarios'}` : ''}
+                    </span>
+                  </div>
+                );
+              })()}
 
-              <div className="bkg-amenities-tags">
-                <span className="bkg-amenity-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  <PetsIcon size={13} color="#4b5563" /> Se admiten mascotas
-                </span>
-                <span className="bkg-amenity-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  <WifiIcon size={13} color="#4b5563" /> WiFi gratis
-                </span>
-                <span className="bkg-amenity-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  <AirportShuttleIcon size={13} color="#4b5563" /> Traslado aeropuerto
-                </span>
-                <span className="bkg-amenity-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  <ParkingIcon size={13} color="#4b5563" /> Estacionamiento
-                </span>
-              </div>
+              {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
+                <div className="bkg-amenities-tags">
+                  {alojamiento.amenidades.slice(0, 4).map((amenidad, idx) => {
+                    const am = amenidad.toLowerCase();
+                    let IconComponent = CheckmarkIcon;
+                    if (am.includes('wifi') || am.includes('internet')) IconComponent = WifiIcon;
+                    else if (am.includes('mascota') || am.includes('pet')) IconComponent = PetsIcon;
+                    else if (am.includes('traslado') || am.includes('aeropuerto') || am.includes('shuttle')) IconComponent = AirportShuttleIcon;
+                    else if (am.includes('estacionamiento') || am.includes('parking') || am.includes('parqueadero')) IconComponent = ParkingIcon;
+
+                    return (
+                      <span key={idx} className="bkg-amenity-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <IconComponent size={13} color="#4b5563" /> {amenidad}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* YOUR BOOKING DETAILS */}
@@ -767,10 +800,12 @@ export function AlojamientoCheckoutModal({
                   <div className="bkg-date-col-label">Entrada</div>
                   <div className="bkg-date-col-value">{formatearFecha(checkin)}</div>
                   <div className="bkg-date-col-hours">A partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}</div>
-                  <div className="bkg-today-tag">
-                    <ClockIcon size={13} color="#d4111e" />
-                    <span>El check-in es hoy</span>
-                  </div>
+                  {checkin === new Date().toISOString().slice(0, 10) && (
+                    <div className="bkg-today-tag">
+                      <ClockIcon size={13} color="#d4111e" />
+                      <span>El check-in es hoy</span>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <div className="bkg-date-col-label">Salida</div>
@@ -780,9 +815,15 @@ export function AlojamientoCheckoutModal({
               </div>
 
               <div className="bkg-total-stay-text">
-                Duración total de la estancia: <strong>{nightsCount} noches</strong>
+                Duración total de la estancia: <strong>{nightsCount} {nightsCount === 1 ? 'noche' : 'noches'}</strong>
                 <br />
-                <strong>{rooms} apartamento para {adults} adultos</strong>
+                <strong>
+                  {rooms} {Number(rooms) === 1
+                    ? (alojamiento?.tipo_propiedad === 'APARTAMENTO' ? 'apartamento' : 'habitación')
+                    : (alojamiento?.tipo_propiedad === 'APARTAMENTO' ? 'apartamentos' : 'habitaciones')}
+                  {tipoHabitacion?.room_name ? ` (${tipoHabitacion.room_name})` : ''} para {adults} {Number(adults) === 1 ? 'adulto' : 'adultos'}
+                  {Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
+                </strong>
               </div>
 
               {step === 1 && (
@@ -806,7 +847,7 @@ export function AlojamientoCheckoutModal({
               </div>
               {discountAmount > 0 && (
                 <div className="bkg-price-row discount">
-                  <span>Escapada de fin de año / Late Escape Deal</span>
+                  <span>Descuento promocional</span>
                   <span>- {currency} {convertPrice(discountAmount)}</span>
                 </div>
               )}
@@ -837,10 +878,12 @@ export function AlojamientoCheckoutModal({
                       <span>15% IVA</span>
                       <span>{currency} {convertPrice(ivaAmount)}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Tarifa de limpieza</span>
-                      <span>{currency} {convertPrice(cleaningFee)}</span>
-                    </div>
+                    {cleaningFee > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Tarifa de limpieza / servicio</span>
+                        <span>{currency} {convertPrice(cleaningFee)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -890,14 +933,20 @@ export function AlojamientoCheckoutModal({
               </div>
             )}
 
-            {/* LIMITED SUPPLY ALERT */}
-            <div className="bkg-urgency-card">
-              <ClockIcon size={20} color="#991b1b" />
-              <div>
-                <h5>Poca disponibilidad para tus fechas:</h5>
-                <p>226 apartamentos como este ya no están disponibles en nuestra web.</p>
+            {/* LIMITED SUPPLY ALERT: solo si realmente quedan pocas habitaciones del tipo o del hotel */}
+            {(tipoHabitacion?.available_rooms <= 3 || alojamiento?.habitaciones <= 3) && (
+              <div className="bkg-urgency-card">
+                <ClockIcon size={20} color="#991b1b" />
+                <div>
+                  <h5>Poca disponibilidad para tus fechas:</h5>
+                  <p>
+                    {tipoHabitacion?.available_rooms
+                      ? `¡Solo quedan ${tipoHabitacion.available_rooms} habitaciones de este tipo en nuestra web!`
+                      : '¡Quedan pocas unidades disponibles para estas fechas!'}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </aside>
 
           {/* ==================== RIGHT MAIN COLUMN ==================== */}
@@ -1166,12 +1215,19 @@ export function AlojamientoCheckoutModal({
                           <CheckmarkIcon size={14} color="#008009" /> {tipoHabitacion.meal_plan}
                         </span>
                       )}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <CheckmarkIcon size={14} color="#008009" /> WiFi gratis
-                      </span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <CheckmarkIcon size={14} color="#008009" /> No se puede fumar
-                      </span>
+                      {Array.isArray(tipoHabitacion?.amenidades) && tipoHabitacion.amenidades.length > 0 ? (
+                        tipoHabitacion.amenidades.slice(0, 3).map((a, i) => (
+                          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckmarkIcon size={14} color="#008009" /> {a}
+                          </span>
+                        ))
+                      ) : (
+                        Array.isArray(alojamiento?.amenidades) && alojamiento.amenidades.some((a) => /wifi/i.test(a)) && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckmarkIcon size={14} color="#008009" /> WiFi gratis
+                          </span>
+                        )
+                      )}
                     </div>
                   </div>
                   <div className="bkg-input-group" style={{ marginBottom: 0 }}>
