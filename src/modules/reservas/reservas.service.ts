@@ -362,62 +362,85 @@ export class ReservasService {
       throw new HttpException(`No se encontró ninguna reserva activa de alojamiento para la referencia '${targetId}'.`, HttpStatus.NOT_FOUND);
     }
 
-    // 1. Intentar actualizar en Atracciones
-    const atrUpdate = verticalActualizada ? [] : await this.dataSource.query(
-      `UPDATE schema_atracciones.atracciones_reservas 
-       SET status = 'CONFIRMADO_ASISTIDO', 
-           checkin_at = NOW(),
-           guia_oficial_asignado = COALESCE($2, guia_oficial_asignado),
-           updated_at = NOW()
-       WHERE id = $1 
-          OR voucher_qr_payload LIKE '%' || $1 || '%' 
-          OR idempotency_key = $1
-          OR cancel_code = $1
-          OR document_id = $1
-          OR customer_email = $1
-          OR ($3::text IS NOT NULL AND document_id = $3::text)
-       RETURNING *`,
-      [targetId, adminId, docId],
-    );
+    // Helper para desempaquetar resultados de UPDATE ... RETURNING en TypeORM / pg
+    // TypeORM en PostgreSQL retorna una tupla [ rows, rowCount ]. Si no hay filas afectadas, retorna [ [], 0 ].
+    const extraerFilasUpdate = (rawResult: any): any[] => {
+      if (!rawResult) return [];
+      if (Array.isArray(rawResult)) {
+        if (Array.isArray(rawResult[0])) return rawResult[0];
+        if (rawResult.length === 2 && Array.isArray(rawResult[0]) && typeof rawResult[1] === 'number') {
+          return rawResult[0];
+        }
+        if (rawResult.length > 0 && typeof rawResult[0] === 'object' && !Array.isArray(rawResult[0])) {
+          return rawResult;
+        }
+      }
+      return [];
+    };
 
-    if (atrUpdate && atrUpdate.length > 0) {
-      verticalActualizada = 'ATRACCIONES';
-      reservaActualizada = atrUpdate[0];
+    // 1. Intentar actualizar en Atracciones
+    if (!verticalActualizada) {
+      try {
+        const rawAtr = await this.dataSource.query(
+          `UPDATE schema_atracciones.atracciones_reservas 
+           SET status = 'CONFIRMADO_ASISTIDO', 
+               checkin_at = NOW(),
+               guia_oficial_asignado = COALESCE($2, guia_oficial_asignado),
+               updated_at = NOW()
+           WHERE id = $1 
+              OR voucher_qr_payload LIKE '%' || $1 || '%' 
+              OR idempotency_key = $1
+              OR cancel_code = $1
+              OR document_id = $1
+              OR customer_email = $1
+              OR ($3::text IS NOT NULL AND document_id = $3::text)
+           RETURNING *`,
+          [targetId, adminId, docId],
+        );
+        const atrFilas = extraerFilasUpdate(rawAtr);
+        if (atrFilas.length > 0) {
+          verticalActualizada = 'ATRACCIONES';
+          reservaActualizada = atrFilas[0];
+        }
+      } catch (_) {}
     }
 
     // 2. Si no fue en atracciones, intentar en Autos
     if (!verticalActualizada) {
-      const autUpdate = await this.dataSource.query(
-        `UPDATE schema_autos.autos_reservas 
-         SET estado = 'CONFIRMADO_ASISTIDO'
-         WHERE id = $1 
-            OR UPPER(id) = UPPER($1)
-            OR idempotency_key = $1
-            OR licencia_conducir = $1
-            OR ($2::text IS NOT NULL AND licencia_conducir = $2::text)
-         RETURNING *`,
-        [targetId, docId],
-      );
-
-      if (autUpdate && autUpdate.length > 0) {
-        verticalActualizada = 'AUTOS';
-        reservaActualizada = autUpdate[0];
-      }
+      try {
+        const rawAut = await this.dataSource.query(
+          `UPDATE schema_autos.autos_reservas 
+           SET estado = 'CONFIRMADO_ASISTIDO'
+           WHERE id = $1 
+              OR UPPER(id) = UPPER($1)
+              OR idempotency_key = $1
+              OR licencia_conducir = $1
+              OR ($2::text IS NOT NULL AND licencia_conducir = $2::text)
+           RETURNING *`,
+          [targetId, docId],
+        );
+        const autFilas = extraerFilasUpdate(rawAut);
+        if (autFilas.length > 0) {
+          verticalActualizada = 'AUTOS';
+          reservaActualizada = autFilas[0];
+        }
+      } catch (_) {}
     }
 
     // 3. Si no, en Vuelos
     if (!verticalActualizada) {
       try {
-        const vueUpdate = await this.dataSource.query(
+        const rawVue = await this.dataSource.query(
           `UPDATE schema_vuelos.vuelos_reservas 
            SET estado = 'CONFIRMADO_ASISTIDO'
            WHERE id::text = $1 OR codigo_reserva = $1
            RETURNING *`,
           [targetId],
         );
-        if (vueUpdate && vueUpdate.length > 0) {
+        const vueFilas = extraerFilasUpdate(rawVue);
+        if (vueFilas.length > 0) {
           verticalActualizada = 'VUELOS';
-          reservaActualizada = vueUpdate[0];
+          reservaActualizada = vueFilas[0];
         }
       } catch (_) {}
     }
@@ -426,7 +449,7 @@ export class ReservasService {
     // aerolínea manda su bookingId o el PNR; en Booking es booking_id_socio.
     if (!verticalActualizada) {
       try {
-        const socioUpdate = await this.dataSource.query(
+        const rawSocio = await this.dataSource.query(
           `UPDATE public.vuelos_reservas_socio
               SET status = 'CHECKED_IN', checkin_at = COALESCE(checkin_at, now()),
                   checkin_origen = COALESCE(checkin_origen, 'aerolinea'), updated_at = now()
@@ -434,9 +457,10 @@ export class ReservasService {
             RETURNING booking_id, codigo_nodo, pnr, status`,
           [targetId],
         );
-        if (socioUpdate && socioUpdate.length > 0) {
+        const socioFilas = extraerFilasUpdate(rawSocio);
+        if (socioFilas.length > 0) {
           verticalActualizada = 'VUELOS_SOCIO';
-          reservaActualizada = socioUpdate[0];
+          reservaActualizada = socioFilas[0];
         }
       } catch (_) {}
     }
@@ -444,16 +468,17 @@ export class ReservasService {
     // 4. Si no, en Alojamientos
     if (!verticalActualizada) {
       try {
-        const aloUpdate = await this.dataSource.query(
+        const rawAlo = await this.dataSource.query(
           `UPDATE schema_alojamientos.alojamientos_reservas 
            SET estado = 'CONFIRMADO_ASISTIDO'
            WHERE id::text = $1 OR codigo_reserva = $1
            RETURNING *`,
           [targetId],
         );
-        if (aloUpdate && aloUpdate.length > 0) {
+        const aloFilas = extraerFilasUpdate(rawAlo);
+        if (aloFilas.length > 0) {
           verticalActualizada = 'ALOJAMIENTOS';
-          reservaActualizada = aloUpdate[0];
+          reservaActualizada = aloFilas[0];
         }
       } catch (_) {}
     }
