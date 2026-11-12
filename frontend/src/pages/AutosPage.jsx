@@ -51,8 +51,10 @@ function normalizeSearchText(str) {
 }
 
 function getAutoDailyPrice(auto) {
+  if (!auto) return 35.50;
   if (typeof auto.precio_diario === 'number') return auto.precio_diario;
   if (typeof auto.precio_por_dia === 'number') return auto.precio_por_dia;
+  if (auto.precio_por_dia && typeof auto.precio_por_dia === 'object' && typeof auto.precio_por_dia.total === 'number') return auto.precio_por_dia.total;
   if (typeof auto.daily_price === 'number') return auto.daily_price;
   if (typeof auto.price === 'number') return auto.price;
   if (typeof auto.precio === 'number') return auto.precio;
@@ -60,11 +62,13 @@ function getAutoDailyPrice(auto) {
   if (typeof auto.precio_por_dia === 'string' && !isNaN(parseFloat(auto.precio_por_dia))) return parseFloat(auto.precio_por_dia);
   if (typeof auto.daily_price === 'string' && !isNaN(parseFloat(auto.daily_price))) return parseFloat(auto.daily_price);
   if (typeof auto.price === 'string' && !isNaN(parseFloat(auto.price))) return parseFloat(auto.price);
+  if (typeof auto.precio === 'string' && !isNaN(parseFloat(auto.precio))) return parseFloat(auto.precio);
   return 35.50;
 }
 
 function getAutoCompanyName(auto) {
-  const pNom = auto.proveedor?.nombre || auto.proveedor_nombre || (typeof auto.proveedor === 'string' ? auto.proveedor : '') || auto.supplier_name || auto.company || '';
+  if (!auto) return '';
+  const pNom = auto.proveedor?.nombre || auto.proveedor?.name || auto.proveedor_nombre || (typeof auto.proveedor === 'string' ? auto.proveedor : '') || auto.supplier_name || auto.supplier?.name || auto.supplier?.nombre || auto.nombre_proveedor || auto.company || auto.company_name || '';
   if (pNom) return pNom;
   if (auto.proveedor_id === 1 || auto.supplier_id === 1) return 'Europcar';
   if (auto.proveedor_id === 2 || auto.supplier_id === 2) return 'Alamo';
@@ -72,7 +76,15 @@ function getAutoCompanyName(auto) {
   return '';
 }
 
+function getAutoSeats(auto) {
+  if (!auto) return 5;
+  const val = auto.asientos ?? auto.seats ?? auto.plazas ?? auto.capacidad_pasajeros ?? auto.capacidadPasajeros ?? auto.capacidad;
+  const num = Number(val);
+  return isNaN(num) || num <= 0 ? 5 : num;
+}
+
 function checkAutoCompanyMatch(auto, targetCompany) {
+  if (!auto || !targetCompany) return false;
   const compName = getAutoCompanyName(auto).toLowerCase();
   const target = targetCompany.toLowerCase();
 
@@ -86,6 +98,7 @@ function checkAutoCompanyMatch(auto, targetCompany) {
 }
 
 function checkAutoVehicleCategoryMatch(auto, targetCategory) {
+  if (!auto || !targetCategory) return false;
   const cat = (auto.categoria || auto.category || '').toUpperCase();
   const tipo = (auto.tipo_carroceria || auto.tipo || '').toUpperCase();
   const modelo = (auto.modelo || auto.model || '').toUpperCase();
@@ -136,9 +149,11 @@ function checkAutoVehicleCategoryMatch(auto, targetCategory) {
 }
 
 function checkAutoPriceMatch(dailyPrice, rangeId) {
-  if (rangeId === '0-50') return dailyPrice >= 0 && dailyPrice <= 50;
-  if (rangeId === '50-100') return dailyPrice >= 50 && dailyPrice <= 100;
-  if (rangeId === '100-150') return dailyPrice >= 100 && dailyPrice <= 150;
+  const price = typeof dailyPrice === 'number' ? dailyPrice : parseFloat(dailyPrice);
+  if (isNaN(price)) return false;
+  if (rangeId === '0-50') return price >= 0 && price <= 50;
+  if (rangeId === '50-100') return price >= 50 && price <= 100;
+  if (rangeId === '100-150') return price >= 100 && price <= 150;
   return true;
 }
 
@@ -639,6 +654,8 @@ export function AutosPage() {
 
   const filteredAutos = useMemo(() => {
     return autos.filter((auto) => {
+      if (!auto) return false;
+
       // 1. Compañía
       if (selectedCompanies.length > 0) {
         const matchesComp = selectedCompanies.some((compName) =>
@@ -666,7 +683,7 @@ export function AutosPage() {
 
       // 4. Número de plazas
       if (selectedSeatOptions.length > 0) {
-        const seats = Number(auto.asientos || auto.seats || 5);
+        const seats = getAutoSeats(auto);
         const matchesSeats = selectedSeatOptions.some((seatOption) =>
           checkAutoSeatsMatch(seats, seatOption)
         );
@@ -1236,7 +1253,7 @@ export function AutosPage() {
                 <div style={{ marginBottom: '20px' }}>
                   <h4 style={{ fontWeight: 'bold', fontSize: '0.9rem', marginBottom: '10px', color: '#333' }}>Número de plazas</h4>
                   {['4 plazas', '5 plazas', '7 o más plazas'].map((p, idx) => {
-                    const count = autos.filter(a => checkAutoSeatsMatch(Number(a.asientos || a.seats || 5), p)).length;
+                    const count = autos.filter(a => checkAutoSeatsMatch(getAutoSeats(a), p)).length;
                     const isChecked = selectedSeatOptions.includes(p);
                     return (
                       <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>

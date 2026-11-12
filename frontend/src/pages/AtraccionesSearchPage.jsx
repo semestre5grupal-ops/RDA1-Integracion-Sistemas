@@ -21,28 +21,11 @@ export function AtraccionesSearchPage() {
   const limit = 5;
 
   // Filtros obligatorios de Cátedra RDA2 (§6 - GAP-FRONT-02)
-  const [arbolCategorias, setArbolCategorias] = useState([]);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
   const [filtroComida, setFiltroComida] = useState(false);
   const [filtroTransporte, setFiltroTransporte] = useState(false);
   const [filtroGuia, setFiltroGuia] = useState(false);
   const [criterioOrden, setCriterioOrden] = useState('favoritos'); // 'favoritos' | 'precio_bajo' | 'mejores_comentarios'
-
-  useEffect(() => {
-    async function fetchArbol() {
-      try {
-        const res = await api.get('/atracciones/categorias/arbol');
-        setArbolCategorias(Array.isArray(res) ? res : res.data || []);
-      } catch (e) {
-        setArbolCategorias([
-          { id: 'cat-1', nombre: 'Aventura y Montaña', hijos: [{ id: 'sub-1', nombre: 'Volcanes Cotopaxi / Chimborazo' }] },
-          { id: 'cat-2', nombre: 'Patrimonio Cultural', hijos: [{ id: 'sub-2', nombre: 'Centro Histórico Colonial' }] },
-          { id: 'cat-3', nombre: 'Naturaleza y Selva', hijos: [{ id: 'sub-3', nombre: 'Tours Baños / Amazonía' }] },
-        ]);
-      }
-    }
-    fetchArbol();
-  }, []);
 
   const isFetchingRef = useRef(false);
 
