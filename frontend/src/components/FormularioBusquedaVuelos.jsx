@@ -1,5 +1,6 @@
 import { useId, useState, useRef, useEffect } from 'react';
 import { hoyEnIso } from '../services/formato';
+import { SpinnerVuelos } from './SpinnerVuelos';
 import { useTelemetry } from '../hooks/useTelemetry';
 
 // Destinos que las aerolíneas socias responden en sus búsquedas (verificado el 10-11-2026).
@@ -401,8 +402,8 @@ export function FormularioBusquedaVuelos({ onBuscar, cargando, origenInicial = '
         </div>
 
         {/* BUSCAR */}
-        <button className="av-btn-buscar" type="submit" disabled={cargando}>
-          {cargando ? 'Buscando...' : 'Buscar'}
+        <button className="av-btn-buscar" type="submit" disabled={cargando} aria-busy={cargando}>
+          {cargando ? <><SpinnerVuelos />Buscando vuelos…</> : 'Buscar'}
         </button>
       </div>
 

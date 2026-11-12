@@ -28,6 +28,11 @@ import {
 } from '../components/BookingIcons';
 import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
 import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
+import { SpinnerVuelos } from '../components/SpinnerVuelos';
+import { useEtapasCarga } from '../hooks/useEtapasCarga';
+
+const ETAPAS_CHECKIN_VUELO = ['Conectando con la aerolínea…', 'Registrando a los pasajeros…', 'Generando tu pase de abordar…'];
+const ETAPAS_CANCEL_VUELO = ['Consultando la política de la aerolínea…', 'Cancelando con la aerolínea…', 'Procesando tu reembolso…'];
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
@@ -219,6 +224,9 @@ export function MisReservasPage() {
   const [checkinKmSalida, setCheckinKmSalida] = useState(10000);
   const [checkinKmRetorno, setCheckinKmRetorno] = useState(10185);
   const [checkinProcessing, setCheckinProcessing] = useState(false);
+  // Vuelos: mensajes por etapas mientras la aerolínea procesa (solo visual).
+  const etapaCheckinVuelo = useEtapasCarga(checkinProcessing && checkinReserva?.tipo === 'vuelo', ETAPAS_CHECKIN_VUELO, 1100);
+  const etapaCancelVuelo = useEtapasCarga(cancelling && selectedReserva?.tipo === 'vuelo', ETAPAS_CANCEL_VUELO, 1100);
 
   const handleExecuteCheckin = async (reserva, tipoOperacion) => {
     setCheckinProcessing(true);
@@ -2250,7 +2258,7 @@ export function MisReservasPage() {
                             transition: 'background 0.2s'
                           }}
                         >
-                          {cancelling ? 'Reintegrando fondos y stock...' : 'Confirmar cancelación y reembolso'}
+                          {cancelling ? (etapaCancelVuelo ? <><SpinnerVuelos />{etapaCancelVuelo}</> : 'Reintegrando fondos y stock...') : 'Confirmar cancelación y reembolso'}
                         </button>
                       </div>
                     </div>
@@ -2533,7 +2541,7 @@ export function MisReservasPage() {
                             disabled={checkinProcessing || antes}
                             style={{ width: '100%', background: antes ? '#94a3b8' : '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: antes ? 'not-allowed' : 'pointer' }}
                           >
-                            {checkinProcessing ? 'Haciendo check-in…' : antes ? 'Check-in aún no disponible' : '🎫 Hacer check-in'}
+                            {checkinProcessing ? <><SpinnerVuelos />{etapaCheckinVuelo || 'Haciendo check-in…'}</> : antes ? 'Check-in aún no disponible' : '🎫 Hacer check-in'}
                           </button>
                         );
                       })()}
