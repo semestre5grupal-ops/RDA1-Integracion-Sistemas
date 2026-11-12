@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { activarConexionesPersistentes } from './core/http/conexiones-persistentes';
+activarConexionesPersistentes();
 import { VuelosSociosMiddleware } from './modules/vuelos/socios/vuelos-socios.middleware';
 import { NestFactory } from '@nestjs/core';
 import { VersioningType } from '@nestjs/common';
@@ -56,6 +58,15 @@ async function bootstrap() {
     new ExpressAdapter(),
     { bodyParser: false },
   );
+
+  // Respuestas comprimidas (gzip) si el módulo se encuentra disponible
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const compression = require('compression');
+    if (typeof compression === 'function') {
+      app.use(compression({ threshold: 1024 }));
+    }
+  } catch (_) {}
 
   app.use((req: any, res: any, next: any) => {
     const correlationId =

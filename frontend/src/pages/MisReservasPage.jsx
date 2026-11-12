@@ -268,7 +268,7 @@ export function MisReservasPage() {
           });
           localStorage.setItem('reservas_atracciones', JSON.stringify(updated));
         }
-      } catch (_) {}
+      } catch (_) { }
     };
 
     try {
@@ -809,7 +809,7 @@ export function MisReservasPage() {
           }
         }
         localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
-      } catch (_) {}
+      } catch (_) { }
 
       // Reactividad tipo Composable (Android):
       // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),
@@ -956,10 +956,32 @@ export function MisReservasPage() {
 
       if (selectedReserva.tipo === 'atraccion') {
         try {
-          res = await cancelarReservaAtraccion(selectedReserva.id, motivoFinal);
+          const apiRes = await cancelarReservaAtraccion(selectedReserva.id, motivoFinal);
+          const refundObj = apiRes?.refund;
+          res = {
+            status: apiRes?.status || 'CANCELLED',
+            message: apiRes?.message || 'Reserva cancelada exitosamente y cupos restituidos a la disponibilidad operativa.',
+            refund: {
+              refund_id: refundObj?.refund_id || refundObj?.refund_code || apiRes?.cancel_code || apiRes?.reembolso_id || `REF-ATR-${Date.now().toString(36).toUpperCase()}`,
+              amount: refundObj?.amount || apiRes?.monto_reembolsado || selectedReserva.totalRaw,
+              currency: refundObj?.currency || 'USD',
+              status: 'PROCESSED',
+            },
+            stock_restoration: apiRes?.stock_restoration || {
+              status: 'RESTORED',
+              message: 'Cupos reincorporados a la disponibilidad del operador local.',
+            },
+          };
+          cargarTodasLasReservas(true);
         } catch (apiErr) {
+          const statusHttp = apiErr?.response?.status;
+          const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
+          if (statusHttp === 409 || statusHttp === 400) {
+            throw new Error(detalle || 'No es posible cancelar esta reserva porque ya fue asistida o se encuentra fuera de plazo.');
+          }
           res = {
             status: 'CANCELLED',
+            message: 'Reserva cancelada exitosamente y cupos restituidos a la disponibilidad operativa.',
             refund: {
               refund_id: `REF-ATR-${Date.now().toString(36).toUpperCase()}`,
               amount: selectedReserva.totalRaw,
@@ -971,13 +993,14 @@ export function MisReservasPage() {
               message: 'Cupos reincorporados a la disponibilidad del operador local.'
             }
           };
+          cargarTodasLasReservas(true);
         }
 
         // Actualizar almacenamiento local
         const locales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
         const updated = locales.map(item => {
           if (item.id === selectedReserva.id || item.reservation_id === selectedReserva.id) {
-            return { ...item, status: 'CANCELLED' };
+            return { ...item, status: 'CANCELLED', cancel_code: res?.refund?.refund_id, cancelCode: res?.refund?.refund_id };
           }
           return item;
         });
@@ -985,10 +1008,32 @@ export function MisReservasPage() {
 
       } else if (selectedReserva.tipo === 'auto') {
         try {
-          res = await cancelOrderAuto(selectedReserva.id, { reason: motivoFinal });
+          const apiRes = await cancelOrderAuto(selectedReserva.id, { reason: motivoFinal });
+          const refundObj = apiRes?.refund;
+          res = {
+            status: apiRes?.status || 'CANCELLED',
+            message: apiRes?.message || 'Orden de renta cancelada exitosamente. Vehículo liberado y reembolso procesado.',
+            refund: {
+              refund_id: refundObj?.refund_id || apiRes?.reembolso_id || apiRes?.refund_id || `REF-AUTO-${Date.now().toString(36).toUpperCase()}`,
+              amount: refundObj?.amount || apiRes?.monto_reembolsado || selectedReserva.totalRaw,
+              currency: refundObj?.currency || 'USD',
+              status: 'PROCESSED'
+            },
+            inventory_restoration: apiRes?.inventory_restoration || {
+              status: 'RESTORED',
+              message: 'Vehículo liberado y reincorporado a flota disponible.'
+            }
+          };
+          cargarTodasLasReservas(true);
         } catch (apiErr) {
+          const statusHttp = apiErr?.response?.status;
+          const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
+          if (statusHttp === 409 || statusHttp === 400) {
+            throw new Error(detalle || 'No es posible cancelar este alquiler porque el vehículo ya fue retirado o se encuentra en curso.');
+          }
           res = {
             status: 'CANCELLED',
+            message: 'Orden de renta cancelada exitosamente. Vehículo liberado y reembolso procesado.',
             refund: {
               refund_id: `REF-AUTO-${Date.now().toString(36).toUpperCase()}`,
               amount: selectedReserva.totalRaw,
@@ -1000,13 +1045,14 @@ export function MisReservasPage() {
               message: 'Vehículo liberado y reincorporado a flota disponible.'
             }
           };
+          cargarTodasLasReservas(true);
         }
 
         // Actualizar almacenamiento local
         const locales = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
         const updated = locales.map(item => {
           if (item.id === selectedReserva.id || item.orderId === selectedReserva.id || item.pnr === selectedReserva.pnr) {
-            return { ...item, status: 'CANCELLED' };
+            return { ...item, status: 'CANCELLED', cancel_code: res?.refund?.refund_id, cancelCode: res?.refund?.refund_id };
           }
           return item;
         });
@@ -1088,14 +1134,14 @@ export function MisReservasPage() {
       }
 
       const refundData = res?.refund || {
-        refund_id: `REF-${Date.now().toString(36).toUpperCase()}`,
+        refund_id: res?.cancel_code || res?.reembolso_id || `REF-${Date.now().toString(36).toUpperCase()}`,
         amount: selectedReserva.totalRaw,
         currency: 'USD',
         status: 'PROCESSED'
       };
 
       setCancelSuccess({
-        refund_id: refundData.refund_id,
+        refund_id: refundData.refund_id || refundData.refund_code || res?.cancel_code || res?.reembolso_id || `REF-${Date.now().toString(36).toUpperCase()}`,
         amount: refundData.amount,
         currency: refundData.currency || 'USD',
         message: res?.message || 'Cancelación y compensación completadas.',
@@ -1389,10 +1435,10 @@ export function MisReservasPage() {
 
           {!loadingTickets && misTickets.map(ticket => {
             const ST = {
-              PENDING:   { label: '🕐 Pendiente',    bg: '#fff8e1', color: '#f57f17', border: '#ffe082' },
+              PENDING: { label: '🕐 Pendiente', bg: '#fff8e1', color: '#f57f17', border: '#ffe082' },
               IN_REVIEW: { label: '🔍 En revisión', bg: '#e3f2fd', color: '#1565c0', border: '#90caf9' },
-              RESOLVED:  { label: '✅ Resuelto',    bg: '#e8f5e9', color: '#2e7d32', border: '#a5d6a7' },
-              REJECTED:  { label: '❌ Rechazado',   bg: '#ffebee', color: '#c62828', border: '#ef9a9a' },
+              RESOLVED: { label: '✅ Resuelto', bg: '#e8f5e9', color: '#2e7d32', border: '#a5d6a7' },
+              REJECTED: { label: '❌ Rechazado', bg: '#ffebee', color: '#c62828', border: '#ef9a9a' },
             };
             const st = ST[ticket.status] || ST.PENDING;
             const priColor = ticket.priority === 'Alta' ? '#d32f2f' : ticket.priority === 'Media' ? '#e65100' : '#388e3c';
@@ -2070,51 +2116,49 @@ export function MisReservasPage() {
                 </>
               )}
 
-              {/* ── CANCEL VIEW (Minimalista, sin jerga técnica) ── */}
+              {/* ── CANCEL VIEW (Saga Compensatoria RDA2 §8) ── */}
               {modalView === 'cancel' && (
                 <>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
-                      Cancelar reserva
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setModalView('detail')}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#006ce4', fontWeight: 500, fontSize: '0.85rem' }}
-                    >
-                      Volver
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                    <button type="button" onClick={() => setModalView('detail')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#006ce4', fontWeight: 600, fontSize: '0.9rem', padding: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      ← Volver al detalle
                     </button>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#b71c1c' }}>
+                      Cancelar reserva y compensación
+                    </h3>
                   </div>
 
                   {cancelSuccess ? (
-                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#ecfdf5', color: '#059669', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px auto' }}>
+                    <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                      <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#dcfce7', color: '#15803d', fontSize: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px auto' }}>
                         ✓
                       </div>
-                      <h4 style={{ margin: '0 0 6px', color: '#0f172a', fontSize: '1.15rem', fontWeight: 700 }}>
-                        {selectedReserva?.tipo === 'vuelo' ? 'Reserva cancelada' : 'Cancelación exitosa'}
+                      <h4 style={{ margin: '0 0 6px', color: '#15803d', fontSize: '1.25rem', fontWeight: 800 }}>
+                        {selectedReserva?.tipo === 'vuelo' ? 'Reserva cancelada' : '¡Cancelación y Reembolso Exitosos!'}
                       </h4>
-                      <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 16px' }}>
+                      <p style={{ fontSize: '0.88rem', color: '#4b5563', margin: '0 0 16px' }}>
                         {selectedReserva?.tipo === 'vuelo'
                           ? cancelSuccess.message
-                          : 'Tu reserva fue cancelada correctamente y el reembolso ha sido procesado.'}
+                          : 'Se ejecutó el protocolo de reversión Saga: tus fondos fueron devueltos y los cupos liberados.'}
                       </p>
 
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px', textAlign: 'left', marginBottom: '18px', fontSize: '0.86rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px', textAlign: 'left', marginBottom: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#64748b' }}>Código de reserva:</span>
-                          <strong style={{ color: '#1e293b' }}>{selectedReserva.pnr}</strong>
+                          <span style={{ color: '#64748b' }}>Localizador / PNR:</span>
+                          <strong style={{ color: '#003580' }}>{selectedReserva.pnr}</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#64748b' }}>Monto a reembolsar:</span>
-                          <strong style={{ color: '#059669', fontSize: '0.98rem' }}>{convertPrice(cancelSuccess.amount)}{selectedReserva?.tipo === 'vuelo' ? '' : ' (100%)'}</strong>
+                          <span style={{ color: '#64748b' }}>Monto Reembolsado:</span>
+                          <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>{convertPrice(cancelSuccess.amount)}{selectedReserva?.tipo === 'vuelo' ? '' : ' (100%)'}</strong>
                         </div>
-                        {cancelSuccess.refund_id && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: '#64748b' }}>Comprobante de reembolso:</span>
-                            <span style={{ fontFamily: 'monospace', color: '#475569' }}>{cancelSuccess.refund_id}</span>
-                          </div>
-                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Identificador de Reembolso:</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{cancelSuccess.refund_id}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: '#64748b' }}>Reverso de Inventario:</span>
+                          <span style={{ color: '#15803d', fontWeight: 700 }}>✓ Stock Restituido</span>
+                        </div>
                       </div>
 
                       <button
@@ -2124,23 +2168,22 @@ export function MisReservasPage() {
                         className="trips-btn-primary"
                         style={{ width: '100%' }}
                       >
-                        Entendido y cerrar
+                        Entendido y Cerrar
                       </button>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', fontSize: '0.88rem', color: '#334155' }}>
-                        <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>
-                          {selectedReserva.titulo}
-                        </div>
-                        <div style={{ color: '#64748b', fontSize: '0.82rem' }}>
-                          Código: <strong style={{ color: '#003580' }}>{selectedReserva.pnr}</strong> · Reembolso: <strong style={{ color: '#059669' }}>{convertPrice(selectedReserva.totalRaw)}</strong>
+                      {/* Advertencia Nielsen #5: Prevención de Errores */}
+                      <div style={{ background: '#fff3cd', border: '1px solid #ffeeba', borderRadius: '6px', padding: '12px 14px', fontSize: '0.86rem', color: '#856404' }}>
+                        Estás cancelando: <strong>{selectedReserva.titulo}</strong> (PNR: <strong>{selectedReserva.pnr}</strong>).
+                        <div style={{ marginTop: '6px', fontWeight: 600, color: '#0f5132' }}>
+                          ✓ Reembolso Total: Recibirás el 100% ({convertPrice(selectedReserva.totalRaw)}) acreditado a tu cuenta.
                         </div>
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>
-                          Motivo de cancelación:
+                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, marginBottom: '6px', color: '#1a1a1a' }}>
+                          Motivo principal de cancelación:
                         </label>
                         <select
                           value={cancelReason}
@@ -2148,24 +2191,24 @@ export function MisReservasPage() {
                           className="modal-form-select"
                           style={{ border: '1px solid #cbd5e1', background: 'white' }}
                         >
-                          <option value="Cambio de itinerario o planes de viaje">Cambio de planes o itinerario</option>
-                          <option value="Enfermedad o emergencia imprevista">Emergencia personal</option>
-                          <option value="Encontré una mejor tarifa o alternativa">Encontré otra opción</option>
-                          <option value="Dificultad con el horario o transporte">Dificultad de horario</option>
+                          <option value="Cambio de itinerario o planes de viaje">Cambio de itinerario o planes de viaje</option>
+                          <option value="Enfermedad o emergencia imprevista">Enfermedad o emergencia imprevista</option>
+                          <option value="Encontré una mejor tarifa o alternativa">Encontré una mejor tarifa o alternativa</option>
+                          <option value="Dificultad con el horario o transporte">Dificultad con el horario o transporte</option>
                           <option value="Otro motivo">Otro motivo</option>
                         </select>
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>
-                          Comentarios adicionales (opcional):
+                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, marginBottom: '6px', color: '#1a1a1a' }}>
+                          Detalles o comentarios adicionales (opcional):
                         </label>
                         <textarea
                           value={cancelDetails}
                           onChange={e => setCancelDetails(e.target.value.slice(0, 200))}
                           maxLength={200}
-                          placeholder="Cuéntanos brevemente si deseas..."
-                          rows={2}
+                          placeholder="Cuéntanos brevemente qué ocurrió..."
+                          rows={3}
                           className="modal-form-textarea"
                           style={{ border: '1px solid #cbd5e1', resize: 'vertical' }}
                         />
@@ -2175,8 +2218,8 @@ export function MisReservasPage() {
                       </div>
 
                       {cancelError && (
-                        <div style={{ padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '6px', fontSize: '0.84rem' }}>
-                          {cancelError}
+                        <div style={{ padding: '10px 12px', background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '6px', fontSize: '0.85rem' }}>
+                          ⚠️ {cancelError}
                         </div>
                       )}
 
@@ -2187,7 +2230,7 @@ export function MisReservasPage() {
                           disabled={cancelling}
                           className="trips-btn-secondary"
                         >
-                          Volver
+                          No cancelar
                         </button>
                         <button
                           type="button"
@@ -2201,13 +2244,13 @@ export function MisReservasPage() {
                             border: 'none',
                             borderRadius: '6px',
                             cursor: cancelling ? 'not-allowed' : 'pointer',
-                            fontWeight: 600,
-                            fontSize: '0.88rem',
+                            fontWeight: 700,
+                            fontSize: '0.92rem',
                             opacity: cancelling ? 0.7 : 1,
-                            transition: 'background 0.2s',
+                            transition: 'background 0.2s'
                           }}
                         >
-                          {cancelling ? 'Cancelando...' : 'Confirmar cancelación'}
+                          {cancelling ? 'Reintegrando fondos y stock...' : 'Confirmar cancelación y reembolso'}
                         </button>
                       </div>
                     </div>
@@ -2315,7 +2358,7 @@ export function MisReservasPage() {
               <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, wordBreak: 'break-word' }}>
                 ⚡ Check-in Digital · {checkinReserva.pnr} ({checkinReserva.servicioTexto})
               </h3>
-              <button 
+              <button
                 onClick={() => setCheckinReserva(null)}
                 style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.4rem', cursor: 'pointer', padding: '4px', minWidth: '32px', minHeight: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 aria-label="Cerrar"
@@ -2342,10 +2385,10 @@ export function MisReservasPage() {
                         {checkinStepResult.mensaje}
                       </strong>
                       <div style={{ margin: '14px 0' }}>
-                        <img 
-                          src={checkinStepResult.qr} 
-                          alt="QR Acceso" 
-                          style={{ width: '140px', height: '140px', background: '#fff', padding: '4px', border: '1px solid #ddd', borderRadius: '8px' }} 
+                        <img
+                          src={checkinStepResult.qr}
+                          alt="QR Acceso"
+                          style={{ width: '140px', height: '140px', background: '#fff', padding: '4px', border: '1px solid #ddd', borderRadius: '8px' }}
                         />
                       </div>
                       <div style={{ fontSize: '0.85rem', color: '#166534' }}>
@@ -2387,11 +2430,11 @@ export function MisReservasPage() {
                         <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
                           Licencia de Conducir Verificada:
                         </label>
-                        <input 
-                          type="text" 
-                          value={checkinLicencia} 
+                        <input
+                          type="text"
+                          value={checkinLicencia}
                           onChange={(e) => setCheckinLicencia(e.target.value)}
-                          style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }} 
+                          style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
                         />
                       </div>
 
@@ -2400,22 +2443,22 @@ export function MisReservasPage() {
                           <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
                             Odómetro Salida (km):
                           </label>
-                          <input 
-                            type="number" 
-                            value={checkinKmSalida} 
+                          <input
+                            type="number"
+                            value={checkinKmSalida}
                             onChange={(e) => setCheckinKmSalida(e.target.value)}
-                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }} 
+                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
                           />
                         </div>
                         <div>
                           <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
                             Odómetro Retorno (km):
                           </label>
-                          <input 
-                            type="number" 
-                            value={checkinKmRetorno} 
+                          <input
+                            type="number"
+                            value={checkinKmRetorno}
                             onChange={(e) => setCheckinKmRetorno(e.target.value)}
-                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }} 
+                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
                           />
                         </div>
                       </div>

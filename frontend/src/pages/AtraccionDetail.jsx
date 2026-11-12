@@ -10,7 +10,7 @@ import { ReportModal } from '../components/ReportModal';
 import { OfflineReservaModal } from '../components/OfflineReservaModal';
 import { VoucherModal } from '../components/VoucherModal';
 import { AtraccionesLoadingView } from '../components/AtraccionesLoadingView';
-import { resolverGaleriaAtraccion } from '../utils/atraccionImagenes';
+import { resolverGaleriaAtraccion, resolverImagenAtraccion } from '../utils/atraccionImagenes';
 
 export function AtraccionDetail() {
   const todayStr = new Date().toISOString().split('T')[0];
@@ -368,9 +368,17 @@ export function AtraccionDetail() {
             </div>
           </div>
 
-          <div className="gallery-grid">
-            <div className="gallery-main">
-              <img src={fotosGaleria[0]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[1]; }} alt="Main" />
+          {fotosGaleria.length <= 1 ? (
+            <div style={{ width: '100%', marginBottom: '24px', position: 'relative', borderRadius: '8px', overflow: 'hidden' }}>
+              <img
+                src={fotosGaleria[0]}
+                alt={atraccion.nombre || 'Atracción'}
+                style={{ width: '100%', maxHeight: '420px', objectFit: 'cover', borderRadius: '8px', display: 'block' }}
+                onError={(e) => {
+                  e.target.onerror = null;
+                  e.target.src = resolverImagenAtraccion(atraccion, 0);
+                }}
+              />
               <div className="gallery-badge-overlay">
                 <div className="gb-score">9.8</div>
                 <div className="gb-text">
@@ -379,16 +387,25 @@ export function AtraccionDetail() {
                 </div>
               </div>
             </div>
-            <div className="gallery-side">
-              <img src={fotosGaleria[1]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[0]; }} alt="Gallery 1" />
-              <img src={fotosGaleria[2]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[0]; }} alt="Gallery 2" />
-              <img src={fotosGaleria[3]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[1]; }} alt="Gallery 3" />
-              <div className="gallery-more">
-                <img src={fotosGaleria[4]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[2]; }} alt="Gallery 4" />
-                <div className="more-overlay">🖼️ Ver todas las imágenes</div>
+          ) : (
+            <div className="gallery-grid">
+              <div className="gallery-main">
+                <img src={fotosGaleria[0]} onError={(e) => { e.target.onerror = null; e.target.src = fotosGaleria[1] || fotosGaleria[0]; }} alt="Main" />
+                <div className="gallery-badge-overlay">
+                  <div className="gb-score">9.8</div>
+                  <div className="gb-text">
+                    <strong>Excepcional</strong><br/>
+                    <a href="#reviews" style={{ color: 'white', textDecoration: 'underline', cursor: 'pointer' }}>142 opiniones verificadas {'>'}</a>
+                  </div>
+                </div>
+              </div>
+              <div className="gallery-side">
+                {fotosGaleria.slice(1, 5).map((f, idx) => (
+                  <img key={`gal-${idx}`} src={f} onError={(e) => { e.target.style.display = 'none'; }} alt={`Gallery ${idx + 1}`} />
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
           <div className="detail-highlights">
             <div className="dh-item">

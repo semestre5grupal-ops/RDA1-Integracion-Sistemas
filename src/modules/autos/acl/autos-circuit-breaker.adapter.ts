@@ -80,7 +80,7 @@ export class AutosCircuitBreakerAdapter {
   // ===========================================================================
   private readonly SOCIOS_PANEL: Array<{
     clave: string; nombre: string; nodoDefecto: string; urlMatch: string; baseDefecto: string;
-    env: string; proveedorId: number; vehRegex?: RegExp; pnrRegex?: RegExp;
+    env: string; proveedorId: number; vehRegex?: RegExp; pnrRegex?: RegExp; apiKeyDefecto?: string;
   }> = [
     {
       clave: 'RENTAFACIL', nombre: 'RentaFacil EC', nodoDefecto: 'NODE_AUT_RENTAFACIL', urlMatch: 'rentafacil',
@@ -92,6 +92,12 @@ export class AutosCircuitBreakerAdapter {
       baseDefecto: 'https://rodadoec-api.azurewebsites.net/api/v3', env: 'RODADO', proveedorId: 7,
       vehRegex: /^veh-\d+$/,
     },
+    {
+      clave: 'AUTOSPOT', nombre: 'AutoSpot (Esteban)', nodoDefecto: 'NODE_AUT_AUTOSPOT', urlMatch: 'alquiler-vehiculos-ijx3',
+      baseDefecto: 'https://alquiler-vehiculos-ijx3.onrender.com/api/v3', env: 'AUTOSPOT', proveedorId: 8,
+      apiKeyDefecto: 'xSQILcF-wlDGZ44NFmLpLbJlsX7rWooq',
+      vehRegex: /^auto-\d+$/i,
+    },
   ];
   private readonly socioCfgCache = new Map<string, { nodo: string; baseUrl: string; apiKey: string; activo: boolean; at: number }>();
   private readonly socioVehiculos = new Map<string, string>(); // vehicle_id → clave del socio
@@ -102,7 +108,7 @@ export class AutosCircuitBreakerAdapter {
     if (cached && Date.now() - cached.at < 60000) return cached;
     let nodo = process.env[`${def.env}_NODO`] || def.nodoDefecto;
     let baseUrl = process.env[`${def.env}_BASE_URL`] || def.baseDefecto;
-    let apiKey = process.env[`${def.env}_API_KEY`] || '';
+    let apiKey = process.env[`${def.env}_API_KEY`] || def.apiKeyDefecto || '';
     let activo = true;
     try {
       const rows = await this.dataSource?.query(
@@ -432,7 +438,7 @@ export class AutosCircuitBreakerAdapter {
             ubicacion: c.proveedor?.ubicacion || c.agencia?.nombre || 'Quito',
           },
           estado: c.estado || c.status || 'DISPONIBLE',
-          images: [c.foto_url || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'],
+          images: Array.isArray(c.images) && c.images.length > 0 ? c.images : [c.foto_url || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'],
         });
       }
     });

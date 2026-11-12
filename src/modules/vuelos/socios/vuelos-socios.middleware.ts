@@ -197,7 +197,10 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
   private async buscar(req: Request, res: Response, fuente: string, entrantes: Record<string, any>) {
     const t0 = Date.now();
+    let tRecargo = 0;
+    const recargo = this.reservas.recargoPct().finally(() => (tRecargo = Date.now() - t0)); // en paralelo con la búsqueda
     const { offers, sources } = await this.socios.buscar(req.body, entrantes, req.headers.host);
+    const tBusqueda = Date.now() - t0;
     const it = req.body?.itineraries?.[0] || {};
     const okN = sources.filter((s) => s.ok).length;
     this.traza(
@@ -217,17 +220,21 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         sources.push({ codigoNodo: 'BOOKING_LOCAL', nombre: 'Base local', ok: false, ms: 0, ofertas: 0, error: e?.message });
       }
     }
+    const pct = await recargo;
+    // Server-Timing: tiempos internos visibles en las DevTools (pestaña Network → Timing).
+    res.setHeader('Server-Timing', `nodos;dur=${this.socios.ultimaBusquedaNodosMs}, aerolineas;dur=${tBusqueda}, recargo;dur=${tRecargo}, total;dur=${Date.now() - t0}`);
     res.status(200).json({
       totalOffers: todas.length,
       offers: todas,
       // Los precios de las ofertas son los de la aerolínea; Booking cobra además
       // su cargo por servicio con este porcentaje (el frontend muestra el final).
-      bookingFee: { percentage: await this.reservas.recargoPct() },
+      bookingFee: { percentage: pct },
       meta: {
         fuente,
         totalOffers: todas.length,
         airlinesQueried: sources.length,
         airlinesOk: sources.filter((s) => s.ok).length,
+        tiemposMs: { nodos: this.socios.ultimaBusquedaNodosMs, aerolineas: tBusqueda, recargo: tRecargo, total: Date.now() - t0 },
       },
       sources,
     });
@@ -246,6 +253,14 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // Si la pantalla quedó con un hold ya reemplazado (cambio de asiento), se usa el vigente.
     const holdId = this.bloqueos.actual(String(req.body?.holdId || '')).holdId;
     if (req.body && typeof req.body === 'object' && holdId && req.body.holdId !== holdId) req.body = { ...req.body, holdId };
+
+    // Lo que no depende del hold (asientos tomados por otros y % de recargo) se
+    // consulta en paralelo mientras responde la aerolínea; se usa en el mismo orden.
+    const pedidos = limpiarAsientos((req.body?.passengers ?? []).flatMap((p: any) => p?.assignedSeats ?? []));
+    const ajenosP = this.bloqueos.tomadosPorOtros(nodo, holdId, pedidos);
+    const recargoP = this.reservas.recargoPct();
+    ajenosP.catch(() => undefined); // si se sale antes, no queda una promesa rechazada suelta
+    recargoP.catch(() => undefined);
 
     // 1) Monto: se toma del hold de la aerolínea (precio congelado), no del cliente.
     const hold = await this.socios.reenviar(nodo, 'GET', ['offers', 'hold', holdId], '', null, entrantes);
@@ -277,8 +292,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     }
 
     // 1b') Asientos: si otra compra en curso ya tiene bloqueado alguno, no se cobra.
-    const pedidos = limpiarAsientos((req.body?.passengers ?? []).flatMap((p: any) => p?.assignedSeats ?? []));
-    const ajenos = await this.bloqueos.tomadosPorOtros(nodo, holdId, pedidos);
+    const ajenos = await ajenosP;
     if (ajenos.length) {
       this.traza(entrantes, 'asiento', 'aviso', `Asiento ${ajenos.map((a) => a.seatNumber).join(', ')} bloqueado por otra compra: no se cobra`, { nodo });
       this.enviar(res, asientoTomado(ajenos, 'No se realizó ningún cobro.'));
@@ -287,7 +301,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
     // 1c) Precio al cliente = precio de la aerolínea (monto) + recargo de Booking.
     //     A la aerolínea se le envía y se le paga SOLO su precio (contrato sin cambios).
-    const precio = precioConRecargo(monto, await this.reservas.recargoPct());
+    const precio = precioConRecargo(monto, await recargoP);
 
     // 2) Cobro en MS_PAG (idempotente con la misma clave del cliente).
     const tCobro = Date.now();
