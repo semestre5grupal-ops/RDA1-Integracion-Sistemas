@@ -210,6 +210,7 @@ export function AlojamientoDetail() {
   // UI Interactive States
   const [activeTab, setActiveTab] = useState('overview');
   const [isSaved, setIsSaved] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [surveyResponse, setSurveyResponse] = useState('');
@@ -800,13 +801,6 @@ export function AlojamientoDetail() {
           </button>
           <button
             type="button"
-            className="dt-nav-tab"
-            onClick={() => alert('La información legal es provista por el anfitrión')}
-          >
-            Información legal
-          </button>
-          <button
-            type="button"
             className={`dt-nav-tab ${activeTab === 'reviews' ? 'active' : ''}`}
             onClick={() => scrollToSection(reviewsRef, 'reviews')}
           >
@@ -842,7 +836,10 @@ export function AlojamientoDetail() {
               <PinIcon size={16} color="#006ce4" />
               <span>{alojamiento.ubicacion?.address || (typeof alojamiento.ubicacion === 'string' ? alojamiento.ubicacion : alojamiento.destino || 'Ecuador')}</span>
               <span>–</span>
-              <span className="dt-address-link" onClick={() => alert('Abriendo mapa de ubicación')}>
+              <span
+                className="dt-address-link"
+                onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((alojamiento.nombre || '') + ' ' + (alojamiento.destino || 'Ecuador'))}`, '_blank')}
+              >
                 Ubicación excelente – mostrar en el mapa
               </span>
               <span className="dt-price-match-tag">
@@ -863,13 +860,15 @@ export function AlojamientoDetail() {
             <button
               type="button"
               className="dt-action-icon-btn"
+              title={linkCopied ? '¡Enlace copiado al portapapeles!' : 'Compartir alojamiento'}
               onClick={() => {
                 navigator.clipboard?.writeText(window.location.href);
-                alert('Enlace copiado al portapapeles!');
+                setLinkCopied(true);
+                setTimeout(() => setLinkCopied(false), 2500);
               }}
               aria-label="Compartir alojamiento"
             >
-              <ShareIcon size={20} color="#1a1a1a" />
+              <ShareIcon size={20} color={linkCopied ? '#008009' : '#1a1a1a'} />
             </button>
             <button
               type="button"
@@ -930,7 +929,11 @@ export function AlojamientoDetail() {
           {/* Left Column */}
           <div className="dt-overview-left">
             <div className="dt-genius-notice">
-              Podrías optar a un descuento Genius en {alojamiento.nombre}. Para comprobar si hay un descuento Genius disponible para tus fechas, <Link to="/login">inicia sesión</Link>.
+              {user ? (
+                <span>✓ Tienes beneficios y tarifas Genius activas aplicadas a tu estancia en <strong>{alojamiento.nombre}</strong>.</span>
+              ) : (
+                <span>Podrías optar a un descuento Genius en {alojamiento.nombre}. Para comprobar si hay un descuento Genius disponible para tus fechas, <Link to="/login">inicia sesión</Link>.</span>
+              )}
             </div>
 
             <div>
@@ -997,7 +1000,7 @@ export function AlojamientoDetail() {
               <button
                 type="button"
                 className="dt-btn-blue"
-                onClick={() => alert(`Mostrando mapa para ${alojamiento.nombre}`)}
+                onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((alojamiento.nombre || '') + ' ' + (alojamiento.destino || 'Ecuador'))}`, '_blank')}
               >
                 <PinIcon size={16} /> Mostrar en el mapa
               </button>
@@ -1044,24 +1047,26 @@ export function AlojamientoDetail() {
           </aside>
         </div>
 
-        {/* Genius promo banner */}
-        <div className="dt-genius-promo-box">
-          <div>
-            <h3>Inicia sesión y ahorra dinero</h3>
-            <p>Para comprobar si puedes ahorrar un 10% o más en este alojamiento, inicia sesión</p>
-            <div className="dt-genius-btns">
-              <Link to="/login" className="dt-btn-blue">
-                Iniciar sesión
-              </Link>
-              <Link to="/register" className="dt-link-blue">
-                Crear una cuenta gratis
-              </Link>
+        {/* Genius promo banner: solo mostrar si el usuario NO ha iniciado sesión */}
+        {!user && (
+          <div className="dt-genius-promo-box">
+            <div>
+              <h3>Inicia sesión y ahorra dinero</h3>
+              <p>Para comprobar si puedes ahorrar un 10% o más en este alojamiento, inicia sesión</p>
+              <div className="dt-genius-btns">
+                <Link to="/login" className="dt-btn-blue">
+                  Iniciar sesión
+                </Link>
+                <Link to="/register" className="dt-link-blue">
+                  Crear una cuenta gratis
+                </Link>
+              </div>
+            </div>
+            <div>
+              <GeniusGiftIcon size={52} />
             </div>
           </div>
-          <div>
-            <GeniusGiftIcon size={52} />
-          </div>
-        </div>
+        )}
 
         {/* ======================================================================
             AVAILABILITY & ROOM SELECTION TABLE SECTION
