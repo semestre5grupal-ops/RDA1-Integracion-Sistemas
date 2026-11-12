@@ -102,8 +102,14 @@ export class VuelosSociosService {
     }
   }
 
+  /** Lista de aerolíneas en memoria unos segundos: cada búsqueda ya no consulta la base. */
+  private nodosCache: { lista: ConfigProveedor[]; hasta: number } | null = null;
+
   async nodosActivos(hostPropio?: string): Promise<ConfigProveedor[]> {
-    const todos = await this.nodos.find({ where: { vertical: 'VUELOS' } });
+    if (!this.nodosCache || this.nodosCache.hasta < Date.now()) {
+      this.nodosCache = { lista: await this.nodos.find({ where: { vertical: 'VUELOS' } }), hasta: Date.now() + 15_000 };
+    }
+    const todos = this.nodosCache.lista;
     return todos.filter((n) => {
       if (n.killSwitchActivo) return false;
       const base = VuelosSociosService.baseVuelos(n.baseUrlRest);
@@ -291,10 +297,44 @@ export class VuelosSociosService {
     hostPropio?: string,
   ): Promise<{ offers: any[]; sources: ResultadoSocio[] }> {
     const nodos = await this.nodosActivos(hostPropio);
-    const resultados = await Promise.all(nodos.map((n) => this.buscarEnNodo(n, body, entrantes)));
+    const resultados = await this.esperarBusquedas(nodos, body, entrantes);
     const offers = resultados.flatMap((r) => r.ofertas);
     offers.sort((a, b) => precioTotal(a) - precioTotal(b));
     return { offers, sources: resultados.map((r) => r.resumen) };
+  }
+
+  /**
+   * Espera a todas las aerolíneas, pero sin quedarse colgado por una sola: pasado
+   * el tope (VUELOS_BUSQUEDA_TOPE_MS, 6 s por defecto) se responde con las que ya
+   * contestaron, siempre que al menos una lo haya hecho. Las que no llegaron salen
+   * en `sources` como "sin respuesta" en esta búsqueda (igual que un timeout).
+   */
+  private async esperarBusquedas(nodos: ConfigProveedor[], body: any, entrantes: Record<string, any>) {
+    const n = Number(process.env.VUELOS_BUSQUEDA_TOPE_MS);
+    const tope = Number.isFinite(n) && n > 0 ? n : 6000;
+    const listos: Array<{ ofertas: any[]; resumen: ResultadoSocio } | undefined> = new Array(nodos.length);
+    const promesas = nodos.map((nodo, i) => this.buscarEnNodo(nodo, body, entrantes).then((r) => (listos[i] = r)));
+    const todas = Promise.all(promesas);
+    let reloj: NodeJS.Timeout | undefined;
+    const alTope = new Promise<'tope'>((ok) => (reloj = setTimeout(() => ok('tope'), tope)));
+    let r = await Promise.race([todas, alTope]);
+    // Si al tope nadie respondió todavía, se espera como antes (al timeout de cada una).
+    if (r === 'tope' && !listos.some(Boolean)) r = await todas;
+    clearTimeout(reloj);
+    return nodos.map(
+      (nodo, i) =>
+        listos[i] ?? {
+          ofertas: [],
+          resumen: {
+            codigoNodo: nodo.codigoNodo,
+            nombre: nodo.nombreProveedor,
+            ok: false,
+            ms: tope,
+            ofertas: 0,
+            error: `Sin respuesta en ${tope} ms`,
+          } as ResultadoSocio,
+        },
+    );
   }
 
   private async buscarEnNodo(
@@ -322,6 +362,9 @@ export class VuelosSociosService {
       // ya es el día siguiente): rechazan "hoy" por pasado y un vuelo de las 23:00
       // sale con la fecha de mañana. A esas se les pide también el día siguiente y
       // se deja solo lo que sale en la fecha pedida en hora de Ecuador.
+      // Si ya se sabe que esta aerolínea usa UTC, las dos consultas van en paralelo.
+      const conocidaUtc = this.fechasEnUtc.has(nodo.codigoNodo) && Array.isArray(body?.itineraries) && body.itineraries.length > 0;
+      const segundaAdelantada = conocidaUtc ? consultar(conFechasMasUnDia(body)).catch(() => null) : null;
       const primera = await consultar(body);
       const fechaUtc = this.fechasEnUtc.has(nodo.codigoNodo)
         || (!primera.ok && /before the current date|fecha.*(pasad|anterior)|past date/i.test(String(primera.error ?? '')))
@@ -329,7 +372,7 @@ export class VuelosSociosService {
       let segunda: Awaited<ReturnType<typeof consultar>> | null = null;
       if (fechaUtc && Array.isArray(body?.itineraries) && body.itineraries.length) {
         this.fechasEnUtc.add(nodo.codigoNodo);
-        segunda = await consultar(conFechasMasUnDia(body)).catch(() => null);
+        segunda = await (segundaAdelantada ?? consultar(conFechasMasUnDia(body)).catch(() => null));
       }
       resumen.status = primera.ok || !segunda?.ok ? primera.status : segunda.status;
       if (!primera.ok && !segunda?.ok) {
