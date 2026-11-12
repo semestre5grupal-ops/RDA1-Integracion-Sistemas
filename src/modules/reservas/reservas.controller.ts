@@ -33,7 +33,18 @@ export class ReservasController {
     @Headers('x-correlation-id') correlationId?: string,
     @Req() req?: any,
   ) {
-    const rawApiKey = apiKey || req?.headers?.['X-Api-Key'] || req?.headers?.['x_api_key'];
+    const rawApiKey =
+      apiKey ||
+      req?.headers?.['x-api-key'] ||
+      req?.headers?.['X-Api-Key'] ||
+      req?.headers?.['X-API-KEY'] ||
+      req?.headers?.['x_api_key'] ||
+      req?.headers?.['api-key'] ||
+      req?.headers?.['apiKey'] ||
+      (req?.headers?.authorization?.toLowerCase()?.startsWith('bearer ') ? req.headers.authorization.slice(7).trim() : null) ||
+      req?.query?.api_key ||
+      (dto as any)?.api_key ||
+      (dto as any)?.apiKey;
     const safeCorrId = correlationId || req?.headers?.['x-correlation-id'];
     return this.reservasService.confirmarCheckin(id, dto, rawApiKey, safeCorrId);
   }
@@ -49,7 +60,18 @@ export class ReservasController {
     @Headers('x-correlation-id') correlationId?: string,
     @Req() req?: any,
   ) {
-    const rawApiKey = apiKey || req?.headers?.['X-Api-Key'] || req?.headers?.['x_api_key'];
+    const rawApiKey =
+      apiKey ||
+      req?.headers?.['x-api-key'] ||
+      req?.headers?.['X-Api-Key'] ||
+      req?.headers?.['X-API-KEY'] ||
+      req?.headers?.['x_api_key'] ||
+      req?.headers?.['api-key'] ||
+      req?.headers?.['apiKey'] ||
+      (req?.headers?.authorization?.toLowerCase()?.startsWith('bearer ') ? req.headers.authorization.slice(7).trim() : null) ||
+      req?.query?.api_key ||
+      (dto as any)?.api_key ||
+      (dto as any)?.apiKey;
     const safeCorrId = correlationId || req?.headers?.['x-correlation-id'];
     const targetId = dto.reserva_id || dto.pnr || dto.codigo_reserva || dto.localizador || (dto as any).id || 'UNKNOWN';
     return this.reservasService.confirmarCheckin(targetId, dto, rawApiKey, safeCorrId);

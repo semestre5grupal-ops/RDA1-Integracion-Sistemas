@@ -25,6 +25,36 @@ import { InventoryService } from '../inventory/inventory.service';
 import * as crypto from 'crypto';
 import { TraceContextService } from '../../core/tracing/trace-context.service';
 
+const DILAN_KNOWN_IDS = new Set([
+  '4fcd5948-9325-4833-9eae-feaafe9c0e41',
+  '20c52405-22a1-4919-a2ec-38531768e505',
+  '55884089-db9c-497d-b13f-fd9647b37d33',
+  '02f18a7b-b36c-482e-803c-d13ad2209d58',
+  '58da47b1-1d9f-4088-a3ec-52e61f8fe9c3',
+  '18fc67dd-b014-4e45-ba03-375a53cafcd6',
+  'a2c575b0-9a46-4fd8-a81a-1c25683af025',
+  'f80548ce-daaa-428f-90e0-1f9cace5aaf9',
+  'f6ba30ba-eece-44e5-9913-61b8c29dffd6',
+  'be4cdc05-3d72-4262-b1d6-63671bc52ccf',
+  'c1196d64-da06-4d5a-aae9-80630514ef30',
+  '26722574-3859-458c-850e-d30d592fab0c',
+  '70f87807-b9e9-489f-a8f2-1e8d47a56690',
+  'a3c21dc2-7d89-41ba-80ed-3c9c89ae21ac',
+  'c823084b-51ae-420e-974f-c62a63dd1089',
+  '5e9af02e-ec3f-4017-a2d9-5c50e61162b6',
+  '90fae681-3124-4159-a5a5-ea125a9fdd28',
+  '9e34398d-4193-4ca0-b572-8108d4af7113',
+  'bb357068-35f7-46c0-9113-652c51ba6d40',
+  '105e8cb1-e9c5-4c63-9ad6-d56e06f239b3',
+  '9c46547c-475d-4854-8d5f-f74df176bfe1',
+  'd44e170e-47fc-41d2-a31a-848293f2099b',
+  '91f4eb02-f50b-4483-b508-f6b436202c18',
+  '0aa62c9e-4aa3-44c2-aae4-964fa13b46fb',
+  '6f035852-c8a8-49b1-a771-1b34b07e972d',
+  'b9aed2c5-30ae-409a-88e8-3ae875acb2e3',
+  'd6dbff2c-b984-4f3f-aada-577a5305b158',
+]);
+
 @Injectable()
 export class AtraccionesService implements OnModuleInit {
   private readonly logger = new Logger(AtraccionesService.name);
@@ -455,10 +485,11 @@ export class AtraccionesService implements OnModuleInit {
           },
         ),
       );
-      const items = Array.isArray(data) ? data : (data?.items || data?.data || []);
+      const items = Array.isArray(data) ? data : (data?.data || data?.items || []);
       for (const item of items) {
         await this.upsertPartnerAttraction(item, 'NODE_ATR_DILAN');
       }
+      this.logger.log(`[Dilan Catalog] Sincronizadas ${items.length} atracciones de Descubre EC (NODE_ATR_DILAN).`);
     } catch (e: any) {
       this.logger.warn(`Error al sincronizar catálogo con Dilan: ${e.message}`);
     }
@@ -1105,10 +1136,10 @@ export class AtraccionesService implements OnModuleInit {
     let isAriel = partnerCode === 'NODE_ATR_ARIEL';
 
     if (!isAlisson && !isMichael && !isGloria && !isDilan && !isAriel) {
-      if (id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d') {
-        isGloria = true;
-      } else if (id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
+      if (DILAN_KNOWN_IDS.has(id) || id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
         isDilan = true;
+      } else if (id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d') {
+        isGloria = true;
       } else if (id.startsWith('PRhu') || id === 's7PpJcyvtY2Q') {
         isAlisson = true;
       } else if (id === 'rLohsmEh6809') {
@@ -1604,6 +1635,32 @@ export class AtraccionesService implements OnModuleInit {
     };
   }
 
+  normalizarHoraParaDilan(timeInput?: string, slotId?: string): string {
+    if (slotId) {
+      const mSlot = slotId.match(/^slot-\d{8}-(\d{2})(\d{2})$/);
+      if (mSlot) return `${mSlot[1]}:${mSlot[2]}:00`;
+    }
+    if (!timeInput) return '09:00:00';
+    const raw = timeInput.trim();
+    const m12 = raw.match(/^(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)$/i);
+    if (m12) {
+      let h = parseInt(m12[1], 10);
+      const min = m12[2];
+      const isPm = m12[3].toLowerCase().startsWith('p');
+      if (isPm && h < 12) h += 12;
+      if (!isPm && h === 12) h = 0;
+      return `${h.toString().padStart(2, '0')}:${min}:00`;
+    }
+    const m24 = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m24) {
+      const h = m24[1].padStart(2, '0');
+      const min = m24[2];
+      const sec = m24[3] || '00';
+      return `${h}:${min}:${sec}`;
+    }
+    return '09:00:00';
+  }
+
   // ============================================================================
   // 5. CONTRATO OBLIGATORIO DE COMPRA Y SAGAS (4 Edades, RFC 7807 409 OUT_OF_STOCK)
   // ============================================================================
@@ -1686,10 +1743,10 @@ export class AtraccionesService implements OnModuleInit {
         '074de7b3-3707-4742-bb73-c5ab659f539a',
         '1563d2a6-65ed-4d4f-a06d-48a6b3ed4ca5',
       ];
-      if (gloriaKnownIds.includes(id)) {
-        isGloriaAttr = true;
-      } else if (id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
+      if (DILAN_KNOWN_IDS.has(id) || id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
         isDilanAttr = true;
+      } else if (gloriaKnownIds.includes(id)) {
+        isGloriaAttr = true;
       } else if (id.startsWith('PRhu') || id === 's7PpJcyvtY2Q') {
         isAlissonAttr = true;
       } else if (id === 'rLohsmEh6809') {
@@ -2306,13 +2363,13 @@ export class AtraccionesService implements OnModuleInit {
 
     if (isDilanAttr) {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
-      const timeRaw = (dto.time || dto.hora || '09:00 a.m.').trim();
-      const timeFormatted = timeRaw.includes('a.m.') || timeRaw.includes('p.m.') ? timeRaw : `${timeRaw} a.m.`;
+      const timeRaw = (dto.time || dto.hora || '09:00:00').trim();
       const dateCompact = dateStr.replace(/-/g, '');
       const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4).padEnd(4, '0');
       const slotIdDilan = dto.slot_id && dto.slot_id.startsWith('slot-')
         ? dto.slot_id
         : `slot-${dateCompact}-${timeCompact}`;
+      const timeFormatted = this.normalizarHoraParaDilan(timeRaw, slotIdDilan);
 
       const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
       const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';
@@ -2943,28 +3000,35 @@ export class AtraccionesService implements OnModuleInit {
       ) || null;
     }
 
-    // Si la reserva no existía aún en la base local (creada en la tienda de Gloria), auto-sincronizarla para no fallar
     if (!reserva) {
-      this.logger.log(`[Check-in Atracciones] Reserva '${reservationId}' no existía en Booking Central. Auto-sincronizando desde socio Descubre EC...`);
-      const docVal = docInput || (reservationId.length === 10 ? reservationId : '1755073481');
-      reserva = this.reservaRepo.create({
-        id: reservationId,
-        idempotencyKey: `idemp-gloria-${reservationId}`,
-        atraccionId: '1563d2a6-65ed-4d4f-a06d-48a6b3ed4ca5',
-        customerName: (dto as any).titular_nombre || (dto as any).cliente_nombre || 'Turista Descubre EC',
-        customerEmail: (dto as any).cliente_email || 'turista@booking.local',
-        customerPhone: '+593991234567',
-        documentId: docVal,
-        date: new Date().toISOString().split('T')[0],
-        time: '09:00',
-        ticketCount: (dto as any).asistentes_reales || 1,
-        subtotal: 55.0,
-        totalAmount: 55.0,
-        status: 'CONFIRMED',
-        voucherQrPayload: `DESCUBRE-EC-${reservationId}`,
-        guiaOficialAsignado: dto.guia_asignado || (dto as any).guia_codigo || 'Carlos Villacís',
-      });
-      await this.reservaRepo.save(reserva);
+      this.logger.warn(`[Check-in Atracciones] Reserva '${reservationId}' no encontrada en Booking Central: 404`);
+      throw new HttpException(
+        {
+          type: 'https://descubre-ec.com/errores/not-found',
+          title: 'Reserva No Encontrada',
+          status: HttpStatus.NOT_FOUND,
+          detail: `No se encontró ninguna reserva activa con el identificador '${reservationId}'.`,
+          instance: `/api/v3/atracciones/reservas/${reservationId}/checkin`,
+          code: 'NOT_FOUND',
+          timestamp: new Date().toISOString(),
+        },
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    if (reserva.status === 'CANCELLED' || reserva.status === 'CANCELADO') {
+      throw new HttpException(
+        {
+          type: 'https://descubre-ec.com/errores/conflict',
+          title: 'Conflicto de Estado',
+          status: HttpStatus.CONFLICT,
+          detail: `La reserva '${reservationId}' se encuentra cancelada y no admite check-in.`,
+          code: 'INVALID_STATUS',
+          instance: `/api/v3/atracciones/reservas/${reservationId}/checkin`,
+          timestamp: new Date().toISOString(),
+        },
+        HttpStatus.CONFLICT,
+      );
     }
 
     // 3. Proceder con el check-in presencial

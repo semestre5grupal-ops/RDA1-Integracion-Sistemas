@@ -136,11 +136,14 @@ export class DilanAtraccionesAdapter {
     const telefonoAdaptado = this.normalizarTelefonoParaDilan(payload.customer_phone);
     const documentoAdaptado = this.normalizarDocumentoParaDilan(payload.document_id);
 
+    const horaAdaptada = this.normalizarHoraParaDilan(payload.time);
+
     // Mapeo canónico OpenAPI v3 de Booking al esquema de Dilan (Descubre EC)
     const dilanPayload = {
       atraccion_id: payload.atraccionId,
       fecha: payload.date,
-      hora: payload.time || '10:00 a.m.',
+      hora: horaAdaptada,
+      time: horaAdaptada,
       adult_count: payload.adult_count || 1,
       child_count: payload.child_count || 0,
       customer: {
@@ -308,6 +311,28 @@ export class DilanAtraccionesAdapter {
       voucher_qr_url: dilanRes.voucher_qr_url || null,
       ics_calendar_url: dilanRes.ics_calendar_url || null
     };
+  }
+
+  private normalizarHoraParaDilan(timeInput?: string): string {
+    if (!timeInput) return '09:00:00';
+    const raw = timeInput.trim();
+    const m12 = raw.match(/^(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)$/i);
+    if (m12) {
+      let h = parseInt(m12[1], 10);
+      const min = m12[2];
+      const isPm = m12[3].toLowerCase().startsWith('p');
+      if (isPm && h < 12) h += 12;
+      if (!isPm && h === 12) h = 0;
+      return `${h.toString().padStart(2, '0')}:${min}:00`;
+    }
+    const m24 = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m24) {
+      const h = m24[1].padStart(2, '0');
+      const min = m24[2];
+      const sec = m24[3] || '00';
+      return `${h}:${min}:${sec}`;
+    }
+    return '09:00:00';
   }
 
   private normalizarTelefonoParaDilan(phone?: string): string {
