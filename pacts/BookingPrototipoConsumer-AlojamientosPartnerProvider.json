@@ -1,0 +1,323 @@
+{
+  "consumer": {
+    "name": "BookingPrototipoConsumer"
+  },
+  "interactions": [
+    {
+      "description": "Despacho de reserva de alojamiento con Idempotency-Key",
+      "providerStates": [
+        {
+          "name": "La habitación HAB-101 cuenta con disponibilidad"
+        }
+      ],
+      "request": {
+        "body": {
+          "checkin": "2026-12-01",
+          "checkout": "2026-12-05",
+          "habitacion_id": "HAB-101",
+          "hotel_id": "HTL-UIO-001",
+          "huespedes": 2,
+          "noches": 4,
+          "titular": {
+            "email": "karol@alojamiento.com",
+            "identificacion": "1723456789",
+            "nombre": "Karol Moreno"
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "idem-alo-9831a"
+        },
+        "matchingRules": {
+          "body": {
+            "$.checkin": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.checkout": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.habitacion_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.hotel_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.huespedes": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.noches": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.titular.email": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.titular.identificacion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.titular.nombre": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/alojamientos/reservas"
+      },
+      "response": {
+        "body": {
+          "checkin_presencial": true,
+          "mensaje": "Reserva confirmada. Check-in presencial en recepción.",
+          "moneda": "USD",
+          "pnr": "BK-ALO-7429",
+          "status": "CONFIRMED",
+          "total": 382
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.checkin_presencial": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.mensaje": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.moneda": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.pnr": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "Petición de búsqueda de alojamientos en Quito",
+      "providerStates": [
+        {
+          "name": "Existen hoteles y habitaciones disponibles en Quito"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/alojamientos/buscar",
+        "query": {
+          "checkin": [
+            "2026-12-01"
+          ],
+          "checkout": [
+            "2026-12-05"
+          ],
+          "ciudad": [
+            "Quito"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "hoteles": [
+            {
+              "ciudad": "Quito",
+              "disponible": true,
+              "habitaciones_disponibles": 4,
+              "hotel_id": "HTL-UIO-001",
+              "moneda": "USD",
+              "nombre": "Hotel Plaza Grande",
+              "precio_por_noche": 95.5
+            }
+          ],
+          "total": 1
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.hoteles": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.hoteles[*].ciudad": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.hoteles[*].disponible": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.hoteles[*].habitaciones_disponibles": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.hoteles[*].hotel_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.hoteles[*].moneda": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.hoteles[*].nombre": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.hoteles[*].precio_por_noche": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "17.1.4"
+    },
+    "pactRust": {
+      "ffi": "0.5.8",
+      "models": "1.3.16"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "AlojamientosPartnerProvider"
+  }
+}

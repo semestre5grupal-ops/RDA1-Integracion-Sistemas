@@ -1,0 +1,299 @@
+{
+  "consumer": {
+    "name": "BookingPrototipoConsumer"
+  },
+  "interactions": [
+    {
+      "description": "Despacho de reserva de auto con conductor y días",
+      "providerStates": [
+        {
+          "name": "El vehículo VEH-UIO-401 está listo para entrega inmediata"
+        }
+      ],
+      "request": {
+        "body": {
+          "conductor": {
+            "email": "damian@rentacar.com",
+            "licencia": "LIC-EC-90812",
+            "nombre": "Damián Nicolalde"
+          },
+          "dias": 3,
+          "vehiculo_id": "VEH-UIO-401"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "idem-aut-1294c"
+        },
+        "matchingRules": {
+          "body": {
+            "$.conductor.email": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.conductor.licencia": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.conductor.nombre": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.dias": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.vehiculo_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/autos/reservas"
+      },
+      "response": {
+        "body": {
+          "cooldown_horas": 2,
+          "deposito_garantia": 200,
+          "moneda": "USD",
+          "reserva_id": "RES-AUT-5541",
+          "status": "CONFIRMED",
+          "total_alquiler": 135,
+          "vehiculo_id": "VEH-UIO-401"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.cooldown_horas": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.deposito_garantia": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.moneda": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.reserva_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total_alquiler": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.vehiculo_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "Petición de catálogo de autos en Quito",
+      "providerStates": [
+        {
+          "name": "Existen vehículos disponibles para alquiler en la ciudad de Quito"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/autos",
+        "query": {
+          "ciudad": [
+            "Quito"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "total": 1,
+          "vehiculos": [
+            {
+              "categoria": "SUV",
+              "disponible": true,
+              "marca": "Toyota",
+              "modelo": "RAV4",
+              "moneda": "USD",
+              "tarifa_diaria": 45,
+              "transmision": "AUTOMATICA",
+              "vehiculo_id": "VEH-UIO-401"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.total": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.vehiculos": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.vehiculos[*].categoria": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.vehiculos[*].disponible": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.vehiculos[*].marca": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.vehiculos[*].modelo": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.vehiculos[*].moneda": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.vehiculos[*].tarifa_diaria": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.vehiculos[*].transmision": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.vehiculos[*].vehiculo_id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "17.1.4"
+    },
+    "pactRust": {
+      "ffi": "0.5.8",
+      "models": "1.3.16"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "AutosPartnerProvider"
+  }
+}

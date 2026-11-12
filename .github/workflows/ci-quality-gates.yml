@@ -1,0 +1,60 @@
+# =============================================================================
+# PIPELINE DE INTEGRACIÓN CONTINUA (CI) CON GATES DE CALIDAD — SEMANA 9
+# Cátedra: Integración de Sistemas — Sistemas de Información (PUCE)
+# Docente: Ing. Damián Nicolalde
+# =============================================================================
+# Principio rector: Fail-Fast (orden de ejecución de más rápido/barato a más costoso)
+# 1. Lint & Type Check -> 2. Pruebas Unitarias -> 3. Contratos Integración
+# -> 4. Contract Testing con Pact (4 Verticales) -> 5. Compilación NestJS (Build)
+# =============================================================================
+name: CI Quality Gates (Semana 9 - Testing & Contracts)
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'fix/**'
+      - 'feat/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: ci-quality-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Pipeline de Gates de Calidad (Fail-Fast)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 1. Checkout del Repositorio
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar Entorno Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Instalación Determinista de Dependencias
+        run: npm ci
+
+      - name: 4. Gate 1 — Linting & Estilo de Código (ESLint)
+        run: npx eslint "{src,test}/**/*.ts" --max-warnings 50
+
+      - name: 5. Gate 2 — Pruebas Unitarias Aisladas (Jest)
+        run: npm test -- --runInBand --forceExit
+
+      - name: 6. Gate 3 — Pruebas de Integración y Schemas OpenAPI
+        run: npm run test:contracts
+
+      - name: 7. Gate 4 — Consumer-Driven Contract Testing con PACT (4 Verticales)
+        run: npm run test:pact
+
+      - name: 8. Gate 5 — Verificación de Compilación NestJS
+        run: npm run build
