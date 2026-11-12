@@ -16,6 +16,7 @@ import { RabbitMqEventBusService } from '../event-bus/rabbitmq/rabbitmq-event-bu
 import { WinstonPhysicalLoggerService } from '../../core/logger/winston-logger.service';
 import { InboundCloudEventDto } from './dto/inbound-cloud-event.dto';
 import { ListWebhookDeliveriesDto } from './dto/list-webhook-deliveries.dto';
+import { trazaVuelos } from '../vuelos/socios/vuelos-traza';
 import { WebhookEntrega } from './entities';
 
 const VERTICALES = ['vuelos', 'autos', 'atracciones', 'alojamientos'] as const;
@@ -79,6 +80,7 @@ export class WebhooksService {
     }
     if (!this.validarFirma(rawBody, signature, secret)) {
       this.winstonLogger.logAudit('WEBHOOK_FIRMA_INVALIDA', { vertical: verticalParam });
+      if (verticalParam === 'vuelos') trazaVuelos.registrar({ correlacion: 'webhook-vuelos', paso: 'webhook', resultado: 'error', detalle: 'Webhook de una aerolínea con firma inválida (rechazado 401)' });
       throw new UnauthorizedException('La firma HMAC-SHA256 del webhook no es válida.');
     }
     if (!contentType || !/^application\/cloudevents\+json(?:\s*;|$)/i.test(contentType)) {
@@ -86,6 +88,15 @@ export class WebhooksService {
     }
 
     const event = this.validarCloudEvent(body);
+    if (verticalParam === 'vuelos') {
+      // Panel de monitoreo de vuelos: webhook recibido (solo registro, no cambia el procesamiento).
+      trazaVuelos.registrar({
+        correlacion: String((event as any).correlationid || `webhook-${event.id}`),
+        paso: 'webhook', resultado: 'ok',
+        detalle: `Webhook ${event.type} de ${event.source}${(event as any).data?.pnr ? ` · PNR ${(event as any).data.pnr}` : ''}`,
+        nodo: (event as any).node_id ?? null,
+      });
+    }
     const existing = await this.entregaRepo.findOne({
       where: { eventId: event.id },
     });

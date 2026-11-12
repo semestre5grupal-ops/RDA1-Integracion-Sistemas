@@ -103,7 +103,34 @@ const ARISTAS = [
   ['pagos', 'bus', 'AMQP'],
 ];
 
-export function ArquitecturaVuelos({ eventos, aerolineas = [], busActivo, reproducir }) {
+/**
+ * Salud de cada conexión del diagrama: cuántos pasos la recorrieron y en cuántos
+ * el punto se quedó ahí por error (último tramo de un paso fallido).
+ * Clave: los dos componentes ordenados, "a|b".
+ */
+export function saludDeTramos(eventos, aerolineas = []) {
+  const salud = {};
+  for (const e of eventos) {
+    for (const r of rutasDe(e, aerolineas)) {
+      const ruta = r.ruta ? (r.cortarEn != null ? r.ruta.slice(0, r.cortarEn + 1) : r.ruta) : null;
+      if (!ruta || ruta.length < 2) continue;
+      const vistas = new Set();
+      for (let i = 0; i < ruta.length - 1; i++) {
+        const k = [ruta[i], ruta[i + 1]].sort().join('|');
+        if (vistas.has(k)) continue;
+        vistas.add(k);
+        (salud[k] ??= { total: 0, errores: 0 }).total += 1;
+      }
+      if (r.resultado === 'error') {
+        const k = [ruta[ruta.length - 2], ruta[ruta.length - 1]].sort().join('|');
+        (salud[k] ??= { total: 0, errores: 0 }).errores += 1;
+      }
+    }
+  }
+  return salud;
+}
+
+export function ArquitecturaVuelos({ eventos, aerolineas = [], busActivo, reproducir, salud = null }) {
   const [puntos, setPuntos] = useState([]);
   const [ahora, setAhora] = useState(() => performance.now());
   const vistos = useRef(new Set());
@@ -230,10 +257,17 @@ export function ArquitecturaVuelos({ eventos, aerolineas = [], busActivo, reprod
           {aristas.map(([a, b]) => {
             const A = comps[a];
             const B = comps[b];
-            const activa = tramosActivos.has([a, b].sort().join('|'));
+            const clave = [a, b].sort().join('|');
+            const activa = tramosActivos.has(clave);
+            // Salud de la última hora: rojo ≥ 20 % de errores, ámbar ≥ 5 %, verde si funciona.
+            const sd = salud?.[clave];
+            const tasa = sd && sd.total >= 3 ? sd.errores / sd.total : null;
+            const colorSalud = tasa == null ? T.border : tasa >= 0.2 ? '#d32f2f' : tasa >= 0.05 ? '#e8a400' : '#8fcca0';
             return (
               <g key={`${a}-${b}`}>
-                <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={activa ? T.azul : T.border} strokeWidth={activa ? 2.5 : 1.5} />
+                <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={activa ? T.azul : colorSalud} strokeWidth={activa ? 2.5 : tasa != null && tasa >= 0.05 ? 2.5 : 1.5}>
+                  {sd && <title>{`Última hora: ${sd.total} paso(s), ${sd.errores} con error (${Math.round((sd.errores / Math.max(1, sd.total)) * 100)} %)`}</title>}
+                </line>
               </g>
             );
           })}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import { ProcesoEnVivo } from './ProcesoEnVivo';
+import { MonitoreoVuelos } from './monitoreo/MonitoreoVuelos';
 import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 import { ActualizadoHace } from './panelUtils';
 
@@ -362,7 +362,7 @@ export function ProcesosTab({ refreshKey = 0 }) {
       </div>
 
       <div role="tablist" aria-label="Tipo de grafo" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {[{ id: 'vivo', tab: '🔴 Flujo en vivo' }, ...GRAFOS].map((g) => (
+        {[{ id: 'vivo', tab: '📈 Monitoreo en vivo' }, ...GRAFOS].map((g) => (
           <button
             key={g.id}
             role="tab"
@@ -379,7 +379,7 @@ export function ProcesosTab({ refreshKey = 0 }) {
         ))}
       </div>
 
-      {enVivo && <ProcesoEnVivo aerolineas={aero} />}
+      {enVivo && <MonitoreoVuelos aerolineas={aero} />}
 
       {!enVivo && (
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: '18px 20px', display: 'grid', gap: 14 }}>

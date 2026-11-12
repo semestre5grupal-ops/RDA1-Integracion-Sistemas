@@ -165,6 +165,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // Hold liberado por el cliente: se sueltan también sus asientos.
     if (metodo === 'DELETE' && segmentos[0] === 'offers' && segmentos[1] === 'hold' && segmentos[2]) {
       const pedido = decodeURIComponent(segmentos[2]);
+      this.trazaUnaVez(`soltar-hold|${pedido}`, 60_000, entrantes, 'soltar', 'ok', 'Hold liberado por el cliente (no pagó)', { nodo });
       await this.bloqueos.liberar(pedido);
       void this.bloqueos.olvidarHold(pedido);
       this.holdsVistos.delete(pedido);
@@ -466,7 +467,22 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         `${segmentos[2] === 'check-in' ? 'Check-in' : 'Cancelación'} rechazado por la aerolínea · ${pnr} · ${motivo}`, { nodo: copia?.codigoNodo });
       return;
     }
+    if (metodo === 'GET' && segmentos[2] === 'boarding-passes' && (r.status < 200 || r.status >= 300)) {
+      this.trazaUnaVez(`pase|${bookingId}|${r.status}`, 120_000, entrantes, 'pase', 'aviso',
+        `Pase de abordar no disponible · ${pnr} · ${String(r.body?.code ?? r.body?.title ?? `HTTP ${r.status}`).slice(0, 120)}`, { nodo: copia?.codigoNodo });
+    }
     if (r.status < 200 || r.status >= 300 || !r.body || typeof r.body !== 'object') return;
+    // Consultas del cliente en Mis Reservas (una vez por minuto por reserva, para no llenar el panel).
+    if (metodo === 'GET' && segmentos.length === 2) {
+      this.trazaUnaVez(`boleto|${bookingId}`, 120_000, entrantes, 'boleto', 'ok', `Boleto consultado en Mis Reservas · ${pnr}`, { nodo: copia?.codigoNodo });
+    } else if (metodo === 'GET' && segmentos[2] === 'boarding-passes') {
+      const n = Array.isArray(r.body?.boardingPasses) ? r.body.boardingPasses.length : 0;
+      this.trazaUnaVez(`pase|${bookingId}`, 120_000, entrantes, 'pase', 'ok', `Pase de abordar consultado · ${pnr} · ${n ? `${n} pase(s) de la aerolínea` : 'armado por Booking con la reserva'}`, { nodo: copia?.codigoNodo });
+    } else if (metodo === 'GET' && segmentos[2] === 'cancellation-quote') {
+      const devolveria = parseFloat(String(r.body?.refundAmount?.total ?? r.body?.refundAmount ?? r.body?.refund?.amount ?? r.body?.refundableAmount?.total ?? ''));
+      this.trazaUnaVez(`cotizacion|${bookingId}`, 60_000, entrantes, 'cotizacion', 'ok',
+        `Cotización de cancelación · ${pnr}${Number.isFinite(devolveria) ? ` · devolvería ${devolveria.toFixed(2)}` : ''}`, { nodo: copia?.codigoNodo, monto: Number.isFinite(devolveria) ? devolveria : null });
+    }
     try {
       if (metodo === 'POST' && segmentos[2] === 'check-in') {
         if (await this.reservas.marcarCheckin(bookingId, new Date(), 'booking')) {
@@ -621,6 +637,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     }
     if (metodo === 'DELETE') {
       await this.bloqueos.liberar(holdId);
+      this.trazaUnaVez(`soltar|${holdId}`, 60_000, entrantes, 'soltar', 'ok', 'Asientos soltados (el cliente cerró el formulario o cambió de vuelo)', { nodo });
       res.status(204).end();
       return;
     }
@@ -883,6 +900,16 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
   }
 
   // ───────────────────────────── Util ─────────────────────────────
+
+  /** Pasos que se repiten (consultas, polling): se registran una sola vez por ventana de tiempo. */
+  private readonly ultimasTrazas = new Map<string, number>();
+  private trazaUnaVez(clave: string, ventanaMs: number, entrantes: Record<string, any>, paso: PasoVuelo, resultado: ResultadoPaso, detalle: string, extra: { nodo?: string | null; ms?: number | null; monto?: number | null } = {}) {
+    const antes = this.ultimasTrazas.get(clave);
+    if (antes && Date.now() - antes < ventanaMs) return;
+    if (this.ultimasTrazas.size > 5_000) this.ultimasTrazas.clear();
+    this.ultimasTrazas.set(clave, Date.now());
+    this.traza(entrantes, paso, resultado, detalle, extra);
+  }
 
   /** Deja un paso en la traza en vivo, con el correlation ID de la compra. */
   private traza(entrantes: Record<string, any>, paso: PasoVuelo, resultado: ResultadoPaso, detalle: string, extra: { nodo?: string | null; ms?: number | null; monto?: number | null } = {}) {
