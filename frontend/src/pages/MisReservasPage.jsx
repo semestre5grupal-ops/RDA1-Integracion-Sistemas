@@ -2110,49 +2110,51 @@ export function MisReservasPage() {
                 </>
               )}
 
-              {/* ── CANCEL VIEW (Saga Compensatoria RDA2 §8) ── */}
+              {/* ── CANCEL VIEW (Minimalista, sin jerga técnica) ── */}
               {modalView === 'cancel' && (
                 <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                    <button type="button" onClick={() => setModalView('detail')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#006ce4', fontWeight: 600, fontSize: '0.9rem', padding: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      ← Volver al detalle
-                    </button>
-                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#b71c1c' }}>
-                      Cancelar reserva y compensación
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>
+                      Cancelar reserva
                     </h3>
+                    <button
+                      type="button"
+                      onClick={() => setModalView('detail')}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#006ce4', fontWeight: 500, fontSize: '0.85rem' }}
+                    >
+                      Volver
+                    </button>
                   </div>
 
                   {cancelSuccess ? (
-                    <div style={{ textAlign: 'center', padding: '16px 0' }}>
-                      <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#dcfce7', color: '#15803d', fontSize: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px auto' }}>
+                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                      <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#ecfdf5', color: '#059669', fontSize: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px auto' }}>
                         ✓
                       </div>
-                      <h4 style={{ margin: '0 0 6px', color: '#15803d', fontSize: '1.25rem', fontWeight: 800 }}>
-                        {selectedReserva?.tipo === 'vuelo' ? 'Reserva cancelada' : '¡Cancelación y Reembolso Exitosos!'}
+                      <h4 style={{ margin: '0 0 6px', color: '#0f172a', fontSize: '1.15rem', fontWeight: 700 }}>
+                        {selectedReserva?.tipo === 'vuelo' ? 'Reserva cancelada' : 'Cancelación exitosa'}
                       </h4>
-                      <p style={{ fontSize: '0.88rem', color: '#4b5563', margin: '0 0 16px' }}>
+                      <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 16px' }}>
                         {selectedReserva?.tipo === 'vuelo'
                           ? cancelSuccess.message
-                          : 'Se ejecutó el protocolo de reversión Saga: tus fondos fueron devueltos y los cupos liberados.'}
+                          : 'Tu reserva fue cancelada correctamente y el reembolso ha sido procesado.'}
                       </p>
 
-                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px', textAlign: 'left', marginBottom: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '14px', textAlign: 'left', marginBottom: '18px', fontSize: '0.86rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#64748b' }}>Localizador / PNR:</span>
-                          <strong style={{ color: '#003580' }}>{selectedReserva.pnr}</strong>
+                          <span style={{ color: '#64748b' }}>Código de reserva:</span>
+                          <strong style={{ color: '#1e293b' }}>{selectedReserva.pnr}</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#64748b' }}>Monto Reembolsado:</span>
-                          <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>{convertPrice(cancelSuccess.amount)}{selectedReserva?.tipo === 'vuelo' ? '' : ' (100%)'}</strong>
+                          <span style={{ color: '#64748b' }}>Monto a reembolsar:</span>
+                          <strong style={{ color: '#059669', fontSize: '0.98rem' }}>{convertPrice(cancelSuccess.amount)}{selectedReserva?.tipo === 'vuelo' ? '' : ' (100%)'}</strong>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#64748b' }}>Identificador de Reembolso:</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{cancelSuccess.refund_id}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#64748b' }}>Reverso de Inventario:</span>
-                          <span style={{ color: '#15803d', fontWeight: 700 }}>✓ Stock Restituido</span>
-                        </div>
+                        {cancelSuccess.refund_id && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: '#64748b' }}>Comprobante de reembolso:</span>
+                            <span style={{ fontFamily: 'monospace', color: '#475569' }}>{cancelSuccess.refund_id}</span>
+                          </div>
+                        )}
                       </div>
 
                       <button
@@ -2162,47 +2164,48 @@ export function MisReservasPage() {
                         className="trips-btn-primary"
                         style={{ width: '100%' }}
                       >
-                        Entendido y Cerrar
+                        Entendido y cerrar
                       </button>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                      {/* Advertencia Nielsen #5: Prevención de Errores */}
-                      <div style={{ background: '#fff3cd', border: '1px solid #ffeeba', borderRadius: '6px', padding: '12px 14px', fontSize: '0.86rem', color: '#856404' }}>
-                        Estás cancelando: <strong>{selectedReserva.titulo}</strong> (PNR: <strong>{selectedReserva.pnr}</strong>).
-                        <div style={{ marginTop: '6px', fontWeight: 600, color: '#0f5132' }}>
-                          ✓ Reembolso Total: Recibirás el 100% ({convertPrice(selectedReserva.totalRaw)}) acreditado a tu cuenta.
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px 14px', fontSize: '0.88rem', color: '#334155' }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>
+                          {selectedReserva.titulo}
+                        </div>
+                        <div style={{ color: '#64748b', fontSize: '0.82rem' }}>
+                          Código: <strong style={{ color: '#003580' }}>{selectedReserva.pnr}</strong> · Reembolso: <strong style={{ color: '#059669' }}>{convertPrice(selectedReserva.totalRaw)}</strong>
                         </div>
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, marginBottom: '6px', color: '#1a1a1a' }}>
-                          Motivo principal de cancelación:
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>
+                          Motivo de cancelación:
                         </label>
                         <select
                           value={cancelReason}
                           onChange={e => setCancelReason(e.target.value)}
-                          style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #d1d5db', borderRadius: '6px', fontSize: '0.9rem', outline: 'none', background: 'white' }}
+                          style={{ width: '100%', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.88rem', outline: 'none', background: 'white' }}
                         >
-                          <option value="Cambio de itinerario o planes de viaje">Cambio de itinerario o planes de viaje</option>
-                          <option value="Enfermedad o emergencia imprevista">Enfermedad o emergencia imprevista</option>
-                          <option value="Encontré una mejor tarifa o alternativa">Encontré una mejor tarifa o alternativa</option>
-                          <option value="Dificultad con el horario o transporte">Dificultad con el horario o transporte</option>
+                          <option value="Cambio de itinerario o planes de viaje">Cambio de planes o itinerario</option>
+                          <option value="Enfermedad o emergencia imprevista">Emergencia personal</option>
+                          <option value="Encontré una mejor tarifa o alternativa">Encontré otra opción</option>
+                          <option value="Dificultad con el horario o transporte">Dificultad de horario</option>
                           <option value="Otro motivo">Otro motivo</option>
                         </select>
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 700, marginBottom: '6px', color: '#1a1a1a' }}>
-                          Detalles o comentarios adicionales (opcional):
+                        <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '6px', color: '#334155' }}>
+                          Comentarios adicionales (opcional):
                         </label>
                         <textarea
                           value={cancelDetails}
                           onChange={e => setCancelDetails(e.target.value.slice(0, 200))}
                           maxLength={200}
-                          placeholder="Cuéntanos brevemente qué ocurrió..."
-                          rows={3}
-                          style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #d1d5db', borderRadius: '6px', fontSize: '0.88rem', boxSizing: 'border-box', outline: 'none' }}
+                          placeholder="Cuéntanos brevemente si deseas..."
+                          rows={2}
+                          style={{ width: '100%', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.86rem', boxSizing: 'border-box', outline: 'none', resize: 'vertical' }}
                         />
                         <div style={{ textAlign: 'right', fontSize: '0.74rem', color: '#9ca3af', marginTop: '2px' }}>
                           {cancelDetails.length}/200
@@ -2210,20 +2213,20 @@ export function MisReservasPage() {
                       </div>
 
                       {cancelError && (
-                        <div style={{ padding: '10px 12px', background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '6px', fontSize: '0.85rem' }}>
-                          ⚠️ {cancelError}
+                        <div style={{ padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', borderRadius: '6px', fontSize: '0.84rem' }}>
+                          {cancelError}
                         </div>
                       )}
 
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                         <button
                           type="button"
                           onClick={() => setModalView('detail')}
                           disabled={cancelling}
                           className="trips-btn-secondary"
-                          style={{ flex: 1 }}
+                          style={{ flex: 1, padding: '10px', borderRadius: '6px', fontWeight: 600, fontSize: '0.88rem' }}
                         >
-                          No cancelar
+                          Volver
                         </button>
                         <button
                           type="button"
@@ -2231,20 +2234,20 @@ export function MisReservasPage() {
                           disabled={cancelling}
                           onClick={handleCancelBooking}
                           style={{
-                            flex: 2,
-                            padding: '11px',
-                            background: '#d32f2f',
+                            flex: 1.5,
+                            padding: '10px',
+                            background: '#dc2626',
                             color: 'white',
                             border: 'none',
                             borderRadius: '6px',
                             cursor: cancelling ? 'not-allowed' : 'pointer',
-                            fontWeight: 700,
-                            fontSize: '0.92rem',
+                            fontWeight: 600,
+                            fontSize: '0.88rem',
                             opacity: cancelling ? 0.7 : 1,
-                            transition: 'background 0.2s'
+                            transition: 'background 0.2s',
                           }}
                         >
-                          {cancelling ? 'Reintegrando fondos y stock...' : 'Confirmar cancelación y reembolso'}
+                          {cancelling ? 'Cancelando...' : 'Confirmar cancelación'}
                         </button>
                       </div>
                     </div>
