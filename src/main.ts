@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { activarConexionesPersistentes } from './core/http/conexiones-persistentes';
+activarConexionesPersistentes();
 import { VuelosSociosMiddleware } from './modules/vuelos/socios/vuelos-socios.middleware';
 import { NestFactory } from '@nestjs/core';
 import { VersioningType } from '@nestjs/common';
