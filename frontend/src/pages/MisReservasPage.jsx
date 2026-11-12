@@ -519,7 +519,7 @@ export function MisReservasPage() {
       if (atraccionesRes.status === 'fulfilled' && atraccionesRes.value) {
         const respuestaAtracciones = atraccionesRes.value;
         const listaAtracciones = Array.isArray(respuestaAtracciones) ? respuestaAtracciones : (respuestaAtracciones?.data || []);
-        atraccionesItems = listaAtracciones.map((at) => {
+        atraccionesItems = listaAtracciones.map((at, idx) => {
           const fechaAtrac = at.date || at.fecha || at.raw?.date || at.raw?.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
           const horaAtrac = at.time || at.hora || at.raw?.time || at.raw?.hora || '10:00 a.m.';
           const tCount = Number(at.ticket_count || at.cupos || at.personas || at.cantidad || at.quantity || at.raw?.ticket_count || 1);
@@ -554,7 +554,7 @@ export function MisReservasPage() {
 
       const atraccionesLocales = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]')
         .filter((at) => !correoSesion || (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase() === correoSesion);
-      const atraccionesLocalesFormatted = atraccionesLocales.map((at) => {
+      const atraccionesLocalesFormatted = atraccionesLocales.map((at, idx) => {
         const fechaLocalAtrac = at.date || at.fecha || (at.createdAt ? String(at.createdAt).split('T')[0] : '');
         const horaLocalAtrac = at.time || at.hora || '10:00 a.m.';
         const tCountLocal = Number(at.ticket_count || at.cupos || at.personas || at.cantidad || 1);
