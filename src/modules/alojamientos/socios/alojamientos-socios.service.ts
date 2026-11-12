@@ -439,7 +439,10 @@ export class AlojamientosSociosService {
     const amenidades: string[] = Array.isArray(h.amenidades) ? h.amenidades : [];
     const gps = h.coordenadasGps || h.coordenadas || {};
     const score = num(h.scoreCalificacion ?? h.calificacion ?? h.ratings?.score);
-    const politica = h.politicaCancelacion;
+    const politica = h.politicaCancelacion || h.politicas?.cancelacion;
+    const polDesc = typeof politica === 'string' ? politica : (politica?.descripcion || h.politicas?.cancelacion || 'Cancelación gratuita hasta 48 horas antes del check-in');
+    const esReem = politica?.esReembolsable !== undefined ? Boolean(politica.esReembolsable) : true;
+    const horasCancel = num(politica?.horasLimiteCancelacion ?? h.politicas?.cancelacion_horas) ?? 48;
     return {
       id,
       nombre: h.nombre || h.name || 'Alojamiento',
@@ -474,14 +477,44 @@ export class AlojamientosSociosService {
         coordinates: { latitude: num(gps.latitud ?? gps.latitude) ?? 0, longitude: num(gps.longitud ?? gps.longitude) ?? 0 },
       },
       politicas: {
-        checkin_desde: h.checkInPermitidoDesde || null,
-        checkout_hasta: h.checkOutHoraMaxima || null,
-        cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
-        es_reembolsable: true,
-        cancelacion_horas: 48,
+        checkin_desde:
+          h.politicas?.checkin_desde ||
+          h.politicas?.check_in ||
+          h.checkInPermitidoDesde ||
+          h.checkin_desde ||
+          h.check_in_desde ||
+          h.horaCheckin ||
+          h.hora_checkin ||
+          h.horarioCheckIn ||
+          h.horario_checkin ||
+          h.checkIn ||
+          h.check_in ||
+          '14:00',
+        checkin_hasta:
+          h.politicas?.checkin_hasta ||
+          h.checkInPermitidoHasta ||
+          h.checkin_hasta ||
+          h.check_in_hasta ||
+          null,
+        checkout_hasta:
+          h.politicas?.checkout_hasta ||
+          h.politicas?.check_out ||
+          h.checkOutHoraMaxima ||
+          h.checkout_hasta ||
+          h.check_out_hasta ||
+          h.horaCheckout ||
+          h.hora_checkout ||
+          h.horarioCheckOut ||
+          h.horario_checkout ||
+          h.checkOut ||
+          h.check_out ||
+          '11:00',
+        cancelacion: polDesc,
+        es_reembolsable: esReem,
+        cancelacion_horas: horasCancel,
       },
-      politica_cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
-      es_reembolsable: true,
+      politica_cancelacion: polDesc,
+      es_reembolsable: esReem,
       estado: 'ACTIVO',
       proveedor_id: nodo.codigoNodo,
       id_externo: String(h.id),

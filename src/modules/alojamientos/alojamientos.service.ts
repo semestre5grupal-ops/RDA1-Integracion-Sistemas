@@ -566,7 +566,12 @@ export class AlojamientosService implements OnModuleInit {
         country: countryCode,
         coordinates: { latitude: 0, longitude: 0 },
       },
-      politicas: l.politicas || null,
+      politicas: l.politicas || {
+        checkin_desde: '14:00',
+        checkout_hasta: '11:00',
+        cancelacion: 'Cancelación gratuita hasta 48 horas antes del check-in',
+        es_reembolsable: true,
+      },
       estado: l.estado || 'ACTIVO',
       proveedor_id: l.proveedorId ?? null,
       id_externo: l.idExterno ?? null,
