@@ -47,6 +47,7 @@
     "@nestjs/swagger": "^7.0.0",
     "@nestjs/typeorm": "^10.0.0",
     "@supabase/supabase-js": "^2.117.2",
+    "dotenv": "^16.4.7",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "amqplib": "^2.2.0",

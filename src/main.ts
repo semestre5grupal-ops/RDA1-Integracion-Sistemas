@@ -1,4 +1,7 @@
-import 'dotenv/config';
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('dotenv').config();
+} catch (_) {}
 import { activarConexionesPersistentes } from './core/http/conexiones-persistentes';
 activarConexionesPersistentes();
 import { VuelosSociosMiddleware } from './modules/vuelos/socios/vuelos-socios.middleware';
