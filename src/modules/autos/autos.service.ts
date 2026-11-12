@@ -1654,6 +1654,31 @@ export class AutosService implements OnModuleInit {
       }, HttpStatus.CONFLICT);
     }
 
+    // Regla de Negocio Oficial RDA2: Cancelación solo permitida con al menos 24 horas de anticipación
+    const pickupDate = order?.pickup_date || order?.recogida?.fecha_hora || order?.fecha_inicio || order?.recogida?.fecha;
+    const pickupTime = order?.pickup_time || order?.recogida?.hora || '10:00';
+    if (pickupDate) {
+      try {
+        const cleanDate = String(pickupDate).split('T')[0];
+        const rawTime = String(pickupTime).trim().split(' ')[0] || '10:00';
+        const cleanTime = rawTime.length === 5 ? rawTime : '10:00';
+        const targetMs = new Date(`${cleanDate}T${cleanTime}:00`).getTime();
+        if (!isNaN(targetMs)) {
+          const diffHours = (targetMs - Date.now()) / (1000 * 60 * 60);
+          if (diffHours < 24) {
+            throw new HttpException({
+              type: 'https://api.booking.local/errors/conflict',
+              title: 'Cancelación Fuera de Plazo',
+              status: HttpStatus.CONFLICT,
+              detail: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación a la fecha y hora de recogida.',
+            }, HttpStatus.CONFLICT);
+          }
+        }
+      } catch (err: any) {
+        if (err instanceof HttpException) throw err;
+      }
+    }
+
     const totalReembolso = order?.total_price?.total || order?.totalPrice?.total || order?.precio_total_monto || 106.50;
     const moneda = order?.total_price?.currency || order?.totalPrice?.currency || order?.moneda || 'USD';
     const autoId = order?.auto_id || order?.vehicle_id || order?.autoId || 'auto-spark-01';

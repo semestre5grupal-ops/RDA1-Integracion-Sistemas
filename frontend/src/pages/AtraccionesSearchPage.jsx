@@ -21,28 +21,11 @@ export function AtraccionesSearchPage() {
   const limit = 5;
 
   // Filtros obligatorios de Cátedra RDA2 (§6 - GAP-FRONT-02)
-  const [arbolCategorias, setArbolCategorias] = useState([]);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
   const [filtroComida, setFiltroComida] = useState(false);
   const [filtroTransporte, setFiltroTransporte] = useState(false);
   const [filtroGuia, setFiltroGuia] = useState(false);
   const [criterioOrden, setCriterioOrden] = useState('favoritos'); // 'favoritos' | 'precio_bajo' | 'mejores_comentarios'
-
-  useEffect(() => {
-    async function fetchArbol() {
-      try {
-        const res = await api.get('/atracciones/categorias/arbol');
-        setArbolCategorias(Array.isArray(res) ? res : res.data || []);
-      } catch (e) {
-        setArbolCategorias([
-          { id: 'cat-1', nombre: 'Aventura y Montaña', hijos: [{ id: 'sub-1', nombre: 'Volcanes Cotopaxi / Chimborazo' }] },
-          { id: 'cat-2', nombre: 'Patrimonio Cultural', hijos: [{ id: 'sub-2', nombre: 'Centro Histórico Colonial' }] },
-          { id: 'cat-3', nombre: 'Naturaleza y Selva', hijos: [{ id: 'sub-3', nombre: 'Tours Baños / Amazonía' }] },
-        ]);
-      }
-    }
-    fetchArbol();
-  }, []);
 
   const isFetchingRef = useRef(false);
 
@@ -219,75 +202,8 @@ export function AtraccionesSearchPage() {
           <div className="sidebar-box">
             <h3>Filtrar por:</h3>
             
-            {/* ÁRBOL JERÁRQUICO RECURSIVO DE CATEGORÍAS (GAP-FRONT-02) */}
-            <div className="filter-group">
-              <h4 style={{ color: '#003580', marginBottom: '8px' }}>🌲 Categorías Oficiales (RDA2 §6)</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <button
-                  type="button"
-                  onClick={() => setCategoriaSeleccionada('')}
-                  style={{
-                    textAlign: 'left',
-                    background: categoriaSeleccionada === '' ? '#eff6ff' : 'transparent',
-                    border: 'none',
-                    padding: '6px 8px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    fontWeight: categoriaSeleccionada === '' ? 700 : 400,
-                    color: categoriaSeleccionada === '' ? '#006ce4' : '#374151',
-                  }}
-                >
-                  📁 Todas las Categorías
-                </button>
-                {arbolCategorias.map((cat) => (
-                  <div key={cat.id} style={{ marginLeft: '4px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setCategoriaSeleccionada(cat.nombre)}
-                      style={{
-                        textAlign: 'left',
-                        background: categoriaSeleccionada === cat.nombre ? '#eff6ff' : 'transparent',
-                        border: 'none',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '0.82rem',
-                        fontWeight: categoriaSeleccionada === cat.nombre ? 700 : 500,
-                        color: categoriaSeleccionada === cat.nombre ? '#006ce4' : '#1f2937',
-                        width: '100%',
-                      }}
-                    >
-                      📂 {cat.nombre}
-                    </button>
-                    {(cat.hijos || []).map((hijo) => (
-                      <button
-                        key={hijo.id}
-                        type="button"
-                        onClick={() => setCategoriaSeleccionada(hijo.nombre)}
-                        style={{
-                          textAlign: 'left',
-                          marginLeft: '14px',
-                          background: categoriaSeleccionada === hijo.nombre ? '#eff6ff' : 'transparent',
-                          border: 'none',
-                          padding: '3px 6px',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '0.78rem',
-                          color: categoriaSeleccionada === hijo.nombre ? '#006ce4' : '#4b5563',
-                          width: 'calc(100% - 14px)',
-                        }}
-                      >
-                        ↳ {hijo.nombre}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-
             {/* INCLUSIONES OBLIGATORIAS DE CÁTEDRA (GAP-FRONT-02) */}
-            <div className="filter-group" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+            <div className="filter-group">
               <h4 style={{ color: '#047857', marginBottom: '8px' }}>✨ Inclusiones del Servicio</h4>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', marginBottom: '8px', cursor: 'pointer' }}>
                 <input type="checkbox" checked={filtroComida} onChange={(e) => setFiltroComida(e.target.checked)} />
@@ -301,12 +217,6 @@ export function AtraccionesSearchPage() {
                 <input type="checkbox" checked={filtroGuia} onChange={(e) => setFiltroGuia(e.target.checked)} />
                 🧭 Guía Oficial Certificado
               </label>
-            </div>
-
-            <div className="filter-group" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
-              <h4>Ver resultados con</h4>
-              <label><input type="checkbox" /> Cancelación gratis</label>
-              <label><input type="checkbox" /> Accesible silla de ruedas</label>
             </div>
           </div>
         </aside>

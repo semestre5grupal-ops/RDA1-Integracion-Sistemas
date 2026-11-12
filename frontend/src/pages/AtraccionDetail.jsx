@@ -882,15 +882,6 @@ export function AtraccionDetail() {
                 </div>
               </div>
 
-              {/* WIDGET PROMO COMBO B2B - GAP-FRONT-05 */}
-              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#1d4ed8', fontWeight: 700, fontSize: '0.85rem', marginBottom: '4px' }}>
-                  <span>🎁</span> Combo Promocional B2B Recomendado
-                </div>
-                <p style={{ margin: 0, fontSize: '0.78rem', color: '#1e40af' }}>
-                  Añade un auto de alquiler con <strong>15% de descuento directo</strong> negociado mediante contrato con Alamo & Hertz.
-                </p>
-              </div>
 
               {/* ALERTA DE CUPO Y AFORO */}
               {isAgotadoSlot && (
