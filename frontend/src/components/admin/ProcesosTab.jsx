@@ -87,10 +87,10 @@ function estados(d) {
 function fta(d) {
   const aerolineas = d?.aerolineas ?? [];
   const lineas = [];
-  const clases = { EN_LINEA: [], CAIDA: [], SIN_VERIFICAR: [], APAGADA: [] };
+  const clases = { EN_LINEA: [], SIN_INTEGRACION: [], CAIDA: [], SIN_VERIFICAR: [], APAGADA: [] };
   aerolineas.forEach((a, i) => {
     const id = `AL${i}`;
-    const icono = { EN_LINEA: '🟢', CAIDA: '🔴', SIN_VERIFICAR: '⚪', APAGADA: '⛔' }[a.estado] || '⚪';
+    const icono = { EN_LINEA: '🟢', SIN_INTEGRACION: '🟡', CAIDA: '🔴', SIN_VERIFICAR: '⚪', APAGADA: '⛔' }[a.estado] || '⚪';
     lineas.push(`  G2 --> ${id}["${icono} ${limpio(a.nombre)}"]`);
     clases[a.estado]?.push(id);
   });
@@ -122,10 +122,12 @@ ${lineas.join('\n') || '  G2 --> SIN(("Registrar aerolíneas en Servicios & Prov
   classDef vivo fill:#e3f4e8,stroke:#0d7a2f,color:#0b3d1a
   classDef caido fill:#fde7e5,stroke:#b42318,color:#5c120c
   classDef neutro fill:#f1f1ef,stroke:#898781,color:#3a3a38
+  classDef aviso fill:#fdf1dc,stroke:#9a5b00,color:#4a2c00
   class TOP top
   class G0,G1,G2,G4,G5 gate
   class B1,B2,B3,E1,E2,F1,F2 base
 ${clases.EN_LINEA.length ? `  class ${clases.EN_LINEA.join(',')} vivo` : ''}
+${clases.SIN_INTEGRACION.length ? `  class ${clases.SIN_INTEGRACION.join(',')} aviso` : ''}
 ${clases.CAIDA.length ? `  class ${clases.CAIDA.join(',')} caido` : ''}
 ${[...clases.SIN_VERIFICAR, ...clases.APAGADA].length ? `  class ${[...clases.SIN_VERIFICAR, ...clases.APAGADA].join(',')} neutro` : ''}`;
 }
@@ -329,7 +331,7 @@ export function ProcesosTab({ refreshKey = 0 }) {
     { label: 'Reservas con aerolíneas socias', valor: (datos?.totalReservas ?? 0).toLocaleString('es-EC') },
     { label: 'Valor reservado', valor: usd(datos?.cobrado), nota: 'suma de todas las reservas' },
     { label: 'Reembolsado', valor: usd(datos?.reembolsado) },
-    { label: 'Aerolíneas en línea', valor: `${enLinea} / ${aero.length}`, nota: 'según el último ping real' },
+    { label: 'Aerolíneas integradas', valor: `${enLinea} / ${aero.length}`, nota: 'token + contrato v2, se comprueba cada 10 s' },
     { label: 'Fuente de vuelos', valor: datos?.fuente === 'local' ? 'Base local' : datos?.fuente === 'mixto' ? 'Mixta' : 'Aerolíneas', nota: `timeout ${datos?.timeoutMs ?? 8000} ms por aerolínea` },
   ];
 

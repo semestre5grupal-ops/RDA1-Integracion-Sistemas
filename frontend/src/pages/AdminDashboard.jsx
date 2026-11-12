@@ -255,8 +255,24 @@ function TipoBadge({ tipo }) {
   );
 }
 
-function EstadoBadge({ online, checking, desconocido }) {
+/** Vuelos: estado del ping de integración (token + contrato v2 + respuesta válida). */
+const ESTADO_INTEGRACION = {
+  INTEGRADO: { texto: 'Integrado', color: C.green, punto: C.green },
+  SIN_INTEGRACION: { texto: 'Vivo sin integración', color: C.orange, punto: C.orange },
+  CAIDO: { texto: 'Caído', color: C.red, punto: C.red },
+};
+
+function EstadoBadge({ online, checking, desconocido, integracion }) {
   if (checking) return <span style={{ color: C.gray, fontSize: '0.8rem' }}>⏳ Comprobando...</span>;
+  const ei = integracion && ESTADO_INTEGRACION[integracion.estado];
+  if (ei) {
+    return (
+      <span title={integracion.detalle} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem', fontWeight: 700, color: ei.color }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: ei.punto, display: 'inline-block', boxShadow: integracion.estado === 'INTEGRADO' ? `0 0 6px ${C.green}` : 'none' }} />
+        {ei.texto}
+      </span>
+    );
+  }
   if (desconocido) {
     return (
       <span title="Nunca se ha verificado con un ping real (pulsa 🔄)" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.8rem', fontWeight: 700, color: C.gray }}>
@@ -284,7 +300,16 @@ function saludDesdeNodo(p) {
     latency: desconocido ? null : (p.latencia_ms ?? null),
     checking: false,
     lastCheck: p.ultimo_ping_at && !desconocido ? new Date(p.ultimo_ping_at) : null,
+    integracion: apagado ? null : (p.integracion || null),
   };
+}
+
+/** "hace 4 s" / "hace 2 min" (la tabla se recarga sola cada 5 s). */
+function haceCuanto(fecha) {
+  const s = Math.max(0, Math.round((Date.now() - fecha.getTime()) / 1000));
+  if (s < 60) return `hace ${s} s`;
+  if (s < 3600) return `hace ${Math.round(s / 60)} min`;
+  return fecha.toLocaleTimeString('es-EC');
 }
 
 function ProveedoresTab({ refreshKey = 0 }) {
@@ -353,6 +378,7 @@ function ProveedoresTab({ refreshKey = 0 }) {
           latency: desconocido ? null : (data.latencia_ms ?? data.latenciaMs ?? null),
           checking: false,
           lastCheck: new Date(),
+          integracion: data.integracion || null,
         },
       }));
     } catch {
@@ -628,12 +654,14 @@ function ProveedoresTab({ refreshKey = 0 }) {
                     </div>
                   </td>
                   <td style={{ padding: '12px 14px' }}><TipoBadge tipo={prov.tipo || prov.vertical} /></td>
-                  <td style={{ padding: '12px 14px' }}><EstadoBadge online={h.online} checking={h.checking} desconocido={h.desconocido} /></td>
+                  <td style={{ padding: '12px 14px' }}><EstadoBadge online={h.online} checking={h.checking} desconocido={h.desconocido} integracion={h.integracion} /></td>
                   <td style={{ padding: '12px 14px', fontWeight: 600, color: h.online ? (h.latency > 300 ? C.orange : C.green) : C.gray }}>
                     {h.checking ? '...' : h.latency ? `${h.latency} ms` : '—'}
                   </td>
                   <td style={{ padding: '12px 14px', color: C.gray, fontSize: '0.78rem' }}>
-                    {h.lastCheck ? (typeof h.lastCheck === 'string' ? h.lastCheck : h.lastCheck.toLocaleTimeString('es-EC')) : 'Pendiente'}
+                    {h.lastCheck
+                      ? (typeof h.lastCheck === 'string' ? h.lastCheck : h.integracion ? haceCuanto(h.lastCheck) : h.lastCheck.toLocaleTimeString('es-EC'))
+                      : 'Pendiente'}
                   </td>
                   <td style={{ padding: '12px 14px' }}>
                     <button
@@ -718,6 +746,11 @@ function ProveedoresTab({ refreshKey = 0 }) {
                 ['🛡️ Kill-switch', detalle.kill_switch_activo ? 'Activo (no recibe tráfico)' : 'Apagado (recibe tráfico)'],
                 ['📈 Tasa de fallos', detalle.tasa_fallos_pct != null ? `${detalle.tasa_fallos_pct}%` : '—'],
                 ['🕒 Último ping', detalle.ultimo_ping_at ? fmtDate(detalle.ultimo_ping_at) : 'Nunca'],
+                ...(detalle.integracion ? [
+                  ['🔗 Integración (token + contrato v2)', `${ESTADO_INTEGRACION[detalle.integracion.estado]?.texto || detalle.integracion.estado} — ${detalle.integracion.detalle}`],
+                  ['⏱️ Último ping desglosado', `token ${detalle.integracion.pasos?.tokenMs ?? '—'} ms · llamada ${detalle.integracion.pasos?.llamadaMs ?? '—'} ms · HTTP ${detalle.integracion.pasos?.http ?? 'sin respuesta'} · mediana ${Math.round(detalle.integracion.ms)} ms`],
+                  ['🔁 Fallos seguidos', String(detalle.integracion.fallosSeguidos ?? 0)],
+                ] : []),
               ].map(([label, val]) => (
                 <div key={label} style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: '0.75rem', color: C.gray, fontWeight: 600, marginBottom: 3 }}>{label}</div>

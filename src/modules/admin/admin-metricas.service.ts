@@ -282,7 +282,9 @@ export class AdminMetricasService {
             ? 'SIN_VERIFICAR'
             : a.health_status === 'DOWN'
               ? 'CAIDA'
-              : 'EN_LINEA',
+              : a.health_status === 'DEGRADED'
+                ? 'SIN_INTEGRACION' // responde, pero falla el token o el contrato (ping de integración)
+                : 'EN_LINEA',
         latenciaMs: a.latencia_ms,
         ultimoPing: a.ultimo_ping_at,
       })),
