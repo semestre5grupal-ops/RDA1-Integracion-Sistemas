@@ -1340,7 +1340,7 @@ export function AlojamientosSearchPage() {
                   <span>Puntuación: {minReviewScore}+</span>
                   <CloseIcon size={12} color="#0369a1" />
                 </span>
-              ))}
+              )}
               {selectedNeighbourhoods.map((n) => (
                 <span
                   key={n}
