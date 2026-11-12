@@ -114,7 +114,7 @@ export function BoletoVuelo({ reserva }) {
 }
 
 const CSS = `
-.bv{border:1px solid #dbe3ee;border-radius:14px;overflow:hidden;background:#fff;color:#0f172a}
+.bv{flex-shrink:0;border:1px solid #dbe3ee;border-radius:14px;overflow:hidden;background:#fff;color:#0f172a}
 .bv-cab{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(120deg,#003580,#0057b8);color:#fff;padding:16px 18px}
 .bv-cab .bv-etq{color:#c7d8f2}
 .bv-aero{font-weight:700;font-size:1rem}

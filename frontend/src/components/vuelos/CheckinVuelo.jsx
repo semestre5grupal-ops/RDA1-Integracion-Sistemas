@@ -30,7 +30,7 @@ export function CheckinVuelo({ reserva, ventana, procesando, etapa, resultado, o
   const [acepto, setAcepto] = useState(false);
   const [pasesAerolinea, setPasesAerolinea] = useState(null);
   const [descargando, setDescargando] = useState(false);
-  const hecho = resultado?.success || String(reserva?.status).toUpperCase() === 'CHECKED_IN';
+  const hecho = resultado?.success || ['CHECKED_IN', 'CONFIRMADO_ASISTIDO'].includes(String(reserva?.status).toUpperCase());
   const paso = hecho ? 3 : acepto ? 2 : 1;
   const faltan = useFaltan(ventana?.estado === 'antes' ? ventana.abre : null);
 
@@ -148,7 +148,7 @@ export function CheckinVuelo({ reserva, ventana, procesando, etapa, resultado, o
 }
 
 const CSS = `
-.cv{display:flex;flex-direction:column;gap:12px}
+.cv{flex-shrink:0;display:flex;flex-direction:column;gap:12px}
 .cv-pasos{list-style:none;display:flex;gap:6px;margin:0 0 4px;padding:0}
 .cv-pasos li{flex:1;display:flex;align-items:center;gap:6px;font-size:.78rem;color:#94a3b8;font-weight:600;padding-bottom:8px;border-bottom:3px solid #e6ebf2}
 .cv-pasos li span{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#e6ebf2;color:#64748b;font-size:.75rem;flex-shrink:0}
