@@ -1978,6 +1978,65 @@ export function MisReservasPage() {
                       );
                     }
 
+                    // Regla de Negocio Oficial: Cancelación y reembolso únicamente con al menos 24h de anticipación
+                    const calcularHorasRestantes = (reserva) => {
+                      if (!reserva) return Infinity;
+                      try {
+                        let targetDateStr = null;
+                        let targetTimeStr = '10:00';
+                        if (reserva.tipo === 'atraccion') {
+                          targetDateStr = reserva.raw?.date || reserva.raw?.fecha || reserva.raw?.slot_date || reserva.fechaEntrega;
+                          targetTimeStr = reserva.raw?.time || reserva.raw?.hora || reserva.raw?.time_24h || '10:00';
+                        } else if (reserva.tipo === 'auto') {
+                          targetDateStr = reserva.raw?.pickup_date || reserva.raw?.recogida?.fecha_hora || reserva.raw?.recogida?.fecha || reserva.fechaEntrega;
+                          targetTimeStr = reserva.raw?.pickup_time || reserva.raw?.recogida?.hora || '10:00';
+                        } else if (reserva.tipo === 'alojamiento') {
+                          targetDateStr = reserva.raw?.checkin || reserva.raw?.fecha_checkin || reserva.fechaEntrega;
+                          targetTimeStr = '14:00';
+                        } else if (reserva.tipo === 'vuelo') {
+                          targetDateStr = reserva.raw?.departure_time || reserva.raw?.fecha_salida || reserva.fechaEntrega;
+                          targetTimeStr = reserva.raw?.hora_salida || '10:00';
+                        }
+                        if (!targetDateStr) return Infinity;
+                        let targetMs = NaN;
+                        if (String(targetDateStr).includes('T')) {
+                          targetMs = new Date(targetDateStr).getTime();
+                        } else {
+                          const dateParts = String(targetDateStr).trim().match(/\d{4}-\d{2}-\d{2}/);
+                          if (!dateParts) return Infinity;
+                          const cleanDate = dateParts[0];
+                          let cleanTime = '10:00';
+                          const timeMatch = String(targetTimeStr).trim().match(/(\d{1,2}):(\d{2})/);
+                          if (timeMatch) {
+                            let h = parseInt(timeMatch[1], 10);
+                            const m = timeMatch[2];
+                            if (/p\.?m\.?/i.test(String(targetTimeStr)) && h < 12) h += 12;
+                            if (/a\.?m\.?/i.test(String(targetTimeStr)) && h === 12) h = 0;
+                            cleanTime = `${h.toString().padStart(2, '0')}:${m}`;
+                          }
+                          targetMs = new Date(`${cleanDate}T${cleanTime}:00`).getTime();
+                        }
+                        if (isNaN(targetMs)) return Infinity;
+                        return (targetMs - Date.now()) / (1000 * 60 * 60);
+                      } catch (_) {
+                        return Infinity;
+                      }
+                    };
+
+                    const horasRestantes = calcularHorasRestantes(selectedReserva);
+                    const esFueraDePlazo24h = horasRestantes < 24;
+
+                    if (esFueraDePlazo24h) {
+                      return (
+                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '6px', color: '#8d6e63', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.3rem' }}>⏳</span>
+                          <div>
+                            <strong>Cancelación no disponible (menos de 24h antes del check-in/retiro).</strong> La política de cancelación gratuita y reembolso del 100% solo aplica hasta 24 horas antes del horario reservado.
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <button
                         type="button"

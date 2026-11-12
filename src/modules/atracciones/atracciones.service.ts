@@ -3068,6 +3068,29 @@ export class AtraccionesService implements OnModuleInit {
       }, HttpStatus.CONFLICT);
     }
 
+    // Regla de Negocio Oficial RDA2: Cancelación solo permitida con al menos 24 horas de anticipación
+    if (reserva?.date) {
+      try {
+        const rawTime = (reserva.time || '10:00').trim().split(' ')[0];
+        const cleanTime = rawTime.length === 5 ? rawTime : '10:00';
+        const eventDateStr = `${reserva.date}T${cleanTime}:00`;
+        const eventTime = new Date(eventDateStr).getTime();
+        if (!isNaN(eventTime)) {
+          const diffHours = (eventTime - Date.now()) / (1000 * 60 * 60);
+          if (diffHours < 24) {
+            throw new HttpException({
+              type: 'https://api.booking.local/errors/conflict',
+              title: 'Cancelación Fuera de Plazo',
+              status: HttpStatus.CONFLICT,
+              detail: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
+            }, HttpStatus.CONFLICT);
+          }
+        }
+      } catch (err: any) {
+        if (err instanceof HttpException) throw err;
+      }
+    }
+
     const cancelCode = `REF-ATR-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const refundAmount = reserva ? Number(reserva.totalAmount) : 55.0;
     const partnerCancelId = reserva?.cancelCode || reservationId;
