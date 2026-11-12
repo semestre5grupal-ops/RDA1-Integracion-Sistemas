@@ -27,6 +27,7 @@ import {
   CalendarIcon,
 } from '../components/BookingIcons';
 import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
@@ -1355,20 +1356,14 @@ export function MisReservasPage() {
 
       {/* Loading state */}
       {cargando && (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#595959' }}>
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              border: '3px solid #e0e0e0',
-              borderTopColor: '#006ce4',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto 12px auto',
-            }}
-          />
-          <p>Cargando tus viajes...</p>
-        </div>
+        <AlojamientosLoadingView
+          frases={[
+            'Cargando tus reservas y viajes...',
+            'Sincronizando estados en tiempo real con proveedores...',
+            'Consultando alojamientos, vuelos, autos y atracciones...',
+          ]}
+          subtitulo="Verificando información actualizada de todas las verticales"
+        />
       )}
 
       {/* Error state */}

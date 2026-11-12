@@ -334,7 +334,7 @@ export function AutoDetail() {
       status: 'CONFIRMED',
       tipo_cobertura: tipoCobertura,
       total_price: { total: totalCalculado, currency: 'USD' },
-      vehiculo: { marca: make, modelo: model, categoria: 'Económico', transmision },
+      vehiculo: { marca: make, modelo: model, categoria: 'Económico', transmision: transmission },
       voucher_qr_data: `BOOKING-CAR-${pnrFinal}-CONFIRMED`,
       checklist_mostrador: [
         'Licencia de conducir física original con antigüedad mayor a 1 año',

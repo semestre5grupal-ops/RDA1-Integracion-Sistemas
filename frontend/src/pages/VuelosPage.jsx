@@ -8,6 +8,7 @@ import { PantallaReservaConfirmada } from '../components/PantallaReservaConfirma
 import { formatearFecha, obtenerHuellaDispositivo } from '../services/formato';
 import { aplicarRecargoBusqueda } from '../utils/precioBooking';
 import { buscarVuelos } from '../services/vuelosApi';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 // Destinos nacionales de Ecuador que el API soporta
 const DESTINOS_ECUADOR = [
@@ -280,12 +281,15 @@ export function VuelosPage() {
         style={{ maxWidth: '1100px', margin: '0 auto', padding: '24px' }}
       >
         {cargando && (
-          <div className="state-container">
-            <div className="spinner" aria-hidden="true" />
-            <p className="state-subtitle" role="status">
-              Buscando vuelos disponibles…
-            </p>
-          </div>
+          <AlojamientosLoadingView
+            frases={[
+              'Buscando vuelos disponibles en tiempo real...',
+              'Consultando aerolíneas y tarifas nacionales...',
+              'Comparando horarios y rutas para tu viaje...',
+              'Casi listo, organizando las mejores ofertas de vuelo...',
+            ]}
+            subtitulo="Conectando con las aerolíneas asociadas en Ecuador"
+          />
         )}
 
         {!cargando && error && (

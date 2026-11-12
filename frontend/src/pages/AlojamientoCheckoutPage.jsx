@@ -4,6 +4,7 @@ import { getAlojamiento } from '../services/alojamientosApi';
 import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 import { fechaLocal } from '../utils/fechas';
 
 export function AlojamientoCheckoutPage() {
@@ -58,10 +59,14 @@ export function AlojamientoCheckoutPage() {
 
   if (loading || !alojamiento) {
     return (
-      <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ width: '40px', height: '40px', border: '3px solid #003580', borderTop: '3px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-        <p style={{ color: '#595959', fontSize: '14px' }}>Cargando proceso de reserva segura...</p>
-      </div>
+      <AlojamientosLoadingView
+        frases={[
+          'Preparando tu proceso de reserva segura...',
+          'Verificando disponibilidad y tarifas en tiempo real...',
+          'Casi listo, cargando datos del alojamiento...',
+        ]}
+        subtitulo="Conectando con el alojamiento seleccionado"
+      />
     );
   }
 

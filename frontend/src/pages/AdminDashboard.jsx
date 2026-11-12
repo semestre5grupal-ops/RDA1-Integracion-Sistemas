@@ -2641,6 +2641,13 @@ export function AdminDashboard() {
     finally{if(!silent) setLoadingReservas(false);}
   },[]);
 
+  const handleRefresh=useCallback(()=>{
+    fetchStats();
+    checkServices();
+    fetchUsers();
+    fetchReservas();
+  },[fetchStats,checkServices,fetchUsers,fetchReservas]);
+
   useEffect(()=>{fetchStats();checkServices();},[]);
 
   useEffect(()=>{
