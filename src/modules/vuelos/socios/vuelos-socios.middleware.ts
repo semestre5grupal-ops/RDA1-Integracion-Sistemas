@@ -403,11 +403,19 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
   }
 
   private async despuesDeReserva(metodo: string, segmentos: string[], bookingId: string, copia: any, r: RespuestaProxy, entrantes: Record<string, any>) {
+    const pnr = copia?.pnr ? `PNR ${copia.pnr}` : bookingId;
+    // Check-in o cancelación rechazados por la aerolínea: quedan en el panel en vivo con el motivo.
+    if ((r.status < 200 || r.status >= 300) && metodo === 'POST' && (segmentos[2] === 'check-in' || segmentos[2] === 'cancel')) {
+      const motivo = String(r.body?.code ?? r.body?.detail ?? r.body?.title ?? `HTTP ${r.status}`).slice(0, 160);
+      this.traza(entrantes, segmentos[2] === 'check-in' ? 'checkin' : 'cancelacion', 'aviso',
+        `${segmentos[2] === 'check-in' ? 'Check-in' : 'Cancelación'} rechazado por la aerolínea · ${pnr} · ${motivo}`, { nodo: copia?.codigoNodo });
+      return;
+    }
     if (r.status < 200 || r.status >= 300 || !r.body || typeof r.body !== 'object') return;
     try {
       if (metodo === 'POST' && segmentos[2] === 'check-in') {
         if (await this.reservas.marcarCheckin(bookingId, new Date(), 'booking')) {
-          this.traza(entrantes, 'checkin', 'ok', `Check-in hecho desde Booking · ${bookingId}`, { nodo: copia.codigoNodo });
+          this.traza(entrantes, 'checkin', 'ok', `Check-in hecho desde Booking · ${pnr}`, { nodo: copia.codigoNodo });
         }
         return;
       }
@@ -427,10 +435,11 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         let devuelto = 0;
         if (copia.transaccionId && monto > 0) {
           devuelto = await this.reservas.reembolsar(copia.transaccionId, monto, `Cancelación ${bookingId}`);
-          if (devuelto <= 0) this.traza(entrantes, 'reembolso', 'error', `Cancelación ${bookingId}: el reembolso FALLÓ`, { nodo: copia.codigoNodo, monto });
+          if (devuelto <= 0) this.traza(entrantes, 'reembolso', 'error', `Cancelación ${pnr}: el reembolso FALLÓ`, { nodo: copia.codigoNodo, monto });
         }
         await this.reservas.marcarEstado(bookingId, String(r.body.status || 'CANCELLED'), devuelto);
-        this.traza(entrantes, 'cancelacion', 'ok', `Reserva ${String(r.body.status || 'CANCELLED')} · reembolso ${devuelto.toFixed(2)}`, { nodo: copia.codigoNodo, monto: devuelto });
+        this.traza(entrantes, 'cancelacion', 'ok', `Cancelada desde Booking · ${pnr} · la aerolínea devuelve ${monto.toFixed(2)}`, { nodo: copia.codigoNodo, monto: devuelto });
+        if (devuelto > 0) this.traza(entrantes, 'reembolso', 'ok', `Reembolso al cliente · ${pnr} · ${devuelto.toFixed(2)} (el cargo por servicio no se devuelve)`, { nodo: copia.codigoNodo, monto: devuelto });
         if (devuelto > 0) {
           const nota = await this.reservas.notaCredito({
             bookingId, monto: devuelto, motivo: `Cancelación ${r.body.reasonCode ?? ''}`.trim(),
@@ -479,6 +488,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       origin: r.origin,
       destination: r.destination,
       departureDate: r.departureDate,
+      departureAt: r.departureAt ?? null,
       grandTotal: { currency: r.currency, total: r.grandTotal.toFixed(2) },
       createdAt: r.createdAt,
       provider: { nodeCode: r.codigoNodo },

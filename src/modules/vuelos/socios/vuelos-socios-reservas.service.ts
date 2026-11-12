@@ -98,6 +98,8 @@ export interface ReservaSocio {
   montoAerolinea: number | null;
   cargoServicio: number | null;
   createdAt: string;
+  /** Salida del primer vuelo (fecha y hora, del detalle de la aerolínea). */
+  departureAt?: string | null;
 }
 
 export interface Cobro {
@@ -488,7 +490,9 @@ export class VuelosSociosReservasService implements OnModuleInit {
 
 const SELECT_BASE = `SELECT booking_id, codigo_nodo, propietario_id, pnr, status, origin, destination,
   to_char(departure_date, 'YYYY-MM-DD') AS departure_date, currency, grand_total, transaccion_id,
-  payment_reference, reembolsado, monto_aerolinea, cargo_servicio, created_at FROM public.vuelos_reservas_socio`;
+  payment_reference, reembolsado, monto_aerolinea, cargo_servicio, created_at,
+  COALESCE(detalle #>> '{itineraries,0,segments,0,departure,at}', detalle #>> '{itineraries,0,segments,0,departureAt}') AS departure_at
+  FROM public.vuelos_reservas_socio`;
 
 function mapear(f: any): ReservaSocio {
   return {
@@ -508,6 +512,7 @@ function mapear(f: any): ReservaSocio {
     montoAerolinea: f.monto_aerolinea != null ? Number(f.monto_aerolinea) : null,
     cargoServicio: f.cargo_servicio != null ? Number(f.cargo_servicio) : null,
     createdAt: new Date(f.created_at).toISOString(),
+    departureAt: f.departure_at ?? null,
   };
 }
 

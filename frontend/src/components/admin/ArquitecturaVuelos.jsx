@@ -118,7 +118,7 @@ export function ArquitecturaVuelos({ eventos, aerolineas = [], busActivo, reprod
     aerolineas.forEach((a, i) => {
       c[`aero:${a.codigo}`] = {
         x: 905, y: 80 + i * alto, w: 165, h: Math.min(58, alto - 8),
-        titulo: a.nombre || a.codigo, sub: a.estado === 'EN_LINEA' ? 'REST + OAuth2 · en línea' : `REST + OAuth2 · ${String(a.estado || '').toLowerCase().replace(/_/g, ' ')}`,
+        titulo: a.nombre || a.codigo, sub: a.estado === 'EN_LINEA' ? 'en línea' : `${String(a.estado || '').toLowerCase().replace(/_/g, ' ')}`,
         icono: '🛫', caida: a.estado !== 'EN_LINEA',
       };
     });
@@ -226,16 +226,14 @@ export function ArquitecturaVuelos({ eventos, aerolineas = [], busActivo, reprod
           <text x={180} y={58} fontSize="11" fill={T.muted}>Booking Core API · un solo despliegue en Azure App Service (módulos NestJS)</text>
           <text x={835} y={30} fontSize="11" fill={T.muted}>Aerolíneas socias (contrato v2)</text>
 
-          {aristas.map(([a, b, etiqueta]) => {
+          {/* Las conexiones van sin nombre: solo las líneas. */}
+          {aristas.map(([a, b]) => {
             const A = comps[a];
             const B = comps[b];
             const activa = tramosActivos.has([a, b].sort().join('|'));
             return (
               <g key={`${a}-${b}`}>
                 <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={activa ? T.azul : T.border} strokeWidth={activa ? 2.5 : 1.5} />
-                {etiqueta && (
-                  <text x={(A.x + B.x) / 2 + (A.x === B.x ? 6 : 0)} y={(A.y + B.y) / 2 - 5} fontSize="9.5" fill={T.muted} textAnchor={A.x === B.x ? 'start' : 'middle'} paintOrder="stroke" stroke="#fafbfc" strokeWidth="3">{etiqueta}</text>
-                )}
               </g>
             );
           })}

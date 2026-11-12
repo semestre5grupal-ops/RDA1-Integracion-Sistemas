@@ -86,7 +86,69 @@ const safeFormatearFecha = (val) => {
 const ESTADOS_SIN_CHECKIN = ['CANCELLED', 'CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'ENTREGADO', 'COMPLETED', 'BOARDED'];
 function puedeHacerCheckin(r) {
   if (!r || ['auto', 'atraccion', 'alojamiento'].includes(r.tipo)) return false;
-  return !ESTADOS_SIN_CHECKIN.includes(String(r.status || '').toUpperCase());
+  if (ESTADOS_SIN_CHECKIN.includes(String(r.status || '').toUpperCase())) return false;
+  // Si el vuelo ya salió, el check-in está cerrado.
+  return r.tipo !== 'vuelo' || ventanaCheckinVuelo(r).estado !== 'cerrado';
+}
+
+// Contrato v2: el check-in abre 48 h antes de la salida y cierra a la hora de salida.
+const HORAS_CHECKIN = 48;
+const fmtAperturaCheckin = (d) => new Intl.DateTimeFormat('es-EC', {
+  timeZone: 'America/Guayaquil', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+}).format(d);
+
+/**
+ * Ventana de check-in de un vuelo: 'antes' (todavía no abre), 'abierto', 'cerrado'
+ * (ya salió) o 'desconocido'. Con solo la fecha (sin hora), se es permisivo: la
+ * aerolínea igual valida la hora exacta.
+ */
+function ventanaCheckinVuelo(r) {
+  const at = r?.raw?.departureAt;
+  const fecha = r?.raw?.departureDate;
+  const ahora = Date.now();
+  if (at && !Number.isNaN(Date.parse(at))) {
+    const salida = Date.parse(at);
+    const abre = new Date(salida - HORAS_CHECKIN * 3600_000);
+    if (ahora < abre.getTime()) return { estado: 'antes', abre, texto: fmtAperturaCheckin(abre) };
+    return { estado: ahora >= salida ? 'cerrado' : 'abierto', abre };
+  }
+  if (fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const inicioDia = Date.parse(`${fecha}T00:00:00-05:00`);
+    const abre = new Date(inicioDia - HORAS_CHECKIN * 3600_000);
+    if (ahora < abre.getTime()) {
+      return { estado: 'antes', abre, texto: new Intl.DateTimeFormat('es-EC', { timeZone: 'America/Guayaquil', day: 'numeric', month: 'short' }).format(abre) };
+    }
+    return { estado: ahora > inicioDia + 86_400_000 ? 'cerrado' : 'abierto', abre };
+  }
+  return { estado: 'desconocido' };
+}
+
+/** Texto del botón de check-in: avisa desde cuándo se puede si todavía no abre. */
+function textoBotonCheckin(r, corto) {
+  if (r?.tipo === 'vuelo') {
+    const v = ventanaCheckinVuelo(r);
+    if (v.estado === 'antes') return corto ? `Check-in desde ${v.texto}` : `🕑 Check-in disponible desde ${v.texto}`;
+  }
+  return corto ? '⚡ Check-in' : '⚡ Realizar Check-in Digital';
+}
+
+// Códigos del contrato v2 → mensaje para el cliente.
+const MENSAJES_CHECKIN = {
+  CHECK_IN_NOT_AVAILABLE: 'El check-in todavía no está disponible: abre 48 horas antes de la salida del vuelo.',
+  CUTOFF_PASSED: 'El check-in de este vuelo ya cerró.',
+  FLIGHT_ALREADY_DEPARTED: 'El vuelo ya salió; el check-in está cerrado.',
+  FLIGHT_CANCELLED: 'La aerolínea canceló este vuelo. Revisa tu reserva o contáctanos.',
+  CHECK_IN_FAILED: 'La aerolínea no pudo completar el check-in. Inténtalo de nuevo en unos minutos.',
+  BOARDING_PASS_NOT_AVAILABLE: 'El pase de abordar todavía no está disponible.',
+  INVALID_STATUS_TRANSITION: 'La reserva no está en un estado que permita hacer check-in.',
+  ALREADY_CANCELLED: 'Esta reserva ya está cancelada.',
+};
+function mensajeErrorCheckin(datos) {
+  const candidatos = [datos?.code, datos?.errorCode, datos?.detail, datos?.title].filter(Boolean).map(String);
+  const codigo = candidatos.find((c) => MENSAJES_CHECKIN[c.trim()]);
+  if (codigo) return MENSAJES_CHECKIN[codigo.trim()];
+  const legible = candidatos.find((c) => !/^[A-Z0-9_]+$/.test(c.trim()));
+  return legible || 'La aerolínea no aceptó el check-in. Inténtalo de nuevo.';
 }
 
 export function MisReservasPage() {
@@ -276,7 +338,7 @@ export function MisReservasPage() {
           setCheckinStepResult({
             vertical: 'vuelo',
             success: false,
-            mensaje: datos.detail || datos.title || 'La aerolínea no aceptó el check-in. Inténtalo de nuevo.',
+            mensaje: mensajeErrorCheckin(datos),
           });
         }
       }
@@ -1575,7 +1637,7 @@ export function MisReservasPage() {
                             whiteSpace: 'nowrap'
                           }}
                         >
-                          ⚡ Check-in
+                          {textoBotonCheckin(r, true)}
                         </button>
                       )}
                       <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()} tabIndex={-1}>
@@ -1601,7 +1663,7 @@ export function MisReservasPage() {
                                   setCheckinStepResult(null);
                                 }}
                               >
-                                ⚡ Realizar Check-in Digital
+                                {textoBotonCheckin(r, false)}
                               </button>
                             )}
                             <button
@@ -1826,7 +1888,7 @@ export function MisReservasPage() {
                         gap: '8px'
                       }}
                     >
-                      ⚡ Realizar Check-in Digital
+                      {textoBotonCheckin(selectedReserva, false)}
                     </button>
                   )}
 
@@ -2400,18 +2462,31 @@ export function MisReservasPage() {
                     </div>
                   ) : (
                     <>
+                      {(() => {
+                        const v = ventanaCheckinVuelo(checkinReserva);
+                        return v.estado === 'antes' ? (
+                          <div role="note" style={{ background: '#eff6ff', border: '1px solid #93c5fd', color: '#1e3a8a', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
+                            El check-in de este vuelo abre el <strong>{v.texto}</strong> (48 horas antes de la salida). Vuelve a partir de esa hora.
+                          </div>
+                        ) : null;
+                      })()}
                       {checkinStepResult?.vertical === 'vuelo' && checkinStepResult.success === false && (
                         <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
                           {checkinStepResult.mensaje}
                         </div>
                       )}
-                      <button
-                        onClick={() => handleExecuteCheckin(checkinReserva)}
-                        disabled={checkinProcessing}
-                        style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
-                      >
-                        {checkinProcessing ? 'Haciendo check-in…' : '🎫 Hacer check-in'}
-                      </button>
+                      {(() => {
+                        const antes = ventanaCheckinVuelo(checkinReserva).estado === 'antes';
+                        return (
+                          <button
+                            onClick={() => handleExecuteCheckin(checkinReserva)}
+                            disabled={checkinProcessing || antes}
+                            style={{ width: '100%', background: antes ? '#94a3b8' : '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: antes ? 'not-allowed' : 'pointer' }}
+                          >
+                            {checkinProcessing ? 'Haciendo check-in…' : antes ? 'Check-in aún no disponible' : '🎫 Hacer check-in'}
+                          </button>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
