@@ -7,6 +7,7 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { formatearMoneda } from '../services/formato';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 const DESTINOS_ECUADOR = [
   {
@@ -721,44 +722,7 @@ export function AutosPage() {
   ];
 
   if (loading && autos.length === 0) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '100px 20px', minHeight: '80vh', background: 'white' }}>
-        <h2 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#333', marginBottom: '40px', textAlign: 'center' }}>Buscando las mejores ofertas entre cientos de marcas</h2>
-        
-        {/* Progress bar */}
-        <div style={{ width: '100%', maxWidth: '800px', height: '8px', background: '#f0f0f0', borderRadius: '4px', marginBottom: '60px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', background: '#006ce4', width: '40%', animation: 'loading-slide 1.5s infinite ease-in-out' }}></div>
-        </div>
-
-        {/* Logos Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '20px', maxWidth: '800px', marginBottom: '80px' }}>
-            {marcasLoading.map((marca, i) => (
-              <div key={`load-${i}`} style={{ width: '110px', height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: marca.bg, color: marca.color, fontWeight: '900', borderRadius: '4px', fontSize: '1rem', border: '1px solid #e7e7e7', letterSpacing: '-0.5px' }}>
-                 {marca.label}
-              </div>
-            ))}
-        </div>
-
-        {/* Bottom indicator */}
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <img src="https://cf.bstatic.com/static/img/cars/icons/car_icon/d261ad47db337611bdcb4914da6b553c3eefbba5.png" alt="car" style={{ height: '40px', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} />
-          <svg style={{ display: 'none', width: '36px', height: '36px', fill: '#006ce4' }} viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-4.66l.12-.34h13.77l.11.34V17z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>
-          <div>
-            <h4 style={{ fontWeight: 'bold', color: '#333', margin: 0, fontSize: '1.1rem' }}>Coches de todos los tamaños</h4>
-            <p style={{ color: '#666', margin: 0, fontSize: '1rem' }}>para todo tipo de viajes</p>
-          </div>
-        </div>
-
-        <style>
-          {`
-            @keyframes loading-slide {
-              0% { left: -40%; }
-              100% { left: 100%; }
-            }
-          `}
-        </style>
-      </div>
-    );
+    return <AlojamientosLoadingView />;
   }
 
   return (

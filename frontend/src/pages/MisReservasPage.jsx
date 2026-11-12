@@ -27,6 +27,14 @@ import {
   CalendarIcon,
 } from '../components/BookingIcons';
 import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
+import { BoletoVuelo } from '../components/vuelos/BoletoVuelo';
+import { CheckinVuelo } from '../components/vuelos/CheckinVuelo';
+import { SpinnerVuelos } from '../components/SpinnerVuelos';
+import { useEtapasCarga } from '../hooks/useEtapasCarga';
+
+const ETAPAS_CHECKIN_VUELO = ['Conectando con la aerolínea…', 'Registrando a los pasajeros…', 'Generando tu pase de abordar…'];
+const ETAPAS_CANCEL_VUELO = ['Consultando la política de la aerolínea…', 'Cancelando con la aerolínea…', 'Procesando tu reembolso…'];
 import './MisReservasPage.css';
 
 const ESTADOS_ES = {
@@ -218,6 +226,9 @@ export function MisReservasPage() {
   const [checkinKmSalida, setCheckinKmSalida] = useState(10000);
   const [checkinKmRetorno, setCheckinKmRetorno] = useState(10185);
   const [checkinProcessing, setCheckinProcessing] = useState(false);
+  // Vuelos: mensajes por etapas mientras la aerolínea procesa (solo visual).
+  const etapaCheckinVuelo = useEtapasCarga(checkinProcessing && checkinReserva?.tipo === 'vuelo', ETAPAS_CHECKIN_VUELO, 1100);
+  const etapaCancelVuelo = useEtapasCarga(cancelling && selectedReserva?.tipo === 'vuelo', ETAPAS_CANCEL_VUELO, 1100);
 
   const handleExecuteCheckin = async (reserva, tipoOperacion) => {
     setCheckinProcessing(true);
@@ -1400,22 +1411,7 @@ export function MisReservasPage() {
       </div>
 
       {/* Loading state */}
-      {cargando && (
-        <div style={{ textAlign: 'center', padding: '60px 20px', color: '#595959' }}>
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              border: '3px solid #e0e0e0',
-              borderTopColor: '#006ce4',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto 12px auto',
-            }}
-          />
-          <p>Cargando tus viajes...</p>
-        </div>
-      )}
+      {cargando && <AlojamientosLoadingView />}
 
       {/* Error state */}
       {!cargando && error && (
@@ -1755,84 +1751,67 @@ export function MisReservasPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-title-reserva"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.65)',
-            backdropFilter: 'blur(2px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '20px',
-            overflowY: 'auto',
-          }}
+          className="modal-reserva-overlay"
           onClick={() => {
             setSelectedReserva(null);
             setModalView('detail');
           }}
         >
           <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '8px',
-              width: '540px',
-              maxWidth: '100%',
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
-              overflow: 'hidden',
-              margin: 'auto',
-            }}
+            className="modal-reserva-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              style={{
-                background: '#003580',
-                padding: '18px 24px',
-                color: '#ffffff',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <h2 id="modal-title-reserva" style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>
-                Confirmación de reserva · {selectedReserva.pnr}
-              </h2>
+            <div className="modal-reserva-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    background: '#ecfdf5',
+                    color: '#059669',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <CheckmarkIcon size={16} color="#059669" />
+                </div>
+                <h2 id="modal-title-reserva" className="modal-reserva-title">
+                  {modalView === 'report' ? 'Reportar problema' : modalView === 'cancel' ? 'Cancelar reserva' : `Confirmación de reserva · ${selectedReserva.pnr}`}
+                </h2>
+              </div>
               <button
                 type="button"
                 onClick={() => {
                   setSelectedReserva(null);
                   setModalView('detail');
                 }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}
+                className="modal-reserva-close"
+                aria-label="Cerrar"
               >
-                <CloseIcon size={20} color="#ffffff" />
+                <CloseIcon size={20} color="#64748b" />
               </button>
             </div>
 
-            <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="modal-reserva-body">
 
               {/* ── DETAIL VIEW ── */}
               {modalView === 'detail' && (
                 <>
                   <div>
-                    <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, color: '#006ce4', letterSpacing: '0.5px' }}>
+                    <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '4px', letterSpacing: '0.5px', display: 'inline-block' }}>
                       {selectedReserva.servicioTexto}
                     </span>
-                    <h3 style={{ fontSize: '1.35rem', fontWeight: 800, margin: '4px 0 6px 0', color: '#1a1a1a' }}>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '8px 0 6px 0', color: '#0f172a', lineHeight: 1.3 }}>
                       {selectedReserva.titulo}
                     </h3>
                     {selectedReserva.tipo === 'alojamiento' ? (
                       (() => {
                         const st = getAlojamientoStatus(selectedReserva);
                         return (
-                          <span className={`trip-card-alojamiento-status ${st.cls}`} style={{ marginTop: '6px' }}>
+                          <span className={`trip-card-alojamiento-status ${st.cls}`} style={{ marginTop: '4px' }}>
                             <CheckCircleIcon size={14} color="currentColor" />
                             <span>{st.text}</span>
                           </span>
@@ -1852,69 +1831,84 @@ export function MisReservasPage() {
                     )}
                   </div>
 
-                  <div style={{ background: '#f5f5f5', borderRadius: '6px', padding: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  {selectedReserva.tipo === 'vuelo' ? (
+                    <BoletoVuelo reserva={selectedReserva} />
+                  ) : (<>
+                  <div className="modal-reserva-pnr-box">
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Código PNR</div>
-                      <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}>{selectedReserva.pnr}</div>
+                      <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 600, color: '#64748b', letterSpacing: '0.5px' }}>
+                        Código de confirmación (PNR)
+                      </div>
+                      <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', letterSpacing: '0.5px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                        {selectedReserva.pnr}
+                      </div>
                     </div>
+                    <div style={{ fontSize: '0.8rem', color: '#059669', fontWeight: 600, background: '#ecfdf5', padding: '4px 10px', borderRadius: '9999px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <CheckmarkIcon size={12} color="#059669" />
+                      <span>Confirmado</span>
+                    </div>
+                  </div>
+
+                  <div className="modal-reserva-grid">
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Cantidad Reservada</div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1a1a1a' }}>
+                      <div className="modal-reserva-grid-label">Cantidad Reservada</div>
+                      <div className="modal-reserva-grid-value">
                         {selectedReserva.cantidadTexto || `${selectedReserva.cantidad || 1} unidad`}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Fecha de Reserva</div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
+                      <div className="modal-reserva-grid-label">Fecha de Reserva</div>
+                      <div className="modal-reserva-grid-value">
                         {selectedReserva.fechaReserva || selectedReserva.fecha || 'Reciente'}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>
+                      <div className="modal-reserva-grid-label">
                         {selectedReserva.tipo === 'auto' ? 'Fecha de Retiro / Entrega' : selectedReserva.tipo === 'atraccion' ? 'Fecha de Visita / Turno' : selectedReserva.tipo === 'vuelo' ? 'Fecha de Salida' : 'Fecha Check-in'}
                       </div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
+                      <div className="modal-reserva-grid-value">
                         {selectedReserva.fechaEntrega || selectedReserva.fechasTexto || 'Por definir'}
                       </div>
                     </div>
                     {selectedReserva.fechaDevolucion && (
                       <div>
-                        <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>
+                        <div className="modal-reserva-grid-label">
                           {selectedReserva.tipo === 'auto' ? 'Fecha de Devolución' : selectedReserva.tipo === 'alojamiento' ? 'Fecha Check-out' : 'Fecha de Retorno'}
                         </div>
-                        <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>
+                        <div className="modal-reserva-grid-value">
                           {selectedReserva.fechaDevolucion}
                         </div>
                       </div>
                     )}
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Destino / Ubicación</div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#1a1a1a' }}>{selectedReserva.destino}</div>
+                      <div className="modal-reserva-grid-label">Destino / Ubicación</div>
+                      <div className="modal-reserva-grid-value">{selectedReserva.destino}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.78rem', color: '#595959', marginBottom: '2px' }}>Total Pagado</div>
-                      <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#008009' }}>{convertPrice(selectedReserva.totalRaw)}</div>
+                      <div className="modal-reserva-grid-label">Total Pagado</div>
+                      <div className="modal-reserva-grid-total">{convertPrice(selectedReserva.totalRaw)}</div>
                     </div>
                   </div>
+                  </>)}
 
                   {avisoDescarga && (
-                    <div style={{ padding: '10px 14px', borderRadius: '4px', fontSize: '0.85rem', background: '#fdecea', color: '#b71c1c', border: '1px solid #ef9a9a' }}>
+                    <div style={{ padding: '10px 14px', borderRadius: '6px', fontSize: '0.85rem', background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
                       {avisoDescarga}
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
-                    <button type="button" disabled={isDownloading} onClick={() => descargarPDF(selectedReserva)} className="trips-btn-primary" style={{ flex: 1, textAlign: 'center' }}>
+                  <div className="modal-reserva-actions">
+                    <button type="button" disabled={isDownloading} onClick={() => descargarPDF(selectedReserva)} className="trips-btn-primary">
                       {isDownloading ? 'Generando PDF...' : 'Descargar factura (PDF)'}
                     </button>
-                    <button type="button" onClick={() => setSelectedReserva(null)} className="trips-btn-secondary" style={{ flex: 1, textAlign: 'center' }}>
+                    <button type="button" onClick={() => setSelectedReserva(null)} className="trips-btn-secondary">
                       Cerrar
                     </button>
                   </div>
 
                   {selectedReserva.tipo === 'alojamiento' && (
-                    <div style={{ marginTop: '12px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.85rem', color: '#334155' }}>
-                      <div style={{ fontWeight: 700, color: '#003580', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <div style={{ marginTop: '4px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.85rem', color: '#334155' }}>
+                      <div style={{ fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                         🏨 Check-in en el alojamiento
                       </div>
                       <div>
@@ -1932,15 +1926,15 @@ export function MisReservasPage() {
                       }}
                       style={{
                         width: '100%',
-                        marginTop: '10px',
-                        padding: '12px',
+                        marginTop: '4px',
+                        padding: '11px',
                         background: '#006ce4',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: '6px',
                         cursor: 'pointer',
-                        fontWeight: 700,
-                        fontSize: '0.95rem',
+                        fontWeight: 600,
+                        fontSize: '0.92rem',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -1958,8 +1952,8 @@ export function MisReservasPage() {
 
                     if (estaCancelada) {
                       return (
-                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: '6px', color: '#b71c1c', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '1.3rem' }}>ℹ️</span>
+                        <div style={{ marginTop: '4px', padding: '12px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', color: '#991b1b', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.2rem' }}>ℹ️</span>
                           <div>
                             <strong>Esta reserva ha sido cancelada.</strong> Los cupos fueron liberados al operador y el 100% del importe ({convertPrice(selectedReserva.totalRaw)}) fue procesado para reembolso.
                           </div>
@@ -1969,8 +1963,8 @@ export function MisReservasPage() {
 
                     if (yaAsistio) {
                       return (
-                        <div style={{ marginTop: '8px', padding: '12px 14px', background: '#e8f5e9', border: '1px solid #c8e6c9', borderRadius: '6px', color: '#1b5e20', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '1.3rem' }}>✅</span>
+                        <div style={{ marginTop: '4px', padding: '12px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', color: '#065f46', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '1.2rem' }}>✅</span>
                           <div>
                             <strong>Check-in realizado / Servicio en curso.</strong> El servicio ya fue verificado o retirado en mostrador. La cancelación no aplica una vez iniciado o completado el servicio.
                           </div>
@@ -2044,19 +2038,19 @@ export function MisReservasPage() {
                         onClick={() => { setModalView('cancel'); setCancelError(''); setCancelSuccess(null); }}
                         style={{
                           width: '100%',
-                          marginTop: '8px',
-                          padding: '11px',
-                          background: '#fff0f0',
-                          color: '#c62828',
-                          border: '1.5px solid #ef9a9a',
+                          marginTop: '4px',
+                          padding: '10px',
+                          background: '#ffffff',
+                          color: '#dc2626',
+                          border: '1px solid #fca5a5',
                           borderRadius: '6px',
                           cursor: 'pointer',
-                          fontWeight: 700,
-                          fontSize: '0.92rem',
+                          fontWeight: 600,
+                          fontSize: '0.88rem',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: '8px',
+                          gap: '6px',
                           transition: 'background 0.2s'
                         }}
                       >
@@ -2068,9 +2062,9 @@ export function MisReservasPage() {
                   <button
                     type="button"
                     onClick={() => { setModalView('report'); setSubjectError(''); setDescError(''); setReportSuccess(false); }}
-                    style={{ width: '100%', marginTop: '6px', padding: '10px', background: '#fff5f5', color: '#d32f2f', border: '1px solid #ffcdd2', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    style={{ width: '100%', marginTop: '2px', padding: '9px', background: '#ffffff', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   >
-                    ⚠️ Reportar un problema con esta reserva
+                    Reportar un problema con esta reserva
                   </button>
                 </>
               )}
@@ -2142,7 +2136,8 @@ export function MisReservasPage() {
                         <select
                           value={reportPriority}
                           onChange={e => setReportPriority(e.target.value)}
-                          style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #ddd', borderRadius: '5px', fontSize: '0.9rem', boxSizing: 'border-box', outline: 'none' }}
+                          className="modal-form-select"
+                          style={{ border: '1.5px solid #ddd', background: 'white' }}
                         >
                           <option value="Baja">Baja — problema menor</option>
                           <option value="Media">Media — afecta mi experiencia</option>
@@ -2160,7 +2155,8 @@ export function MisReservasPage() {
                             rows={4}
                             maxLength={800}
                             placeholder="Describe qué ocurrió, cuándo y cómo afectó tu reserva..."
-                            style={{ width: '100%', padding: '9px 12px', border: `1.5px solid ${descError ? '#d32f2f' : '#ddd'}`, borderRadius: '5px', fontSize: '0.9rem', boxSizing: 'border-box', outline: 'none', resize: 'vertical', background: descError ? 'rgba(211,47,47,0.04)' : 'white', transition: 'border-color 0.2s, background 0.2s' }}
+                            className="modal-form-textarea"
+                            style={{ border: `1.5px solid ${descError ? '#d32f2f' : '#ddd'}`, resize: 'vertical', background: descError ? 'rgba(211,47,47,0.04)' : 'white', transition: 'border-color 0.2s, background 0.2s' }}
                           />
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '3px' }}>
@@ -2178,12 +2174,12 @@ export function MisReservasPage() {
                         </div>
                       )}
 
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <button type="button" onClick={() => setModalView('detail')} className="trips-btn-secondary" style={{ flex: 1 }}>Cancelar</button>
+                      <div className="modal-reserva-actions">
+                        <button type="button" onClick={() => setModalView('detail')} className="trips-btn-secondary">Cancelar</button>
                         <button
                           type="submit"
                           disabled={sendingReport || !!subjectError || !!descError}
-                          style={{ flex: 2, padding: '10px', background: '#d32f2f', color: 'white', border: 'none', borderRadius: '6px', cursor: (sendingReport || subjectError || descError) ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: '0.95rem', opacity: (sendingReport || subjectError || descError) ? 0.6 : 1, transition: 'opacity 0.2s' }}
+                          style={{ padding: '10px 16px', background: '#d32f2f', color: 'white', border: 'none', borderRadius: '6px', cursor: (sendingReport || subjectError || descError) ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: '0.95rem', opacity: (sendingReport || subjectError || descError) ? 0.6 : 1, transition: 'opacity 0.2s' }}
                         >
                           {sendingReport ? 'Enviando...' : 'Enviar reporte'}
                         </button>
@@ -2265,7 +2261,8 @@ export function MisReservasPage() {
                         <select
                           value={cancelReason}
                           onChange={e => setCancelReason(e.target.value)}
-                          style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #d1d5db', borderRadius: '6px', fontSize: '0.9rem', outline: 'none', background: 'white' }}
+                          className="modal-form-select"
+                          style={{ border: '1px solid #cbd5e1', background: 'white' }}
                         >
                           <option value="Cambio de itinerario o planes de viaje">Cambio de itinerario o planes de viaje</option>
                           <option value="Enfermedad o emergencia imprevista">Enfermedad o emergencia imprevista</option>
@@ -2285,7 +2282,8 @@ export function MisReservasPage() {
                           maxLength={200}
                           placeholder="Cuéntanos brevemente qué ocurrió..."
                           rows={3}
-                          style={{ width: '100%', padding: '9px 12px', border: '1.5px solid #d1d5db', borderRadius: '6px', fontSize: '0.88rem', boxSizing: 'border-box', outline: 'none' }}
+                          className="modal-form-textarea"
+                          style={{ border: '1px solid #cbd5e1', resize: 'vertical' }}
                         />
                         <div style={{ textAlign: 'right', fontSize: '0.74rem', color: '#9ca3af', marginTop: '2px' }}>
                           {cancelDetails.length}/200
@@ -2298,13 +2296,12 @@ export function MisReservasPage() {
                         </div>
                       )}
 
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                      <div className="modal-reserva-actions" style={{ marginTop: '4px' }}>
                         <button
                           type="button"
                           onClick={() => setModalView('detail')}
                           disabled={cancelling}
                           className="trips-btn-secondary"
-                          style={{ flex: 1 }}
                         >
                           No cancelar
                         </button>
@@ -2314,9 +2311,8 @@ export function MisReservasPage() {
                           disabled={cancelling}
                           onClick={handleCancelBooking}
                           style={{
-                            flex: 2,
-                            padding: '11px',
-                            background: '#d32f2f',
+                            padding: '10px 16px',
+                            background: '#dc2626',
                             color: 'white',
                             border: 'none',
                             borderRadius: '6px',
@@ -2327,7 +2323,7 @@ export function MisReservasPage() {
                             transition: 'background 0.2s'
                           }}
                         >
-                          {cancelling ? 'Reintegrando fondos y stock...' : 'Confirmar cancelación y reembolso'}
+                          {cancelling ? (etapaCancelVuelo ? <><SpinnerVuelos />{etapaCancelVuelo}</> : 'Reintegrando fondos y stock...') : 'Confirmar cancelación y reembolso'}
                         </button>
                       </div>
                     </div>
@@ -2351,18 +2347,21 @@ export function MisReservasPage() {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 1000,
-            padding: '20px',
+            padding: '12px',
+            overflowY: 'auto',
           }}
           onClick={() => setShowHelpModal(false)}
         >
           <div
             style={{
               background: '#ffffff',
-              borderRadius: '8px',
+              borderRadius: '12px',
               width: '480px',
               maxWidth: '100%',
-              padding: '24px',
+              padding: '20px',
               boxShadow: '0 10px 30px rgba(0, 0, 0, 0.2)',
+              maxHeight: 'calc(100vh - 24px)',
+              overflowY: 'auto',
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2408,7 +2407,8 @@ export function MisReservasPage() {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 10000,
-            padding: '20px',
+            padding: '12px',
+            overflowY: 'auto',
           }}
           onClick={() => setCheckinReserva(null)}
         >
@@ -2420,22 +2420,27 @@ export function MisReservasPage() {
               maxWidth: '100%',
               boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
               overflow: 'hidden',
+              maxHeight: 'calc(100vh - 24px)',
+              display: 'flex',
+              flexDirection: 'column',
+              margin: 'auto',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ background: '#003580', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+            <div style={{ background: '#003580', color: '#fff', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, wordBreak: 'break-word' }}>
                 ⚡ Check-in Digital · {checkinReserva.pnr} ({checkinReserva.servicioTexto})
               </h3>
               <button
                 onClick={() => setCheckinReserva(null)}
-                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.4rem', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.4rem', cursor: 'pointer', padding: '4px', minWidth: '32px', minHeight: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                aria-label="Cerrar"
               >
                 &times;
               </button>
             </div>
 
-            <div style={{ padding: '24px' }}>
+            <div style={{ padding: '20px', overflowY: 'auto' }}>
               {/* VERTICAL: ATRACCIONES */}
               {checkinReserva.tipo === 'atraccion' && (
                 <div>
@@ -2557,57 +2562,14 @@ export function MisReservasPage() {
 
               {/* VERTICAL: VUELOS */}
               {checkinReserva.tipo === 'vuelo' && (
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '1.05rem', color: '#1a1a1a' }}>
-                    {checkinReserva.titulo}
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '16px' }}>
-                    Asignación de asiento de cabina y emisión de pase de abordar digital con PNR.
-                  </p>
-
-                  {checkinStepResult?.success ? (
-                    <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '1.5rem' }}>✈️</span>
-                      <strong style={{ display: 'block', color: '#047857', marginTop: '6px' }}>
-                        {checkinStepResult.mensaje}
-                      </strong>
-                      <div style={{ margin: '14px 0', background: '#fff', padding: '12px', borderRadius: '6px', border: '1px dashed #003580' }}>
-                        <div style={{ fontSize: '0.9rem', color: '#334155' }}>Asiento Asignado: <strong>{checkinStepResult.asiento}</strong></div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#003580', marginTop: '4px' }}>
-                          PNR: {checkinStepResult.pnr}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {(() => {
-                        const v = ventanaCheckinVuelo(checkinReserva);
-                        return v.estado === 'antes' ? (
-                          <div role="note" style={{ background: '#eff6ff', border: '1px solid #93c5fd', color: '#1e3a8a', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
-                            El check-in de este vuelo abre el <strong>{v.texto}</strong> (48 horas antes de la salida). Vuelve a partir de esa hora.
-                          </div>
-                        ) : null;
-                      })()}
-                      {checkinStepResult?.vertical === 'vuelo' && checkinStepResult.success === false && (
-                        <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
-                          {checkinStepResult.mensaje}
-                        </div>
-                      )}
-                      {(() => {
-                        const antes = ventanaCheckinVuelo(checkinReserva).estado === 'antes';
-                        return (
-                          <button
-                            onClick={() => handleExecuteCheckin(checkinReserva)}
-                            disabled={checkinProcessing || antes}
-                            style={{ width: '100%', background: antes ? '#94a3b8' : '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: antes ? 'not-allowed' : 'pointer' }}
-                          >
-                            {checkinProcessing ? 'Haciendo check-in…' : antes ? 'Check-in aún no disponible' : '🎫 Hacer check-in'}
-                          </button>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
+                <CheckinVuelo
+                  reserva={checkinReserva}
+                  ventana={ventanaCheckinVuelo(checkinReserva)}
+                  procesando={checkinProcessing}
+                  etapa={etapaCheckinVuelo}
+                  resultado={checkinStepResult?.vertical === 'vuelo' ? checkinStepResult : null}
+                  onCheckin={() => handleExecuteCheckin(checkinReserva)}
+                />
               )}
             </div>
           </div>

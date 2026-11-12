@@ -14,6 +14,9 @@ import { trazaVuelos } from './vuelos-traza';
 describe('VuelosSociosService (agregador de aerolíneas)', () => {
   const llamadas: Array<{ nodo: string; method: string; url: string; headers: any; body: any }> = [];
   let servidor: http.Server;
+  /** Simula EQ10/RAM/GabatAIR: un hold nuevo no puede incluir asientos que siguen en otro hold vivo. */
+  let chocarConPropio = false;
+  const holdsVivos = new Map<string, string[]>();
   let puerto: number;
   const original = VuelosSociosService.esAutoReferencia;
 
@@ -50,8 +53,15 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
           // 'oauth' es una aerolínea que todavía no acepta assignedSeats; '9Z' ya lo compró alguien en la web de la aerolínea.
           if (asientos.length && nodo === 'oauth') return json(400, { title: 'property assignedSeats should not exist' });
           if (asientos.includes('9Z')) return json(409, { code: 'SEAT_TAKEN', title: 'Seat taken' });
-          const id = asientos.length ? `HOLD-${nodo}-${asientos.join('-')}` : `HOLD-${nodo}`;
+          if (chocarConPropio && [...holdsVivos.values()].some((l) => l.some((x) => asientos.includes(x)))) return json(409, { code: 'SEAT_TAKEN', title: 'Seat taken' });
+          const id = asientos.length ? `HOLD-${nodo}-${asientos.join('-')}` : body.passengersBreakdown?.adults === 2 ? `HOLD-${nodo}-dos` : `HOLD-${nodo}`;
+          if (chocarConPropio) holdsVivos.set(id, asientos);
           return json(201, { holdId: id, offerId: body.offerId, status: 'HELD', expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), lockedPrice: { currency: 'USD', total: '150.00' }, assignedSeats: body.assignedSeats });
+        }
+        if (ruta.startsWith('/api/v2/vuelos/offers/hold/') && req.method === 'DELETE') {
+          holdsVivos.delete(ruta.split('/').pop()!);
+          res.writeHead(204);
+          return res.end();
         }
         if (ruta.startsWith('/api/v2/vuelos/offers/hold/') && req.method === 'GET') {
           return json(200, { holdId: ruta.split('/').pop(), lockedPrice: { currency: 'USD', total: '150.00' } });
@@ -67,7 +77,7 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
           return json(200, { bookingId: ruta.split('/')[5], pnr: 'ABC123', status: 'CANCELLED', refund: { refundId: 'R1', amount: '125.00' } });
         }
         if (/\/offers\/[^/]+\/seatmap/.test(ruta)) {
-          return json(200, { segmentId: 'SEG-1', cabins: [{ cabinClass: 'ECONOMY', rows: [{ rowNumber: 7, seats: [{ seatNumber: '7A', isAvailable: true, status: 'AVAILABLE' }, { seatNumber: '7B', isAvailable: true, status: 'AVAILABLE' }] }] }] });
+          return json(200, { segmentId: 'SEG-1', cabins: [{ cabinClass: 'ECONOMY', rows: [{ rowNumber: 7, seats: [{ seatNumber: '7A', isAvailable: true, status: 'AVAILABLE' }, { seatNumber: '7B', isAvailable: true, status: 'AVAILABLE' }] }, { rowNumber: 0, seats: ['1A', '1B', '2A', '2B', '3A', '4A', '4B', '5C', '8C', '9D', '9Z'].map((n) => ({ seatNumber: n, isAvailable: true, status: 'AVAILABLE' })) }, { rowNumber: 12, seats: [{ seatNumber: '12F', isAvailable: false, status: 'OCCUPIED' }] }] }] });
         }
         if (ruta.startsWith('/api/v2/vuelos/flights/')) {
           return nodo === 'oauth' ? json(200, { flightNumber: 'RA101', status: 'DELAYED' }) : json(404, { title: 'no opera' });
@@ -272,6 +282,28 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(copias.get('NODE_VUE_KEY~BK-1')).toMatchObject({ propietarioId: DUENO, codigoNodo: 'NODE_VUE_KEY' });
     });
 
+    it('reintento con la misma Idempotency-Key (respuesta perdida): devuelve la reserva ya hecha sin cobrar ni reservar otra vez', async () => {
+      const pedir = () => fetch(`${base}/api/v2/vuelos/bookings`, {
+        method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-repetida' }),
+        body: JSON.stringify({ holdId: 'NODE_VUE_KEY~HOLD-key', passengers: [] }),
+      });
+      const primero = await (await pedir()).json();
+      const cobrosAntes = cobros.length;
+      const reservasAntes = llamadas.filter((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST').length;
+      const r2 = await pedir();
+      const segundo = await r2.json();
+      expect(r2.headers.get('idempotent-replayed')).toBe('true');
+      expect(segundo.bookingId).toBe(primero.bookingId);
+      expect(cobros.length).toBe(cobrosAntes);
+      expect(llamadas.filter((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST').length).toBe(reservasAntes);
+      // Otra persona con la misma clave no recibe esa reserva.
+      const ajeno = await fetch(`${base}/api/v2/vuelos/bookings`, {
+        method: 'POST', headers: conDueno(OTRO, { 'Idempotency-Key': 'idem-repetida' }),
+        body: JSON.stringify({ holdId: 'NODE_VUE_KEY~HOLD-key', passengers: [] }),
+      });
+      expect(ajeno.headers.get('idempotent-replayed')).toBeNull();
+    });
+
     it('traza en vivo: los pasos de una compra quedan unidos por su X-Correlation-Id', async () => {
       trazaVuelos.reiniciar();
       const corr = 'corr-vuelo-prueba-1';
@@ -403,6 +435,54 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       const otros = await (await fetch(`${locks}?holdId=otro`)).json();
       expect(otros.locks).toEqual([{ segmentId: 'SEG-1', seatNumber: '8C' }]);
       await fetch(`${locks}?holdId=${encodeURIComponent(datos.holdId)}`, { method: 'DELETE' });
+    });
+
+    it('varios pasajeros: agregar un segundo asiento no choca con el hold propio en la aerolínea', async () => {
+      chocarConPropio = true;
+      holdsVivos.clear();
+      try {
+        const oferta = encodeURIComponent('NODE_VUE_KEY~OF-key');
+        const locks = `${base}/api/v2/vuelos/offers/${oferta}/seat-locks`;
+        const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-multi' }), body: JSON.stringify({ offerId: 'NODE_VUE_KEY~OF-key', itinerarySelections: [], passengersBreakdown: { adults: 2 } }) })).json();
+        const put = (holdId: string, seats: string[]) => fetch(locks, { method: 'PUT', headers: conDueno(DUENO), body: JSON.stringify({ holdId, seats: seats.map((n) => ({ segmentId: 'SEG-1', seatNumber: n })) }) });
+        const uno = await (await put(h.holdId, ['5C'])).json();
+        expect(uno.holdId).toBe('NODE_VUE_KEY~HOLD-key-5C');
+        llamadas.length = 0;
+        const dos = await put(uno.holdId, ['5C', '9D']);
+        const datos = await dos.json();
+        expect(dos.status).toBe(200);
+        expect(datos).toMatchObject({ holdId: 'NODE_VUE_KEY~HOLD-key-5C-9D', airlineHold: true });
+        // Se soltó el hold anterior ANTES del reintento que sí funcionó.
+        const orden = llamadas.filter((c) => c.url.startsWith('/api/v2/vuelos/offers/hold') && c.method !== 'GET' && c.url !== '/api/v2/vuelos/offers/hold/HOLD-key-dos').map((c) => `${c.method} ${c.url}`);
+        expect(orden).toEqual(['POST /api/v2/vuelos/offers/hold', 'DELETE /api/v2/vuelos/offers/hold/HOLD-key-5C', 'POST /api/v2/vuelos/offers/hold']);
+        // Si el asiento nuevo de verdad es de otro (9Z), se restaura el hold con los asientos previos.
+        const malo = await put(datos.holdId, ['5C', '9Z']);
+        const cuerpo = await malo.json();
+        expect(malo.status).toBe(409);
+        expect(cuerpo.taken).toEqual([{ segmentId: 'SEG-1', seatNumber: '9Z' }]);
+        expect(cuerpo.holdId).toBe('NODE_VUE_KEY~HOLD-key-5C-9D');
+        await fetch(`${locks}?holdId=${encodeURIComponent(cuerpo.holdId)}`, { method: 'DELETE', headers: conDueno(DUENO) });
+      } finally {
+        chocarConPropio = false;
+        holdsVivos.clear();
+      }
+    });
+
+    it('validación de asientos: inexistente, más que pasajeros, y solo el dueño suelta', async () => {
+      const oferta = encodeURIComponent('NODE_VUE_KEY~OF-key');
+      const locks = `${base}/api/v2/vuelos/offers/${oferta}/seat-locks`;
+      const h = await (await fetch(`${base}/api/v2/vuelos/offers/hold`, { method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-valida' }), body: JSON.stringify({ offerId: 'NODE_VUE_KEY~OF-key', itinerarySelections: [], passengersBreakdown: { adults: 1 } }) })).json();
+      const put = (seats: string[], quien = DUENO) => fetch(locks, { method: 'PUT', headers: conDueno(quien), body: JSON.stringify({ holdId: h.holdId, seats: seats.map((n) => ({ segmentId: 'SEG-1', seatNumber: n })) }) });
+      expect((await put(['99Z'])).status).toBe(422);
+      expect((await put(['1A', '1B'])).status).toBe(422);
+      expect((await put(['12F'])).status).toBe(409);
+      const ok = await (await put(['1A'])).json();
+      expect(ok.locked).toEqual([{ segmentId: 'SEG-1', seatNumber: '1A' }]);
+      // Otra persona no puede soltar ni cambiar los asientos de esta compra.
+      expect((await fetch(`${locks}?holdId=${encodeURIComponent(ok.holdId)}`, { method: 'DELETE', headers: conDueno(OTRO) })).status).toBe(403);
+      const sigue = await (await fetch(`${locks}?holdId=otro`)).json();
+      expect(sigue.locks).toContainEqual({ segmentId: 'SEG-1', seatNumber: '1A' });
+      expect((await fetch(`${locks}?holdId=${encodeURIComponent(ok.holdId)}`, { method: 'DELETE', headers: conDueno(DUENO) })).status).toBe(204);
     });
 
     it('cambio de asiento rápido con el hold viejo: Booking usa el vigente y el comprador no se bloquea a sí mismo', async () => {

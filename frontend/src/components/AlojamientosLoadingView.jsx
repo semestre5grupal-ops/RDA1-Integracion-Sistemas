@@ -1,48 +1,56 @@
 import React, { useState, useEffect } from 'react';
 import {
   BedIcon,
-  PinIcon,
-  CalendarIcon,
+  FlightIcon,
+  CarRentalIcon,
+  AttractionsNavIcon,
   CheckmarkIcon,
-  HeartIcon,
-  GeniusGiftIcon,
+  ShieldCheckIcon,
 } from './BookingIcons';
 
-const FRASES_LOADING = [
-  'Estamos buscando los mejores hoteles...',
+// ============================================================================
+// CONFIGURACIÓN CENTRALIZADA DE LA PANTALLA DE CARGA (TODAS LAS VERTICALES)
+// Modifica aquí las frases, el subtítulo o los íconos para actualizar toda la app.
+// ============================================================================
+
+export const FRASES_LOADING = [
+  'Estamos buscando las mejores opciones para tu viaje...',
   'Verificando disponibilidad y tarifas en tiempo real...',
-  'Comparando opciones para darte la mejor estadía...',
-  'Estamos personalizando tu experiencia...',
-  'Casi listo, organizando tus resultados...',
+  'Comparando opciones para darte la mejor experiencia...',
+  'Estamos personalizando tus resultados...',
+  'Casi listo, organizando las mejores ofertas...',
 ];
 
-const ICONOS_CARACTERISTICAS = [
-  { icon: BedIcon, label: 'Habitaciones y suites' },
-  { icon: PinIcon, label: 'Ubicaciones céntricas' },
-  { icon: CalendarIcon, label: 'Fechas flexibles' },
+export const SUBTITULO_LOADING = 'Encuentra alojamientos, vuelos, renta de autos y atracciones en un solo lugar';
+
+export const ICONOS_VERTICALES = [
+  { icon: BedIcon, label: 'Alojamientos' },
+  { icon: FlightIcon, label: 'Vuelos' },
+  { icon: CarRentalIcon, label: 'Renta de autos' },
+  { icon: AttractionsNavIcon, label: 'Atracciones' },
   { icon: CheckmarkIcon, label: 'Disponibilidad en vivo' },
-  { icon: GeniusGiftIcon, label: 'Tarifas preferenciales' },
-  { icon: HeartIcon, label: 'Alojamientos destacados' },
+  { icon: ShieldCheckIcon, label: 'Reserva segura' },
 ];
 
-export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_LOADING, subtitulo }) {
+export function AlojamientosLoadingView({ frases = FRASES_LOADING, subtitulo = SUBTITULO_LOADING }) {
+  const listaFrases = Array.isArray(frases) && frases.length > 0 ? frases : FRASES_LOADING;
   const [fraseIndex, setFraseIndex] = useState(0);
   const [activoIcono, setActivoIcono] = useState(0);
 
   useEffect(() => {
     const fraseTimer = setInterval(() => {
-      setFraseIndex((prev) => (prev + 1) % frases.length);
+      setFraseIndex((prev) => (prev + 1) % listaFrases.length);
     }, 2400);
 
     const iconTimer = setInterval(() => {
-      setActivoIcono((prev) => (prev + 1) % ICONOS_CARACTERISTICAS.length);
+      setActivoIcono((prev) => (prev + 1) % ICONOS_VERTICALES.length);
     }, 1200);
 
     return () => {
       clearInterval(fraseTimer);
       clearInterval(iconTimer);
     };
-  }, [frases.length]);
+  }, [listaFrases.length]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '90px 20px', minHeight: '75vh', background: '#ffffff' }}>
@@ -58,11 +66,11 @@ export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_L
           animation: 'fadeInText 0.4s ease-in-out',
         }}
       >
-        {frases[fraseIndex]}
+        {listaFrases[fraseIndex]}
       </h2>
 
       <p style={{ color: '#595959', fontSize: '1.05rem', margin: '0 0 32px 0', textAlign: 'center' }}>
-        {subtitulo || `Conectando con la red hotelera${destino ? ` en ${destino}` : ''}`}
+        {subtitulo}
       </p>
 
       {/* Barra de progreso animada */}
@@ -81,7 +89,7 @@ export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_L
         />
       </div>
 
-      {/* Conjunto de iconos vectoriales SVG oficiales (limpios, sin bordes ni pastillas) */}
+      {/* Conjunto de iconos vectoriales SVG de todas las verticales (limpios, sin bordes ni pastillas) */}
       <div
         style={{
           display: 'grid',
@@ -92,7 +100,7 @@ export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_L
           marginBottom: '48px',
         }}
       >
-        {ICONOS_CARACTERISTICAS.map((item, idx) => {
+        {ICONOS_VERTICALES.map((item, idx) => {
           const IconComp = item.icon;
           const isHighlight = idx === activoIcono;
           return (

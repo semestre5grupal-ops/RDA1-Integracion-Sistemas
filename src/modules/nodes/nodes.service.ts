@@ -56,6 +56,16 @@ export class NodesService {
    * servidor detenido en Azure (403) o caído (5xx / sin conexión) es "caído".
    * Antes bastaba con que el host contestara cualquier cosa < 500.
    */
+  /** Servicio de aerolíneas socias (import perezoso: evita un ciclo de módulos). */
+  private async sociosVuelos(): Promise<any> {
+    try {
+      const { VuelosSociosService } = await import('../vuelos/socios/vuelos-socios.service');
+      return this.moduleRef?.get(VuelosSociosService, { strict: false }) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async pingVuelos(codigoNodo: string): Promise<{ online: boolean; status: number; ms: number }> {
     const t0 = Date.now();
     let socios: any = null;
@@ -131,6 +141,7 @@ export class NodesService {
       await this.sembrarNodosPorDefecto();
     }
     let nodos = await this.configRepo.find({ order: { vertical: 'ASC', codigoNodo: 'ASC' } });
+    const socios = nodos.some((n) => n.vertical === 'VUELOS') ? await this.sociosVuelos() : null;
 
     return nodos.map(n => {
       // Cálculo del semáforo LED visual (🟢/🟡/🔴) para Panel 1
@@ -183,6 +194,8 @@ export class NodesService {
         circuit_breaker_estado: n.circuitBreakerEstado,
         tasa_fallos_pct: Number(n.tasaFallosPct),
         failCount: n.circuitBreakerEstado === 'OPEN' ? 3 : 0,
+        // Vuelos: detalle del ping de integración (token + contrato), se renueva cada 10 s.
+        ...(n.vertical === 'VUELOS' && socios?.saludDe ? { integracion: socios.saludDe(n.codigoNodo) } : {}),
         semaforo_led: {
           icono: ledColor,
           estado: ledStatus,
@@ -454,7 +467,16 @@ export class NodesService {
     let online = false;
     let verificable = false;
 
-    if (nodo.vertical === 'VUELOS' && /^https?:\/\//.test(nodo.baseUrlRest || '')) {
+    let integracion: any = null;
+    const socios = nodo.vertical === 'VUELOS' ? await this.sociosVuelos() : null;
+
+    if (nodo.vertical === 'VUELOS' && /^https?:\/\//.test(nodo.baseUrlRest || '') && socios?.comprobarIntegracion && !nodo.killSwitchActivo) {
+      // Ping de integración: token + llamada del contrato + respuesta válida.
+      verificable = true;
+      integracion = await socios.comprobarIntegracion(nodo);
+      online = integracion.estado !== 'CAIDO';
+      latencia = Math.round(integracion.ms);
+    } else if (nodo.vertical === 'VUELOS' && /^https?:\/\//.test(nodo.baseUrlRest || '')) {
       verificable = true;
       try {
         const r = await this.pingVuelos(nodo.codigoNodo);
@@ -528,7 +550,9 @@ export class NodesService {
       const umbralDegradado = nodo.baseUrlRest?.startsWith('https://') ? 3000 : 1200;
       nodo.healthStatus = !verificable
         ? 'UNKNOWN'
-        : online ? (latencia > umbralDegradado ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
+        : integracion
+          ? integracion.estado === 'INTEGRADO' ? 'HEALTHY' : integracion.estado === 'SIN_INTEGRACION' ? 'DEGRADED' : 'DOWN'
+          : online ? (latencia > umbralDegradado ? 'DEGRADED' : 'HEALTHY') : 'DOWN';
     }
     await this.configRepo.save(nodo);
 
@@ -541,6 +565,7 @@ export class NodesService {
       online: nodo.healthStatus === 'HEALTHY' || nodo.healthStatus === 'DEGRADED',
       verificado: verificable,
       timestamp: nodo.ultimoPingAt,
+      ...(integracion ? { integracion } : {}),
     };
   }
 

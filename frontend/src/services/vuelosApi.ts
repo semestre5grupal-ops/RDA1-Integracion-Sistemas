@@ -306,6 +306,8 @@ export async function crearReserva(
 ) {
   const correlacion = cabeceraCorrelacion();
   const { data } = await api.post('/vuelos/bookings', cuerpo, {
+    // Cobro + confirmación en la aerolínea: algunas tardan más de 45 s.
+    timeout: 150_000,
     headers: {
       'Idempotency-Key': idempotencyKey,
       'X-Device-Fingerprint': fingerprint,

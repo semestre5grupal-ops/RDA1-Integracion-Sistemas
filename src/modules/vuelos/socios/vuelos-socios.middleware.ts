@@ -54,10 +54,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     const apagado = String(process.env.VUELOS_EVENTOS_POLL ?? '').toLowerCase() === 'off';
     if (apagado || process.env.NODE_ENV === 'test' || this.socios.fuente() === 'local') return;
     this.eventos.iniciar(Math.max(5_000, Number(process.env.VUELOS_EVENTOS_INTERVALO_MS) || 10_000));
+    // Ping de integración con cada aerolínea (token + contrato), cada 10 s.
+    this.socios.iniciarMonitorSalud(Math.max(5_000, Number(process.env.VUELOS_SALUD_INTERVALO_MS) || 10_000));
   }
 
   onModuleDestroy() {
     this.eventos.detener();
+    this.socios.detenerMonitorSalud();
   }
 
   handler() {
@@ -115,7 +118,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
     // ── Bloqueo de asientos en tiempo real (propio de Booking) ──
     if (segmentos[0] === 'offers' && segmentos.length === 3 && segmentos[2].toLowerCase() === 'seat-locks') {
-      await this.bloqueoAsientos(req, res, nodo, metodo, entrantes);
+      await this.bloqueoAsientos(req, res, nodo, metodo, entrantes, decodeURIComponent(segmentos[1]));
       return true;
     }
 
@@ -164,6 +167,8 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       const pedido = decodeURIComponent(segmentos[2]);
       await this.bloqueos.liberar(pedido);
       void this.bloqueos.olvidarHold(pedido);
+      this.holdsVistos.delete(pedido);
+      this.holdsVistos.delete(this.bloqueos.actual(pedido).holdId);
       // Si la pantalla soltó un hold ya reemplazado, se suelta también el vigente.
       const vigente = this.bloqueos.actual(pedido).holdId;
       if (vigente !== pedido) {
@@ -181,6 +186,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     }
     if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && metodo === 'POST' && segmentos.length === 2 && rg.status < 300 && rg.body?.holdId) {
       await this.bloqueos.guardarHold(String(rg.body.holdId), nodo, req.body, limpiarAsientos(req.body?.assignedSeats));
+      this.registrarDueno(String(rg.body.holdId), entrantes);
     }
     if (segmentos[0] === 'offers' && segmentos[1] === 'hold' && metodo === 'POST') {
       this.traza(entrantes, 'hold', rg.status < 300 ? 'ok' : 'error',
@@ -242,6 +248,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
   // ───────────────────────────── Reservar + pagar ─────────────────────────────
 
+  /**
+   * Reservas por Idempotency-Key (1 h): si la respuesta no le llegó al cliente
+   * (aerolínea lenta, timeout) y reintenta con la misma clave, recibe la reserva
+   * ya hecha en vez de un error de "hold consumido" o un segundo cobro.
+   */
+  private readonly reservasPorClave = new Map<string, { promesa: Promise<RespuestaProxy | null>; t: number }>();
+
   private async reservar(req: Request, res: Response, nodo: string, entrantes: Record<string, any>) {
     const propietario = propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']);
     const idem = String(entrantes['idempotency-key'] || '').trim();
@@ -250,6 +263,33 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       this.enviar(res, problema(400, 'Falta Idempotency-Key', 'La cabecera Idempotency-Key es obligatoria para reservar.'));
       return;
     }
+    const clave = `${propietario}|${idem}`;
+    const previa = this.reservasPorClave.get(clave);
+    if (previa) {
+      const hecha = await previa.promesa;
+      if (hecha) {
+        this.traza(entrantes, 'confirmada', 'ok', `Reintento con la misma clave: se devuelve la reserva ya hecha · ${hecha.body?.bookingId ?? ''}`, { nodo });
+        res.setHeader('Idempotent-Replayed', 'true');
+        this.enviar(res, hecha);
+        return;
+      }
+    }
+    let resolver!: (r: RespuestaProxy | null) => void;
+    const promesa = new Promise<RespuestaProxy | null>((ok) => (resolver = ok));
+    const limite = Date.now() - 3_600_000;
+    for (const [k, v] of this.reservasPorClave) if (v.t < limite) this.reservasPorClave.delete(k);
+    this.reservasPorClave.set(clave, { promesa, t: Date.now() });
+    let hecha: RespuestaProxy | null = null;
+    try {
+      hecha = (await this.reservarUnaVez(req, res, nodo, entrantes, propietario, idem)) || null;
+    } finally {
+      resolver(hecha);
+      if (!hecha) this.reservasPorClave.delete(clave);
+    }
+  }
+
+  /** Cobra y reserva. Devuelve la respuesta enviada si la reserva quedó confirmada. */
+  private async reservarUnaVez(req: Request, res: Response, nodo: string, entrantes: Record<string, any>, propietario: string, idem: string): Promise<RespuestaProxy | null | void> {
     // Si la pantalla quedó con un hold ya reemplazado (cambio de asiento), se usa el vigente.
     const holdId = this.bloqueos.actual(String(req.body?.holdId || '')).holdId;
     if (req.body && typeof req.body === 'object' && holdId && req.body.holdId !== holdId) req.body = { ...req.body, holdId };
@@ -414,6 +454,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       ...(factura ? { factura } : {}),
     };
     this.enviar(res, r);
+    return r;
   }
 
   private async despuesDeReserva(metodo: string, segmentos: string[], bookingId: string, copia: any, r: RespuestaProxy, entrantes: Record<string, any>) {
@@ -555,7 +596,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
    * `GET    /vuelos/offers/{offerId}/seat-locks?holdId=&segmentId=`  asientos bloqueados por otras compras.
    * `DELETE /vuelos/offers/{offerId}/seat-locks?holdId=`  suelta los de esta compra.
    */
-  private async bloqueoAsientos(req: Request, res: Response, nodo: string, metodo: string, entrantes: Record<string, any>) {
+  private async bloqueoAsientos(req: Request, res: Response, nodo: string, metodo: string, entrantes: Record<string, any>, offerId: string) {
     const q = req.query as Record<string, string | undefined>;
     const pedido = String((metodo === 'PUT' ? req.body?.holdId : q.holdId) ?? '').trim().slice(0, 200);
     // La pantalla puede llegar con un hold que Booking ya reemplazó: se trabaja con el vigente
@@ -573,6 +614,11 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       this.enviar(res, problema(400, 'Falta holdId', 'Indica el holdId de la compra a la que pertenecen los asientos.'));
       return;
     }
+    // Solo quien creó el hold puede cambiar o soltar sus asientos.
+    if (!this.esDuenoDelHold(holdId, entrantes)) {
+      this.enviar(res, problema(403, 'Hold de otra compra', 'Este hold pertenece a otra persona.'));
+      return;
+    }
     if (metodo === 'DELETE') {
       await this.bloqueos.liberar(holdId);
       res.status(204).end();
@@ -583,6 +629,12 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const asientos = limpiarAsientos(req.body?.seats);
+    // Asientos que existen en el avión, no vendidos, y no más que los pasajeros con asiento.
+    const invalido = await this.validarAsientos(nodo, offerId, holdId, asientos, entrantes);
+    if (invalido) {
+      this.enviar(res, invalido);
+      return;
+    }
     // Solo bloquea quien tiene un hold vivo en la aerolínea (nadie puede bloquear asientos "al aire").
     if (asientos.length && !(await this.holdVigente(nodo, holdId, entrantes))) {
       await this.bloqueos.liberar(holdId);
@@ -611,10 +663,19 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // En la aerolínea: el hold se rehace con `assignedSeats` (contrato v2) para
     // que ella también vea el asiento apartado. Si no lo acepta, sigue el bloqueo de Booking.
     const enAerolinea = await this.apartarEnAerolinea(nodo, holdId, asientos, entrantes);
+    if (enAerolinea.perdido) {
+      await this.bloqueos.liberar(holdId);
+      this.enviar(res, problema(410, 'Hold no activo', 'La aerolínea no pudo mantener la selección. Vuelve a seleccionar la tarifa.'));
+      return;
+    }
     if (enAerolinea.tomados) {
-      await this.bloqueos.fijar(nodo, holdId, enAerolinea.previos, expira);
+      // Si para reintentar hubo que rehacer el hold, la compra sigue con el restaurado.
+      const restaurado = enAerolinea.nuevoHold?.holdId ? String(enAerolinea.nuevoHold.holdId) : null;
+      if (restaurado) await this.bloqueos.liberar(holdId);
+      await this.bloqueos.fijar(nodo, restaurado ?? holdId, enAerolinea.previos, expira);
       const r = asientoTomado(enAerolinea.tomados, 'Elige otro asiento.');
-      r.body = { ...r.body, holdId, airlineHold: true, ...(holdParaPantalla ? { hold: holdParaPantalla } : {}) };
+      const holdVisible = restaurado ? enAerolinea.nuevoHold : holdParaPantalla;
+      r.body = { ...r.body, holdId: restaurado ?? holdId, airlineHold: true, ...(holdVisible ? { hold: holdVisible } : {}) };
       this.enviar(res, r);
       return;
     }
@@ -630,6 +691,92 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     res.status(200).json({ holdId, ...(holdParaPantalla ? { hold: holdParaPantalla } : {}), locked, taken: [], expiresAt: expira.toISOString(), ttlMinutes: minutosBloqueo(), airlineHold: enAerolinea.apartado });
   }
 
+  // ── Dueño del hold (en memoria: tras reiniciar el servidor no se conoce y se deja pasar) ──
+  // Se guarda la huella del navegador y el usuario: si inicia sesión a mitad de la compra
+  // la huella sigue siendo la misma, así que no se le bloquea.
+  private readonly duenos = new Map<string, { huella: string; propietario: string }>();
+
+  private quien(entrantes: Record<string, any>) {
+    return {
+      huella: String(entrantes['x-device-fingerprint'] || ''),
+      propietario: propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']),
+    };
+  }
+
+  private registrarDueno(holdId: string, entrantes: Record<string, any>) {
+    if (this.duenos.size > 20_000) this.duenos.clear();
+    this.duenos.set(holdId, this.quien(entrantes));
+  }
+
+  private esDuenoDelHold(holdId: string, entrantes: Record<string, any>): boolean {
+    // El hold vigente hereda el dueño del original de la cadena de reemplazos.
+    let registrado = this.duenos.get(holdId);
+    if (!registrado) {
+      for (const [h, d] of this.duenos) if (this.bloqueos.actual(h).holdId === holdId) { registrado = d; break; }
+    }
+    if (!registrado) return true;
+    const yo = this.quien(entrantes);
+    return (!!yo.huella && yo.huella === registrado.huella) || yo.propietario === registrado.propietario;
+  }
+
+  // ── Validación de asientos contra el mapa de la aerolínea ──
+  private readonly mapasCache = new Map<string, { asientos: Map<string, string>; hasta: number }>();
+
+  /** Número de asiento → estado, según el mapa de la aerolínea (caché de 60 s). Null si no se pudo leer. */
+  private async asientosDelMapa(nodo: string, offerId: string, segmentId: string, entrantes: Record<string, any>): Promise<Map<string, string> | null> {
+    const clave = `${offerId}|${segmentId}`;
+    const c = this.mapasCache.get(clave);
+    if (c && c.hasta > Date.now()) return c.asientos;
+    const r = await this.socios.reenviar(nodo, 'GET', ['offers', offerId, 'seatmap'], `segmentId=${encodeURIComponent(segmentId)}`, null, entrantes);
+    if (r.status !== 200 || !r.body || typeof r.body !== 'object') return null;
+    const asientos = new Map<string, string>();
+    for (const cab of r.body.cabins ?? []) for (const fila of cab.rows ?? []) for (const a of fila.seats ?? []) {
+      if (!a?.seatNumber) continue;
+      const estado = String(a.status ?? '').toUpperCase();
+      // Vendido: no disponible y no es un apartado temporal (HELD puede ser de esta misma compra).
+      asientos.set(String(a.seatNumber).toUpperCase(), a.isAvailable === false && estado !== 'HELD' ? 'VENDIDO' : estado || 'AVAILABLE');
+    }
+    if (!asientos.size) return null;
+    if (this.mapasCache.size > 500) this.mapasCache.clear();
+    this.mapasCache.set(clave, { asientos, hasta: Date.now() + 60_000 });
+    return asientos;
+  }
+
+  /**
+   * Rechaza lo que el mapa no permite: más asientos por tramo que pasajeros con
+   * asiento, asientos que no existen en el avión (422) o ya vendidos (409).
+   * Si el mapa no se puede leer, no se bloquea la compra por eso.
+   */
+  private async validarAsientos(nodo: string, offerId: string, holdId: string, asientos: AsientoRef[], entrantes: Record<string, any>): Promise<RespuestaProxy | null> {
+    if (!asientos.length) return null;
+    const guardado = await this.bloqueos.hold(holdId);
+    const pb = guardado?.cuerpo?.passengersBreakdown;
+    const conAsiento = pb ? Number(pb.adults ?? 0) + Number(pb.children ?? 0) : 0;
+    if (conAsiento > 0) {
+      const porTramo = new Map<string, number>();
+      for (const a of asientos) porTramo.set(a.segmentId, (porTramo.get(a.segmentId) ?? 0) + 1);
+      if ([...porTramo.values()].some((n) => n > conAsiento)) {
+        return problema(422, 'Demasiados asientos', `Esta compra tiene ${conAsiento} pasajero(s) con asiento: elige como máximo ${conAsiento} por vuelo.`);
+      }
+    }
+    const inexistentes: AsientoRef[] = [];
+    const vendidos: AsientoRef[] = [];
+    for (const segmentId of new Set(asientos.map((a) => a.segmentId))) {
+      const mapa = await this.asientosDelMapa(nodo, offerId, segmentId, entrantes).catch(() => null);
+      if (!mapa) continue;
+      for (const a of asientos.filter((x) => x.segmentId === segmentId)) {
+        const estado = mapa.get(a.seatNumber);
+        if (!estado) inexistentes.push(a);
+        else if (estado === 'VENDIDO') vendidos.push(a);
+      }
+    }
+    if (inexistentes.length) {
+      return problema(422, 'Asiento inexistente', `El asiento ${inexistentes.map((a) => a.seatNumber).join(', ')} no existe en este avión.`);
+    }
+    if (vendidos.length) return asientoTomado(vendidos, 'Ese asiento ya está vendido. Elige otro.');
+    return null;
+  }
+
   /** Aerolíneas que todavía no aceptan `assignedSeats` en el hold (se vuelve a probar cada 10 min). */
   private readonly sinAsientoEnHold = new Map<string, number>();
 
@@ -639,7 +786,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
    * que el asiento ya está ocupado (409). Si la aerolínea no lo soporta o falla,
    * no cambia nada (queda el bloqueo de Booking).
    */
-  private async apartarEnAerolinea(nodo: string, holdId: string, asientos: AsientoRef[], entrantes: Record<string, any>): Promise<{ nuevoHold?: any; tomados?: AsientoRef[]; previos: AsientoRef[]; apartado: boolean }> {
+  private async apartarEnAerolinea(nodo: string, holdId: string, asientos: AsientoRef[], entrantes: Record<string, any>): Promise<{ nuevoHold?: any; tomados?: AsientoRef[]; previos: AsientoRef[]; apartado: boolean; perdido?: boolean }> {
     const guardado = await this.bloqueos.hold(holdId);
     const previos = guardado?.asientos ?? [];
     const firma = (l: AsientoRef[]) => l.map((a) => `${a.segmentId}|${a.seatNumber}`).sort().join(',');
@@ -649,15 +796,48 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     if (asientos.length && pausa && Date.now() - pausa < 10 * 60_000) return { previos, apartado: false };
 
     const t0 = Date.now();
-    const cuerpo = asientos.length ? { ...guardado.cuerpo, assignedSeats: asientos } : { ...guardado.cuerpo };
-    const r = await this.socios.reenviar(nodo, 'POST', ['offers', 'hold'], '', cuerpo, { ...entrantes, 'idempotency-key': randomUUID() });
+    const crear = (lista: AsientoRef[]) =>
+      this.socios.reenviar(nodo, 'POST', ['offers', 'hold'], '', lista.length ? { ...guardado.cuerpo, assignedSeats: lista } : { ...guardado.cuerpo }, { ...entrantes, 'idempotency-key': randomUUID() });
+    let r = await crear(asientos);
+    let anteriorSoltado = false;
+    // Varias aerolíneas (EQ10, RAM, GabatAIR) chocan con el propio hold de la compra:
+    // si el pasajero 1 ya tiene 4C y se agrega 4E para el pasajero 2, el hold nuevo
+    // con [4C, 4E] da 409 porque 4C sigue en el hold anterior. Se suelta primero el
+    // anterior y se reintenta; si aun así falla, se restaura con los asientos previos.
+    const clavePrev = new Set(previos.map((a) => `${a.segmentId}|${a.seatNumber}`));
+    const conservaAlguno = asientos.some((a) => clavePrev.has(`${a.segmentId}|${a.seatNumber}`));
+    if (r.status === 409 && conservaAlguno) {
+      await this.socios.reenviar(nodo, 'DELETE', ['offers', 'hold', holdId], '', null, entrantes).catch(() => undefined);
+      anteriorSoltado = true;
+      this.holdsVistos.delete(holdId);
+      r = await crear(asientos);
+      if (!(r.status >= 200 && r.status < 300 && r.body?.holdId)) {
+        const conflicto = r.status;
+        const restaurado = await crear(previos);
+        if (restaurado.status >= 200 && restaurado.status < 300 && restaurado.body?.holdId) {
+          const idR = String(restaurado.body.holdId);
+          await this.bloqueos.guardarHold(idR, nodo, guardado.cuerpo, previos);
+          void this.bloqueos.olvidarHold(holdId);
+          const baseR = parseFloat(String(restaurado.body?.lockedPrice?.total ?? ''));
+          if (Number.isFinite(baseR) && baseR > 0) {
+            restaurado.body = { ...restaurado.body, bookingPrice: precioBooking(precioConRecargo(baseR, await this.reservas.recargoPct()), restaurado.body.lockedPrice.currency) };
+          }
+          this.bloqueos.registrarReemplazo(holdId, idR, restaurado.body);
+          const nuevos = asientos.filter((a) => !clavePrev.has(`${a.segmentId}|${a.seatNumber}`));
+          this.traza(entrantes, 'asiento', 'aviso', `La aerolínea dice que el asiento ${nuevos.map((a) => a.seatNumber).join(', ')} ya está ocupado (HTTP ${conflicto}); se mantienen los anteriores`, { nodo, ms: Date.now() - t0 });
+          return { tomados: nuevos.length ? nuevos : asientos, previos, apartado: previos.length > 0, nuevoHold: restaurado.body };
+        }
+        this.traza(entrantes, 'asiento', 'error', `No se pudo rehacer el hold en la aerolínea (HTTP ${conflicto} / ${restaurado.status})`, { nodo, ms: Date.now() - t0 });
+        return { previos, apartado: false, perdido: true };
+      }
+    }
     if (r.status >= 200 && r.status < 300 && r.body?.holdId) {
       this.sinAsientoEnHold.delete(nodo);
       const nuevoId = String(r.body.holdId);
       await this.bloqueos.guardarHold(nuevoId, nodo, guardado.cuerpo, asientos);
       this.holdsVistos.delete(holdId);
       // El hold anterior se suelta en la aerolínea (si falla, vence solo).
-      void this.socios.reenviar(nodo, 'DELETE', ['offers', 'hold', holdId], '', null, entrantes).catch(() => undefined);
+      if (!anteriorSoltado) void this.socios.reenviar(nodo, 'DELETE', ['offers', 'hold', holdId], '', null, entrantes).catch(() => undefined);
       void this.bloqueos.olvidarHold(holdId);
       const base = parseFloat(String(r.body?.lockedPrice?.total ?? ''));
       if (Number.isFinite(base) && base > 0) {

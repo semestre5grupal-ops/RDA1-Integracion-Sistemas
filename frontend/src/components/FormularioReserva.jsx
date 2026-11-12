@@ -10,6 +10,8 @@ import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { totalBooking } from '../utils/precioBooking';
 import { useTelemetry } from '../hooks/useTelemetry';
+import { PasarelaPago } from './vuelos/PasarelaPago';
+import { SpinnerVuelos } from './SpinnerVuelos';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
 const COUNTRIES = [
@@ -279,8 +281,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   // Asientos que otros clientes están eligiendo ahora mismo: { [segmentId]: ['14D', ...] }
   const [bloqueosAjenos, setBloqueosAjenos] = useState({});
   const [enviando, setEnviando] = useState(false);
+  /** Etapa visible del pago (Verificando asientos → Procesando pago → Confirmando con la aerolínea). */
+  const [etapaPago, setEtapaPago] = useState(null);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
+  /** Pago en curso: mientras tanto no se revisa el mapa (el asiento ya va en la reserva). */
+  const pagandoRef = useRef(false);
+  /** El último pago no tuvo respuesta (tardó demasiado): pudo completarse en la aerolínea. */
+  const pagoIncierto = useRef(false);
   const refContenedor = useRef(null);
 
   useFocusTrap(abierto, pedirCancelar, refDialogo);
@@ -320,6 +328,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     if (!abierto || !hold) return;
     setPasoActual(1);
     claveIdempotencia.current = uuidv4();
+    pagoIncierto.current = false;
     setErrorGeneral(null);
     setErrores({});
     setMapas({}); // hold nuevo: el mapa de asientos se vuelve a pedir
@@ -489,6 +498,16 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           onHoldCambiado?.({ ...r.hold, compraId: holdActual.compraId });
         }
       } catch (fallo) {
+        // Para reintentar, Booking pudo rehacer el hold con los asientos que ya tenía: se sigue con ese.
+        const rehecho = fallo?.response?.data?.hold;
+        if (rehecho?.holdId && rehecho.holdId !== holdActual.holdId) {
+          holdRef.current = { ...holdActual, ...rehecho, compraId: holdActual.compraId };
+          holdsRehechos.current.add(rehecho.holdId);
+          onHoldCambiado?.({ ...rehecho, compraId: holdActual.compraId });
+        }
+        if (fallo?.response?.status === 410) {
+          setErrorGeneral('Tu reserva temporal venció mientras elegías asientos. Vuelve a seleccionar la tarifa.');
+        }
         const tomados = fallo?.response?.status === 409 ? fallo.response.data?.taken ?? [] : [];
         if (tomados.length) {
           ultimaFirma.current = '';
@@ -552,11 +571,20 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   // Mientras el cliente elige asiento o está por pagar, el mapa se actualiza cada 15 s.
   useEffect(() => {
     if (pasoActual !== 2 && pasoActual !== 3) return undefined;
+    let revisando = false;
     const id = setInterval(async () => {
-      const tomados = await revisarAsientos();
-      if (tomados.length) {
-        soltarTomados(tomados, pasoActual === 3);
-        setPasoActual(2);
+      // Durante el pago (o si el último pago quedó sin respuesta) no se revisa: el asiento
+      // puede salir "ocupado" justamente porque ya es de esta reserva.
+      if (revisando || pagandoRef.current || pagoIncierto.current) return;
+      revisando = true;
+      try {
+        const tomados = await revisarAsientos();
+        if (tomados.length && !pagandoRef.current && !pagoIncierto.current) {
+          soltarTomados(tomados, pasoActual === 3);
+          setPasoActual(2);
+        }
+      } finally {
+        revisando = false;
       }
     }, 15_000);
     return () => clearInterval(id);
@@ -687,14 +715,18 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       setPendingOfflinePay(false);
 
       setEnviando(true);
+      pagandoRef.current = true;
       setErrorGeneral(null);
       trackEvent('payment_started', 'vuelos');
       try {
-        // Simulando pasarela de pagos
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Conexión con la pasarela simulada (antes eran 2 s fijos de espera).
+        setEtapaPago('Conectando con la pasarela de pago…');
+        await new Promise(resolve => setTimeout(resolve, 400));
 
         // Justo antes de cobrar: los asientos elegidos tienen que seguir libres.
-        if (navigator.onLine) {
+        // (Si el pago anterior quedó sin respuesta, no: el asiento ya puede ser de esta reserva.)
+        if (navigator.onLine && !pagoIncierto.current) {
+          setEtapaPago('Verificando tus asientos…');
           const tomados = await revisarAsientos();
           if (tomados.length) {
             soltarTomados(tomados, true);
@@ -725,6 +757,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           payment: { paymentReference: `pay_${uuidv4().slice(0, 18)}` },
         };
         const idempotencyKey = claveIdempotencia.current ?? uuidv4();
+        claveIdempotencia.current = idempotencyKey;
         const fingerprint = obtenerHuellaDispositivo();
 
         // Datos de la factura. `monto` va como string porque `hold.lockedPrice.total`
@@ -749,7 +782,26 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           await savePendingReservation('vuelo', { ...payload, fingerprint }, idempotencyKey, datosFactura);
           reserva = { bookingId: idempotencyKey, pnr: idempotencyKey, offline: true };
         } else {
-          reserva = await crearReserva(payload, idempotencyKey, fingerprint);
+          setEtapaPago('Procesando el pago…');
+          const siguiente = setTimeout(() => setEtapaPago('Confirmando con la aerolínea…'), 1500);
+          try {
+            // Si la respuesta no llega (aerolínea lenta), se reintenta con la MISMA clave:
+            // Booking devuelve la reserva ya hecha en vez de cobrar otra vez.
+            for (let intento = 0; ; intento++) {
+              try {
+                reserva = await crearReserva(payload, idempotencyKey, fingerprint);
+                break;
+              } catch (e) {
+                if (e?.response || intento >= 2) throw e;
+                pagoIncierto.current = true;
+                setEtapaPago('La aerolínea está tardando, seguimos confirmando…');
+              }
+            }
+            pagoIncierto.current = false;
+          } finally {
+            clearTimeout(siguiente);
+          }
+          setEtapaPago('¡Listo! Emitiendo tu reserva…');
 
           // El PNR lo asigna el servidor. Se usa el suyo y solo se recurre a la
           // clave de idempotencia si la respuesta viniera sin él, porque pintar un
@@ -769,9 +821,17 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         onConfirmada?.(reserva, lista);
       } catch (fallo) {
         trackEvent('payment_failed', 'vuelos', { error: fallo?.message });
+        // Sin respuesta: el pago pudo completarse. Se conserva la clave para que un nuevo
+        // "Confirmar pago" recupere esa reserva en vez de cobrar otra vez.
+        if (!fallo?.response) {
+          pagoIncierto.current = true;
+          setErrorGeneral('La aerolínea tardó demasiado en responder. Tu reserva pudo completarse: pulsa "Confirmar pago" otra vez para comprobarlo (no se cobra dos veces) o revisa Mis Reservas.');
+          return;
+        }
         // Un intento fallido no se repite con la misma clave: el siguiente
         // "Confirmar pago" es un intento nuevo.
         claveIdempotencia.current = uuidv4();
+        pagoIncierto.current = false;
         const datos = fallo?.response?.data ?? {};
         // Otro cliente tomó el asiento entre que se vio el mapa y se pagó:
         // el cobro ya se devolvió; se vuelve a Asientos con el mapa actualizado.
@@ -795,6 +855,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         );
       } finally {
         setEnviando(false);
+        pagandoRef.current = false;
+        setEtapaPago(null);
       }
     },
     [enviando, lista, hold, validar, onConfirmada, pasoActual, cargarMapas, revisarAsientos, soltarTomados],
@@ -1198,36 +1260,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           )}
 
           {pasoActual === 3 && (
-            <div className="paso-pago" style={{ marginTop: '20px' }}>
-              <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Pago Simulado</h3>
-              <p className="modal-nota-bloque">
-                El total a pagar es de <strong>{formatearMoneda(totalBooking(hold), hold.lockedPrice?.currency)}</strong>.
-              </p>
-              {hold.bookingPrice && (
-                <dl className="modal-nota-bloque" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 16px', margin: '8px 0 0' }}>
-                  <dt>Tarifa de la aerolínea (impuestos incluidos)</dt>
-                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.airlineTotal, hold.bookingPrice.currency)}</dd>
-                  <dt>Cargo por servicio Booking ({hold.bookingPrice.serviceFeePercentage}%, no reembolsable)</dt>
-                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.serviceFee, hold.bookingPrice.currency)}</dd>
-                </dl>
-              )}
-              
-              <div className="tarjeta-simulada" style={{ background: '#f5f7f9', padding: '20px', borderRadius: '12px', border: '1px solid #e1e4e8', marginTop: '20px' }}>
-                <div className="campo">
-                  <label className="modal-label">Número de tarjeta</label>
-                  <input className="modal-input" type="text" placeholder="4111 1111 1111 1111" defaultValue="4111 1111 1111 1111" readOnly style={{ background: 'white' }} />
-                </div>
-                <div className="rejilla-campos" style={{ marginTop: '16px' }}>
-                  <div className="campo">
-                    <label className="modal-label">Vencimiento</label>
-                    <input className="modal-input" type="text" placeholder="MM/AA" defaultValue="12/28" readOnly style={{ background: 'white' }} />
-                  </div>
-                  <div className="campo">
-                    <label className="modal-label">CVC</label>
-                    <input className="modal-input" type="text" placeholder="123" defaultValue="123" readOnly style={{ background: 'white' }} />
-                  </div>
-                </div>
-              </div>
+            <div className="paso-pago">
+              <PasarelaPago hold={hold} lista={lista} />
             </div>
           )}
 
@@ -1267,7 +1301,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                 <button type="submit" className="btn-primario" disabled={enviando}>
                   {pasoActual === 1 && 'Continuar a Extras'}
                   {pasoActual === 2 && (!user ? 'Inicia sesión para continuar' : 'Continuar al Pago')}
-                  {pasoActual === 3 && (enviando ? 'Procesando pago...' : 'Confirmar pago')}
+                  {pasoActual === 3 && (enviando ? <><SpinnerVuelos />{etapaPago || 'Procesando pago…'}</> : <>🔒 Pagar {formatearMoneda(totalBooking(hold), hold?.bookingPrice?.currency ?? hold?.lockedPrice?.currency)}</>)}
                 </button>
               )}
             </div>

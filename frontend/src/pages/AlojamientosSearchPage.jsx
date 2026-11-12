@@ -101,14 +101,6 @@ export function AlojamientosSearchPage() {
   // Search Bar Form State
   const [destination, setDestination] = useState(initialDestination);
   const [destinosCatalogo, setDestinosCatalogo] = useState(undefined);
-
-  // Destinos reales del catálogo para el autocompletado aprovechando los resultados cargados.
-  useEffect(() => {
-    if (properties && properties.length > 0) {
-      const nombres = properties.map((a) => a?.destino || a?.ubicacion?.city).filter(Boolean);
-      if (nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
-    }
-  }, [properties]);
   const [destinationError, setDestinationError] = useState('');
   const [checkin, setCheckin] = useState(initialCheckin);
   const [checkout, setCheckout] = useState(initialCheckout);
@@ -146,6 +138,14 @@ export function AlojamientosSearchPage() {
   const [sortBy, setSortBy] = useState('popularity');
   const [wishlist, setWishlist] = useState(new Set());
   const isFetchingRef = useRef(false);
+
+  // Destinos reales del catálogo para el autocompletado aprovechando los resultados cargados.
+  useEffect(() => {
+    if (properties && properties.length > 0) {
+      const nombres = properties.map((a) => a?.destino || a?.ubicacion?.city).filter(Boolean);
+      if (nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
+    }
+  }, [properties]);
 
   // Filter States
   // El extremo derecho del control ("US$250+") significa SIN LÍMITE, como en Booking.
@@ -630,7 +630,7 @@ export function AlojamientosSearchPage() {
   ]);
 
   if (loading && properties.length === 0) {
-    return <AlojamientosLoadingView destino={destination} />;
+    return <AlojamientosLoadingView />;
   }
 
   return (
