@@ -54,6 +54,7 @@ export function AutosPage() {
   const navigate = useNavigate();
   const [autos, setAutos] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isUpdatingList, setIsUpdatingList] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
   const { convertPrice, currency } = useCurrency();
@@ -66,26 +67,26 @@ export function AutosPage() {
   const [pickupError, setPickupError] = useState('');
   const [flashRed, setFlashRed] = useState(false);
   const sugerenciasBusqueda = [
-    { texto: 'Quito', tipo: 'ciudad', icono: '📍' },
-    { texto: 'Guayaquil', tipo: 'ciudad', icono: '📍' },
-    { texto: 'Cuenca', tipo: 'ciudad', icono: '📍' },
-    { texto: 'Manta', tipo: 'ciudad', icono: '📍' },
-    { texto: 'Aeropuerto Mariscal Sucre', tipo: 'aeropuerto', icono: '✈️' },
-    { texto: 'Aeropuerto José Joaquín de Olmedo', tipo: 'aeropuerto', icono: '✈️' },
-    { texto: 'Loja', tipo: 'ciudad', icono: '📍' },
-    { texto: 'Machala', tipo: 'ciudad', icono: '📍' },
-    { texto: 'Mercedes', tipo: 'auto', icono: '🚗' },
-    { texto: 'Mercedes-Benz', tipo: 'auto', icono: '🚗' },
-    { texto: 'Toyota', tipo: 'auto', icono: '🚗' },
-    { texto: 'Toyota Yaris Cross', tipo: 'auto', icono: '🚗' },
-    { texto: 'Chevrolet', tipo: 'auto', icono: '🚗' },
-    { texto: 'Chevrolet Tracker', tipo: 'auto', icono: '🚗' },
-    { texto: 'Kia', tipo: 'auto', icono: '🚗' },
-    { texto: 'Kia Sportage', tipo: 'auto', icono: '🚗' },
-    { texto: 'Hyundai', tipo: 'auto', icono: '🚗' },
-    { texto: 'Hyundai Tucson', tipo: 'auto', icono: '🚗' },
-    { texto: 'Nissan', tipo: 'auto', icono: '🚗' },
-    { texto: 'SUV', tipo: 'categoria', icono: '🚙' },
+    { texto: 'Quito', tipo: 'ciudad' },
+    { texto: 'Guayaquil', tipo: 'ciudad' },
+    { texto: 'Cuenca', tipo: 'ciudad' },
+    { texto: 'Manta', tipo: 'ciudad' },
+    { texto: 'Aeropuerto Mariscal Sucre', tipo: 'aeropuerto' },
+    { texto: 'Aeropuerto José Joaquín de Olmedo', tipo: 'aeropuerto' },
+    { texto: 'Loja', tipo: 'ciudad' },
+    { texto: 'Machala', tipo: 'ciudad' },
+    { texto: 'Mercedes', tipo: 'auto' },
+    { texto: 'Mercedes-Benz', tipo: 'auto' },
+    { texto: 'Toyota', tipo: 'auto' },
+    { texto: 'Toyota Yaris Cross', tipo: 'auto' },
+    { texto: 'Chevrolet', tipo: 'auto' },
+    { texto: 'Chevrolet Tracker', tipo: 'auto' },
+    { texto: 'Kia', tipo: 'auto' },
+    { texto: 'Kia Sportage', tipo: 'auto' },
+    { texto: 'Hyundai', tipo: 'auto' },
+    { texto: 'Hyundai Tucson', tipo: 'auto' },
+    { texto: 'Nissan', tipo: 'auto' },
+    { texto: 'SUV', tipo: 'categoria' },
   ];
 
   const triggerFlash = (msg) => {
@@ -200,12 +201,9 @@ export function AutosPage() {
     setPickupLocation(destinationName);
     setPickupError('');
     setShowSuggestions(false);
-    // Scroll to top (form) and trigger search
     window.scrollTo({ top: 0, behavior: 'smooth' });
     shouldScrollRef.current = true;
-    setTimeout(() => {
-      fetchData();
-    }, 400);
+    fetchData(null, null, false, false, destinationName);
   };
 
   const calculateDays = () => {
@@ -219,23 +217,51 @@ export function AutosPage() {
 
   const isFetchingRef = useRef(false);
   const shouldScrollRef = useRef(false);
+  const lastSearchRef = useRef(null);
 
-  const fetchData = useCallback(async (catOverride = null, transOverride = null, isSilent = false) => {
+  const fetchData = useCallback(async (
+    catOverride = null,
+    transOverride = null,
+    isSilent = false,
+    isFilterChange = false,
+    locationOverride = null
+  ) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+
     if (!isSilent) {
-      setLoading(true);
+      if (isFilterChange || autos.length > 0) {
+        setIsUpdatingList(true);
+      } else {
+        setLoading(true);
+      }
       setError(null);
     }
+
     try {
       const cat = catOverride !== null ? catOverride : selectedCategory;
       const trans = transOverride !== null ? transOverride : selectedTransmission;
       const ageToUse = driverAge ? 32 : Number(customAge || 22);
+      const loc = locationOverride !== null ? locationOverride : pickupLocation;
+
+      lastSearchRef.current = {
+        pickupLocation: loc,
+        dropoffLocation,
+        sameDropoff,
+        startDate,
+        endDate,
+        pickupTime,
+        dropoffTime,
+        ageToUse,
+        driverAge,
+        cat,
+        trans
+      };
 
       const requestPayload = {
-        pickup_location: pickupLocation || 'Quito',
-        q: pickupLocation || '',
-        dropoff_location: sameDropoff ? (dropoffLocation || pickupLocation || 'Quito') : (pickupLocation || 'Quito'),
+        pickup_location: loc || 'Quito',
+        q: loc || '',
+        dropoff_location: sameDropoff ? (dropoffLocation || loc || 'Quito') : (loc || 'Quito'),
         pickup_date: startDate || new Date().toISOString().split('T')[0],
         pickup_time: pickupTime || '10:00',
         dropoff_date: endDate || new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
@@ -249,7 +275,7 @@ export function AutosPage() {
 
       const result = await searchAutos(requestPayload);
       let fetchedCars = result.data || [];
-      const qNorm = normalizeSearchText(pickupLocation);
+      const qNorm = normalizeSearchText(loc);
       const ciudadesComunes = [
         'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'uio', 'gye', 'cue',
         'aeropuerto mariscal sucre', 'aeropuerto jose joaquin de olmedo', 'tababela', 'ecuador'
@@ -306,6 +332,7 @@ export function AutosPage() {
       isFetchingRef.current = false;
       if (!isSilent) {
         setLoading(false);
+        setIsUpdatingList(false);
       }
       setHasSearched(true);
       if (shouldScrollRef.current) {
@@ -317,28 +344,111 @@ export function AutosPage() {
         }, 100);
       }
     }
-  }, [pickupLocation, dropoffLocation, sameDropoff, startDate, endDate, pickupTime, dropoffTime, driverAge, customAge, selectedCategory, selectedTransmission]);
+  }, [pickupLocation, dropoffLocation, sameDropoff, startDate, endDate, pickupTime, dropoffTime, driverAge, customAge, selectedCategory, selectedTransmission, autos.length]);
 
-  // Carga inicial y polling en segundo plano cada 8 segundos (RDA2 Tiempo Real)
+  // Polling silencioso en segundo plano cada 8 segundos (RDA2 Tiempo Real)
+  // Únicamente se ejecuta cuando ya se ha realizado una búsqueda (hasSearched === true)
   useEffect(() => {
+    if (!hasSearched) return;
+
     let timer = null;
     let isCancelled = false;
 
-    const runPoll = async (silent) => {
+    const runPoll = async () => {
       if (isCancelled) return;
-      await fetchData(null, null, silent);
-      if (!isCancelled) {
-        timer = setTimeout(() => runPoll(true), 8000);
+      if (typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(runPoll, 8000);
+        return;
+      }
+      if (isFetchingRef.current) {
+        timer = setTimeout(runPoll, 8000);
+        return;
+      }
+
+      isFetchingRef.current = true;
+      try {
+        const last = lastSearchRef.current || {};
+        const requestPayload = {
+          pickup_location: last.pickupLocation || 'Quito',
+          q: last.pickupLocation || '',
+          dropoff_location: last.sameDropoff ? (last.dropoffLocation || last.pickupLocation || 'Quito') : (last.pickupLocation || 'Quito'),
+          pickup_date: last.startDate || new Date().toISOString().split('T')[0],
+          pickup_time: last.pickupTime || '10:00',
+          dropoff_date: last.endDate || new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
+          dropoff_time: last.dropoffTime || '10:00',
+          driver_age: last.ageToUse || 32,
+          driver_age_bracket: last.driverAge ?? true,
+          category: last.cat || 'ALL',
+          transmission: last.trans || 'ALL',
+          currency: 'USD'
+        };
+
+        const result = await searchAutos(requestPayload);
+        let fetchedCars = result.data || [];
+        const qNorm = normalizeSearchText(last.pickupLocation || '');
+        const ciudadesComunes = [
+          'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'uio', 'gye', 'cue',
+          'aeropuerto mariscal sucre', 'aeropuerto jose joaquin de olmedo', 'tababela', 'ecuador'
+        ];
+        const esSoloCiudad = ciudadesComunes.includes(qNorm);
+
+        if (qNorm && !esSoloCiudad) {
+          const tokens = qNorm.split(' ').filter(t => t.length > 0 && !ciudadesComunes.includes(t));
+          if (tokens.length > 0) {
+            fetchedCars = fetchedCars.filter(c => {
+              const fullText = normalizeSearchText([
+                c.marca,
+                c.modelo,
+                c.vehiculo,
+                c.nombre,
+                c.categoria,
+                c.proveedor?.nombre,
+                c.proveedor_nombre
+              ].filter(Boolean).join(' '));
+              return tokens.every(token => fullText.includes(token));
+            });
+          }
+        }
+
+        setAutos((prev) => {
+          if (prev && prev.length === fetchedCars.length) {
+            let hasDiff = false;
+            for (let i = 0; i < fetchedCars.length; i++) {
+              const p = prev[i];
+              const n = fetchedCars[i];
+              const pId = p.id || p.auto_id || p.vehiculo_id;
+              const nId = n.id || n.auto_id || n.vehiculo_id;
+              const pEstado = p.estado || p.status;
+              const nEstado = n.estado || n.status;
+              const pPrice = typeof p.precio_por_dia === 'object' ? p.precio_por_dia?.total : (p.precio_por_dia || p.price);
+              const nPrice = typeof n.precio_por_dia === 'object' ? n.precio_por_dia?.total : (n.precio_por_dia || n.price);
+              if (pId !== nId || pEstado !== nEstado || pPrice !== nPrice) {
+                hasDiff = true;
+                break;
+              }
+            }
+            if (!hasDiff) return prev;
+          }
+          return fetchedCars;
+        });
+        setMetadata(result.metadata || null);
+      } catch (err) {
+        console.warn('[AutosPage] Error transitorio en refresco silencioso de autos:', err?.message || err);
+      } finally {
+        isFetchingRef.current = false;
+        if (!isCancelled) {
+          timer = setTimeout(runPoll, 8000);
+        }
       }
     };
 
-    runPoll(false);
+    timer = setTimeout(runPoll, 8000);
 
     return () => {
       isCancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [fetchData]);
+  }, [hasSearched]);
 
   const timeOptions = [];
   for(let i=0; i<24; i++) {
@@ -419,7 +529,7 @@ export function AutosPage() {
     { nombre: 'Keddy', bg: '#6a1b9a', color: 'white', label: 'keddy' }
   ];
 
-  if (loading) {
+  if (loading && autos.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '100px 20px', minHeight: '80vh', background: 'white' }}>
         <h2 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#333', marginBottom: '40px', textAlign: 'center' }}>Buscando las mejores ofertas entre cientos de marcas</h2>
@@ -441,7 +551,7 @@ export function AutosPage() {
         {/* Bottom indicator */}
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
           <img src="https://cf.bstatic.com/static/img/cars/icons/car_icon/d261ad47db337611bdcb4914da6b553c3eefbba5.png" alt="car" style={{ height: '40px', objectFit: 'contain' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} />
-          <span style={{ fontSize: '2.5rem', display: 'none' }}>🚙</span>
+          <svg style={{ display: 'none', width: '36px', height: '36px', fill: '#006ce4' }} viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-4.66l.12-.34h13.77l.11.34V17z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>
           <div>
             <h4 style={{ fontWeight: 'bold', color: '#333', margin: 0, fontSize: '1.1rem' }}>Coches de todos los tamaños</h4>
             <p style={{ color: '#666', margin: 0, fontSize: '1rem' }}>para todo tipo de viajes</p>
@@ -502,7 +612,15 @@ export function AutosPage() {
                     {sugerenciasBusqueda.filter(s => s.texto.toLowerCase().includes(pickupLocation.toLowerCase())).length > 0 ? (
                       sugerenciasBusqueda.filter(s => s.texto.toLowerCase().includes(pickupLocation.toLowerCase())).map((item, idx) => (
                         <li key={idx} onMouseDown={() => handleSelectSuggestion(item.texto)} style={{ padding: '10px 16px', borderBottom: '1px solid #e7e7e7', cursor: 'pointer', fontSize: '0.95rem', color: '#333', display: 'flex', alignItems: 'center', gap: '10px' }} onMouseOver={e => e.currentTarget.style.background = '#f5f5f5'} onMouseOut={e => e.currentTarget.style.background = 'white'}>
-                          <span style={{ fontSize: '1.1rem' }}>{item.icono}</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                            {item.tipo === 'aeropuerto' ? (
+                              <svg viewBox="0 0 24 24" width="18" height="18" fill="#006ce4"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                            ) : item.tipo === 'auto' ? (
+                              <svg viewBox="0 0 24 24" width="18" height="18" fill="#006ce4"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-4.66l.12-.34h13.77l.11.34V17z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" width="18" height="18" fill="#006ce4"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                            )}
+                          </span>
                           <div>
                             <span style={{ fontWeight: item.tipo === 'auto' ? 600 : 400 }}>{item.texto}</span>
                             <span style={{ fontSize: '0.75rem', color: '#888', marginLeft: '8px', textTransform: 'capitalize' }}>({item.tipo})</span>
@@ -837,9 +955,9 @@ export function AutosPage() {
         <div ref={resultsRef} className="main-content" style={{ maxWidth: '1100px', margin: '0 auto', padding: '40px 20px' }}>
           {error && (
           <div className="state-container" style={{ textAlign: 'center', padding: '40px 0' }}>
-            <div className="error-icon" style={{ fontSize: '2rem' }}>⚠️</div>
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="#d93025" style={{ marginBottom: '8px' }}><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
             <p className="state-subtitle">{error}</p>
-            <button className="retry-btn" onClick={fetchData} style={{ background: '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', marginTop: '10px', cursor: 'pointer' }}>Reintentar</button>
+            <button className="retry-btn" onClick={() => fetchData()} style={{ background: '#006ce4', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '4px', marginTop: '10px', cursor: 'pointer' }}>Reintentar</button>
           </div>
         )}
 
@@ -907,17 +1025,20 @@ export function AutosPage() {
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {[
-                      { id: 'ALL', label: '🚗 Todos' },
-                      { id: 'ECONOMICO', label: '⚡ Económico' },
-                      { id: 'COMPACTO', label: '🚘 Compacto' },
-                      { id: 'SUV', label: '🚙 SUV / 4x4' },
-                      { id: 'PREMIUM', label: '💎 Premium' },
-                      { id: 'VAN', label: '🚐 Vans' }
+                      { id: 'ALL', label: 'Todos' },
+                      { id: 'ECONOMICO', label: 'Económico' },
+                      { id: 'COMPACTO', label: 'Compacto' },
+                      { id: 'SUV', label: 'SUV / 4x4' },
+                      { id: 'PREMIUM', label: 'Premium' },
+                      { id: 'VAN', label: 'Vans' }
                     ].map(cat => (
                       <button
                         key={cat.id}
                         type="button"
-                        onClick={() => { setSelectedCategory(cat.id); fetchData(cat.id, selectedTransmission); }}
+                        onClick={() => {
+                          setSelectedCategory(cat.id);
+                          fetchData(cat.id, selectedTransmission, false, true);
+                        }}
                         style={{
                           background: selectedCategory === cat.id ? '#003580' : '#f0f4f8',
                           color: selectedCategory === cat.id ? 'white' : '#333',
@@ -943,13 +1064,16 @@ export function AutosPage() {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     {[
                       { id: 'ALL', label: 'Todas' },
-                      { id: 'MANUAL', label: '⚙️ Manual' },
-                      { id: 'AUTOMATICO', label: '🕹️ Automática' }
+                      { id: 'MANUAL', label: 'Manual' },
+                      { id: 'AUTOMATICO', label: 'Automática' }
                     ].map(trans => (
                       <button
                         key={trans.id}
                         type="button"
-                        onClick={() => { setSelectedTransmission(trans.id); fetchData(selectedCategory, trans.id); }}
+                        onClick={() => {
+                          setSelectedTransmission(trans.id);
+                          fetchData(selectedCategory, trans.id, false, true);
+                        }}
                         style={{
                           background: selectedTransmission === trans.id ? '#006ce4' : '#f0f4f8',
                           color: selectedTransmission === trans.id ? 'white' : '#333',
@@ -968,17 +1092,27 @@ export function AutosPage() {
                 </div>
               </div>
 
+              {isUpdatingList && (
+                <div style={{ padding: '10px 16px', background: '#f0f7ff', border: '1px solid #b8daff', borderRadius: '6px', marginBottom: '16px', color: '#004085', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#004085" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <span>Actualizando coches disponibles...</span>
+                </div>
+              )}
+
               {/* Banner Informativo de Cooldown y Reglas RDA2 */}
               <div style={{ background: '#eef8ff', border: '1px solid #b8e2fb', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '1.4rem' }}>🛡️</span>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="#006ce4" style={{ flexShrink: 0 }}><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-1 16l-4-4 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/></svg>
                 <div style={{ fontSize: '0.85rem', color: '#004373', lineHeight: 1.4 }}>
                   <b>Garantía de Limpieza e Inspección (RDA2):</b> Los vehículos devueltos cumplen un <b>cooldown estricto de 2 horas</b> de higienización técnica antes de reingresar al catálogo.
                 </div>
               </div>
 
               {metadata?.surcharge_applied && (
-                <div style={{ background: '#fef7e0', border: '1px solid #f6e05e', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', color: '#975a16', fontSize: '0.85rem' }}>
-                  ⚠️ Se ha aplicado un recargo por conductor menor de 25 años (+${metadata.surcharge_amount || 15} USD/día) según políticas de alquiler.
+                <div style={{ background: '#fef7e0', border: '1px solid #f6e05e', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', color: '#975a16', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="#975a16" style={{ flexShrink: 0 }}><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                  <span>Se ha aplicado un recargo por conductor menor de 25 años (+${metadata.surcharge_amount || 15} USD/día) según políticas de alquiler.</span>
                 </div>
               )}
 
