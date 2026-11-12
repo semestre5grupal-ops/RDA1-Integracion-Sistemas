@@ -26,7 +26,14 @@ export type PasoVuelo =
   | 'checkin'
   | 'cambio_fecha'
   | 'estado_vuelo'
-  | 'consulta';
+  | 'consulta'
+  // Monitoreo: post-venta y fondo
+  | 'boleto'
+  | 'pase'
+  | 'cotizacion'
+  | 'soltar'
+  | 'webhook'
+  | 'integracion';
 
 export type ResultadoPaso = 'ok' | 'error' | 'aviso';
 
@@ -50,6 +57,8 @@ const MAX_EVENTOS = 500;
 export interface AlmacenTraza {
   guardar(e: EventoVuelo): Promise<void>;
   consultar(desde: number, limite: number): Promise<{ ultimoSeq: number; contadores: Record<string, { ok: number; error: number; aviso: number }>; eventos: EventoVuelo[] }>;
+  /** Eventos de las últimas `horas` (para el monitoreo: resumen, compras, aerolíneas). */
+  ventana?(horas: number, limite: number): Promise<{ eventos: EventoVuelo[]; truncado: boolean }>;
 }
 
 class TrazaVuelos {
@@ -89,6 +98,21 @@ class TrazaVuelos {
       }
     }
     return { ...this.desde(desde, limite), origen: 'memoria' };
+  }
+
+  /** Eventos de las últimas `horas` (base compartida si está; si no, memoria). */
+  async ventana(horas = 24, limite = 6000): Promise<{ eventos: EventoVuelo[]; truncado: boolean; origen: string }> {
+    const h = Math.min(Math.max(Number(horas) || 24, 1), 168);
+    if (this.almacen?.ventana) {
+      try {
+        return { ...(await this.almacen.ventana(h, limite)), origen: 'base' };
+      } catch {
+        /* sin base: memoria */
+      }
+    }
+    const limiteTs = Date.now() - h * 3_600_000;
+    const evs = this.eventos.filter((e) => Date.parse(e.ts) >= limiteTs);
+    return { eventos: evs.slice(-limite), truncado: evs.length > limite, origen: 'memoria' };
   }
 
   /** Eventos con seq mayor a `desde` (para que el admin pida solo lo nuevo). */

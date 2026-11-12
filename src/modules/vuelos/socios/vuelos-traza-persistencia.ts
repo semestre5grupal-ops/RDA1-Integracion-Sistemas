@@ -54,6 +54,34 @@ export class VuelosTrazaPersistencia implements AlmacenTraza, OnModuleInit, OnMo
     }
   }
 
+  async ventana(horas: number, limite: number) {
+    const tope = Math.min(Math.max(limite, 1), 10_000);
+    const filas: any[] = await this.dataSource.query(
+      `SELECT * FROM (
+         SELECT id, ts, correlacion, paso, resultado, detalle, nodo, ms, monto, cliente
+           FROM public.vuelos_traza WHERE ts > now() - make_interval(hours => $1::int) ORDER BY id DESC LIMIT $2
+       ) t ORDER BY id`,
+      [Math.floor(horas), tope + 1],
+    );
+    const truncado = filas.length > tope;
+    return { eventos: (truncado ? filas.slice(1) : filas).map((f) => this.aEvento(f)), truncado };
+  }
+
+  private aEvento(f: any): EventoVuelo {
+    return {
+      seq: Number(f.id),
+      ts: new Date(f.ts).toISOString(),
+      correlacion: f.correlacion,
+      paso: f.paso,
+      resultado: f.resultado,
+      detalle: f.detalle ?? '',
+      nodo: f.nodo,
+      ms: f.ms,
+      monto: f.monto != null ? Number(f.monto) : null,
+      cliente: f.cliente,
+    } as EventoVuelo;
+  }
+
   async consultar(desde: number, limite: number) {
     const filas: any[] = await this.dataSource.query(
       `SELECT * FROM (

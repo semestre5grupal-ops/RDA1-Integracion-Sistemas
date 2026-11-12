@@ -181,7 +181,7 @@ const duracion = (a, b) => {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 };
 
-export function ProcesoEnVivo({ aerolineas = [] }) {
+export function ProcesoEnVivo({ aerolineas = [], reproducirExterno = null, salud = null }) {
   const [eventos, setEventos] = useState([]);
   const [contadores, setContadores] = useState({});
   const [inicio, setInicio] = useState(null);
@@ -200,6 +200,11 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
   const inicioRef = useRef(null);
 
   const enCurso = useRef(false);
+
+  // Desde Operaciones: "Ver recorrido en el diagrama".
+  useEffect(() => {
+    if (reproducirExterno?.eventos?.length) setReproducir(reproducirExterno);
+  }, [reproducirExterno]);
 
   const consultar = useCallback(async () => {
     // Si el backend tarda más de 2 s, no se lanza otra consulta con el mismo
@@ -370,7 +375,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
           )}
         </div>
 
-        <ArquitecturaVuelos eventos={pausado ? [] : eventos} aerolineas={aerolineas} busActivo={busActivo} reproducir={reproducir} />
+        <ArquitecturaVuelos eventos={pausado ? [] : eventos} aerolineas={aerolineas} busActivo={busActivo} reproducir={reproducir} salud={salud} />
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: `1px solid ${T.border}`, paddingTop: 10 }}>
           <span style={{ fontSize: '0.74rem', color: T.muted, alignSelf: 'center', marginRight: 4 }}>{origen === 'base' ? 'Últimas 24 h:' : 'Total desde que arrancó el servidor:'}</span>

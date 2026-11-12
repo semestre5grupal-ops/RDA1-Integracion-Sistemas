@@ -146,6 +146,13 @@ export class AdminController {
     return { ...(await trazaVuelos.consultar(Number(desde) || 0)), bus: { rabbitmq: this.rabbit?.isBrokerActive?.() ?? false } };
   }
 
+  @Get('procesos/vuelos/monitoreo')
+  @ApiOperation({ summary: 'Monitoreo de vuelos: eventos de la traza de las últimas `horas` (1-168) para resumen, compras y aerolíneas' })
+  @ApiQuery({ name: 'horas', required: false, example: 24 })
+  async monitoreoVuelos(@Query('horas') horas?: string) {
+    return { generadoEn: new Date().toISOString(), horas: Number(horas) || 24, ...(await trazaVuelos.ventana(Number(horas) || 24)) };
+  }
+
   // ── Usuarios ──────────────────────────────────────────────────────────────
   @Get('users')
   @ApiOperation({ summary: 'Lista de usuarios registrados (auth.users)' })

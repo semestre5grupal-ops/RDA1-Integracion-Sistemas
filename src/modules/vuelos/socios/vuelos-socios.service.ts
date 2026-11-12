@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
 import { propietarioDesde } from '../vuelos.controller';
+import { trazaVuelos } from './vuelos-traza';
 import { acumular, Comprobacion, esFeedDelContrato, healthStatusDe, respondeComoApi, SaludIntegracion } from './vuelos-salud';
 
 /**
@@ -578,7 +579,19 @@ export class VuelosSociosService {
 
   /** Comprueba una aerolínea y guarda estado/ms/hora en la tabla (solo esas columnas). */
   async comprobarYGuardar(nodo: ConfigProveedor): Promise<SaludIntegracion> {
+    const antes = this.salud.get(nodo.codigoNodo)?.estado;
     const s = await this.comprobarIntegracion(nodo);
+    // En el panel solo aparecen los cambios de estado (🟢→🔴→🟢), no cada ping.
+    if (antes && antes !== s.estado) {
+      trazaVuelos.registrar({
+        correlacion: `integracion-${nodo.codigoNodo}`,
+        paso: 'integracion',
+        resultado: s.estado === 'INTEGRADO' ? 'ok' : s.estado === 'CAIDO' ? 'error' : 'aviso',
+        detalle: `${nodo.nombreProveedor}: ${antes} → ${s.estado} · ${s.detalle}`,
+        nodo: nodo.codigoNodo,
+        ms: Math.round(s.ms),
+      });
+    }
     try {
       await this.nodos.update(
         { codigoNodo: nodo.codigoNodo, killSwitchActivo: false },
