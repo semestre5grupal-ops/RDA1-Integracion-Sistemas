@@ -284,6 +284,10 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const [etapaPago, setEtapaPago] = useState(null);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
+  /** Pago en curso: mientras tanto no se revisa el mapa (el asiento ya va en la reserva). */
+  const pagandoRef = useRef(false);
+  /** El último pago no tuvo respuesta (tardó demasiado): pudo completarse en la aerolínea. */
+  const pagoIncierto = useRef(false);
   const refContenedor = useRef(null);
 
   useFocusTrap(abierto, pedirCancelar, refDialogo);
@@ -323,6 +327,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     if (!abierto || !hold) return;
     setPasoActual(1);
     claveIdempotencia.current = uuidv4();
+    pagoIncierto.current = false;
     setErrorGeneral(null);
     setErrores({});
     setMapas({}); // hold nuevo: el mapa de asientos se vuelve a pedir
@@ -565,11 +570,20 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   // Mientras el cliente elige asiento o está por pagar, el mapa se actualiza cada 15 s.
   useEffect(() => {
     if (pasoActual !== 2 && pasoActual !== 3) return undefined;
+    let revisando = false;
     const id = setInterval(async () => {
-      const tomados = await revisarAsientos();
-      if (tomados.length) {
-        soltarTomados(tomados, pasoActual === 3);
-        setPasoActual(2);
+      // Durante el pago (o si el último pago quedó sin respuesta) no se revisa: el asiento
+      // puede salir "ocupado" justamente porque ya es de esta reserva.
+      if (revisando || pagandoRef.current || pagoIncierto.current) return;
+      revisando = true;
+      try {
+        const tomados = await revisarAsientos();
+        if (tomados.length && !pagandoRef.current && !pagoIncierto.current) {
+          soltarTomados(tomados, pasoActual === 3);
+          setPasoActual(2);
+        }
+      } finally {
+        revisando = false;
       }
     }, 15_000);
     return () => clearInterval(id);
@@ -700,6 +714,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       setPendingOfflinePay(false);
 
       setEnviando(true);
+      pagandoRef.current = true;
       setErrorGeneral(null);
       trackEvent('payment_started', 'vuelos');
       try {
@@ -708,7 +723,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         await new Promise(resolve => setTimeout(resolve, 400));
 
         // Justo antes de cobrar: los asientos elegidos tienen que seguir libres.
-        if (navigator.onLine) {
+        // (Si el pago anterior quedó sin respuesta, no: el asiento ya puede ser de esta reserva.)
+        if (navigator.onLine && !pagoIncierto.current) {
           setEtapaPago('Verificando tus asientos…');
           const tomados = await revisarAsientos();
           if (tomados.length) {
@@ -740,6 +756,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           payment: { paymentReference: `pay_${uuidv4().slice(0, 18)}` },
         };
         const idempotencyKey = claveIdempotencia.current ?? uuidv4();
+        claveIdempotencia.current = idempotencyKey;
         const fingerprint = obtenerHuellaDispositivo();
 
         // Datos de la factura. `monto` va como string porque `hold.lockedPrice.total`
@@ -767,7 +784,19 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           setEtapaPago('Procesando el pago…');
           const siguiente = setTimeout(() => setEtapaPago('Confirmando con la aerolínea…'), 1500);
           try {
-            reserva = await crearReserva(payload, idempotencyKey, fingerprint);
+            // Si la respuesta no llega (aerolínea lenta), se reintenta con la MISMA clave:
+            // Booking devuelve la reserva ya hecha en vez de cobrar otra vez.
+            for (let intento = 0; ; intento++) {
+              try {
+                reserva = await crearReserva(payload, idempotencyKey, fingerprint);
+                break;
+              } catch (e) {
+                if (e?.response || intento >= 2) throw e;
+                pagoIncierto.current = true;
+                setEtapaPago('La aerolínea está tardando, seguimos confirmando…');
+              }
+            }
+            pagoIncierto.current = false;
           } finally {
             clearTimeout(siguiente);
           }
@@ -791,9 +820,17 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         onConfirmada?.(reserva, lista);
       } catch (fallo) {
         trackEvent('payment_failed', 'vuelos', { error: fallo?.message });
+        // Sin respuesta: el pago pudo completarse. Se conserva la clave para que un nuevo
+        // "Confirmar pago" recupere esa reserva en vez de cobrar otra vez.
+        if (!fallo?.response) {
+          pagoIncierto.current = true;
+          setErrorGeneral('La aerolínea tardó demasiado en responder. Tu reserva pudo completarse: pulsa "Confirmar pago" otra vez para comprobarlo (no se cobra dos veces) o revisa Mis Reservas.');
+          return;
+        }
         // Un intento fallido no se repite con la misma clave: el siguiente
         // "Confirmar pago" es un intento nuevo.
         claveIdempotencia.current = uuidv4();
+        pagoIncierto.current = false;
         const datos = fallo?.response?.data ?? {};
         // Otro cliente tomó el asiento entre que se vio el mapa y se pagó:
         // el cobro ya se devolvió; se vuelve a Asientos con el mapa actualizado.
@@ -817,6 +854,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         );
       } finally {
         setEnviando(false);
+        pagandoRef.current = false;
         setEtapaPago(null);
       }
     },

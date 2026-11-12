@@ -282,6 +282,28 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(copias.get('NODE_VUE_KEY~BK-1')).toMatchObject({ propietarioId: DUENO, codigoNodo: 'NODE_VUE_KEY' });
     });
 
+    it('reintento con la misma Idempotency-Key (respuesta perdida): devuelve la reserva ya hecha sin cobrar ni reservar otra vez', async () => {
+      const pedir = () => fetch(`${base}/api/v2/vuelos/bookings`, {
+        method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-repetida' }),
+        body: JSON.stringify({ holdId: 'NODE_VUE_KEY~HOLD-key', passengers: [] }),
+      });
+      const primero = await (await pedir()).json();
+      const cobrosAntes = cobros.length;
+      const reservasAntes = llamadas.filter((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST').length;
+      const r2 = await pedir();
+      const segundo = await r2.json();
+      expect(r2.headers.get('idempotent-replayed')).toBe('true');
+      expect(segundo.bookingId).toBe(primero.bookingId);
+      expect(cobros.length).toBe(cobrosAntes);
+      expect(llamadas.filter((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST').length).toBe(reservasAntes);
+      // Otra persona con la misma clave no recibe esa reserva.
+      const ajeno = await fetch(`${base}/api/v2/vuelos/bookings`, {
+        method: 'POST', headers: conDueno(OTRO, { 'Idempotency-Key': 'idem-repetida' }),
+        body: JSON.stringify({ holdId: 'NODE_VUE_KEY~HOLD-key', passengers: [] }),
+      });
+      expect(ajeno.headers.get('idempotent-replayed')).toBeNull();
+    });
+
     it('traza en vivo: los pasos de una compra quedan unidos por su X-Correlation-Id', async () => {
       trazaVuelos.reiniciar();
       const corr = 'corr-vuelo-prueba-1';
