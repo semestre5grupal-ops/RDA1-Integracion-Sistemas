@@ -497,17 +497,7 @@ export function AlojamientoDetail() {
 
 
   if (loading) {
-    return (
-      <AlojamientosLoadingView
-        frases={[
-          'Estamos preparando los detalles de tu estadía...',
-          'Verificando habitaciones y disponibilidad en tiempo real...',
-          'Estamos personalizando tu experiencia...',
-          'Casi listo, organizando fotos y comodidades...',
-        ]}
-        subtitulo="Consultando información actualizada del alojamiento"
-      />
-    );
+    return <AlojamientosLoadingView />;
   }
 
   if (error || !alojamiento) {

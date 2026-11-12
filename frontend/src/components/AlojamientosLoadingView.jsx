@@ -8,7 +8,12 @@ import {
   ShieldCheckIcon,
 } from './BookingIcons';
 
-const FRASES_LOADING = [
+// ============================================================================
+// CONFIGURACIÓN CENTRALIZADA DE LA PANTALLA DE CARGA (TODAS LAS VERTICALES)
+// Modifica aquí las frases, el subtítulo o los íconos para actualizar toda la app.
+// ============================================================================
+
+export const FRASES_LOADING = [
   'Estamos buscando las mejores opciones para tu viaje...',
   'Verificando disponibilidad y tarifas en tiempo real...',
   'Comparando opciones para darte la mejor experiencia...',
@@ -16,7 +21,9 @@ const FRASES_LOADING = [
   'Casi listo, organizando las mejores ofertas...',
 ];
 
-const ICONOS_VERTICALES = [
+export const SUBTITULO_LOADING = 'Encuentra alojamientos, vuelos, renta de autos y atracciones en un solo lugar';
+
+export const ICONOS_VERTICALES = [
   { icon: BedIcon, label: 'Alojamientos' },
   { icon: FlightIcon, label: 'Vuelos' },
   { icon: CarRentalIcon, label: 'Renta de autos' },
@@ -25,8 +32,8 @@ const ICONOS_VERTICALES = [
   { icon: ShieldCheckIcon, label: 'Reserva segura' },
 ];
 
-export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_LOADING, titulo, subtitulo }) {
-  const listaFrases = Array.isArray(frases) && frases.length > 0 ? frases : (titulo ? [titulo] : FRASES_LOADING);
+export function AlojamientosLoadingView({ frases = FRASES_LOADING, subtitulo = SUBTITULO_LOADING }) {
+  const listaFrases = Array.isArray(frases) && frases.length > 0 ? frases : FRASES_LOADING;
   const [fraseIndex, setFraseIndex] = useState(0);
   const [activoIcono, setActivoIcono] = useState(0);
 
@@ -59,11 +66,11 @@ export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_L
           animation: 'fadeInText 0.4s ease-in-out',
         }}
       >
-        {titulo || listaFrases[fraseIndex]}
+        {listaFrases[fraseIndex]}
       </h2>
 
       <p style={{ color: '#595959', fontSize: '1.05rem', margin: '0 0 32px 0', textAlign: 'center' }}>
-        {subtitulo || `Conectando con proveedores verificados${destino ? ` en ${destino}` : ''}`}
+        {subtitulo}
       </p>
 
       {/* Barra de progreso animada */}

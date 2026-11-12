@@ -1401,16 +1401,7 @@ export function MisReservasPage() {
       </div>
 
       {/* Loading state */}
-      {cargando && (
-        <AlojamientosLoadingView
-          frases={[
-            'Cargando tus reservas y viajes...',
-            'Sincronizando estados en tiempo real con proveedores...',
-            'Consultando alojamientos, vuelos, autos y atracciones...',
-          ]}
-          subtitulo="Verificando información actualizada de todas las verticales"
-        />
-      )}
+      {cargando && <AlojamientosLoadingView />}
 
       {/* Error state */}
       {!cargando && error && (

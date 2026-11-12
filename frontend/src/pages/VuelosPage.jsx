@@ -280,17 +280,7 @@ export function VuelosPage() {
         aria-busy={cargando}
         style={{ maxWidth: '1100px', margin: '0 auto', padding: '24px' }}
       >
-        {cargando && (
-          <AlojamientosLoadingView
-            frases={[
-              'Buscando vuelos disponibles en tiempo real...',
-              'Consultando aerolíneas y tarifas nacionales...',
-              'Comparando horarios y rutas para tu viaje...',
-              'Casi listo, organizando las mejores ofertas de vuelo...',
-            ]}
-            subtitulo="Conectando con las aerolíneas asociadas en Ecuador"
-          />
-        )}
+        {cargando && <AlojamientosLoadingView />}
 
         {!cargando && error && (
           <div className="state-container" role="alert">

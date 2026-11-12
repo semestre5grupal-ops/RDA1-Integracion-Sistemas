@@ -58,16 +58,7 @@ export function AlojamientoCheckoutPage() {
   }, [hotelId]);
 
   if (loading || !alojamiento) {
-    return (
-      <AlojamientosLoadingView
-        frases={[
-          'Preparando tu proceso de reserva segura...',
-          'Verificando disponibilidad y tarifas en tiempo real...',
-          'Casi listo, cargando datos del alojamiento...',
-        ]}
-        subtitulo="Conectando con el alojamiento seleccionado"
-      />
-    );
+    return <AlojamientosLoadingView />;
   }
 
   const nightsCount = 6;

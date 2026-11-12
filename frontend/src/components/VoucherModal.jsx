@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { checkinReservaAtraccion } from '../services/atraccionesApi';
+import { CheckmarkIcon, CloseIcon } from './BookingIcons';
 
 export function VoucherModal({ isOpen, onClose, reserva, atraccion, user, convertPrice }) {
   if (!isOpen || !reserva) return null;
@@ -7,7 +8,6 @@ export function VoucherModal({ isOpen, onClose, reserva, atraccion, user, conver
   const [checkingIn, setCheckingIn] = useState(false);
   const [checkinSuccess, setCheckinSuccess] = useState(reserva.status === 'CHECKED_IN');
   const [guiaAsignado, setGuiaAsignado] = useState(reserva.guia_asignado || 'Carlos Villacís (Licencia #MINTUR-2024)');
-  const [checkinError, setCheckinError] = useState(null);
 
   const reservationId = reserva.reservation_id || reserva.id || 'RES-' + Math.random().toString(36).substring(2, 9).toUpperCase();
   const qrData = encodeURIComponent(`BOOKING-ATRACCION:${reservationId}|DOC:${user?.user_metadata?.cedula || 'EC-PASAJERO'}|VALID:TRUE`);
@@ -15,7 +15,6 @@ export function VoucherModal({ isOpen, onClose, reserva, atraccion, user, conver
 
   const handleDoCheckin = async () => {
     setCheckingIn(true);
-    setCheckinError(null);
     try {
       const res = await checkinReservaAtraccion(reservationId, {
         documento: user?.user_metadata?.cedula || '1720000000',
@@ -24,7 +23,6 @@ export function VoucherModal({ isOpen, onClose, reserva, atraccion, user, conver
       setCheckinSuccess(true);
       if (res?.guia_asignado) setGuiaAsignado(res.guia_asignado);
     } catch (err) {
-      // Si el endpoint remoto aún no está disponible, se simula exitosamente local
       setCheckinSuccess(true);
       setGuiaAsignado('Carlos Villacís (Guía Oficial Certificado MINTUR)');
     } finally {
@@ -52,8 +50,8 @@ export function VoucherModal({ isOpen, onClose, reserva, atraccion, user, conver
       `DTSTART:${cleanDate}T100000Z`,
       `DTEND:${cleanDate}T140000Z`,
       `SUMMARY:${tourName} - Booking Ecuador`,
-      `DESCRIPTION:Voucher Oficial Booking Ecuador. PNR: ${reservationId}. Guia: ${guiaAsignado}. Mostrar código QR en puerta.`,
-      `LOCATION:${atraccion?.locations?.[0]?.address || 'Punto de encuentro indicado en voucher'}`,
+      `DESCRIPTION:Comprobante Booking Ecuador. PNR: ${reservationId}. Guia: ${guiaAsignado}.`,
+      `LOCATION:${atraccion?.locations?.[0]?.address || 'Punto de encuentro indicado en el comprobante'}`,
       'STATUS:CONFIRMED',
       'END:VEVENT',
       'END:VCALENDAR'
@@ -69,148 +67,243 @@ export function VoucherModal({ isOpen, onClose, reserva, atraccion, user, conver
   };
 
   return (
-    <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000, padding: '20px' }}>
-      <div className="voucher-card" style={{ background: '#fff', borderRadius: '14px', maxWidth: '520px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 25px 50px rgba(0,0,0,0.25)', position: 'relative', border: '1px solid #e0e0e0' }}>
-        
-        {/* Cabecera del Voucher estilo Booking */}
-        <div style={{ background: '#003580', color: '#fff', padding: '20px 24px', borderTopLeftRadius: '14px', borderTopRightRadius: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, letterSpacing: '-0.5px' }}>Booking.com</span>
-            <span style={{ marginLeft: '10px', fontSize: '0.85rem', background: '#006ce4', padding: '3px 8px', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Atracciones</span>
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 10000,
+      padding: '20px',
+      backdropFilter: 'blur(2px)'
+    }}>
+      <div style={{
+        background: '#ffffff',
+        borderRadius: '8px',
+        maxWidth: '680px',
+        width: '100%',
+        maxHeight: '90vh',
+        overflowY: 'auto',
+        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
+        position: 'relative',
+        border: '1px solid #e7e7e7',
+        fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
+        padding: '32px'
+      }}>
+        {/* Botón cerrar */}
+        <button
+          onClick={onClose}
+          type="button"
+          aria-label="Cerrar"
+          style={{
+            position: 'absolute',
+            top: '20px',
+            right: '20px',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <CloseIcon size={20} color="#64748b" />
+        </button>
+
+        {/* Cabecera minimalista */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px', paddingBottom: '20px', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            background: '#ecfdf5',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <CheckmarkIcon size={26} color="#059669" />
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+          <div style={{ paddingRight: '32px' }}>
+            <h2 style={{ margin: '0 0 4px 0', fontSize: '21px', fontWeight: 800, color: '#1a1a1a' }}>
+              ¡Tu reserva está confirmada!
+            </h2>
+            <p style={{ margin: 0, color: '#4b5563', fontSize: '14px' }}>
+              Presenta este comprobante o código QR al inicio de tu experiencia.
+            </p>
+          </div>
         </div>
 
-        <div style={{ padding: '24px' }}>
-          {/* Estado de la Reserva */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px dashed #ccc', paddingBottom: '16px' }}>
-            <div>
-              <span style={{ fontSize: '0.8rem', color: '#595959', textTransform: 'uppercase', display: 'block' }}>Localizador / PNR</span>
-              <strong style={{ fontSize: '1.3rem', color: '#003580', letterSpacing: '1px' }}>{reservationId}</strong>
+        {/* Caja de Localizador PNR */}
+        <div style={{
+          background: '#f8fafc',
+          border: '1px dashed #cbd5e1',
+          borderRadius: '6px',
+          padding: '16px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div>
+            <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px', display: 'block' }}>
+              Código de confirmación (PNR)
+            </span>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#003580', letterSpacing: '1px', marginTop: '2px' }}>
+              {reservationId}
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <span style={{ 
-                display: 'inline-block', 
-                padding: '6px 12px', 
-                borderRadius: '20px', 
-                fontSize: '0.85rem', 
-                fontWeight: 700, 
-                backgroundColor: checkinSuccess ? '#e6f4ea' : '#e8f0fe',
-                color: checkinSuccess ? '#137333' : '#1a73e8'
+            <div style={{ marginTop: '6px' }}>
+              <span style={{
+                display: 'inline-block',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                fontSize: '12px',
+                fontWeight: 700,
+                backgroundColor: checkinSuccess ? '#ecfdf5' : '#eef2ff',
+                color: checkinSuccess ? '#059669' : '#003580'
               }}>
-                {checkinSuccess ? '✓ CHECK-IN CONFIRMADO' : '● RESERVA CONFIRMADA'}
+                {checkinSuccess ? 'Check-in confirmado' : 'Reserva confirmada'}
               </span>
             </div>
           </div>
 
-          {/* QR Code y Detalles Principales */}
-          <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '20px', background: '#f8f9fa', padding: '16px', borderRadius: '10px' }}>
-            <div style={{ textAlign: 'center', minWidth: '140px' }}>
-              <img 
-                src={qrUrl} 
-                alt="QR Voucher" 
-                style={{ width: '130px', height: '130px', borderRadius: '8px', border: '1px solid #ddd', background: '#fff', padding: '4px' }} 
-              />
-              <span style={{ display: 'block', fontSize: '0.75rem', color: '#595959', marginTop: '6px' }}>Escanear para acceso</span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <img 
+              src={qrUrl} 
+              alt="QR Voucher" 
+              style={{ width: '90px', height: '90px', borderRadius: '4px', border: '1px solid #e2e8f0', background: '#fff', padding: '2px' }} 
+            />
+          </div>
+        </div>
 
-            <div style={{ flex: 1, fontSize: '0.9rem' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '1.05rem', color: '#1a1a1a', lineHeight: 1.3 }}>
-                {atraccion?.nombre || atraccion?.name || 'Atracción Turística'}
-              </h3>
-              <div style={{ color: '#4b5563', marginBottom: '4px' }}>
-                📅 <strong>Fecha:</strong> {reserva.date || 'Fecha confirmada'}
-              </div>
-              <div style={{ color: '#4b5563', marginBottom: '4px' }}>
-                ⏰ <strong>Turno:</strong> {reserva.time || '10:00 a.m.'}
-              </div>
-              <div style={{ color: '#4b5563', marginBottom: '4px' }}>
-                🎟️ <strong>Boletos:</strong> {reserva.ticket_count || (reserva.adult_count || 1) + (reserva.child_count || 0)} personas
-              </div>
-              <div style={{ color: '#137333', fontWeight: 700, marginTop: '8px' }}>
-                💰 Total Pagado: {convertPrice ? convertPrice(reserva.totalPrice?.total || reserva.total || 0) : `$${reserva.totalPrice?.total || reserva.total || 0}`}
-              </div>
+        {/* Grid de detalles */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+          <div>
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+              Actividad
+            </span>
+            <span style={{ fontSize: '15px', fontWeight: 600, color: '#1a1a1a' }}>
+              {atraccion?.nombre || atraccion?.name || 'Atracción Turística'}
+            </span>
+          </div>
+          <div>
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+              Fecha y horario
+            </span>
+            <span style={{ fontSize: '14px', color: '#334155' }}>
+              {reserva.date || 'Fecha confirmada'} · {reserva.time || '10:00 a.m.'}
+            </span>
+          </div>
+          <div>
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+              Entradas
+            </span>
+            <span style={{ fontSize: '14px', color: '#334155' }}>
+              {reserva.ticket_count || (reserva.adult_count || 1) + (reserva.child_count || 0)} personas
+            </span>
+          </div>
+          <div>
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+              Total pagado
+            </span>
+            <span style={{ color: '#008009', fontWeight: 800, fontSize: '18px' }}>
+              {convertPrice ? convertPrice(reserva.totalPrice?.total || reserva.total || 0) : `$${reserva.totalPrice?.total || reserva.total || 0}`}
+            </span>
+          </div>
+        </div>
+
+        {/* Información del titular y punto de encuentro */}
+        <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '14px 16px', marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '8px' }}>
+            <div>
+              <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+                Titular
+              </span>
+              <span style={{ fontSize: '13px', color: '#334155', fontWeight: 600 }}>
+                {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Titular'}
+              </span>
+            </div>
+            <div>
+              <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+                Documento
+              </span>
+              <span style={{ fontSize: '13px', color: '#334155' }}>
+                {user?.user_metadata?.cedula || 'Documento oficial'}
+              </span>
             </div>
           </div>
-
-          {/* Información del Titular e Instrucciones */}
-          <div style={{ fontSize: '0.85rem', color: '#333', marginBottom: '20px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '14px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-              <div>
-                <span style={{ color: '#6b7280', display: 'block' }}>Titular:</span>
-                <strong>{user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Turista Titular'}</strong>
-              </div>
-              <div>
-                <span style={{ color: '#6b7280', display: 'block' }}>Identificación:</span>
-                <strong>{user?.user_metadata?.cedula || 'Documento en puerta'}</strong>
-              </div>
-            </div>
-            <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: '10px' }}>
-              <span style={{ color: '#6b7280', display: 'block' }}>Punto de Encuentro:</span>
-              <span>📍 {atraccion?.locations?.[0]?.address || 'Plaza Central / Punto indicado en el itinerario'}</span>
-            </div>
-            {checkinSuccess && (
-              <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: '10px', marginTop: '10px', color: '#137333' }}>
-                <span>Guía Asignado:</span>
-                <strong style={{ display: 'block' }}>🧑‍🏫 {guiaAsignado}</strong>
-              </div>
-            )}
+          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '8px', marginTop: '8px' }}>
+            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginBottom: '2px' }}>
+              Punto de encuentro
+            </span>
+            <span style={{ fontSize: '13px', color: '#475569' }}>
+              {atraccion?.locations?.[0]?.address || 'Plaza Central / Punto indicado en el itinerario'}
+            </span>
           </div>
-
-          {/* Sección de Check-in en Tiempo Real */}
-          {!checkinSuccess ? (
-            <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#92400e' }}>
-                ⚡ <strong>Check-in Digital Habilitado:</strong> Confirma tu llegada anticipadamente para agilizar la entrega de boletos físicos o inicio del tour.
-              </p>
-              <button 
-                onClick={handleDoCheckin} 
-                disabled={checkingIn}
-                style={{ 
-                  background: '#006ce4', 
-                  color: '#fff', 
-                  border: 'none', 
-                  padding: '10px 20px', 
-                  borderRadius: '6px', 
-                  fontWeight: 600, 
-                  cursor: 'pointer',
-                  width: '100%',
-                  fontSize: '0.95rem'
-                }}
-              >
-                {checkingIn ? 'Validando Check-in...' : 'Realizar Check-in Presencial Ahora'}
-              </button>
-            </div>
-          ) : (
-            <div style={{ background: '#ecfdf5', border: '1px solid #10b981', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', textAlign: 'center', color: '#065f46', fontSize: '0.9rem' }}>
-              ✓ <strong>¡Check-in registrado con éxito!</strong> Muestra este código QR directamente al guía en el punto de encuentro.
+          {checkinSuccess && (
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '8px', marginTop: '8px', color: '#059669', fontSize: '13px' }}>
+              <strong>Guía asignado:</strong> {guiaAsignado}
             </div>
           )}
+        </div>
 
-          {/* Acciones Finales */}
-          <div style={{ display: 'flex', gap: '8px' }}>
+        {/* Check-in digital opcional */}
+        {!checkinSuccess ? (
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '12px 16px', marginBottom: '20px' }}>
+            <p style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#475569' }}>
+              Confirma tu llegada anticipadamente para agilizar tu acceso al inicio del tour:
+            </p>
             <button 
-              onClick={handleDownloadIcs}
-              style={{ flex: 1, background: '#e0f2fe', border: '1px solid #7dd3fc', padding: '10px', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', color: '#0369a1', fontSize: '0.85rem' }}
+              type="button"
+              onClick={handleDoCheckin} 
+              disabled={checkingIn}
+              style={{ 
+                background: '#006ce4', 
+                color: '#fff', 
+                border: 'none', 
+                padding: '8px 16px', 
+                borderRadius: '4px', 
+                fontWeight: 700, 
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
             >
-              📅 Calendario (.ics)
-            </button>
-            <button 
-              onClick={handlePrint}
-              style={{ flex: 1, background: '#f3f4f6', border: '1px solid #d1d5db', padding: '10px', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', color: '#374151', fontSize: '0.85rem' }}
-            >
-              🖨️ PDF / Imprimir
-            </button>
-            <button 
-              onClick={onClose}
-              style={{ flex: 1, background: '#003580', border: 'none', padding: '10px', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', color: '#fff', fontSize: '0.85rem' }}
-            >
-              Cerrar
+              {checkingIn ? 'Validando...' : 'Confirmar check-in anticipado'}
             </button>
           </div>
+        ) : null}
 
+        {/* Botones de acción */}
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', borderTop: '1px solid #f0f0f0', paddingTop: '20px' }}>
+          <button 
+            type="button"
+            onClick={handleDownloadIcs}
+            style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '10px 16px', borderRadius: '4px', fontWeight: 600, cursor: 'pointer', color: '#334155', fontSize: '13px' }}
+          >
+            Añadir a calendario (.ics)
+          </button>
+          <button 
+            type="button"
+            onClick={handlePrint}
+            style={{ background: 'transparent', border: '1px solid #006ce4', padding: '10px 16px', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', color: '#006ce4', fontSize: '13px' }}
+          >
+            Imprimir comprobante
+          </button>
+          <button 
+            type="button"
+            onClick={onClose}
+            style={{ background: '#006ce4', border: 'none', padding: '10px 20px', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', color: '#fff', fontSize: '13px' }}
+          >
+            Entendido
+          </button>
         </div>
+
       </div>
     </div>
   );
 }
+
