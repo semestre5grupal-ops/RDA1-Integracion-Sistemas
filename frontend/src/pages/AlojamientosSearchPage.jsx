@@ -1104,12 +1104,12 @@ export function AlojamientosSearchPage() {
               const totalPrice = disp
                 ? Math.round(disp.total_price * rooms * 100) / 100
                 : Math.round(pricePerNight * noches * rooms);
-              const libres = typeof disp?.available_rooms === 'number' ? disp.available_rooms : prop.habitacionesDisponibles;
+              const libres = typeof disp?.available_rooms === 'number' ? disp.available_rooms : (prop.habitacionesDisponibles ?? prop.habitaciones);
               const originalPrice = Math.round(totalPrice * 1.15);
               const taxes = Math.round(totalPrice * 0.15);
-              const score = Number(prop.ratings?.score || 8.9).toFixed(1);
-              const reviewsCount = prop.ratings?.number_of_reviews || 240;
-              const comfort = prop.ratings?.comfort || 9.0;
+              const score = Number(prop.ratings?.score ?? prop.calificacion ?? 8.5).toFixed(1);
+              const reviewsCount = prop.ratings?.number_of_reviews ?? 0;
+              const comfort = prop.ratings?.comfort || prop.ratings?.servicio || 9.0;
               const isSaved = wishlist.has(prop.id);
               const isAd = index === 1;
 
@@ -1145,12 +1145,13 @@ export function AlojamientosSearchPage() {
                         <Link to={`/alojamientos/${prop.id}?${detailQuery}`} className="sr-card-title">
                           {prop.nombre}
                         </Link>
-                        <div className="sr-rating-squares" role="img" aria-label="Categoría de 4 estrellas">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                        </div>
+                        {Number(prop.estrellas) > 0 && (
+                          <div className="sr-rating-squares" role="img" aria-label={`Categoría de ${prop.estrellas} estrellas`}>
+                            {Array.from({ length: Math.min(5, Math.max(1, parseInt(prop.estrellas, 10) || 1)) }).map((_, idx) => (
+                              <svg key={idx} width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
+                            ))}
+                          </div>
+                        )}
                         <PreferredPlusBadge />
                         {isAd && <span className="sr-ad-badge">Anuncio</span>}
                       </div>
@@ -1170,9 +1171,15 @@ export function AlojamientosSearchPage() {
                           Mostrar en el mapa
                         </span>
                         <span>•</span>
-                        <span className="sr-distance-tag">
-                          A {prop.ubicacion?.distance_centre_km || '1.4'} km del centro
-                        </span>
+                        {prop.ubicacion?.distance_centre_km ? (
+                          <span className="sr-distance-tag">
+                            A {prop.ubicacion.distance_centre_km} km del centro
+                          </span>
+                        ) : (
+                          <span className="sr-distance-tag">
+                            Cerca del centro
+                          </span>
+                        )}
                       </div>
 
                       {index === 2 && <div className="sr-deal-tag">Oferta de escapada</div>}

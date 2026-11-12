@@ -378,16 +378,16 @@ export function AlojamientoDetail() {
       const d2 = new Date(checkout);
       const diffTime = Math.abs(d2 - d1);
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays > 0 ? diffDays : 25;
+      return diffDays > 0 ? diffDays : 1;
     } catch {
-      return 25;
+      return 1;
     }
   }, [checkin, checkout]);
 
   const nightsCount = cotizacion?.noches || nochesCalculadas;
 
   // Precio: el del backend para estas fechas (por habitación) × habitaciones.
-  const pricePerNight = Number(alojamiento?.precioPorNoche || alojamiento?.precio_noche || 91);
+  const pricePerNight = Number(alojamiento?.precioPorNoche || alojamiento?.precio_noche || alojamiento?.precioBase || 0);
   const totalPrice = cotizacion?.precio != null
     ? Math.round(cotizacion.precio * rooms * 100) / 100
     : Math.round(pricePerNight * nightsCount * rooms);
@@ -737,12 +737,13 @@ export function AlojamientoDetail() {
         <div className="dt-header-section">
           <div className="dt-header-left">
             <div className="dt-badge-row">
-              <div className="dt-rating-squares" role="img" aria-label="Categoría de 4 estrellas">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
-              </div>
+              {Number(alojamiento.estrellas) > 0 && (
+                <div className="dt-rating-squares" role="img" aria-label={`Categoría de ${alojamiento.estrellas} estrellas`}>
+                  {Array.from({ length: Math.min(5, Math.max(1, parseInt(alojamiento.estrellas, 10) || 1)) }).map((_, idx) => (
+                    <svg key={idx} width="12" height="12" viewBox="0 0 24 24" fill="#ffb700"><rect width="24" height="24" rx="3" /></svg>
+                  ))}
+                </div>
+              )}
               <span className="dt-travel-proud-badge">
                 <TravelProudIcon size={14} />
                 <span>Travel Proud</span>
@@ -753,7 +754,7 @@ export function AlojamientoDetail() {
 
             <div className="dt-address-line">
               <PinIcon size={16} color="#006ce4" />
-              <span>{alojamiento.ubicacion?.address || 'Av. Eloy Alfaro & Av. República, 170517 Quito, Ecuador'}</span>
+              <span>{alojamiento.ubicacion?.address || (typeof alojamiento.ubicacion === 'string' ? alojamiento.ubicacion : alojamiento.destino || 'Ecuador')}</span>
               <span>–</span>
               <span className="dt-address-link" onClick={() => alert('Abriendo mapa de ubicación')}>
                 Ubicación excelente – mostrar en el mapa
