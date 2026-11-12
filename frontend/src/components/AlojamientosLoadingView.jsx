@@ -25,13 +25,13 @@ const ICONOS_CARACTERISTICAS = [
   { icon: HeartIcon, label: 'Alojamientos destacados' },
 ];
 
-export function AlojamientosLoadingView({ destino = 'Ecuador' }) {
+export function AlojamientosLoadingView({ destino = 'Ecuador', frases = FRASES_LOADING, subtitulo }) {
   const [fraseIndex, setFraseIndex] = useState(0);
   const [activoIcono, setActivoIcono] = useState(0);
 
   useEffect(() => {
     const fraseTimer = setInterval(() => {
-      setFraseIndex((prev) => (prev + 1) % FRASES_LOADING.length);
+      setFraseIndex((prev) => (prev + 1) % frases.length);
     }, 2400);
 
     const iconTimer = setInterval(() => {
@@ -42,7 +42,7 @@ export function AlojamientosLoadingView({ destino = 'Ecuador' }) {
       clearInterval(fraseTimer);
       clearInterval(iconTimer);
     };
-  }, []);
+  }, [frases.length]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '90px 20px', minHeight: '75vh', background: '#ffffff' }}>
@@ -58,11 +58,11 @@ export function AlojamientosLoadingView({ destino = 'Ecuador' }) {
           animation: 'fadeInText 0.4s ease-in-out',
         }}
       >
-        {FRASES_LOADING[fraseIndex]}
+        {frases[fraseIndex]}
       </h2>
 
       <p style={{ color: '#595959', fontSize: '1.05rem', margin: '0 0 32px 0', textAlign: 'center' }}>
-        Conectando con la red hotelera{destino ? ` en ${destino}` : ''}
+        {subtitulo || `Conectando con la red hotelera${destino ? ` en ${destino}` : ''}`}
       </p>
 
       {/* Barra de progreso animada */}
@@ -81,7 +81,7 @@ export function AlojamientosLoadingView({ destino = 'Ecuador' }) {
         />
       </div>
 
-      {/* Conjunto de iconos vectoriales SVG oficiales (sin emojis ni rectángulos) */}
+      {/* Conjunto de iconos vectoriales SVG oficiales (limpios, sin bordes ni pastillas) */}
       <div
         style={{
           display: 'grid',
@@ -102,37 +102,32 @@ export function AlojamientosLoadingView({ destino = 'Ecuador' }) {
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '8px',
-                padding: '14px 10px',
-                borderRadius: '12px',
-                border: isHighlight ? '1.5px solid #006ce4' : '1px solid #f0f0f0',
-                background: isHighlight ? '#eff6ff' : '#fafafa',
-                transition: 'all 0.3s ease',
+                gap: '10px',
+                padding: '8px 4px',
+                background: 'transparent',
+                border: 'none',
+                transition: 'transform 0.3s ease',
                 transform: isHighlight ? 'translateY(-2px)' : 'none',
               }}
             >
               <div
                 style={{
-                  width: '42px',
-                  height: '42px',
-                  borderRadius: '50%',
-                  background: isHighlight ? '#006ce4' : '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                  transition: 'background 0.3s ease',
+                  transition: 'transform 0.3s ease',
+                  transform: isHighlight ? 'scale(1.15)' : 'scale(1)',
                 }}
               >
-                <IconComp size={22} color={isHighlight ? '#ffffff' : '#003580'} />
+                <IconComp size={28} color={isHighlight ? '#006ce4' : '#64748b'} />
               </div>
               <span
                 style={{
-                  fontSize: '0.78rem',
-                  color: isHighlight ? '#003580' : '#4b5563',
+                  fontSize: '0.8rem',
+                  color: isHighlight ? '#003580' : '#64748b',
                   fontWeight: isHighlight ? 700 : 500,
                   textAlign: 'center',
-                  lineHeight: '1.2',
+                  lineHeight: '1.25',
                 }}
               >
                 {item.label}
@@ -142,20 +137,17 @@ export function AlojamientosLoadingView({ destino = 'Ecuador' }) {
         })}
       </div>
 
-      {/* Indicador de confianza minimalista */}
+      {/* Indicador de confianza minimalista (limpio, sin pastilla ni bordes) */}
       <div
         style={{
-          display: 'inline-flex',
+          display: 'flex',
           alignItems: 'center',
-          gap: '10px',
-          padding: '8px 18px',
-          background: '#f8fafc',
-          borderRadius: '24px',
-          border: '1px solid #e2e8f0',
+          gap: '8px',
+          color: '#475569',
         }}
       >
         <CheckmarkIcon size={16} color="#008009" />
-        <span style={{ fontSize: '0.88rem', color: '#334155', fontWeight: 500 }}>
+        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
           Tarifas transparentes y confirmación inmediata
         </span>
       </div>

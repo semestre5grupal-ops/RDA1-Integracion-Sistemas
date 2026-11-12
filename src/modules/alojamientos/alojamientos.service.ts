@@ -700,7 +700,13 @@ export class AlojamientosService implements OnModuleInit {
     });
 
     // Socios: mismos filtros sobre su catálogo en vivo y, con fechas, su cupo real.
-    let itemsSocios = await this.hotelesDeSocios();
+    let itemsSocios: any[] = [];
+    try {
+      itemsSocios = await this.hotelesDeSocios();
+    } catch (e: any) {
+      this.logger.warn(`[alojamientos.search] Error al consultar hoteles de socios: ${e?.message}`);
+      itemsSocios = [];
+    }
     if (destinoTerm) {
       const termino = normalizarBusqueda(destinoTerm);
       itemsSocios = itemsSocios.filter((h) => [h.destino, h.nombre, h.descripcion].some((c) => normalizarBusqueda(c).includes(termino)));
@@ -714,9 +720,18 @@ export class AlojamientosService implements OnModuleInit {
       const pedidas = dto.guests?.number_of_rooms || dto.habitaciones || 1;
       const noches = calcularNoches(checkinDate, checkoutDate);
       const conCupo: any[] = [];
-      for (let i = 0; i < itemsSocios.length; i += 6) {
-        const lote = itemsSocios.slice(i, i + 6);
-        const disp = await Promise.all(lote.map((h) => this.socios!.opciones(h.id, checkinDate, checkoutDate).catch(() => null)));
+      // Se evalúan como máximo los primeros 18 candidatos para garantizar tiempos de respuesta ágiles
+      const candidatos = itemsSocios.slice(0, 18);
+      for (let i = 0; i < candidatos.length; i += 6) {
+        const lote = candidatos.slice(i, i + 6);
+        const disp = await Promise.all(
+          lote.map((h) =>
+            Promise.race([
+              this.socios!.opciones(h.id, checkinDate, checkoutDate),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000).unref?.()),
+            ]).catch(() => null),
+          ),
+        );
         lote.forEach((h, j) => {
           const d = disp[j];
           if (!d || d.respuesta.status !== 200) return;
@@ -1575,14 +1590,18 @@ export class AlojamientosService implements OnModuleInit {
     const page = query.page || 1;
 
     if (this.socios && this.socios.fuente() !== 'local') {
-      const { hoteles, fuentes } = await this.socios.catalogo();
-      const locales = (await this.alojamientoRepo.find({ where: SOLO_ACTIVOS as any })).filter((a) => this.incluirLocal(a));
-      const todos = [...locales.map((l) => this.transformAlojamiento(l)), ...hoteles];
-      return {
-        data: todos.slice((page - 1) * limit, page * limit),
-        meta: { total: todos.length, limit, page },
-        fuentes,
-      };
+      try {
+        const { hoteles, fuentes } = await this.socios.catalogo();
+        const locales = (await this.alojamientoRepo.find({ where: SOLO_ACTIVOS as any })).filter((a) => this.incluirLocal(a));
+        const todos = [...locales.map((l) => this.transformAlojamiento(l)), ...hoteles];
+        return {
+          data: todos.slice((page - 1) * limit, page * limit),
+          meta: { total: todos.length, limit, page },
+          fuentes,
+        };
+      } catch (err: any) {
+        this.logger.warn(`[alojamientos] Error al consultar catálogo de socios en findAll: ${err?.message || err}. Usando catálogo local.`);
+      }
     }
 
     const locales = await this.alojamientoRepo.find({

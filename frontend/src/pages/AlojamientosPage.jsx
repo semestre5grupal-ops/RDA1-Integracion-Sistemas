@@ -342,12 +342,13 @@ export function AlojamientosPage() {
     const destToSearch = customDest !== undefined ? customDest : destination;
     try {
       let result;
+      const opts = isSilent ? { timeout: 12000 } : {};
       if (destToSearch && destToSearch.trim()) {
         result = await searchAlojamientos({
           destino: destToSearch.trim(),
-        });
+        }, opts);
       } else {
-        result = await getAlojamientos();
+        result = await getAlojamientos(opts);
       }
       const data = result.data || result;
       const list = Array.isArray(data) ? data : [];
@@ -387,7 +388,7 @@ export function AlojamientosPage() {
   }, [destination]);
 
   // Espera a que el usuario deje de escribir antes de consultar al servidor
-  // y mantiene sondeo silencioso en segundo plano cada 5 segundos
+  // y mantiene sondeo silencioso en segundo plano cada 5 segundos (en vivo)
   useEffect(() => {
     let timer = null;
     let isCancelled = false;
@@ -395,6 +396,10 @@ export function AlojamientosPage() {
     const debounceTimer = setTimeout(() => {
       const runPoll = async (silent) => {
         if (isCancelled) return;
+        if (silent && typeof document !== 'undefined' && document.hidden) {
+          timer = setTimeout(() => runPoll(true), 5000);
+          return;
+        }
         await fetchData(undefined, silent);
         if (!isCancelled) {
           timer = setTimeout(() => runPoll(true), 5000);
@@ -410,22 +415,14 @@ export function AlojamientosPage() {
     };
   }, [fetchData, destination]);
 
-  // Carga una vez la lista de destinos reales del catálogo (incluidos los de los
-  // socios) para que el autocompletado los sugiera, no solo los locales.
+  // Carga la lista de destinos reales del catálogo aprovechando los alojamientos cargados
+  // o consultando un lote liviano para el autocompletado sin duplicar peticiones pesadas.
   useEffect(() => {
-    let vivo = true;
-    (async () => {
-      try {
-        const resp = await getAlojamientos({ limit: 500 });
-        const arr = Array.isArray(resp) ? resp : resp?.data || [];
-        const nombres = arr.map((a) => a?.destino).filter(Boolean);
-        if (vivo && nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
-      } catch {
-        /* si falla, el autocompletado usa la lista por defecto */
-      }
-    })();
-    return () => { vivo = false; };
-  }, []);
+    if (alojamientos && alojamientos.length > 0) {
+      const nombres = alojamientos.map((a) => a?.destino).filter(Boolean);
+      if (nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
+    }
+  }, [alojamientos]);
 
   // Accesibilidad WCAG 2.1: Cerrar popovers con tecla Escape
   useEffect(() => {

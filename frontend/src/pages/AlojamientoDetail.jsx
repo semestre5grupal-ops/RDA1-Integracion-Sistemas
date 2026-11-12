@@ -9,6 +9,7 @@ import { useCurrency } from '../hooks/CurrencyContext';
 import { formatearRegimen } from '../utils/regimenFormato';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
 import { ReportModal } from '../components/ReportModal';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 import {
   BedIcon,
@@ -372,6 +373,10 @@ export function AlojamientoDetail() {
 
     const runPoll = async (silent) => {
       if (isCancelled) return;
+      if (silent && typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(() => runPoll(true), 4000);
+        return;
+      }
       await fetchAvail(silent);
       if (!isCancelled) {
         timer = setTimeout(() => runPoll(true), 4000);
@@ -492,20 +497,15 @@ export function AlojamientoDetail() {
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '100px 20px', color: '#003580' }}>
-        <div
-          style={{
-            width: '40px',
-            height: '40px',
-            border: '4px solid #e0e0e0',
-            borderTopColor: '#006ce4',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            margin: '0 auto 16px auto',
-          }}
-        />
-        <h2>Cargando alojamiento...</h2>
-      </div>
+      <AlojamientosLoadingView
+        frases={[
+          'Estamos preparando los detalles de tu estadía...',
+          'Verificando habitaciones y disponibilidad en tiempo real...',
+          'Estamos personalizando tu experiencia...',
+          'Casi listo, organizando fotos y comodidades...',
+        ]}
+        subtitulo="Consultando información actualizada del alojamiento"
+      />
     );
   }
 
