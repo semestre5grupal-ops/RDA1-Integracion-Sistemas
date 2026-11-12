@@ -825,13 +825,17 @@ export function MisReservasPage() {
       // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),
       // mantenemos intacta la referencia previa para evitar cualquier re-render o parpadeo visual.
       setReservas((prev) => {
-        // Preservación monotónica de check-in: nunca degradar a CONFIRMED tras confirmación
+        // Preservación monotónica de check-in y cancelación: nunca degradar a CONFIRMED tras confirmación o cancelación
         if (prev && prev.length > 0) {
           for (const item of listaFinal) {
             const p = prev.find(x => x.id === item.id || (x.pnr && x.pnr === item.pnr));
-            if (p && estadosAsistidos.includes(p.status) && !estadosAsistidos.includes(item.status)) {
-              item.status = p.status;
-              if (p.placa && !item.placa) item.placa = p.placa;
+            if (p) {
+              if (estadosAsistidos.includes(p.status) && !estadosAsistidos.includes(item.status)) {
+                item.status = p.status;
+                if (p.placa && !item.placa) item.placa = p.placa;
+              } else if ((p.status === 'CANCELLED' || p.status === 'CANCELADO') && item.status !== 'CANCELLED' && item.status !== 'CANCELADO') {
+                item.status = 'CANCELLED';
+              }
             }
           }
         }
@@ -982,7 +986,6 @@ export function MisReservasPage() {
               message: 'Cupos reincorporados a la disponibilidad del operador local.',
             },
           };
-          cargarTodasLasReservas(true);
         } catch (apiErr) {
           const statusHttp = apiErr?.response?.status;
           const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
@@ -1003,7 +1006,6 @@ export function MisReservasPage() {
               message: 'Cupos reincorporados a la disponibilidad del operador local.'
             }
           };
-          cargarTodasLasReservas(true);
         }
 
         // Actualizar almacenamiento local
@@ -1034,7 +1036,6 @@ export function MisReservasPage() {
               message: 'Vehículo liberado y reincorporado a flota disponible.'
             }
           };
-          cargarTodasLasReservas(true);
         } catch (apiErr) {
           const statusHttp = apiErr?.response?.status;
           const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
@@ -1055,7 +1056,6 @@ export function MisReservasPage() {
               message: 'Vehículo liberado y reincorporado a flota disponible.'
             }
           };
-          cargarTodasLasReservas(true);
         }
 
         // Actualizar almacenamiento local
@@ -1094,7 +1094,6 @@ export function MisReservasPage() {
             stock_restoration: { message: 'La aerolínea liberó los asientos.' },
           };
           claveCancelVuelo.current = null;
-          cargarTodasLasReservas(true);
         } catch (fallo) {
           const datos = fallo?.response?.data ?? {};
           throw new Error(datos.detail || datos.title || 'La aerolínea no aceptó la cancelación. Inténtalo de nuevo.');
@@ -1126,7 +1125,6 @@ export function MisReservasPage() {
             return item;
           });
           localStorage.setItem('reservas_alojamientos', JSON.stringify(updated));
-          cargarTodasLasReservas(true);
         } catch (apiErr) {
           const detalle = apiErr?.response?.data?.detail || apiErr?.response?.data?.message || apiErr?.message;
           throw new Error(detalle || 'El hotel no permitió cancelar la reserva. Verifica el estado o las políticas de cancelación.');
@@ -1172,6 +1170,9 @@ export function MisReservasPage() {
         }
         return r;
       }));
+
+      // Sincronización en segundo plano silenciosa sin alterar el estado cancelado optimista
+      setTimeout(() => cargarTodasLasReservas(true), 400);
 
     } catch (err) {
       setCancelError(err.message || 'Error al procesar la cancelación. Intenta de nuevo.');
