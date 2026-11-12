@@ -234,6 +234,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         totalOffers: todas.length,
         airlinesQueried: sources.length,
         airlinesOk: sources.filter((s) => s.ok).length,
+        tiemposMs: { nodos: this.socios.ultimaBusquedaNodosMs, aerolineas: tBusqueda, recargo: tRecargo, total: Date.now() - t0 },
       },
       sources,
     });
