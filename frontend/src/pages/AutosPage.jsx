@@ -864,53 +864,7 @@ export function AutosPage() {
               </div>
             )}
 
-            {/* Opciones inferiores */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px' }}>
-              <div style={{ display: 'flex', gap: '20px', alignItems: 'center', color: '#1b1b1b', flexWrap: 'wrap' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem' }}>
-                  <input type="checkbox" checked={sameDropoff} onChange={(e) => setSameDropoff(e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#003580' }} />
-                  Devolver el coche en otra oficina
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem' }}>
-                  <input type="checkbox" checked={driverAge} onChange={(e) => setDriverAge(e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#003580' }} />
-                  Conductor entre 30 y 65 años
-                </label>
-
-                {!driverAge && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fff', padding: '4px 10px', borderRadius: '4px', border: '1px solid #ccc' }}>
-                    <label style={{ fontSize: '0.85rem', color: '#333' }}>Edad real:</label>
-                    <input
-                      type="number"
-                      min="18"
-                      max="99"
-                      value={customAge}
-                      onChange={(e) => setCustomAge(e.target.value)}
-                      style={{ width: '60px', padding: '4px', border: '1px solid #aaa', borderRadius: '3px', fontSize: '0.9rem' }}
-                    />
-                    {Number(customAge) < 25 && (
-                      <span style={{ fontSize: '0.75rem', color: '#b06000', fontWeight: 'bold' }}>
-                        *Aplica tasa por conductor joven (+$15/día)
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {sameDropoff && (
-                <div style={{ maxWidth: '420px', marginTop: '6px' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#1b1b1b', marginBottom: '3px', fontWeight: 600 }}>
-                    Lugar de devolución diferente:
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Oficina, aeropuerto o ciudad de devolución"
-                    value={dropoffLocation}
-                    onChange={(e) => setDropoffLocation(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '4px', border: '1px solid #ccc', fontSize: '0.9rem' }}
-                  />
-                </div>
-              )}
-            </div>
+            {/* Opciones inferiores eliminadas según requerimiento */}
           </form>
         </div>
       </section>

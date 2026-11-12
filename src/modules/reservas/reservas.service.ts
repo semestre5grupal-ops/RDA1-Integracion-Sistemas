@@ -410,14 +410,20 @@ export class ReservasService {
       try {
         const rawAut = await this.dataSource.query(
           `UPDATE schema_autos.autos_reservas 
-           SET estado = 'CONFIRMADO_ASISTIDO'
+           SET estado = 'CONFIRMADO_ASISTIDO',
+               checkin_at = COALESCE(checkin_at, NOW()),
+               checkin_admin = COALESCE($3, checkin_admin)
            WHERE id = $1 
               OR UPPER(id) = UPPER($1)
+              OR external_order_id = $1
+              OR UPPER(COALESCE(external_order_id, '')) = UPPER($1)
+              OR pnr = $1
+              OR UPPER(COALESCE(pnr, '')) = UPPER($1)
               OR idempotency_key = $1
               OR licencia_conducir = $1
               OR ($2::text IS NOT NULL AND licencia_conducir = $2::text)
            RETURNING *`,
-          [targetId, docId],
+          [targetId, docId, adminId],
         );
         const autFilas = extraerFilasUpdate(rawAut);
         if (autFilas.length > 0) {
