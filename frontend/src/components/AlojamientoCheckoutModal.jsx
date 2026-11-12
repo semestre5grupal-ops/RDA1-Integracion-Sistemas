@@ -40,6 +40,52 @@ import {
 } from './BookingIcons';
 import './AlojamientoCheckoutModal.css';
 
+function getHorarioCheckin(al) {
+  if (!al) return '14:00';
+  return (
+    al.checkin_desde ||
+    al.politicas?.checkin_desde ||
+    al.politicas?.check_in ||
+    al.politicas?.checkin ||
+    al.politicas?.hora_checkin ||
+    al.politicas?.hora_entrada ||
+    al.politicas?.entrada ||
+    al.checkInPermitidoDesde ||
+    al.check_in_desde ||
+    al.horaCheckin ||
+    al.hora_checkin ||
+    al.horarioCheckIn ||
+    al.horario_checkin ||
+    al.checkIn ||
+    al.check_in ||
+    al.checkin ||
+    '14:00'
+  );
+}
+
+function getHorarioCheckout(al) {
+  if (!al) return '11:00';
+  return (
+    al.checkout_hasta ||
+    al.politicas?.checkout_hasta ||
+    al.politicas?.check_out ||
+    al.politicas?.checkout ||
+    al.politicas?.hora_checkout ||
+    al.politicas?.hora_salida ||
+    al.politicas?.salida ||
+    al.checkOutHoraMaxima ||
+    al.check_out_hasta ||
+    al.horaCheckout ||
+    al.hora_checkout ||
+    al.horarioCheckOut ||
+    al.horario_checkout ||
+    al.checkOut ||
+    al.check_out ||
+    al.checkout ||
+    '11:00'
+  );
+}
+
 const PAISES = [
   { code: 'EC', name: 'Ecuador', prefix: '+593' },
   { code: 'CO', name: 'Colombia', prefix: '+57' },
@@ -799,7 +845,7 @@ export function AlojamientoCheckoutModal({
                 <div>
                   <div className="bkg-date-col-label">Entrada</div>
                   <div className="bkg-date-col-value">{formatearFecha(checkin)}</div>
-                  <div className="bkg-date-col-hours">A partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}</div>
+                  <div className="bkg-date-col-hours">A partir de las {getHorarioCheckin(alojamiento)}</div>
                   {checkin === new Date().toISOString().slice(0, 10) && (
                     <div className="bkg-today-tag">
                       <ClockIcon size={13} color="#d4111e" />
@@ -810,7 +856,7 @@ export function AlojamientoCheckoutModal({
                 <div>
                   <div className="bkg-date-col-label">Salida</div>
                   <div className="bkg-date-col-value">{formatearFecha(checkout)}</div>
-                  <div className="bkg-date-col-hours">Hasta las {alojamiento?.politicas?.checkout_hasta || alojamiento?.checkOutHoraMaxima || '11:00'}</div>
+                  <div className="bkg-date-col-hours">Hasta las {getHorarioCheckout(alojamiento)}</div>
                 </div>
               </div>
 

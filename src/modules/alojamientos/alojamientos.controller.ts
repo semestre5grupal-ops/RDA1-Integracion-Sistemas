@@ -330,28 +330,6 @@ export class AlojamientosController {
     return this.alojamientosService.cancelOrder(orderId, keyValida, dto?.reason);
   }
 
-  @Post('orders/:orderId/checkin')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Check-in Digital y liberación de clave de acceso a las 14:00 (Cátedra RDA2 §4)' })
-  @ApiParam({ name: 'orderId', description: 'UUID o Código de la orden' })
-  @ApiResponse({ status: 200, description: 'Estado del check-in y clave de cerradura digital si es >= 14:00.' })
-  async checkinDigital(
-    @Param('orderId') orderId: string,
-    @Body() body?: { forzar_liberacion?: boolean }
-  ) {
-    return this.alojamientosService.checkinDigital(orderId, body?.forzar_liberacion);
-  }
-
-  @Post('reservas/:orderId/checkin')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Check-in Digital y liberación de clave de acceso a las 14:00 (Alias)' })
-  async checkinDigitalAlias(
-    @Param('orderId') orderId: string,
-    @Body() body?: { forzar_liberacion?: boolean }
-  ) {
-    return this.alojamientosService.checkinDigital(orderId, body?.forzar_liberacion);
-  }
-
   // =========================================================================
   // WEBHOOKS
   // =========================================================================
