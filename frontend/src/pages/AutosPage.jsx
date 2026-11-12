@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { searchAutos } from '../services/autosApi';
@@ -50,9 +50,112 @@ function normalizeSearchText(str) {
     .trim();
 }
 
+function getAutoDailyPrice(auto) {
+  if (typeof auto.precio_diario === 'number') return auto.precio_diario;
+  if (typeof auto.precio_por_dia === 'number') return auto.precio_por_dia;
+  if (typeof auto.daily_price === 'number') return auto.daily_price;
+  if (typeof auto.price === 'number') return auto.price;
+  if (typeof auto.precio === 'number') return auto.precio;
+  if (typeof auto.precio_diario === 'string' && !isNaN(parseFloat(auto.precio_diario))) return parseFloat(auto.precio_diario);
+  if (typeof auto.precio_por_dia === 'string' && !isNaN(parseFloat(auto.precio_por_dia))) return parseFloat(auto.precio_por_dia);
+  if (typeof auto.daily_price === 'string' && !isNaN(parseFloat(auto.daily_price))) return parseFloat(auto.daily_price);
+  if (typeof auto.price === 'string' && !isNaN(parseFloat(auto.price))) return parseFloat(auto.price);
+  return 35.50;
+}
+
+function getAutoCompanyName(auto) {
+  const pNom = auto.proveedor?.nombre || auto.proveedor_nombre || (typeof auto.proveedor === 'string' ? auto.proveedor : '') || auto.supplier_name || auto.company || '';
+  if (pNom) return pNom;
+  if (auto.proveedor_id === 1 || auto.supplier_id === 1) return 'Europcar';
+  if (auto.proveedor_id === 2 || auto.supplier_id === 2) return 'Alamo';
+  if (auto.proveedor_id === 3 || auto.supplier_id === 3) return 'Enterprise';
+  return '';
+}
+
+function checkAutoCompanyMatch(auto, targetCompany) {
+  const compName = getAutoCompanyName(auto).toLowerCase();
+  const target = targetCompany.toLowerCase();
+
+  if (target === 'keddy by europcar' || target === 'keddy') {
+    return compName.includes('keddy');
+  }
+  if (target === 'europcar') {
+    return compName.includes('europcar') && !compName.includes('keddy');
+  }
+  return compName.includes(target);
+}
+
+function checkAutoVehicleCategoryMatch(auto, targetCategory) {
+  const cat = (auto.categoria || auto.category || '').toUpperCase();
+  const tipo = (auto.tipo_carroceria || auto.tipo || '').toUpperCase();
+  const modelo = (auto.modelo || auto.model || '').toUpperCase();
+  const combined = `${cat} ${tipo} ${modelo}`;
+
+  if (targetCategory === 'Coche pequeño') {
+    return (
+      combined.includes('PEQUEÑ') ||
+      combined.includes('PEQUEN') ||
+      combined.includes('ECONOM') ||
+      combined.includes('MINI') ||
+      combined.includes('SMALL') ||
+      combined.includes('HATCHBACK')
+    );
+  }
+  if (targetCategory === 'Coche mediano') {
+    return (
+      combined.includes('MEDIAN') ||
+      combined.includes('COMPACT') ||
+      combined.includes('INTERMED') ||
+      combined.includes('STANDARD') ||
+      (combined.includes('SEDAN') && !combined.includes('PREMIUM') && !combined.includes('GRAND'))
+    );
+  }
+  if (targetCategory === 'Coche grande') {
+    return (
+      combined.includes('GRAND') ||
+      combined.includes('LARGE') ||
+      combined.includes('PREMIUM') ||
+      combined.includes('LUJO') ||
+      combined.includes('LUXURY') ||
+      combined.includes('FULLSIZE') ||
+      combined.includes('VAN') ||
+      combined.includes('MINIVAN') ||
+      combined.includes('CAMIONETA') ||
+      combined.includes('PICKUP')
+    );
+  }
+  if (targetCategory === 'SUV') {
+    return (
+      combined.includes('SUV') ||
+      combined.includes('4X4') ||
+      combined.includes('CROSSOVER') ||
+      combined.includes('TODOTERRENO')
+    );
+  }
+  return combined.includes(targetCategory.toUpperCase());
+}
+
+function checkAutoPriceMatch(dailyPrice, rangeId) {
+  if (rangeId === '0-50') return dailyPrice >= 0 && dailyPrice <= 50;
+  if (rangeId === '50-100') return dailyPrice >= 50 && dailyPrice <= 100;
+  if (rangeId === '100-150') return dailyPrice >= 100 && dailyPrice <= 150;
+  return true;
+}
+
+function checkAutoSeatsMatch(seats, seatOption) {
+  if (seatOption === '4 plazas') return seats === 4;
+  if (seatOption === '5 plazas') return seats === 5;
+  if (seatOption === '7 o más plazas') return seats >= 7;
+  return false;
+}
+
 export function AutosPage() {
   const navigate = useNavigate();
   const [autos, setAutos] = useState([]);
+  const [selectedCompanies, setSelectedCompanies] = useState([]);
+  const [selectedVehicleCategories, setSelectedVehicleCategories] = useState([]);
+  const [selectedPriceRanges, setSelectedPriceRanges] = useState([]);
+  const [selectedSeatOptions, setSelectedSeatOptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isUpdatingList, setIsUpdatingList] = useState(false);
   const [error, setError] = useState(null);
@@ -502,6 +605,77 @@ export function AutosPage() {
     shouldScrollRef.current = true;
     fetchData();
   };
+
+  const handleToggleCompany = (companyName) => {
+    setSelectedCompanies(prev =>
+      prev.includes(companyName) ? prev.filter(c => c !== companyName) : [...prev, companyName]
+    );
+  };
+
+  const handleToggleCategory = (categoryName) => {
+    setSelectedVehicleCategories(prev =>
+      prev.includes(categoryName) ? prev.filter(c => c !== categoryName) : [...prev, categoryName]
+    );
+  };
+
+  const handleTogglePriceRange = (rangeId) => {
+    setSelectedPriceRanges(prev =>
+      prev.includes(rangeId) ? prev.filter(r => r !== rangeId) : [...prev, rangeId]
+    );
+  };
+
+  const handleToggleSeats = (seatOption) => {
+    setSelectedSeatOptions(prev =>
+      prev.includes(seatOption) ? prev.filter(s => s !== seatOption) : [...prev, seatOption]
+    );
+  };
+
+  const handleClearFilters = () => {
+    setSelectedCompanies([]);
+    setSelectedVehicleCategories([]);
+    setSelectedPriceRanges([]);
+    setSelectedSeatOptions([]);
+  };
+
+  const filteredAutos = useMemo(() => {
+    return autos.filter((auto) => {
+      // 1. Compañía
+      if (selectedCompanies.length > 0) {
+        const matchesComp = selectedCompanies.some((compName) =>
+          checkAutoCompanyMatch(auto, compName)
+        );
+        if (!matchesComp) return false;
+      }
+
+      // 2. Categoría del vehículo
+      if (selectedVehicleCategories.length > 0) {
+        const matchesCat = selectedVehicleCategories.some((catName) =>
+          checkAutoVehicleCategoryMatch(auto, catName)
+        );
+        if (!matchesCat) return false;
+      }
+
+      // 3. Rango de precio por día
+      if (selectedPriceRanges.length > 0) {
+        const dailyPrice = getAutoDailyPrice(auto);
+        const matchesPrice = selectedPriceRanges.some((rangeKey) =>
+          checkAutoPriceMatch(dailyPrice, rangeKey)
+        );
+        if (!matchesPrice) return false;
+      }
+
+      // 4. Número de plazas
+      if (selectedSeatOptions.length > 0) {
+        const seats = Number(auto.asientos || auto.seats || 5);
+        const matchesSeats = selectedSeatOptions.some((seatOption) =>
+          checkAutoSeatsMatch(seats, seatOption)
+        );
+        if (!matchesSeats) return false;
+      }
+
+      return true;
+    });
+  }, [autos, selectedCompanies, selectedVehicleCategories, selectedPriceRanges, selectedSeatOptions]);
 
   const marcasPopulares = [
     { nombre: 'Europcar', bg: '#00843D', color: 'white', label: 'Europcar' },
@@ -974,43 +1148,110 @@ export function AutosPage() {
               <div style={{ border: '1px solid #e7e7e7', borderRadius: '4px', padding: '16px', background: 'white' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', margin: 0, color: '#333' }}>Filtrar</h3>
-                  <span style={{ fontSize: '0.8rem', color: '#006ce4', cursor: 'pointer' }}>Borrar todos los filtros</span>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: '0.8rem',
+                      color: '#006ce4',
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    Borrar todos los filtros
+                  </button>
                 </div>
                 
                 <div style={{ marginBottom: '20px' }}>
                   <h4 style={{ fontWeight: 'bold', fontSize: '0.9rem', marginBottom: '10px', color: '#333' }}>Compañía</h4>
-                  {marcasPopulares.map((m, idx) => (
-                     <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
-                       <input type="checkbox" style={{ width: '18px', height: '18px' }} /> {m.label} <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.8rem' }}>10</span>
-                     </label>
-                  ))}
+                  {marcasPopulares.map((m, idx) => {
+                    const count = autos.filter(a => checkAutoCompanyMatch(a, m.nombre)).length;
+                    const isChecked = selectedCompanies.includes(m.nombre);
+                    return (
+                      <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleCompany(m.nombre)}
+                          aria-label={`Filtrar por compañía ${m.label}`}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#003580' }}
+                        />
+                        <span>{m.label}</span>
+                        <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.8rem' }}>{count}</span>
+                      </label>
+                    );
+                  })}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <h4 style={{ fontWeight: 'bold', fontSize: '0.9rem', marginBottom: '10px', color: '#333' }}>Categoría del vehículo</h4>
-                  {['Coche pequeño', 'Coche mediano', 'Coche grande', 'SUV'].map((c, idx) => (
-                     <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
-                       <input type="checkbox" style={{ width: '18px', height: '18px' }} /> {c} <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.8rem' }}>5</span>
-                     </label>
-                  ))}
+                  {['Coche pequeño', 'Coche mediano', 'Coche grande', 'SUV'].map((c, idx) => {
+                    const count = autos.filter(a => checkAutoVehicleCategoryMatch(a, c)).length;
+                    const isChecked = selectedVehicleCategories.includes(c);
+                    return (
+                      <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleCategory(c)}
+                          aria-label={`Filtrar por categoría ${c}`}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#003580' }}
+                        />
+                        <span>{c}</span>
+                        <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.8rem' }}>{count}</span>
+                      </label>
+                    );
+                  })}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <h4 style={{ fontWeight: 'bold', fontSize: '0.9rem', marginBottom: '10px', color: '#333' }}>Precio por día</h4>
-                  {[`0 ${currency} - ${convertPrice(50)}`, `${convertPrice(50)} - ${convertPrice(100)}`, `${convertPrice(100)} - ${convertPrice(150)}`].map((p, idx) => (
-                     <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
-                       <input type="checkbox" style={{ width: '18px', height: '18px' }} /> {p}
-                     </label>
-                  ))}
+                  {[
+                    { id: '0-50', label: `0 ${currency} - ${convertPrice(50)}` },
+                    { id: '50-100', label: `${convertPrice(50)} - ${convertPrice(100)}` },
+                    { id: '100-150', label: `${convertPrice(100)} - ${convertPrice(150)}` }
+                  ].map((p, idx) => {
+                    const count = autos.filter(a => checkAutoPriceMatch(getAutoDailyPrice(a), p.id)).length;
+                    const isChecked = selectedPriceRanges.includes(p.id);
+                    return (
+                      <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleTogglePriceRange(p.id)}
+                          aria-label={`Filtrar por precio ${p.label}`}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#003580' }}
+                        />
+                        <span>{p.label}</span>
+                        <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.8rem' }}>{count}</span>
+                      </label>
+                    );
+                  })}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <h4 style={{ fontWeight: 'bold', fontSize: '0.9rem', marginBottom: '10px', color: '#333' }}>Número de plazas</h4>
-                  {['4 plazas', '5 plazas', '7 o más plazas'].map((p, idx) => (
-                     <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
-                       <input type="checkbox" style={{ width: '18px', height: '18px' }} /> {p}
-                     </label>
-                  ))}
+                  {['4 plazas', '5 plazas', '7 o más plazas'].map((p, idx) => {
+                    const count = autos.filter(a => checkAutoSeatsMatch(Number(a.asientos || a.seats || 5), p)).length;
+                    const isChecked = selectedSeatOptions.includes(p);
+                    return (
+                      <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', marginBottom: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleSeats(p)}
+                          aria-label={`Filtrar por plazas ${p}`}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#003580' }}
+                        />
+                        <span>{p}</span>
+                        <span style={{ marginLeft: 'auto', color: '#666', fontSize: '0.8rem' }}>{count}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1117,23 +1358,50 @@ export function AutosPage() {
               )}
 
               <div style={{ marginBottom: '20px' }}>
-                 <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333', margin: '0 0 15px 0' }}>{autos.length} coches disponibles</h2>
+                 <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333', margin: '0 0 15px 0' }}>{filteredAutos.length} coches disponibles</h2>
                  <div style={{ display: 'inline-flex', border: '1px solid #666', borderRadius: '32px', padding: '6px 16px', fontSize: '0.9rem', fontWeight: 'bold', cursor: 'pointer', alignItems: 'center', gap: '5px' }}>
                    <span style={{ fontSize: '0.8rem' }}>↓↑</span> Ordenar por: Recomendado <span style={{ fontSize: '0.7rem', marginLeft: '5px' }}>▼</span>
                  </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-                {autos.map((a, i) => (
-                  <AutoCard
-                    key={a.vehicle_id || i}
-                    auto={a}
-                    dias={calculateDays()}
-                    startDate={startDate}
-                    endDate={endDate}
-                    pickupLocation={pickupLocation}
-                  />
-                ))}
-              </div>
+              {filteredAutos.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', background: 'white', borderRadius: '8px', border: '1px solid #e7e7e7', marginTop: '10px' }}>
+                  <p style={{ fontSize: '1.1rem', fontWeight: 600, color: '#333', marginBottom: '8px' }}>
+                    No se encontraron coches con los filtros seleccionados.
+                  </p>
+                  <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: '16px' }}>
+                    Prueba a cambiar o borrar tus filtros para ver más resultados.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    style={{
+                      background: '#006ce4',
+                      color: 'white',
+                      border: 'none',
+                      padding: '8px 18px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      fontWeight: 600
+                    }}
+                  >
+                    Borrar todos los filtros
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                  {filteredAutos.map((a, i) => (
+                    <AutoCard
+                      key={a.vehicle_id || i}
+                      auto={a}
+                      dias={calculateDays()}
+                      startDate={startDate}
+                      endDate={endDate}
+                      pickupLocation={pickupLocation}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

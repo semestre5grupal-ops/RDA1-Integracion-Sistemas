@@ -140,7 +140,7 @@ export class DilanAtraccionesAdapter {
     const dilanPayload = {
       id_atraccion: payload.atraccionId,
       fecha_uso: payload.date,
-      hora_inicio: payload.time.split(' ')[0] || '10:00',
+      hora_inicio: payload.time || '10:00:00',
       items_tickets: [
         { tipo: 'ADULTO', cantidad: payload.adult_count || 1 },
         ...(payload.child_count > 0 ? [{ tipo: 'NINO', cantidad: payload.child_count }] : [])
