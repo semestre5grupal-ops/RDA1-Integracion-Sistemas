@@ -7,8 +7,35 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const redirectTo = location.state?.from || '/';
+  
+  // Resuelve la URL a la que se debe volver tras autenticarse
+  const resolveRedirect = () => {
+    const fromState = location.state?.from;
+    if (fromState) {
+      if (typeof fromState === 'string' && fromState !== '/login') return fromState;
+      if (typeof fromState === 'object' && fromState.pathname && fromState.pathname !== '/login') {
+        return fromState.pathname + (fromState.search || '');
+      }
+    }
+    const params = new URLSearchParams(location.search);
+    const paramFrom = params.get('from') || params.get('returnUrl');
+    if (paramFrom && paramFrom !== '/login') return paramFrom;
+
+    const stored = sessionStorage.getItem('booking_return_url');
+    if (stored && stored !== '/login') return stored;
+
+    return '/';
+  };
+
+  const redirectTo = resolveRedirect();
   const redirectMessage = location.state?.message || null;
+
+  // Persistir la ruta en sessionStorage para sobrevivir a recargas de página
+  useEffect(() => {
+    if (redirectTo && redirectTo !== '/' && redirectTo !== '/login') {
+      sessionStorage.setItem('booking_return_url', redirectTo);
+    }
+  }, [redirectTo]);
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,6 +49,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (user) {
+      sessionStorage.removeItem('booking_return_url');
       navigate(redirectTo, { replace: true });
     }
   }, [user, navigate, redirectTo]);
@@ -75,6 +103,7 @@ export function LoginPage() {
          setErrors(prev => ({ ...prev, general: signInError.message }));
       }
     } else {
+      sessionStorage.removeItem('booking_return_url');
       navigate(redirectTo, { replace: true });
     }
     setLoading(false);
@@ -147,7 +176,7 @@ export function LoginPage() {
         </form>
 
         <p style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.9rem' }}>
-          ¿No tienes cuenta? <Link to="/register" style={{ color: '#006ce4', fontWeight: '600', textDecoration: 'none' }}>Regístrate aquí</Link>
+          ¿No tienes cuenta? <Link to="/register" state={{ from: redirectTo }} style={{ color: '#006ce4', fontWeight: '600', textDecoration: 'none' }}>Regístrate aquí</Link>
         </p>
       </div>
     </main>

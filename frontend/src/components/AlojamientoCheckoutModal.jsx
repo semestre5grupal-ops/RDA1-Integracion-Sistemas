@@ -122,6 +122,16 @@ export function AlojamientoCheckoutModal({
   const navigate = useNavigate();
   const [step, setStep] = useState(1); // 1: Tus datos, 2: Finalizar reserva, 3: Confirmada
 
+  // Para reservar el usuario debe haber iniciado sesión (mismo flujo que Atracciones)
+  useEffect(() => {
+    if (!user) {
+      const returnUrl = window.location.pathname + window.location.search;
+      sessionStorage.setItem('booking_return_url', returnUrl);
+      onClose?.();
+      navigate('/login', { state: { from: returnUrl, message: 'Inicia sesión para completar tu reserva' } });
+    }
+  }, [user, navigate, onClose]);
+
   // Con sesión se precargan los datos de la cuenta; sin sesión, vacíos.
   // Filtramos correos de prueba o técnicos (como esbbooking) para que nunca se envíen
   // valores dummy al socio si el usuario quiere usar sus datos reales.

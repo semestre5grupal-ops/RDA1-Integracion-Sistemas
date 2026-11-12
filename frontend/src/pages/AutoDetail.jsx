@@ -190,7 +190,8 @@ export function AutoDetail() {
     e.preventDefault();
 
     if (!user) {
-      navigate('/login');
+      sessionStorage.setItem('booking_return_url', location.pathname + location.search);
+      navigate('/login', { state: { from: location.pathname + location.search, message: 'Inicia sesión para reservar tu auto' } });
       return;
     }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getAtraccion, reservarAtraccion, getDisponibilidadAtraccion } from '../services/atraccionesApi';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../hooks/useAuth';
@@ -15,6 +15,7 @@ import { resolverGaleriaAtraccion } from '../utils/atraccionImagenes';
 export function AtraccionDetail() {
   const todayStr = new Date().toISOString().split('T')[0];
   const { id } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const isLoggedIn = !!user;
@@ -185,7 +186,8 @@ export function AtraccionDetail() {
   const handleBooking = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!isLoggedIn) {
-      navigate('/login');
+      sessionStorage.setItem('booking_return_url', location.pathname + location.search);
+      navigate('/login', { state: { from: location.pathname + location.search, message: 'Inicia sesión para reservar tu atracción' } });
       return;
     }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useSearchParams, useLocation, useNavigate, Link } from 'react-router-dom';
 import { getAlojamiento } from '../services/alojamientosApi';
 import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
@@ -8,9 +8,18 @@ import { fechaLocal } from '../utils/fechas';
 
 export function AlojamientoCheckoutPage() {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currency, convertPrice } = useCurrency();
+
+  useEffect(() => {
+    if (!user) {
+      const returnUrl = location.pathname + location.search;
+      sessionStorage.setItem('booking_return_url', returnUrl);
+      navigate('/login', { state: { from: returnUrl, message: 'Inicia sesión para completar tu reserva' } });
+    }
+  }, [user, navigate, location]);
 
   const hotelId = searchParams.get('hotel_id') || searchParams.get('id') || '11771815';
   const checkin = searchParams.get('checkin') || fechaLocal(2);
