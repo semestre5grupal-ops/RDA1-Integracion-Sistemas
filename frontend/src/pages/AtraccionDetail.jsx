@@ -11,6 +11,7 @@ import { OfflineReservaModal } from '../components/OfflineReservaModal';
 import { VoucherModal } from '../components/VoucherModal';
 import { AtraccionesLoadingView } from '../components/AtraccionesLoadingView';
 import { resolverGaleriaAtraccion } from '../utils/atraccionImagenes';
+import { CheckmarkIcon, CloseIcon } from '../components/BookingIcons';
 
 export function AtraccionDetail() {
   const todayStr = new Date().toISOString().split('T')[0];
@@ -1019,48 +1020,62 @@ export function AtraccionDetail() {
 
       {/* MODAL DE ÉXITO Y ACCESO AL VOUCHER QR */}
       {showSuccessModal && bookingResult?.success && (
-        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999 }}>
-          <div className="modal-content" style={{ background: 'white', padding: '36px', borderRadius: '14px', maxWidth: '460px', width: '90%', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.25)' }}>
-            <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', color: '#15803d', fontSize: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto' }}>
-              ✓
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: '20px', backdropFilter: 'blur(2px)' }}>
+          <div className="modal-content" style={{ background: '#ffffff', padding: '32px', borderRadius: '8px', maxWidth: '480px', width: '100%', textAlign: 'left', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', border: '1px solid #e7e7e7', position: 'relative', fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif" }}>
+            <button
+              onClick={() => setShowSuccessModal(false)}
+              type="button"
+              aria-label="Cerrar"
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <CloseIcon size={20} color="#64748b" />
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <CheckmarkIcon size={24} color="#059669" />
+              </div>
+              <div style={{ paddingRight: '24px' }}>
+                <h2 style={{ margin: 0, color: '#1a1a1a', fontSize: '1.25rem', fontWeight: 800 }}>
+                  {bookingResult.data?.offline ? 'Guardado sin conexión' : '¡Tu reserva está confirmada!'}
+                </h2>
+                <p style={{ margin: '2px 0 0', color: '#4b5563', fontSize: '13px' }}>
+                  Hemos enviado la confirmación a <strong>{user?.email}</strong>.
+                </p>
+              </div>
             </div>
-            <h2 style={{ marginBottom: '8px', color: '#1a1a1a', fontSize: '1.4rem' }}>
-              {bookingResult.data?.offline ? 'Guardado sin conexión' : '¡Reserva y Pago Exitosos!'}
-            </h2>
-            <p style={{ color: '#4b5563', marginBottom: '20px', fontSize: '0.95rem' }}>
-              Tu comprobante y voucher digital han sido generados para <strong>{user?.email}</strong>.
-            </p>
             
-            <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', textAlign: 'left', marginBottom: '20px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: '#64748b' }}>Localizador / PNR:</span>
-                <strong style={{ color: '#003580' }}>{confirmedReservation?.reservation_id?.substring(0, 8).toUpperCase()}</strong>
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '6px', marginBottom: '20px', border: '1px dashed #cbd5e1', fontSize: '13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 700 }}>Localizador / PNR</span>
+                <strong style={{ color: '#003580', fontSize: '15px' }}>{confirmedReservation?.reservation_id?.substring(0, 8).toUpperCase()}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: '#64748b' }}>Turno Confirmado:</span>
-                <strong>{form.date} ({form.time})</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 700 }}>Turno</span>
+                <span style={{ color: '#1a1a1a', fontWeight: 600 }}>{form.date} · {form.time}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: '#64748b' }}>Total Pagado:</span>
-                <strong style={{ color: '#15803d' }}>{convertPrice(totalCalculado)}</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '11px', fontWeight: 700 }}>Total pagado</span>
+                <strong style={{ color: '#008009', fontSize: '16px' }}>{convertPrice(totalCalculado)}</strong>
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button 
-                style={{ width: '100%', padding: '12px', fontSize: '1rem', borderRadius: '8px', background: '#006ce4', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}
+                type="button"
+                style={{ flex: 1, padding: '10px 16px', fontSize: '13px', borderRadius: '4px', background: '#006ce4', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}
                 onClick={() => {
                   setShowSuccessModal(false);
                   setShowVoucherModal(true);
                 }}
               >
-                🎟️ Ver Voucher Digital con Código QR
+                Ver comprobante completo
               </button>
               <button 
-                style={{ width: '100%', padding: '10px', fontSize: '0.9rem', borderRadius: '8px', background: '#f1f5f9', color: '#475569', border: 'none', fontWeight: 600, cursor: 'pointer' }}
+                type="button"
+                style={{ padding: '10px 16px', fontSize: '13px', borderRadius: '4px', background: 'transparent', color: '#475569', border: '1px solid #cbd5e1', fontWeight: 600, cursor: 'pointer' }}
                 onClick={() => setShowSuccessModal(false)}
               >
-                Continuar Explorando
+                Cerrar
               </button>
             </div>
           </div>
