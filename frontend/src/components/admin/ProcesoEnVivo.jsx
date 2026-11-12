@@ -74,6 +74,55 @@ function resumenCompra(eventos) {
  * búsquedas previas al primer hold van con el primer intento; la cancelación o
  * el check-in posteriores quedan con el intento al que pertenecen.
  */
+// Operaciones de vuelos que no son una compra: llegan después, con su propio
+// correlation ID (desde Mis Reservas o desde el feed de la aerolínea).
+const OPERACIONES = [
+  { id: 'cancelacion', filtro: 'Cancelaciones', icon: '🛑' },
+  { id: 'checkin', filtro: 'Check-in', icon: '🛂' },
+  { id: 'cambio_fecha', filtro: 'Cambios de fecha', icon: '🗓️' },
+  { id: 'reembolso', filtro: 'Reembolsos', icon: '↩️' },
+];
+const ID_OPERACIONES = OPERACIONES.map((o) => o.id);
+const pnrDe = (e) => String(e?.detalle || '').match(/PNR ([A-Z0-9]{5,8})/)?.[1] ?? null;
+
+/** Cómo terminó una operación posterior a la compra (check-in, cancelación, reembolso, cambio de fecha). */
+function resumenOperacion(eventos) {
+  const ultimoDe = (paso) => [...eventos].reverse().find((e) => e.paso === paso);
+  const conMotivo = (r, e) => ({ ...r, motivo: e && e.resultado !== 'ok' ? e.detalle : null, pasoFallo: e && e.resultado !== 'ok' ? e.paso : null });
+  const reemb = ultimoDe('reembolso');
+  const canc = ultimoDe('cancelacion');
+  if (canc) {
+    if (canc.resultado !== 'ok') return conMotivo({ label: 'Cancelación rechazada', tono: canc.resultado }, canc);
+    if (reemb?.resultado === 'error') return conMotivo({ label: 'Cancelada · reembolso falló', tono: 'error' }, reemb);
+    return conMotivo({ label: reemb ? 'Cancelada · reembolsada' : 'Cancelada', tono: 'aviso' }, null);
+  }
+  const ci = ultimoDe('checkin');
+  if (ci) return conMotivo({ label: ci.resultado === 'ok' ? 'Check-in hecho' : 'Check-in rechazado', tono: ci.resultado }, ci);
+  const cf = ultimoDe('cambio_fecha');
+  if (cf) return conMotivo({ label: cf.resultado === 'ok' ? 'Cambio de fecha' : 'Cambio de fecha con aviso', tono: 'aviso' }, cf.resultado === 'ok' ? null : cf);
+  if (reemb) return conMotivo({ label: reemb.resultado === 'ok' ? 'Reembolsada' : 'Reembolso falló', tono: reemb.resultado === 'ok' ? 'aviso' : 'error' }, reemb);
+  return conMotivo({ label: 'Consulta', tono: 'neutro' }, null);
+}
+
+/**
+ * Separa las operaciones que no son compras por PNR: un mismo ciclo del feed de
+ * la aerolínea puede traer varias reservas.
+ */
+function separarPorPnr(grupo) {
+  const porPnr = new Map();
+  for (const e of grupo.eventos) {
+    const k = pnrDe(e) ?? '';
+    if (!porPnr.has(k)) porPnr.set(k, []);
+    porPnr.get(k).push(e);
+  }
+  const sinPnr = porPnr.get('') ?? [];
+  porPnr.delete('');
+  if (porPnr.size <= 1) return [grupo];
+  // Las consultas sin PNR quedan con la primera reserva.
+  const partes = [...porPnr.entries()].map(([pnr, evs], i) => ({ ...grupo, id: `${grupo.id}~${pnr}`, eventos: (i === 0 ? [...sinPnr, ...evs] : evs).sort((a, b) => a.seq - b.seq) }));
+  return partes;
+}
+
 function dividirEnCompras(eventos) {
   const porCorrelacion = new Map();
   for (const e of eventos) {
@@ -93,9 +142,18 @@ function dividirEnCompras(eventos) {
       }
       if (actual) actual.eventos.push(e); else previos.push(e);
     }
-    if (!actual) compras.push({ id: `${correlacion}#0`, correlacion, intento: 0, eventos: previos });
+    if (!actual) {
+      const grupo = { id: `${correlacion}#0`, correlacion, intento: 0, eventos: previos };
+      if (previos.some((e) => ID_OPERACIONES.includes(e.paso))) compras.push(...separarPorPnr(grupo));
+      else compras.push(grupo);
+    }
   }
   return compras.map((c) => {
+    const esOperacion = c.intento === 0 && c.eventos.some((e) => ID_OPERACIONES.includes(e.paso));
+    const operacion = esOperacion ? OPERACIONES.find((o) => c.eventos.some((e) => e.paso === o.id)) : null;
+    // ¿La hizo el cliente en Booking o llegó desde la aerolínea (su web, mostrador o feed)?
+    const textos = c.eventos.map((e) => String(e.detalle || '')).join(' ');
+    const desdeAerolinea = esOperacion && !/desde Booking|Cancelada desde Booking|Reembolso al cliente/.test(textos) && /por NODE|en NODE|Cancelada en|confirmado por|Cambio de fecha en/.test(textos);
     const intentos = compras.filter((x) => x.correlacion === c.correlacion && x.intento > 0).length;
     const cobro = c.eventos.find((e) => e.paso === 'cobro' && e.monto);
     return {
@@ -109,8 +167,11 @@ function dividirEnCompras(eventos) {
         ?? c.eventos.find((e) => e.cliente)?.cliente ?? null,
       nodo: c.eventos.find((e) => e.nodo)?.nodo ?? null,
       monto: cobro?.monto ?? c.eventos.find((e) => e.monto)?.monto ?? null,
-      pnr: c.eventos.map((e) => String(e.detalle || '').match(/PNR ([A-Z0-9]{5,8})/)?.[1]).find(Boolean) ?? null,
-      resumen: resumenCompra(c.eventos),
+      pnr: c.eventos.map(pnrDe).find(Boolean) ?? null,
+      tipo: c.intento > 0 ? 'compra' : esOperacion ? 'operacion' : 'busqueda',
+      operacion,
+      desdeAerolinea,
+      resumen: esOperacion ? resumenOperacion(c.eventos) : resumenCompra(c.eventos),
     };
   }).sort((a, b) => b.ultimo.seq - a.ultimo.seq);
 }
@@ -128,6 +189,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
   const [error, setError] = useState(null);
   const [seleccion, setSeleccion] = useState(null);
   const [filtro, setFiltro] = useState('');
+  const [tipoFiltro, setTipoFiltro] = useState('todas');
   const [verBusquedas, setVerBusquedas] = useState(false);
   const [latidos, setLatidos] = useState({});
   const [busActivo, setBusActivo] = useState(false);
@@ -196,11 +258,15 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
 
   const nombreAerolinea = useMemo(() => Object.fromEntries(aerolineas.map((a) => [a.codigo, a.nombre || a.codigo])), [aerolineas]);
   const compras = useMemo(() => dividirEnCompras(eventos), [eventos]);
-  const soloBusquedas = compras.filter((c) => c.intento === 0).length;
+  const soloBusquedas = compras.filter((c) => c.tipo === 'busqueda').length;
+  /** Filtro por tipo de flujo: todas, compras o una operación (check-in, cancelación…). */
+  const cumpleTipo = (c, t) => t === 'todas' || (t === 'compras' ? c.tipo === 'compra' : c.eventos.some((e) => e.paso === t));
+  const conteoTipo = (t) => compras.filter((c) => c.tipo !== 'busqueda' && cumpleTipo(c, t)).length;
 
   const q = filtro.trim().toLowerCase();
   const comprasFiltradas = compras.filter((c) => {
-    if (!verBusquedas && c.intento === 0) return false;
+    if (!verBusquedas && c.tipo === 'busqueda') return false;
+    if (!cumpleTipo(c, tipoFiltro)) return false;
     if (!q) return true;
     return [c.correlacion, c.cliente, c.nodo, nombreAerolinea[c.nodo], c.pnr, ...c.eventos.map((e) => e.detalle)]
       .some((v) => String(v || '').toLowerCase().includes(q));
@@ -268,7 +334,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: T.text2 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: error ? T.bad : pausado ? T.muted : '#d03b3b', animation: !pausado && !error ? 'pvPunto 1.2s infinite' : 'none' }} />
           <strong style={{ color: T.text }}>{error ? 'Sin conexión' : pausado ? 'En pausa' : 'En vivo'}</strong>
-          <span>· se actualiza cada 2 s · {eventos.length} pasos en pantalla{origen === 'base' ? ' · historial compartido (igual en todas las computadoras)' : inicio ? ` · solo memoria de este servidor desde ${hora(inicio)}` : ''}</span>
+          <span>· {eventos.length} pasos en pantalla{origen === 'base' ? ' · historial compartido (igual en todas las computadoras)' : inicio ? ` · solo memoria de este servidor desde ${hora(inicio)}` : ''}</span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" onClick={() => setPausado((p) => !p)}
@@ -291,9 +357,9 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ fontSize: '0.82rem', color: T.text2, maxWidth: 720 }}>
             {elegida ? (
-              <>Reproduciendo la compra de <strong>{elegida.cliente || 'cliente sin identificar'}</strong>{elegida.nodo ? ` en ${nombreAerolinea[elegida.nodo] || elegida.nodo}` : ''} ({hora(elegida.inicio.ts)}): cada punto es uno de sus pasos, en orden.</>
+              <>Reproduciendo {elegida.tipo === 'operacion' ? `${elegida.operacion?.filtro === 'Check-in' ? 'el check-in' : elegida.operacion?.filtro === 'Cancelaciones' ? 'la cancelación' : elegida.operacion?.filtro === 'Reembolsos' ? 'el reembolso' : 'el cambio de fecha'}${elegida.pnr ? ` del PNR ${elegida.pnr}` : ''}${elegida.desdeAerolinea ? ' (hecho en la aerolínea)' : ''} de` : 'la compra de'} <strong>{elegida.cliente || (elegida.desdeAerolinea ? 'un pasajero' : 'cliente sin identificar')}</strong>{elegida.nodo ? ` en ${nombreAerolinea[elegida.nodo] || elegida.nodo}` : ''} ({hora(elegida.inicio.ts)}): cada punto es uno de sus pasos, en orden.</>
             ) : (
-              <>Cada punto es un paso real que acaba de pasar por Booking: sale de donde empieza, recorre los componentes que toca y se apaga al terminar. Elige una compra abajo para repetir su recorrido.</>
+              <>Cada punto es un paso real que acaba de pasar por Booking: sale de donde empieza, recorre los componentes que toca y se apaga al terminar. Elige una operación de la lista para repetir su recorrido.</>
             )}
           </div>
           {elegida && (
@@ -323,12 +389,12 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
         </div>
       </section>
 
-      {/* ── Compras: una fila por compra (X-Correlation-Id + intento) ── */}
+      {/* ── Operaciones: compras (X-Correlation-Id + intento) y check-ins, cancelaciones, reembolsos y cambios de fecha ── */}
       <section style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, display: 'grid', gap: 10, alignContent: 'start' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '1rem' }}>Compras</h3>
-            <div style={{ fontSize: '0.76rem', color: T.muted }}>Toca una compra y su recorrido se repite en el diagrama, sin moverte de aquí. Con ↑ ↓ pasas a la anterior o la siguiente.</div>
+            <h3 style={{ margin: 0, fontSize: '1rem' }}>Operaciones de vuelos</h3>
+            <div style={{ fontSize: '0.76rem', color: T.muted }}>Compras, check-ins, cancelaciones, reembolsos y cambios de fecha, hechos en Booking o en la aerolínea. Toca una y su recorrido se repite en el diagrama. Con ↑ ↓ pasas a la anterior o la siguiente.</div>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <label style={{ fontSize: '0.78rem', color: T.text2, display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
@@ -341,17 +407,29 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
               value={filtro}
               onChange={(e) => setFiltro(e.target.value)}
               placeholder="Cliente, aerolínea, PNR o correlation ID…"
-              aria-label="Buscar compra por cliente, aerolínea, PNR o correlation ID"
+              aria-label="Buscar operación por cliente, aerolínea, PNR o correlation ID"
               style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px', fontSize: '0.82rem', minWidth: 220, flex: 1 }}
             />
           </div>
         </div>
 
+        <div role="group" aria-label="Tipo de operación" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[['todas', 'Todas', ''], ['compras', 'Compras', '🛒'], ...OPERACIONES.map((o) => [o.id, o.filtro, o.icon])].map(([id, texto, icono]) => {
+            const activo = tipoFiltro === id;
+            return (
+              <button key={id} type="button" aria-pressed={activo} onClick={() => setTipoFiltro(id)}
+                style={{ border: `1px solid ${activo ? T.azul : T.border}`, background: activo ? T.azul : T.surface, color: activo ? '#fff' : T.text2, borderRadius: 999, padding: '3px 10px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+                {icono ? `${icono} ` : ''}{texto} ({conteoTipo(id)})
+              </button>
+            );
+          })}
+        </div>
+
         {comprasFiltradas.length === 0 && (
           <div style={{ padding: '22px 10px', textAlign: 'center', color: T.muted, fontSize: '0.86rem' }}>
             {eventos.length === 0
-              ? 'Todavía no pasa nada. Haz una búsqueda de vuelos en el sitio y la verás aparecer aquí en 2 segundos.'
-              : q ? 'Ninguna compra coincide con la búsqueda.' : 'Todavía no hay compras; solo búsquedas.'}
+              ? 'Todavía no pasa nada. Haz una búsqueda de vuelos en el sitio y la verás aparecer aquí en unos segundos.'
+              : q ? 'Ninguna operación coincide con la búsqueda.' : tipoFiltro !== 'todas' ? 'No hay operaciones de este tipo en pantalla.' : 'Todavía no hay compras ni operaciones; solo búsquedas.'}
           </div>
         )}
 
@@ -376,7 +454,9 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', minWidth: 0 }}>
                     <span style={{ fontVariantNumeric: 'tabular-nums', color: T.text2, flexShrink: 0 }}>{hora(c.inicio.ts)}</span>
-                    <span style={{ fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} title={c.cliente || ''}>👤 {c.cliente || 'sin identificar'}</span>
+                    <span style={{ fontWeight: 600, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} title={c.cliente || ''}>
+                      {c.tipo === 'operacion' ? `${c.operacion?.icon ?? ''} ` : ''}👤 {c.cliente || (c.desdeAerolinea ? 'desde la aerolínea' : 'sin identificar')}
+                    </span>
                     <span style={{ background: tono.bg, color: tono.fg, borderRadius: 999, padding: '2px 9px', fontWeight: 700, fontSize: '0.72rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.resumen.label}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.76rem', color: T.text2, minWidth: 0 }}>
@@ -386,9 +466,13 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
                     <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: T.text, flexShrink: 0 }}>{c.monto ? usd(c.monto) : ''}</span>
                   </div>
 
-                  {/* Barra del flujo: un punto por paso (verde, ámbar, rojo o gris si no llegó) */}
+                  {/* Barra del flujo: un punto por paso (verde, ámbar, rojo o gris si no llegó).
+                      En una operación posterior solo se muestran sus pasos. */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
-                    {PASOS.map((p) => {
+                    {c.tipo === 'operacion' && (
+                      <span style={{ fontSize: '0.7rem', color: T.muted, marginRight: 4 }}>{c.desdeAerolinea ? 'Hecho en la aerolínea' : 'Hecho en Booking'}</span>
+                    )}
+                    {c.tipo !== 'operacion' && PASOS.map((p) => {
                       const r = resultadoDe(p.id);
                       const est = r ? COLOR[r] : null;
                       return (
@@ -399,7 +483,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
                       );
                     })}
                     {ramas.map((r) => {
-                      const est = COLOR[resultadoDe(r.id)];
+                      const est = COLOR[resultadoDe(r.id)] ?? COLOR.ok;
                       return (
                         <span key={r.id} style={{ fontSize: '0.72rem', borderRadius: 6, padding: '2px 7px', fontWeight: 600, background: est.bg, color: est.fg, marginLeft: 6 }}>
                           {est.icon} {r.label}
@@ -408,7 +492,7 @@ export function ProcesoEnVivo({ aerolineas = [] }) {
                     })}
                   </div>
 
-                  {c.resumen.tono === 'error' && c.resumen.motivo && (
+                  {(c.resumen.tono === 'error' || (c.tipo === 'operacion' && c.resumen.tono === 'aviso')) && c.resumen.motivo && (
                     <div style={{ fontSize: '0.78rem', color: T.bad }}>Motivo: {c.resumen.motivo}</div>
                   )}
                 </button>
