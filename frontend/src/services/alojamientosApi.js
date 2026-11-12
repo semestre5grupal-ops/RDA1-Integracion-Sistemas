@@ -9,7 +9,7 @@ const api = axios.create({
   timeout: 45000,
 });
 
-export async function getAlojamientos({ page = 1, limit = 10, destino, tienePiscina } = {}) {
+export async function getAlojamientos({ page = 1, limit = 10, destino, tienePiscina, timeout } = {}) {
   const { data } = await api.get('/alojamientos', {
     params: {
       page,
@@ -17,12 +17,15 @@ export async function getAlojamientos({ page = 1, limit = 10, destino, tienePisc
       destino,
       tienePiscina,
     },
+    ...(timeout ? { timeout } : {}),
   });
   return data;
 }
 
-export async function searchAlojamientos(searchPayload) {
-  const { data } = await api.post('/alojamientos/search', searchPayload);
+export async function searchAlojamientos(searchPayload, options = {}) {
+  const { data } = await api.post('/alojamientos/search', searchPayload, {
+    ...(options?.timeout ? { timeout: options.timeout } : {}),
+  });
   return data;
 }
 

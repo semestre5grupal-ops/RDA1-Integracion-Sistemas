@@ -101,19 +101,13 @@ export function AlojamientosSearchPage() {
   const [destination, setDestination] = useState(initialDestination);
   const [destinosCatalogo, setDestinosCatalogo] = useState(undefined);
 
-  // Destinos reales del catálogo (incluidos los de socios) para el autocompletado.
+  // Destinos reales del catálogo para el autocompletado aprovechando los resultados cargados.
   useEffect(() => {
-    let vivo = true;
-    (async () => {
-      try {
-        const resp = await getAlojamientos({ limit: 500 });
-        const arr = Array.isArray(resp) ? resp : resp?.data || [];
-        const nombres = arr.map((a) => a?.destino).filter(Boolean);
-        if (vivo && nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
-      } catch { /* usa la lista por defecto */ }
-    })();
-    return () => { vivo = false; };
-  }, []);
+    if (properties && properties.length > 0) {
+      const nombres = properties.map((a) => a?.destino || a?.ubicacion?.city).filter(Boolean);
+      if (nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
+    }
+  }, [properties]);
   const [destinationError, setDestinationError] = useState('');
   const [checkin, setCheckin] = useState(initialCheckin);
   const [checkout, setCheckout] = useState(initialCheckout);
@@ -213,6 +207,7 @@ export function AlojamientosSearchPage() {
       const ch = params?.ninos ?? children;
       const rm = params?.habitaciones ?? rooms;
 
+      const opts = isSilent ? { timeout: 12000 } : {};
       const res = await searchAlojamientos({
         destino: destQuery,
         adultos: ad,
@@ -220,7 +215,7 @@ export function AlojamientosSearchPage() {
         habitaciones: rm,
         dates: { checkin: cIn, checkout: cOut },
         rows: 25,
-      });
+      }, opts);
 
       const items = res.data || res;
       const list = Array.isArray(items) ? items : [];
@@ -250,7 +245,7 @@ export function AlojamientosSearchPage() {
       // Fallback to general list
       try {
         const destQuery = params?.destino || (typeof params === 'string' ? params : destination);
-        const fallback = await getAlojamientos({ limit: 25, destino: destQuery });
+        const fallback = await getAlojamientos({ limit: 25, destino: destQuery, timeout: 12000 });
         const items = fallback.data || fallback;
         const list = Array.isArray(items) ? items : [];
         setProperties(list);
@@ -302,6 +297,10 @@ export function AlojamientosSearchPage() {
 
     const runPoll = async (silent) => {
       if (isCancelled) return;
+      if (silent && typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(() => runPoll(true), 5000);
+        return;
+      }
       await fetchResults(currentQuery, silent);
       if (!isCancelled) {
         timer = setTimeout(() => runPoll(true), 5000);
