@@ -1864,6 +1864,17 @@ export function MisReservasPage() {
                     </button>
                   </div>
 
+                  {selectedReserva.tipo === 'alojamiento' && (
+                    <div style={{ marginTop: '12px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.85rem', color: '#334155' }}>
+                      <div style={{ fontWeight: 700, color: '#003580', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        🏨 Check-in en el alojamiento
+                      </div>
+                      <div>
+                        El check-in se realiza presencialmente en la recepción del hotel a tu llegada. Presenta tu documento de identidad y tu código de confirmación <strong>{selectedReserva.pnr}</strong>.
+                      </div>
+                    </div>
+                  )}
+
                   {puedeHacerCheckin(selectedReserva) && (
                     <button
                       type="button"

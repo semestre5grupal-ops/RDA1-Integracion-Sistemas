@@ -332,15 +332,10 @@ export class GraphqlBffService {
     }
 
     if (input.vertical === 'ALOJAMIENTOS') {
-      const res = await this.alojamientosService.checkin(input.reservaId);
-      return {
-        success: true,
-        vertical: 'ALOJAMIENTOS',
-        reservaId: input.reservaId,
-        mensaje: res.mensaje,
-        habitacionAsignada: res.habitacion_asignada,
-        claveAccesoDigital: res.clave_acceso_digital,
-      };
+      throw new HttpException(
+        'El check-in en alojamientos no se realiza de forma digital; debe efectuarse presencialmente en la recepción del establecimiento.',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     if (input.vertical === 'VUELOS') {

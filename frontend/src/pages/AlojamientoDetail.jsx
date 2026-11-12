@@ -49,6 +49,65 @@ import {
 import './AlojamientoDetail.css';
 import { fechaLocal } from '../utils/fechas';
 
+export function getHorarioCheckin(al) {
+  if (!al) return '14:00';
+  return (
+    al.checkin_desde ||
+    al.politicas?.checkin_desde ||
+    al.politicas?.check_in ||
+    al.politicas?.checkin ||
+    al.politicas?.hora_checkin ||
+    al.politicas?.hora_entrada ||
+    al.politicas?.entrada ||
+    al.checkInPermitidoDesde ||
+    al.check_in_desde ||
+    al.horaCheckin ||
+    al.hora_checkin ||
+    al.horarioCheckIn ||
+    al.horario_checkin ||
+    al.checkIn ||
+    al.check_in ||
+    al.checkin ||
+    '14:00'
+  );
+}
+
+export function getHorarioCheckinHasta(al) {
+  if (!al) return null;
+  return (
+    al.checkin_hasta ||
+    al.politicas?.checkin_hasta ||
+    al.politicas?.check_in_hasta ||
+    al.politicas?.hora_limite_checkin ||
+    al.checkInPermitidoHasta ||
+    al.check_in_hasta ||
+    null
+  );
+}
+
+export function getHorarioCheckout(al) {
+  if (!al) return '11:00';
+  return (
+    al.checkout_hasta ||
+    al.politicas?.checkout_hasta ||
+    al.politicas?.check_out ||
+    al.politicas?.checkout ||
+    al.politicas?.hora_checkout ||
+    al.politicas?.hora_salida ||
+    al.politicas?.salida ||
+    al.checkOutHoraMaxima ||
+    al.check_out_hasta ||
+    al.horaCheckout ||
+    al.hora_checkout ||
+    al.horarioCheckOut ||
+    al.horario_checkout ||
+    al.checkOut ||
+    al.check_out ||
+    al.checkout ||
+    '11:00'
+  );
+}
+
 // High-res gallery photos matching Booking.com desktop layout
 const GALLERY_DEFAULT_PHOTOS = [
   { url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/833148758.jpg?k=4af6fee87e75cf2bdb688cfa67e30d77b3282140a0ed4ee22ac61e5be30b95dd&o=&hp=1', caption: 'Piscina en la azotea con vista panorámica a la ciudad' },
@@ -1348,9 +1407,9 @@ export function AlojamientoDetail() {
                 <span>Entrada</span>
               </div>
               <div className="dt-rule-right">
-                <strong>A partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}</strong>
+                <strong>A partir de las {getHorarioCheckin(alojamiento)}{getHorarioCheckinHasta(alojamiento) ? ` hasta las ${getHorarioCheckinHasta(alojamiento)}` : ''}</strong>
                 <div style={{ fontSize: '0.8rem', color: '#595959' }}>
-                  Debes avisar al alojamiento con antelación a qué hora vas a llegar.
+                  El check-in se realiza presencialmente en la recepción del alojamiento a tu llegada.
                 </div>
               </div>
             </div>
@@ -1361,7 +1420,7 @@ export function AlojamientoDetail() {
                 <span>Salida</span>
               </div>
               <div className="dt-rule-right">
-                <strong>Hasta las {alojamiento?.politicas?.checkout_hasta || alojamiento?.checkOutHoraMaxima || '11:00'}</strong>
+                <strong>Hasta las {getHorarioCheckout(alojamiento)}</strong>
               </div>
             </div>
 
