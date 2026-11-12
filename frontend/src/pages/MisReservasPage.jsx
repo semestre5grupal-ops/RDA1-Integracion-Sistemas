@@ -1824,7 +1824,7 @@ export function MisReservasPage() {
                         </span>
                         {(selectedReserva.status === 'CONFIRMADO_ASISTIDO' || selectedReserva.status === 'CHECKED_IN') && (
                           <span style={{ marginLeft: 8, fontSize: '0.85rem', color: '#15803d', fontWeight: 600 }}>
-                            • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : 'Asistencia confirmada (Sí asistió)'}
+                            • {selectedReserva.tipo === 'auto' ? `Llaves entregadas ${selectedReserva.placa ? `(Placa: ${selectedReserva.placa})` : ''}` : selectedReserva.tipo === 'vuelo' ? 'Pase de abordar disponible' : 'Asistencia confirmada (Sí asistió)'}
                           </span>
                         )}
                       </>
@@ -1961,6 +1961,18 @@ export function MisReservasPage() {
                       );
                     }
 
+                    if (yaAsistio && selectedReserva.tipo === 'vuelo') {
+                      // Vuelos: tras el check-in se puede volver a ver y descargar el pase de abordar.
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => { setCheckinReserva(selectedReserva); setCheckinStepResult(null); }}
+                          style={{ width: '100%', marginTop: '4px', padding: '11px', background: '#003580', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          🎫 Ver pase de abordar
+                        </button>
+                      );
+                    }
                     if (yaAsistio) {
                       return (
                         <div style={{ marginTop: '4px', padding: '12px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', color: '#065f46', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
