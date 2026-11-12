@@ -248,6 +248,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
   // ───────────────────────────── Reservar + pagar ─────────────────────────────
 
+  /**
+   * Reservas por Idempotency-Key (1 h): si la respuesta no le llegó al cliente
+   * (aerolínea lenta, timeout) y reintenta con la misma clave, recibe la reserva
+   * ya hecha en vez de un error de "hold consumido" o un segundo cobro.
+   */
+  private readonly reservasPorClave = new Map<string, { promesa: Promise<RespuestaProxy | null>; t: number }>();
+
   private async reservar(req: Request, res: Response, nodo: string, entrantes: Record<string, any>) {
     const propietario = propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']);
     const idem = String(entrantes['idempotency-key'] || '').trim();
@@ -256,6 +263,33 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       this.enviar(res, problema(400, 'Falta Idempotency-Key', 'La cabecera Idempotency-Key es obligatoria para reservar.'));
       return;
     }
+    const clave = `${propietario}|${idem}`;
+    const previa = this.reservasPorClave.get(clave);
+    if (previa) {
+      const hecha = await previa.promesa;
+      if (hecha) {
+        this.traza(entrantes, 'confirmada', 'ok', `Reintento con la misma clave: se devuelve la reserva ya hecha · ${hecha.body?.bookingId ?? ''}`, { nodo });
+        res.setHeader('Idempotent-Replayed', 'true');
+        this.enviar(res, hecha);
+        return;
+      }
+    }
+    let resolver!: (r: RespuestaProxy | null) => void;
+    const promesa = new Promise<RespuestaProxy | null>((ok) => (resolver = ok));
+    const limite = Date.now() - 3_600_000;
+    for (const [k, v] of this.reservasPorClave) if (v.t < limite) this.reservasPorClave.delete(k);
+    this.reservasPorClave.set(clave, { promesa, t: Date.now() });
+    let hecha: RespuestaProxy | null = null;
+    try {
+      hecha = (await this.reservarUnaVez(req, res, nodo, entrantes, propietario, idem)) || null;
+    } finally {
+      resolver(hecha);
+      if (!hecha) this.reservasPorClave.delete(clave);
+    }
+  }
+
+  /** Cobra y reserva. Devuelve la respuesta enviada si la reserva quedó confirmada. */
+  private async reservarUnaVez(req: Request, res: Response, nodo: string, entrantes: Record<string, any>, propietario: string, idem: string): Promise<RespuestaProxy | null | void> {
     // Si la pantalla quedó con un hold ya reemplazado (cambio de asiento), se usa el vigente.
     const holdId = this.bloqueos.actual(String(req.body?.holdId || '')).holdId;
     if (req.body && typeof req.body === 'object' && holdId && req.body.holdId !== holdId) req.body = { ...req.body, holdId };
@@ -420,6 +454,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       ...(factura ? { factura } : {}),
     };
     this.enviar(res, r);
+    return r;
   }
 
   private async despuesDeReserva(metodo: string, segmentos: string[], bookingId: string, copia: any, r: RespuestaProxy, entrantes: Record<string, any>) {
