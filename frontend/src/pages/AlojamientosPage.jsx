@@ -330,9 +330,15 @@ export function AlojamientosPage() {
     }
   };
 
-  const fetchData = useCallback(async (customDest) => {
-    setLoading(true);
-    setError(null);
+  const isFetchingRef = useRef(false);
+
+  const fetchData = useCallback(async (customDest, isSilent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    if (!isSilent) {
+      setLoading(true);
+      setError(null);
+    }
     const destToSearch = customDest !== undefined ? customDest : destination;
     try {
       let result;
@@ -344,21 +350,65 @@ export function AlojamientosPage() {
         result = await getAlojamientos();
       }
       const data = result.data || result;
-      setAlojamientos(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setAlojamientos((prev) => {
+        if (prev && prev.length === list.length) {
+          let hasDiff = false;
+          for (let i = 0; i < list.length; i++) {
+            const p = prev[i];
+            const n = list[i];
+            const pId = p.id || p.alojamiento_id || p._id;
+            const nId = n.id || n.alojamiento_id || n._id;
+            const pPrice = typeof p.precio_por_noche === 'object' ? p.precio_por_noche?.total : (p.precio_por_noche || p.precio_noche || p.price);
+            const nPrice = typeof n.precio_por_noche === 'object' ? n.precio_por_noche?.total : (n.precio_por_noche || n.precio_noche || n.price);
+            const pStock = p.habitaciones_disponibles || p.cupos || p.disponibilidad;
+            const nStock = n.habitaciones_disponibles || n.cupos || n.disponibilidad;
+            if (pId !== nId || pPrice !== nPrice || pStock !== nStock || (p.nombre || p.name) !== (n.nombre || n.name)) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+        return list;
+      });
+      if (isSilent) setError(null);
     } catch (err) {
-      console.error('Error al cargar alojamientos:', err);
-      setError('No se pudieron cargar los alojamientos desde el servidor.');
+      console.warn('[AlojamientosPage] Error transitorio en refresco silencioso:', err?.message || err);
+      if (!isSilent) {
+        setError('No se pudieron cargar los alojamientos desde el servidor.');
+      }
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (!isSilent) {
+        setLoading(false);
+      }
     }
   }, [destination]);
 
   // Espera a que el usuario deje de escribir antes de consultar al servidor
-  // (antes se hacía una petición por cada tecla).
+  // y mantiene sondeo silencioso en segundo plano cada 10 segundos
   useEffect(() => {
-    const timer = setTimeout(() => fetchData(), destination ? 400 : 0);
-    return () => clearTimeout(timer);
-  }, [fetchData]);
+    let timer = null;
+    let isCancelled = false;
+
+    const debounceTimer = setTimeout(() => {
+      const runPoll = async (silent) => {
+        if (isCancelled) return;
+        await fetchData(undefined, silent);
+        if (!isCancelled) {
+          timer = setTimeout(() => runPoll(true), 10000);
+        }
+      };
+      runPoll(false);
+    }, destination ? 400 : 0);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(debounceTimer);
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchData, destination]);
 
   // Carga una vez la lista de destinos reales del catálogo (incluidos los de los
   // socios) para que el autocompletado los sugiera, no solo los locales.

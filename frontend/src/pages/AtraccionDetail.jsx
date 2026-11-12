@@ -129,10 +129,26 @@ export function AtraccionDetail() {
                 estado: s.estado || s.status || (cuposNum > 0 ? 'DISPONIBLE' : 'AGOTADO')
               };
             });
-            setTimeSlots(mapped);
+            setTimeSlots((prev) => {
+              if (prev && prev.length === mapped.length) {
+                let hasDiff = false;
+                for (let i = 0; i < mapped.length; i++) {
+                  if (
+                    prev[i].time !== mapped[i].time ||
+                    prev[i].cupos !== mapped[i].cupos ||
+                    prev[i].estado !== mapped[i].estado
+                  ) {
+                    hasDiff = true;
+                    break;
+                  }
+                }
+                if (!hasDiff) return prev;
+              }
+              return mapped;
+            });
             // Sincronizar automáticamente el formulario si el horario actual no existe en los turnos disponibles
-            setForm(prev => {
-              const exists = mapped.some(s => s.time === prev.time);
+            setForm((prev) => {
+              const exists = mapped.some((s) => s.time === prev.time);
               if (!exists && mapped[0]) {
                 return { ...prev, time: mapped[0].time };
               }

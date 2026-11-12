@@ -30,7 +30,16 @@ export function AutoDetail() {
         .then(data => {
           if (data) {
             failCount = 0;
-            setFetchedAuto(prev => ({ ...(prev || {}), ...data }));
+            setFetchedAuto((prev) => {
+              if (
+                prev &&
+                (prev.estado || prev.status) === (data.estado || data.status) &&
+                (prev.precio_diario || prev.price) === (data.precio_diario || data.price)
+              ) {
+                return prev;
+              }
+              return { ...(prev || {}), ...data };
+            });
           }
         })
         .catch(err => {

@@ -331,30 +331,57 @@ export function AlojamientoDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Sincronizar disponibilidad en tiempo real
+  // Sincronizar disponibilidad en tiempo real (Polling continuo cada 4 segundos)
   useEffect(() => {
     if (!id) return;
     let isCancelled = false;
-    const fetchAvail = async () => {
-      setLoadingDisponibilidad(true);
+    let timer = null;
+
+    const fetchAvail = async (isSilent = false) => {
+      if (!isSilent) setLoadingDisponibilidad(true);
       try {
         const data = await getDisponibilidadAlojamiento(id, { checkin, checkout });
-        if (!isCancelled) {
-          setDisponibilidad(data);
-          if (data && typeof data.available_rooms === 'number') {
+        if (!isCancelled && data) {
+          setDisponibilidad((prev) => {
+            if (
+              prev &&
+              prev.available_rooms === data.available_rooms &&
+              prev.estado === data.estado &&
+              prev.precio_total === data.precio_total
+            ) {
+              return prev;
+            }
+            return data;
+          });
+          if (typeof data.available_rooms === 'number') {
             if (data.available_rooms > 0 && rooms > data.available_rooms) {
               setRooms(data.available_rooms);
             }
           }
         }
       } catch (err) {
-        console.warn('Error verificando disponibilidad de habitaciones:', err);
+        console.warn('[AlojamientoDetail] Error transitorio verificando disponibilidad:', err?.message || err);
       } finally {
-        if (!isCancelled) setLoadingDisponibilidad(false);
+        if (!isCancelled && !isSilent) {
+          setLoadingDisponibilidad(false);
+        }
       }
     };
-    fetchAvail();
-    return () => { isCancelled = true; };
+
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      await fetchAvail(silent);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 4000);
+      }
+    };
+
+    runPoll(false);
+
+    return () => {
+      isCancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [id, checkin, checkout]);
 
   // References for Smooth Scrolling
