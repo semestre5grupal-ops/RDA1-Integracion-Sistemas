@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
 import { propietarioDesde } from '../vuelos.controller';
+import { acumular, Comprobacion, esFeedDelContrato, healthStatusDe, respondeComoApi, SaludIntegracion } from './vuelos-salud';
 
 /**
  * Agregador de aerolíneas socias (RDA2).
@@ -263,7 +264,11 @@ export class VuelosSociosService {
       datos = await res.json().catch(() => ({}));
     }
     if (!res.ok || !datos.access_token) {
-      throw new Error(`OAuth2 rechazado por ${nodo.codigoNodo} (HTTP ${res.status}${datos?.error ? `: ${datos.error}` : ''})`);
+      // `json`: la aerolínea contestó como API (credenciales rechazadas), no una página de error.
+      throw Object.assign(new Error(`OAuth2 rechazado por ${nodo.codigoNodo} (HTTP ${res.status}${datos?.error ? `: ${datos.error}` : ''})`), {
+        http: res.status,
+        json: !!datos && typeof datos === 'object' && Object.keys(datos).length > 0,
+      });
     }
     const segundos = Number(datos.expires_in) || 300;
     this.tokens.set(nodo.codigoNodo, { token: datos.access_token, expira: Date.now() + segundos * 1000 });
@@ -421,6 +426,168 @@ export class VuelosSociosService {
           `${resumen.descartadas ? `, ${resumen.descartadas} descartadas por fecha` : ''})${resumen.error ? ' ' + resumen.error : ''}`,
       );
     }
+  }
+
+  // ───────────────────────── Ping de integración ─────────────────────────
+
+  private readonly salud = new Map<string, SaludIntegracion & { muestras: number[] }>();
+  /** Último id de evento visto por el ping (para pedir `after=` y que la respuesta sea mínima). */
+  private readonly cursorSalud = new Map<string, string>();
+  /** Aerolíneas que rechazan `after=` (400): se les pide solo `limit=1`. */
+  private readonly sinAfter = new Set<string>();
+  private monitorSalud: NodeJS.Timeout | null = null;
+  private monitorOcupado = false;
+
+  /** Último resultado del ping de integración de una aerolínea (o null si aún no hay). */
+  saludDe(codigoNodo: string): SaludIntegracion | null {
+    const s = this.salud.get(codigoNodo);
+    if (!s) return null;
+    const { muestras: _m, ...publico } = s;
+    return publico;
+  }
+
+  /**
+   * Comprueba la integración con una aerolínea (ver vuelos-salud.ts) y guarda el
+   * resultado en memoria. No toca reservas ni el feed de eventos de Booking.
+   */
+  async comprobarIntegracion(nodo: ConfigProveedor): Promise<SaludIntegracion> {
+    const c = await this.medirIntegracion(nodo);
+    const s = acumular(this.salud.get(nodo.codigoNodo), c);
+    this.salud.set(nodo.codigoNodo, s);
+    return this.saludDe(nodo.codigoNodo)!;
+  }
+
+  private async medirIntegracion(nodo: ConfigProveedor): Promise<Comprobacion> {
+    const base = VuelosSociosService.baseVuelos(nodo.baseUrlRest);
+    if (!base) return { estado: 'CAIDO', tokenMs: 0, llamadaMs: 0, http: null, detalle: 'Sin URL http(s) registrada' };
+
+    // 1) Token (se reutiliza el guardado; solo se pide uno nuevo si venció).
+    const t0 = Date.now();
+    let auth: Record<string, string>;
+    try {
+      auth = await this.cabecerasAuth(nodo);
+    } catch (e: any) {
+      const tokenMs = Date.now() - t0;
+      if (e?.json) return { estado: 'SIN_INTEGRACION', tokenMs, llamadaMs: 0, http: e.http ?? null, detalle: `Credenciales rechazadas: ${e.message}` };
+      if (e?.http) return { estado: 'CAIDO', tokenMs, llamadaMs: 0, http: e.http, detalle: `El servicio de token no responde como API (HTTP ${e.http})` };
+      return { estado: 'CAIDO', tokenMs, llamadaMs: 0, http: null, detalle: `Sin conexión al pedir el token: ${e?.message || e}` };
+    }
+    const tokenMs = Date.now() - t0;
+
+    const cabeceras = {
+      Accept: 'application/json',
+      'X-Booking-Node': nodo.codigoNodo,
+      'X-Device-Fingerprint': 'booking-gateway',
+      'X-Correlation-Id': `corr-salud-${nodo.codigoNodo}-${Date.now()}`,
+      ...auth,
+    };
+    const pedir = async (metodo: 'GET' | 'POST', ruta: string, body?: any) => {
+      const t = Date.now();
+      const res = await fetch(`${base}/${ruta}`, {
+        method: metodo,
+        headers: body ? { ...cabeceras, 'Content-Type': 'application/json' } : cabeceras,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(this.timeoutMs()),
+      });
+      const texto = await res.text();
+      let cuerpo: any = null;
+      try {
+        cuerpo = texto ? JSON.parse(texto) : null;
+      } catch {
+        cuerpo = null; // HTML u otra cosa: no es la API
+      }
+      return { status: res.status, cuerpo, ms: Date.now() - t };
+    };
+
+    try {
+      // 2) Llamada del contrato con el token: feed de eventos desde el último visto.
+      const after = this.sinAfter.has(nodo.codigoNodo) ? undefined : this.cursorSalud.get(nodo.codigoNodo);
+      let r = await pedir('GET', `eventos?limit=1${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+      if (after && r.status === 400) {
+        this.sinAfter.add(nodo.codigoNodo);
+        r = await pedir('GET', 'eventos?limit=1');
+      }
+
+      // 3) Respuesta con la forma del contrato.
+      if (r.status >= 200 && r.status < 300 && esFeedDelContrato(r.cuerpo)) {
+        const lista: any[] = r.cuerpo.events ?? r.cuerpo.items;
+        const ultimo = lista[lista.length - 1]?.id;
+        if (ultimo != null) this.cursorSalud.set(nodo.codigoNodo, String(ultimo));
+        return { estado: 'INTEGRADO', tokenMs, llamadaMs: r.ms, http: r.status, detalle: 'Token aceptado y feed de eventos del contrato v2 respondiendo' };
+      }
+      if ((r.status === 401 || r.status === 403) && r.cuerpo) {
+        this.tokens.delete(nodo.codigoNodo); // el próximo intento pide un token nuevo
+        return { estado: 'SIN_INTEGRACION', tokenMs, llamadaMs: r.ms, http: r.status, detalle: `La aerolínea rechazó el token (HTTP ${r.status})` };
+      }
+      if (r.status >= 200 && r.status < 300) {
+        return { estado: 'SIN_INTEGRACION', tokenMs, llamadaMs: r.ms, http: r.status, detalle: 'El feed de eventos responde fuera del contrato (sin events/items)' };
+      }
+
+      // Sin feed de eventos: se confirma el contrato con la búsqueda (como el ping anterior).
+      const fecha = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10);
+      const b = await pedir('POST', 'search', {
+        itineraries: [{ origin: 'UIO', destination: 'GYE', departureDate: fecha }],
+        passengers: { adults: 1, children: 0, infants: 0 },
+      });
+      if (respondeComoApi(b.status, b.cuerpo)) {
+        return { estado: 'INTEGRADO', tokenMs, llamadaMs: b.ms, http: b.status, detalle: `Contrato respondiendo por /search (el feed de eventos devolvió HTTP ${r.status})` };
+      }
+      if (b.cuerpo && typeof b.cuerpo === 'object') {
+        return { estado: 'SIN_INTEGRACION', tokenMs, llamadaMs: b.ms, http: b.status, detalle: `La API responde con error (eventos HTTP ${r.status}, búsqueda HTTP ${b.status})` };
+      }
+      return { estado: 'CAIDO', tokenMs, llamadaMs: b.ms, http: b.status, detalle: `No responde como API del contrato (eventos HTTP ${r.status}, búsqueda HTTP ${b.status})` };
+    } catch (e: any) {
+      return {
+        estado: 'CAIDO',
+        tokenMs,
+        llamadaMs: Date.now() - t0 - tokenMs,
+        http: null,
+        detalle: e?.name === 'TimeoutError' ? `Sin respuesta en ${this.timeoutMs()} ms` : `Sin conexión: ${e?.message || e}`,
+      };
+    }
+  }
+
+  /**
+   * Comprueba la integración con todas las aerolíneas activas cada `intervaloMs`
+   * y guarda el resultado en la tabla de proveedores (estado, ms y hora), que es
+   * lo que muestra el panel. Mantiene además las conexiones abiertas.
+   */
+  iniciarMonitorSalud(intervaloMs: number) {
+    if (this.monitorSalud) return;
+    const vuelta = async () => {
+      if (this.monitorOcupado) return;
+      this.monitorOcupado = true;
+      try {
+        const nodos = await this.nodosActivos();
+        await Promise.all(nodos.map((n) => this.comprobarYGuardar(n)));
+      } catch (e: any) {
+        this.logger.warn(`[vuelos-salud] ${e?.message || e}`);
+      } finally {
+        this.monitorOcupado = false;
+      }
+    };
+    this.monitorSalud = setInterval(() => void vuelta(), intervaloMs);
+    this.monitorSalud.unref?.();
+    setTimeout(() => void vuelta(), 3_000).unref?.();
+  }
+
+  detenerMonitorSalud() {
+    if (this.monitorSalud) clearInterval(this.monitorSalud);
+    this.monitorSalud = null;
+  }
+
+  /** Comprueba una aerolínea y guarda estado/ms/hora en la tabla (solo esas columnas). */
+  async comprobarYGuardar(nodo: ConfigProveedor): Promise<SaludIntegracion> {
+    const s = await this.comprobarIntegracion(nodo);
+    try {
+      await this.nodos.update(
+        { codigoNodo: nodo.codigoNodo, killSwitchActivo: false },
+        { healthStatus: healthStatusDe(s.estado), latenciaMs: Math.round(s.ms), ultimoPingAt: new Date(s.en) },
+      );
+    } catch (e: any) {
+      this.logger.warn(`[vuelos-salud] no se pudo guardar el ping de ${nodo.codigoNodo}: ${e?.message || e}`);
+    }
+    return s;
   }
 
   // ───────────────────────────── Reenvío ─────────────────────────────

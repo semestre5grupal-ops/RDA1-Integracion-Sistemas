@@ -54,10 +54,13 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     const apagado = String(process.env.VUELOS_EVENTOS_POLL ?? '').toLowerCase() === 'off';
     if (apagado || process.env.NODE_ENV === 'test' || this.socios.fuente() === 'local') return;
     this.eventos.iniciar(Math.max(5_000, Number(process.env.VUELOS_EVENTOS_INTERVALO_MS) || 10_000));
+    // Ping de integración con cada aerolínea (token + contrato), cada 10 s.
+    this.socios.iniciarMonitorSalud(Math.max(5_000, Number(process.env.VUELOS_SALUD_INTERVALO_MS) || 10_000));
   }
 
   onModuleDestroy() {
     this.eventos.detener();
+    this.socios.detenerMonitorSalud();
   }
 
   handler() {
