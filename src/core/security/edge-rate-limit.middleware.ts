@@ -14,10 +14,18 @@ export class EdgeRateLimitMiddleware implements NestMiddleware {
     }
 
     const clientIp = this.extractClientIp(req);
-    const maxRequests = parseInt(process.env.SECURITY_RATE_LIMIT_MAX_PER_MINUTE || '180', 10);
     const windowMs = 60_000; // 1 minuto
 
-    const result = this.rateLimitService.check(`edge:ip:${clientIp}`, maxRequests, windowMs);
+    // Las consultas del panel de administración (GET con sesión) se recargan solas
+    // cada pocos segundos: tienen su propio cupo, para no gastar el de las
+    // búsquedas públicas (en la universidad muchos usuarios comparten la misma IP).
+    const esConsultaAdmin = req.method === 'GET' && /^\/api\/v\d+\/admin\//.test(path) && !!req.headers['authorization'];
+    const maxRequests = esConsultaAdmin
+      ? parseInt(process.env.SECURITY_RATE_LIMIT_ADMIN_PER_MINUTE || '1200', 10)
+      : parseInt(process.env.SECURITY_RATE_LIMIT_MAX_PER_MINUTE || '600', 10);
+    const clave = esConsultaAdmin ? `edge:admin:${clientIp}` : `edge:ip:${clientIp}`;
+
+    const result = this.rateLimitService.check(clave, maxRequests, windowMs);
 
     if (!result.allowed) {
       res.setHeader('Retry-After', result.retryAfterSeconds);

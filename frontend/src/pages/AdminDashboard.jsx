@@ -15,6 +15,8 @@ import { Panel5_ConsolaFiscalFacturas } from '../components/admin/Panel5_Consola
 import { Panel8_AuditoriaSagas } from '../components/admin/Panel8_AuditoriaSagas';
 import { PanelServiceMesh } from '../components/admin/PanelServiceMesh';
 import { cotizarCancelacion, cancelarReserva as cancelarReservaVuelo } from '../services/vuelosApi';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { ActualizadoHace } from '../components/admin/panelUtils';
 
 const C = {
   blue: '#006ce4', darkBlue: '#003b95', lightBlue: '#ebf3ff',
@@ -305,8 +307,8 @@ function ProveedoresTab({ refreshKey = 0 }) {
   const [syncing, setSyncing] = useState({});
   const [aviso, setAviso] = useState(null);
 
-  const cargarProveedores = useCallback(async () => {
-    setLoading(true);
+  const cargarProveedores = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setLoading(true);
     try {
       const { data } = await api.get('/nodes');
       const lista = Array.isArray(data) ? data : (data?.nodes || []);
@@ -321,6 +323,7 @@ function ProveedoresTab({ refreshKey = 0 }) {
       });
       setHealth(healthInit);
     } catch (err) {
+      if (silencioso) throw err; // la recarga automática conserva lo que ya está en pantalla
       // Sin datos del backend no se inventan proveedores: se muestra el error.
       setProveedores([]);
       setAviso({ tipo: 'error', texto: apiErrorMsg(err, 'No se pudo cargar la lista de proveedores') });
@@ -332,6 +335,8 @@ function ProveedoresTab({ refreshKey = 0 }) {
   useEffect(() => {
     cargarProveedores();
   }, [cargarProveedores, refreshKey]);
+
+  const autoProv = useAutoRefresh(cargarProveedores, 5000, { pausado: !!modal || !!detalle || guardando });
 
   // Ping de salud real HTTP al backend
   const checkHealth = async (prov) => {
@@ -533,10 +538,8 @@ function ProveedoresTab({ refreshKey = 0 }) {
             <strong>Proveedores y aliados.</strong> Registra aquí los sistemas de tus socios (Atracciones, Autos, Alojamientos, Vuelos). El estado de cada uno sale de un <strong>ping real</strong>: "Sin verificar" significa que todavía nadie lo ha comprobado.
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={cargarProveedores} disabled={loading} style={{ background: 'white', color: C.blue, border: `1px solid ${C.blue}`, borderRadius: 6, padding: '7px 14px', cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
-            {loading ? '⏳ Cargando...' : '↻ Recargar lista'}
-          </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ActualizadoHace ultima={autoProv.ultima} fallos={autoProv.fallos} cada={5000} />
           <button onClick={verificarTodos} disabled={verificandoTodos || loading || proveedores.length === 0} style={{ background: C.blue, color: 'white', border: 'none', borderRadius: 6, padding: '7px 14px', cursor: verificandoTodos ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
             {verificandoTodos ? '⏳ Verificando...' : '📡 Verificar todos (ping real)'}
           </button>
@@ -1658,6 +1661,7 @@ function FinanzasPanel({ refreshKey }) {
       setFin(data);
       setHistorial(Array.isArray(hist.data) ? hist.data : []);
     } catch (err) {
+      if (silencioso) throw err;
       setError(apiErrorMsg(err, 'No se pudieron cargar las finanzas'));
     } finally {
       setLoading(false);
@@ -1665,6 +1669,7 @@ function FinanzasPanel({ refreshKey }) {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar, refreshKey]);
+  useAutoRefresh(() => cargar(true), 30000, { pausado: !!aprobando });
 
   const aprobar = async (l) => {
     if (!window.confirm(`¿Aprobar el payout de $${fmt(l.pendiente)} para ${l.proveedor} (${fmtMes(l.periodo)})?\n\nSe registrará como pagado y quedará en auditoría.`)) return;
@@ -1674,7 +1679,7 @@ function FinanzasPanel({ refreshKey }) {
       const body = { vertical: l.vertical, periodo: l.periodo };
       const { data } = await api.post('/admin/payouts/aprobar', body);
       setAviso({ tipo: 'success', texto: `${data?.message || 'Payout aprobado.'} Referencia: ${data?.referencia || '—'}` });
-      await cargar(true);
+      await cargar(true).catch(() => {});
     } catch (err) {
       setAviso({ tipo: 'error', texto: `No se pudo aprobar el payout: ${apiErrorMsg(err)}` });
     } finally {
@@ -1871,13 +1876,14 @@ function SolicitudesProveedorPanel() {
   const [notas, setNotas] = useState({});
   const [guardando, setGuardando] = useState(null);
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) { setLoading(true); setError(null); }
     try {
       const { data } = await api.get('/admin/proveedores/solicitudes');
       setData({ items: Array.isArray(data?.items) ? data.items : [], resumen: data?.resumen || {} });
+      if (silencioso) setError(null);
     } catch (err) {
+      if (silencioso) throw err;
       setError(apiErrorMsg(err, 'No se pudieron cargar las solicitudes de proveedores'));
     } finally {
       setLoading(false);
@@ -1885,6 +1891,7 @@ function SolicitudesProveedorPanel() {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
+  const autoSol = useAutoRefresh(cargar, 5000, { pausado: !!guardando });
 
   const revisar = async (sol, accion) => {
     const nota = (notas[sol.id] || '').trim();
@@ -1927,7 +1934,7 @@ function SolicitudesProveedorPanel() {
               {label} {n ? `(${n})` : ''}
             </button>
           ))}
-          <button type="button" onClick={cargar} title="Recargar" style={{ background: C.white, border: `1px solid ${C.border}`, borderRadius: 20, padding: '4px 10px', cursor: 'pointer' }}>↻</button>
+          <ActualizadoHace ultima={autoSol.ultima} fallos={autoSol.fallos} cada={5000} />
         </div>
       </div>
       <div style={{ fontSize: '0.8rem', color: C.gray, marginBottom: 12 }}>
@@ -2005,14 +2012,15 @@ function SoporteTab() {
   const [savingId, setSavingId] = useState(null);
   const [errorTickets, setErrorTickets] = useState(null);
 
-  const fetchTickets = useCallback(async () => {
-    setLoadingTickets(true);
-    setErrorTickets(null);
+  const fetchTickets = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) { setLoadingTickets(true); setErrorTickets(null); }
     try {
       const { data, error } = await supabase.from('support_tickets').select('*').order('created_at', { ascending: false });
       if (error) throw error;
       setTickets(data || []);
+      if (silencioso) setErrorTickets(null);
     } catch (err) {
+      if (silencioso) throw err;
       setTickets([]);
       setErrorTickets(err?.message || 'No se pudieron leer los tickets.');
     } finally {
@@ -2021,6 +2029,7 @@ function SoporteTab() {
   }, []);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
+  useAutoRefresh(fetchTickets, 5000, { pausado: !!savingId });
 
   const updateTicket = async (ticketId, status, resolution) => {
     setSavingId(ticketId);
@@ -2058,7 +2067,7 @@ function SoporteTab() {
 
       <SectionTitle>🎫 Tickets de Soporte (Helpdesk)</SectionTitle>
 
-      {errorTickets && <Alerta tipo="error" onClose={() => setErrorTickets(null)}>{errorTickets} <button type="button" onClick={fetchTickets} style={{ marginLeft: 8, background: 'transparent', border: `1px solid ${C.red}`, color: C.red, borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>Reintentar</button></Alerta>}
+      {errorTickets && <Alerta tipo="error" onClose={() => setErrorTickets(null)}>{errorTickets} <button type="button" onClick={() => fetchTickets()} style={{ marginLeft: 8, background: 'transparent', border: `1px solid ${C.red}`, color: C.red, borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>Reintentar</button></Alerta>}
       {loadingTickets && (
         <div style={{ textAlign: 'center', padding: '30px', color: C.gray }}>Cargando tickets...</div>
       )}
@@ -2209,13 +2218,14 @@ function AuditoriaTab({ refreshKey }) {
   const [busqueda, setBusqueda] = useState('');
   const [pagina, setPagina] = useState(1);
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) { setLoading(true); setError(null); }
     try {
       const { data } = await api.get('/admin/auditoria', { params: { limit: 500 } });
       setItems(Array.isArray(data?.items) ? data.items : []);
+      if (silencioso) setError(null);
     } catch (err) {
+      if (silencioso) throw err;
       setError(apiErrorMsg(err, 'No se pudo cargar la auditoría'));
     } finally {
       setLoading(false);
@@ -2223,6 +2233,7 @@ function AuditoriaTab({ refreshKey }) {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar, refreshKey]);
+  useAutoRefresh(cargar, 5000);
   useEffect(() => { setPagina(1); }, [origen, categoria, busqueda]);
 
   const q = busqueda.trim().toLowerCase();
@@ -2602,7 +2613,7 @@ export function AdminDashboard() {
       // Todo sale de la base de datos (el backend ya incluye las 4 verticales).
       setStats(data);
     }
-    catch(err){setStats({kpis:{},ultimasReservas:[],estadosPorVertical:{},error:apiErrorMsg(err,'No se pudieron cargar las estadísticas')});}
+    catch(err){if(silent) return;setStats({kpis:{},ultimasReservas:[],estadosPorVertical:{},error:apiErrorMsg(err,'No se pudieron cargar las estadísticas')});}
     finally{if(!silent) setLoadingStats(false);setLastRefresh(new Date());}
   },[]);
 
@@ -2615,7 +2626,7 @@ export function AdminDashboard() {
       if(!lista) throw new Error('Respuesta inesperada del backend en /admin/users');
       setUsers(lista);
     }
-    catch(err){setUsers([]);setUsersError(err?.response?apiErrorMsg(err,'No se pudieron cargar los usuarios'):(err?.message||apiErrorMsg(err)));}
+    catch(err){if(silent) return;setUsers([]);setUsersError(err?.response?apiErrorMsg(err,'No se pudieron cargar los usuarios'):(err?.message||apiErrorMsg(err)));}
     finally{if(!silent) setLoadingUsers(false);}
   },[]);
 
@@ -2626,7 +2637,7 @@ export function AdminDashboard() {
       const{data}=await api.get('/admin/reservas');
       setReservas({vuelos:data?.vuelos||[],autos:data?.autos||[],atracciones:data?.atracciones||[],hospedaje:data?.hospedaje||[]});
     }
-    catch(err){setReservas({vuelos:[],autos:[],atracciones:[],hospedaje:[]});setReservasError(apiErrorMsg(err,'No se pudieron cargar las reservas'));}
+    catch(err){if(silent) return;setReservas({vuelos:[],autos:[],atracciones:[],hospedaje:[]});setReservasError(apiErrorMsg(err,'No se pudieron cargar las reservas'));}
     finally{if(!silent) setLoadingReservas(false);}
   },[]);
 
@@ -2636,22 +2647,11 @@ export function AdminDashboard() {
     if(activeTab==='gestion'){fetchUsers();fetchReservas();}
   },[activeTab]);
 
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      await Promise.allSettled([
-        fetchStats(true),
-        checkServices(),
-        activeTab === 'gestion' ? Promise.allSettled([fetchUsers(true), fetchReservas(true)]) : Promise.resolve(),
-      ]);
-      setRefreshKey(k => k + 1);
-      setLastRefresh(new Date());
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
+  // Recarga automática y silenciosa (sin botón "Refrescar").
+  useAutoRefresh(() => fetchStats(true), 15000);
+  useAutoRefresh(() => checkServices(), 30000);
+  useAutoRefresh(() => fetchReservas(true), 5000, { pausado: activeTab !== 'gestion' });
+  useAutoRefresh(() => fetchUsers(true), 30000, { pausado: activeTab !== 'gestion' });
 
   return (
     <div style={{minHeight:'100vh',background:C.bg,fontFamily:"'Segoe UI', system-ui, sans-serif"}}>
@@ -2665,33 +2665,7 @@ export function AdminDashboard() {
             </div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:12}}>
-            {lastRefresh&&<span style={{fontSize:'0.75rem',opacity:0.7}}>Actualizado: {lastRefresh.toLocaleTimeString('es-EC')}</span>}
-            <button 
-              onClick={handleRefresh} 
-              disabled={isRefreshing}
-              style={{
-                background: isRefreshing ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.15)',
-                border: '1px solid rgba(255,255,255,0.3)',
-                color: 'white',
-                padding: '6px 14px',
-                borderRadius: 6,
-                cursor: isRefreshing ? 'wait' : 'pointer',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s',
-              }}
-            >
-              <span style={{
-                display: 'inline-block',
-                animation: isRefreshing ? 'spin 0.8s linear infinite' : 'none'
-              }}>
-                ↻
-              </span>
-              {isRefreshing ? 'Refrescando…' : '↻ Refrescar'}
-            </button>
+            {lastRefresh&&<span style={{fontSize:'0.75rem',opacity:0.7}}>Actualizado: {lastRefresh.toLocaleTimeString('es-EC')} · se actualiza solo</span>}
           </div>
         </div>
       </div>

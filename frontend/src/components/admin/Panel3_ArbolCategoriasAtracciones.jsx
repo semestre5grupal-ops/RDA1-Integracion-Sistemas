@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import { mensajeError, ErrorBox } from './panelUtils';
+import { mensajeError, ErrorBox, ActualizadoHace } from './panelUtils';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
 /**
  * Categorías de atracciones (árbol de la base: GET /atracciones/categorias/arbol)
@@ -28,13 +29,14 @@ export function Panel3_ArbolCategoriasAtracciones({ refreshKey = 0 }) {
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState(null);
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setLoading(true);
     setError(null);
     try {
       const { data } = await api.get('/atracciones/categorias/arbol');
       setArbol(Array.isArray(data) ? data : []);
     } catch (e) {
+      if (silencioso) throw e;
       setArbol([]);
       setError(mensajeError(e, 'No se pudo leer el árbol de categorías.'));
     } finally {
@@ -43,6 +45,9 @@ export function Panel3_ArbolCategoriasAtracciones({ refreshKey = 0 }) {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar, refreshKey]);
+
+  // Se actualiza solo cada 30 s (sin botón).
+  const auto = useAutoRefresh(cargar, 30000);
 
   const crear = async (e) => {
     e.preventDefault();
@@ -90,9 +95,7 @@ export function Panel3_ArbolCategoriasAtracciones({ refreshKey = 0 }) {
     <div style={{ background: '#fff', border: '1px solid #e7e7e7', borderRadius: 8, padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <span style={{ fontSize: '0.82rem', color: '#52514e' }}><strong>{total}</strong> categorías en la base</span>
-        <button type="button" onClick={cargar} disabled={loading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: 6, cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem' }}>
-          {loading ? 'Cargando…' : '↻ Actualizar'}
-        </button>
+        <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={30000} />
       </div>
       <ErrorBox error={error} onRetry={cargar} />
 

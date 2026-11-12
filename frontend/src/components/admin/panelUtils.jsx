@@ -47,3 +47,28 @@ export function aLista(res, ...claves) {
   }
   return [];
 }
+
+/**
+ * Indicador de recarga automática (reemplaza a los botones "Actualizar").
+ * `ultima`: hora de la última recarga correcta; `fallos`: fallos seguidos.
+ */
+export function ActualizadoHace({ ultima, fallos = 0, cada }) {
+  const [ahora, setAhora] = React.useState(Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const s = Math.max(0, Math.round((ahora - ultima) / 1000));
+  const texto = s < 2 ? 'Actualizado ahora' : s < 60 ? `Actualizado hace ${s} s` : `Actualizado hace ${Math.floor(s / 60)} min`;
+  const color = fallos ? '#b45309' : '#16a34a';
+  return (
+    <span
+      role="status"
+      title={cada ? `Se actualiza solo cada ${Math.round(cada / 1000)} s` : 'Se actualiza solo'}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', color: '#64748b', whiteSpace: 'nowrap' }}
+    >
+      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: color }} />
+      {fallos ? `Sin conexión · reintentando (${texto.toLowerCase()})` : texto}
+    </span>
+  );
+}

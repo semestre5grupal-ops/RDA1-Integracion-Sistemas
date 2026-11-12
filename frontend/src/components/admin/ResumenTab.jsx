@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { ActualizadoHace } from './panelUtils';
 
 /**
  * Tablero "Resumen" del admin, al estilo del extranet de un Booking real.
@@ -377,13 +379,14 @@ export function ResumenTab({ refreshKey = 0, onIrA }) {
   const [error, setError] = useState(null);
   const [verTabla, setVerTabla] = useState(false);
 
-  const cargar = useCallback(async () => {
-    setCargando(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setCargando(true);
     setError(null);
     try {
       const { data } = await api.get('/admin/metricas', { params: { dias } });
       setDatos(data);
     } catch (e) {
+      if (silencioso) throw e;
       setError(e?.response?.data?.detail || e?.response?.data?.message || e?.message || 'No se pudieron cargar las métricas.');
     } finally {
       setCargando(false);
@@ -393,6 +396,9 @@ export function ResumenTab({ refreshKey = 0, onIrA }) {
   useEffect(() => {
     cargar();
   }, [cargar, refreshKey]);
+
+  // Se actualiza solo cada 15 s (sin botón).
+  const auto = useAutoRefresh(cargar, 15000);
 
   const puntos = useMemo(() => (datos?.serieDiaria ? agrupar(datos.serieDiaria, datos.dias) : []), [datos]);
   const k = datos?.kpis || {};
@@ -427,10 +433,7 @@ export function ResumenTab({ refreshKey = 0, onIrA }) {
               </button>
             ))}
           </div>
-          <button type="button" onClick={cargar} disabled={cargando}
-            style={{ border: `1px solid ${T.border}`, background: T.surface, borderRadius: 8, padding: '7px 10px', cursor: 'pointer', fontSize: '0.8rem' }}>
-            {cargando ? '⏳' : '↻'} Actualizar
-          </button>
+          <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={15000} />
         </div>
       </div>
 

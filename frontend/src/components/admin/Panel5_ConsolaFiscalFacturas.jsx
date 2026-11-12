@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
-import { mensajeError, ErrorBox } from './panelUtils';
+import { mensajeError, ErrorBox, ActualizadoHace } from './panelUtils';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
 /**
  * Facturas emitidas (schema_facturacion.facturas_encabezado), con búsqueda,
@@ -29,13 +30,14 @@ export function Panel5_ConsolaFiscalFacturas({ refreshKey = 0 }) {
   const [busqueda, setBusqueda] = useState('');
   const [detalle, setDetalle] = useState(null);
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setLoading(true);
     setError(null);
     try {
       const { data } = await api.get('/facturas', { params: { limit: 200, ...(estado ? { estado } : {}), ...(busqueda ? { q: busqueda } : {}) } });
       setDatos({ items: Array.isArray(data?.items) ? data.items : [], total: data?.total ?? 0, totales: data?.totales ?? null });
     } catch (e) {
+      if (silencioso) throw e;
       setDatos({ items: [], total: 0, totales: null });
       setError(mensajeError(e, 'No se pudieron leer las facturas.'));
     } finally {
@@ -44,6 +46,9 @@ export function Panel5_ConsolaFiscalFacturas({ refreshKey = 0 }) {
   }, [estado, busqueda]);
 
   useEffect(() => { cargar(); }, [cargar, refreshKey]);
+
+  // Se actualiza solo cada 5 s (sin botón).
+  const auto = useAutoRefresh(cargar, 5000);
 
   const abrir = async (f) => {
     setDetalle({ cargando: true, numero: f.numero_factura });
@@ -67,9 +72,7 @@ export function Panel5_ConsolaFiscalFacturas({ refreshKey = 0 }) {
             <button key={id || 'todos'} type="button" onClick={() => setEstado(id)} style={{ padding: '6px 12px', borderRadius: 20, border: `1px solid ${estado === id ? '#006ce4' : '#e7e7e7'}`, background: estado === id ? '#ebf3ff' : '#fff', color: estado === id ? '#003b95' : '#1a1a1a', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}>{label}</button>
           ))}
         </form>
-        <button type="button" onClick={cargar} disabled={loading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: 6, cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem' }}>
-          {loading ? 'Cargando…' : '↻ Actualizar'}
-        </button>
+        <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={5000} />
       </div>
 
       <ErrorBox error={error} onRetry={cargar} />

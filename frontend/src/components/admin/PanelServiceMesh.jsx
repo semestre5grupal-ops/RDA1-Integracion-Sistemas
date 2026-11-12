@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { ActualizadoHace } from './panelUtils';
 
 /**
  * Panel de Malla de Servicios y API Gateway — Semana 08: API Gateways y Service Mesh
@@ -110,7 +112,14 @@ export function PanelServiceMesh({ refreshKey = 0 }) {
   const [manifiestoIstio, setManifiestoIstio] = useState('');
   const [copiado, setCopiado] = useState(false);
 
-  const cargar = useCallback(async () => {
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (silencioso) {
+      // Recarga automática: solo el estado de la malla; los manifiestos no cambian.
+      const { data } = await api.get('/admin/mesh/health');
+      setDatos(data);
+      setError(null);
+      return;
+    }
     setCargando(true);
     setError(null);
     try {
@@ -132,6 +141,9 @@ export function PanelServiceMesh({ refreshKey = 0 }) {
   useEffect(() => {
     cargar();
   }, [cargar, refreshKey]);
+
+  // Se actualiza sola cada 5 s (sin botón).
+  const auto = useAutoRefresh(cargar, 5000);
 
   const resetCb = async (servicioId) => {
     try {
@@ -169,22 +181,7 @@ export function PanelServiceMesh({ refreshKey = 0 }) {
             Control de Tráfico Norte-Sur (Kong Gateway DB-less) y Tráfico Este-Oeste (Service Mesh con Sidecars Envoy, mTLS Zero Trust y Circuit Breakers).
           </div>
         </div>
-        <button
-          type="button"
-          onClick={cargar}
-          disabled={cargando}
-          style={{
-            border: `1px solid ${T.border}`,
-            background: T.surface,
-            borderRadius: 8,
-            padding: '7px 14px',
-            cursor: 'pointer',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-          }}
-        >
-          {cargando ? '⏳ Consultando...' : '↻ Actualizar Malla'}
-        </button>
+        <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={5000} />
       </div>
 
       {error && (
