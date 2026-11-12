@@ -136,22 +136,20 @@ export class DilanAtraccionesAdapter {
     const telefonoAdaptado = this.normalizarTelefonoParaDilan(payload.customer_phone);
     const documentoAdaptado = this.normalizarDocumentoParaDilan(payload.document_id);
 
-    // Mapeo del payload de Booking al esquema de Dilan
+    // Mapeo canónico OpenAPI v3 de Booking al esquema de Dilan (Descubre EC)
     const dilanPayload = {
-      id_atraccion: payload.atraccionId,
-      fecha_uso: payload.date,
-      hora_inicio: payload.time || '10:00:00',
-      items_tickets: [
-        { tipo: 'ADULTO', cantidad: payload.adult_count || 1 },
-        ...(payload.child_count > 0 ? [{ tipo: 'NINO', cantidad: payload.child_count }] : [])
-      ],
-      datos_cliente: {
-        nombres: payload.customer_name,
+      atraccion_id: payload.atraccionId,
+      fecha: payload.date,
+      hora: payload.time || '10:00 a.m.',
+      adult_count: payload.adult_count || 1,
+      child_count: payload.child_count || 0,
+      customer: {
+        full_name: payload.customer_name,
         email: payload.customer_email,
-        telefono: telefonoAdaptado,
-        cedula_pasaporte: documentoAdaptado,
-        observaciones: payload.special_requirements || ''
-      }
+        phone: telefonoAdaptado,
+        document_id: documentoAdaptado
+      },
+      payment_method: 'SOA_BOOKING_GATEWAY'
     };
 
     try {
@@ -297,15 +295,18 @@ export class DilanAtraccionesAdapter {
 
   private transformDilanReservaResponseToBooking(dilanRes: any, req: BookingReservaPayload, idempotencyKey: string): any {
     return {
-      reservation_id: dilanRes.codigo_reserva || dilanRes.id || idempotencyKey,
-      status: 'CONFIRMED',
+      reservation_id: dilanRes.reservation_code || dilanRes.pnr || dilanRes.codigo_reserva || dilanRes.id || idempotencyKey,
+      pnr: dilanRes.reservation_code || dilanRes.pnr || dilanRes.codigo_reserva || null,
+      status: dilanRes.status || dilanRes.estado || 'CONFIRMED',
       ticket_count: req.ticket_count,
-      total_price: dilanRes.total || (req.adult_count * 55 + req.child_count * 27.5),
+      total_price: dilanRes.precio_total || dilanRes.total || (req.adult_count * 55 + req.child_count * 27.5),
       date: req.date,
       time: req.time,
       customer_email: req.customer_email,
-      guia_asignado: dilanRes.guia || 'Carlos Villacís (Guía Oficial Certificado)',
-      voucher_url: dilanRes.voucher_url || null
+      guia_asignado: dilanRes.guia_asignado || dilanRes.guia || 'Carlos Villacís (Guía Oficial Certificado)',
+      voucher_url: dilanRes.voucher_qr_url || dilanRes.voucher_url || null,
+      voucher_qr_url: dilanRes.voucher_qr_url || null,
+      ics_calendar_url: dilanRes.ics_calendar_url || null
     };
   }
 
