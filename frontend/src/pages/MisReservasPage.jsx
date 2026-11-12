@@ -28,6 +28,8 @@ import {
 } from '../components/BookingIcons';
 import { resolverImagenAtraccion } from '../utils/atraccionImagenes';
 import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
+import { BoletoVuelo } from '../components/vuelos/BoletoVuelo';
+import { CheckinVuelo } from '../components/vuelos/CheckinVuelo';
 import { SpinnerVuelos } from '../components/SpinnerVuelos';
 import { useEtapasCarga } from '../hooks/useEtapasCarga';
 
@@ -1829,6 +1831,9 @@ export function MisReservasPage() {
                     )}
                   </div>
 
+                  {selectedReserva.tipo === 'vuelo' ? (
+                    <BoletoVuelo reserva={selectedReserva} />
+                  ) : (<>
                   <div className="modal-reserva-pnr-box">
                     <div>
                       <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', fontWeight: 600, color: '#64748b', letterSpacing: '0.5px' }}>
@@ -1884,6 +1889,7 @@ export function MisReservasPage() {
                       <div className="modal-reserva-grid-total">{convertPrice(selectedReserva.totalRaw)}</div>
                     </div>
                   </div>
+                  </>)}
 
                   {avisoDescarga && (
                     <div style={{ padding: '10px 14px', borderRadius: '6px', fontSize: '0.85rem', background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
@@ -2497,57 +2503,14 @@ export function MisReservasPage() {
 
               {/* VERTICAL: VUELOS */}
               {checkinReserva.tipo === 'vuelo' && (
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '1.05rem', color: '#1a1a1a' }}>
-                    {checkinReserva.titulo}
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '16px' }}>
-                    Asignación de asiento de cabina y emisión de pase de abordar digital con PNR.
-                  </p>
-
-                  {checkinStepResult?.success ? (
-                    <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '1.5rem' }}>✈️</span>
-                      <strong style={{ display: 'block', color: '#047857', marginTop: '6px' }}>
-                        {checkinStepResult.mensaje}
-                      </strong>
-                      <div style={{ margin: '14px 0', background: '#fff', padding: '12px', borderRadius: '6px', border: '1px dashed #003580' }}>
-                        <div style={{ fontSize: '0.9rem', color: '#334155' }}>Asiento Asignado: <strong>{checkinStepResult.asiento}</strong></div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#003580', marginTop: '4px' }}>
-                          PNR: {checkinStepResult.pnr}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {(() => {
-                        const v = ventanaCheckinVuelo(checkinReserva);
-                        return v.estado === 'antes' ? (
-                          <div role="note" style={{ background: '#eff6ff', border: '1px solid #93c5fd', color: '#1e3a8a', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
-                            El check-in de este vuelo abre el <strong>{v.texto}</strong> (48 horas antes de la salida). Vuelve a partir de esa hora.
-                          </div>
-                        ) : null;
-                      })()}
-                      {checkinStepResult?.vertical === 'vuelo' && checkinStepResult.success === false && (
-                        <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
-                          {checkinStepResult.mensaje}
-                        </div>
-                      )}
-                      {(() => {
-                        const antes = ventanaCheckinVuelo(checkinReserva).estado === 'antes';
-                        return (
-                          <button
-                            onClick={() => handleExecuteCheckin(checkinReserva)}
-                            disabled={checkinProcessing || antes}
-                            style={{ width: '100%', background: antes ? '#94a3b8' : '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: antes ? 'not-allowed' : 'pointer' }}
-                          >
-                            {checkinProcessing ? <><SpinnerVuelos />{etapaCheckinVuelo || 'Haciendo check-in…'}</> : antes ? 'Check-in aún no disponible' : '🎫 Hacer check-in'}
-                          </button>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
+                <CheckinVuelo
+                  reserva={checkinReserva}
+                  ventana={ventanaCheckinVuelo(checkinReserva)}
+                  procesando={checkinProcessing}
+                  etapa={etapaCheckinVuelo}
+                  resultado={checkinStepResult?.vertical === 'vuelo' ? checkinStepResult : null}
+                  onCheckin={() => handleExecuteCheckin(checkinReserva)}
+                />
               )}
             </div>
           </div>
