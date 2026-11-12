@@ -172,6 +172,27 @@ export function inferirDescripcionCamas(camasRaw: unknown, nombreTipo = '', capa
 
   return '1 cama doble grande';
 }
+
+export function normalizarRegimen(reg?: string | null): string {
+  if (!reg) return 'Solo habitación';
+  const r = String(reg).trim().toUpperCase();
+  const map: Record<string, string> = {
+    SOLO_HABITACION: 'Solo habitación',
+    SOLO_ALOJAMIENTO: 'Solo alojamiento',
+    ROOM_ONLY: 'Solo habitación',
+    DESAYUNO: 'Desayuno incluido',
+    DESAYUNO_INCLUIDO: 'Desayuno incluido',
+    BED_AND_BREAKFAST: 'Desayuno incluido',
+    MEDIA_PENSION: 'Media pensión',
+    HALF_BOARD: 'Media pensión',
+    PENSION_COMPLETA: 'Pensión completa',
+    FULL_BOARD: 'Pensión completa',
+    TODO_INCLUIDO: 'Todo incluido',
+    ALL_INCLUSIVE: 'Todo incluido',
+  };
+  return map[r] || reg;
+}
+
 const desempacar = (b: any) => (b && typeof b === 'object' && b.data && !Array.isArray(b.data) ? b.data : b);
 
 @Injectable()
@@ -199,7 +220,7 @@ export class AlojamientosSociosService {
 
   private cacheMs(): number {
     const v = Number(process.env.ALOJAMIENTOS_SOCIOS_CACHE_MS);
-    return Number.isFinite(v) && v >= 0 ? v : 60_000;
+    return Number.isFinite(v) && v >= 0 ? v : 10_000;
   }
 
   /** Base del socio sin barra final. Acepta `.../api/v2` o `.../api/v2/alojamientos`. */
@@ -633,8 +654,8 @@ export class AlojamientosSociosService {
           tamano_m2: num(t.tamanoM2 ?? t.metrosCuadrados),
           precio_noche: money(t.precioBaseNoche ?? t.precioPorNoche ?? plan?.precioBaseNoche) ?? 0,
           cantidad: num(t.habitacionesTotales ?? t.cantidad ?? t.cantidadDisponible) ?? 0,
-          regimen: plan?.regimen || t.regimen || null,
-          regimen_texto: plan?.regimen || t.regimen || null,
+          regimen: normalizarRegimen(plan?.regimen || t.regimen),
+          regimen_texto: normalizarRegimen(plan?.regimen || t.regimen),
           cancelacion_gratuita_horas: horas,
           cancelacion_texto: descPol,
           reembolsable: esReembolsable,
@@ -695,7 +716,7 @@ export class AlojamientosSociosService {
           disponible: o.estaDisponible ?? o.disponible ?? remanentes > 0,
           precioNoche: money(o.precioNoche ?? o.precio_noche ?? o.precioBaseNoche) ?? t?.precio_noche ?? null,
           precioTotal: money(o.precioTotalEstancia ?? o.precioTotal),
-          regimen: o.regimen || t?.regimen || null,
+          regimen: normalizarRegimen(o.regimen || t?.regimen),
           capacidadAdultos: t?.capacidad_adultos ?? num(o.capacidadAdultos) ?? null,
           capacidadNinos: t?.capacidad_ninos ?? num(o.capacidadNinos) ?? null,
           totalHabitaciones: t?.cantidad ?? num(o.total_rooms ?? o.totalHabitaciones) ?? null,
@@ -812,8 +833,8 @@ export class AlojamientosSociosService {
           plan_tarifa: o.plan,
           room_name: o.nombre,
           descripcion: null,
-          meal_plan: o.regimen,
-          regimen: o.regimen,
+          meal_plan: normalizarRegimen(o.regimen),
+          regimen: normalizarRegimen(o.regimen),
           cancellation_type: o.cancelacionHoras !== null
             ? `Cancelación gratuita hasta ${o.cancelacionHoras} horas antes`
             : 'Cancelación gratuita hasta 48 horas antes',

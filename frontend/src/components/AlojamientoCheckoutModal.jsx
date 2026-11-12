@@ -20,6 +20,7 @@ function cedulaValida(c) {
 import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { formatearFecha } from '../services/formato';
+import { formatearRegimen } from '../utils/regimenFormato';
 import { OfflineReservaModal } from './OfflineReservaModal';
 import { ModalReservaExistente, reservasQueSeSolapan, esAvisoDuplicado } from './ModalReservaExistente';
 import {
@@ -1258,7 +1259,7 @@ export function AlojamientoCheckoutModal({
                       </span>
                       {tipoHabitacion?.meal_plan && (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          <CheckmarkIcon size={14} color="#008009" /> {tipoHabitacion.meal_plan}
+                          <CheckmarkIcon size={14} color="#008009" /> {formatearRegimen(tipoHabitacion.meal_plan)}
                         </span>
                       )}
                       {Array.isArray(tipoHabitacion?.amenidades) && tipoHabitacion.amenidades.length > 0 ? (
