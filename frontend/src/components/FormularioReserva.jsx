@@ -10,6 +10,7 @@ import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { totalBooking } from '../utils/precioBooking';
 import { useTelemetry } from '../hooks/useTelemetry';
+import { PasarelaPago } from './vuelos/PasarelaPago';
 import { SpinnerVuelos } from './SpinnerVuelos';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
@@ -1259,36 +1260,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           )}
 
           {pasoActual === 3 && (
-            <div className="paso-pago" style={{ marginTop: '20px' }}>
-              <h3 className="modal-title-secundario" style={{ fontSize: '1.25rem', marginBottom: '10px' }}>Pago Simulado</h3>
-              <p className="modal-nota-bloque">
-                El total a pagar es de <strong>{formatearMoneda(totalBooking(hold), hold.lockedPrice?.currency)}</strong>.
-              </p>
-              {hold.bookingPrice && (
-                <dl className="modal-nota-bloque" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '4px 16px', margin: '8px 0 0' }}>
-                  <dt>Tarifa de la aerolínea (impuestos incluidos)</dt>
-                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.airlineTotal, hold.bookingPrice.currency)}</dd>
-                  <dt>Cargo por servicio Booking ({hold.bookingPrice.serviceFeePercentage}%, no reembolsable)</dt>
-                  <dd style={{ margin: 0, textAlign: 'right' }}>{formatearMoneda(hold.bookingPrice.serviceFee, hold.bookingPrice.currency)}</dd>
-                </dl>
-              )}
-              
-              <div className="tarjeta-simulada" style={{ background: '#f5f7f9', padding: '20px', borderRadius: '12px', border: '1px solid #e1e4e8', marginTop: '20px' }}>
-                <div className="campo">
-                  <label className="modal-label">Número de tarjeta</label>
-                  <input className="modal-input" type="text" placeholder="4111 1111 1111 1111" defaultValue="4111 1111 1111 1111" readOnly style={{ background: 'white' }} />
-                </div>
-                <div className="rejilla-campos" style={{ marginTop: '16px' }}>
-                  <div className="campo">
-                    <label className="modal-label">Vencimiento</label>
-                    <input className="modal-input" type="text" placeholder="MM/AA" defaultValue="12/28" readOnly style={{ background: 'white' }} />
-                  </div>
-                  <div className="campo">
-                    <label className="modal-label">CVC</label>
-                    <input className="modal-input" type="text" placeholder="123" defaultValue="123" readOnly style={{ background: 'white' }} />
-                  </div>
-                </div>
-              </div>
+            <div className="paso-pago">
+              <PasarelaPago hold={hold} lista={lista} />
             </div>
           )}
 
@@ -1328,7 +1301,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                 <button type="submit" className="btn-primario" disabled={enviando}>
                   {pasoActual === 1 && 'Continuar a Extras'}
                   {pasoActual === 2 && (!user ? 'Inicia sesión para continuar' : 'Continuar al Pago')}
-                  {pasoActual === 3 && (enviando ? <><SpinnerVuelos />{etapaPago || 'Procesando pago…'}</> : 'Confirmar pago')}
+                  {pasoActual === 3 && (enviando ? <><SpinnerVuelos />{etapaPago || 'Procesando pago…'}</> : <>🔒 Pagar {formatearMoneda(totalBooking(hold), hold?.bookingPrice?.currency ?? hold?.lockedPrice?.currency)}</>)}
                 </button>
               )}
             </div>
