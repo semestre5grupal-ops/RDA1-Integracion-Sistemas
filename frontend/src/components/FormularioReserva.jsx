@@ -285,6 +285,13 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   const [etapaPago, setEtapaPago] = useState(null);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
+  /** Asientos que esta compra eligió alguna vez, por tramo: si la aerolínea aún los muestra
+   *  "apartados" (hold anterior que todavía no suelta), siguen siendo de esta compra. */
+  const propiosRecientes = useRef({});
+  /** Cambios de asiento enviados a la aerolínea que todavía no terminan. */
+  const asientosPendientes = useRef(0);
+  /** Solo se envía la última selección: los cambios intermedios en cola se saltan. */
+  const ultimaPeticionAsientos = useRef(0);
   /** Pago en curso: mientras tanto no se revisa el mapa (el asiento ya va en la reserva). */
   const pagandoRef = useRef(false);
   /** El último pago no tuvo respuesta (tardó demasiado): pudo completarse en la aerolínea. */
@@ -329,6 +336,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     setPasoActual(1);
     claveIdempotencia.current = uuidv4();
     pagoIncierto.current = false;
+    propiosRecientes.current = {};
     setErrorGeneral(null);
     setErrores({});
     setMapas({}); // hold nuevo: el mapa de asientos se vuelve a pedir
@@ -379,7 +387,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'cargando' } }));
       try {
         const data = await obtenerMapaAsientos(hold.offerId, t.segmentId, hold.holdId);
-        setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'ok', asientos: asientosDeCabina(data, t.cabina) } }));
+        setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'ok', asientos: conPropios(asientosDeCabina(data, t.cabina), propiosRecientes.current[t.segmentId]) } }));
       } catch {
         setMapas((m) => ({ ...m, [t.segmentId]: { estado: 'error' } }));
       }
@@ -410,7 +418,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     await Promise.all(tramos.map(async (t) => {
       try {
         const data = await obtenerMapaAsientos(hold.offerId, t.segmentId, hold.holdId);
-        frescos[t.segmentId] = asientosDeCabina(data, t.cabina);
+        frescos[t.segmentId] = conPropios(asientosDeCabina(data, t.cabina), propiosRecientes.current[t.segmentId]);
       } catch {
         // sin mapa no se puede comprobar: la aerolínea igual rechaza un asiento ocupado (409)
       }
@@ -422,13 +430,23 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         return n;
       });
     }
+    // Otra compra de Booking lo tiene bloqueado (fuente confiable, ya excluye esta compra).
+    let ajenos = null;
+    try {
+      ajenos = await consultarBloqueosAsientos(hold.offerId, hold.holdId);
+    } catch {
+      ajenos = null;
+    }
     const tomados = [];
     listaRef.current.forEach((p, i) => {
       for (const [seg, numero] of Object.entries(p.asientos ?? {})) {
+        if (!numero) continue;
         const filas = frescos[seg];
-        if (!filas || !numero) continue;
-        const asiento = filas.flatMap((f) => f.asientos).find((a) => a.numero === numero);
-        if (asiento && !asiento.libre) tomados.push({ indice: i, segmentId: seg, numero });
+        const asiento = filas?.flatMap((f) => f.asientos).find((a) => a.numero === numero);
+        // "Apartado" (HELD) en la aerolínea puede ser esta misma compra mientras rehace el hold:
+        // solo cuenta como tomado si está vendido o si otra compra de Booking lo bloqueó.
+        const deOtraCompra = (ajenos ?? []).some((l) => l.segmentId === seg && l.seatNumber === numero);
+        if ((asiento && asiento.vendido) || deOtraCompra) tomados.push({ indice: i, segmentId: seg, numero });
       }
     });
     return tomados;
@@ -481,7 +499,17 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     ultimaFirma.current = firma;
     const t = setTimeout(() => {
       // Una petición a la vez: si el hold se rehace, la siguiente usa el nuevo.
+      for (const a of elegidos) {
+        (propiosRecientes.current[a.segmentId] ??= new Set()).add(a.seatNumber);
+      }
+      asientosPendientes.current += 1;
+      const idPeticion = ++ultimaPeticionAsientos.current;
       colaAsientos.current = colaAsientos.current.then(async () => {
+      // Si mientras esperaba en la cola el cliente cambió otra vez, se salta: va la selección más nueva.
+      if (idPeticion !== ultimaPeticionAsientos.current) {
+        asientosPendientes.current = Math.max(0, asientosPendientes.current - 1);
+        return;
+      }
       const holdActual = holdRef.current;
       try {
         const r = await bloquearAsientos(holdActual.offerId, holdActual.holdId, elegidos.map(({ segmentId, seatNumber }) => ({ segmentId, seatNumber })), holdActual.expiresAt);
@@ -524,6 +552,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           });
         }
         // Otros errores (red, hold vencido): la aerolínea igual valida el asiento al reservar.
+      } finally {
+        asientosPendientes.current = Math.max(0, asientosPendientes.current - 1);
       }
       });
     }, 250);
@@ -575,7 +605,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
     const id = setInterval(async () => {
       // Durante el pago (o si el último pago quedó sin respuesta) no se revisa: el asiento
       // puede salir "ocupado" justamente porque ya es de esta reserva.
-      if (revisando || pagandoRef.current || pagoIncierto.current) return;
+      if (revisando || pagandoRef.current || pagoIncierto.current || asientosPendientes.current > 0) return;
       revisando = true;
       try {
         const tomados = await revisarAsientos();
@@ -1347,9 +1377,21 @@ function asientosDeCabina(data, cabina) {
     asientos: (r.seats ?? []).map((a) => ({
       numero: a.seatNumber,
       libre: a.isAvailable !== false && String(a.status ?? 'AVAILABLE').toUpperCase() === 'AVAILABLE',
+      // Vendido de verdad (no un apartado temporal que puede ser de esta misma compra).
+      vendido: a.isAvailable === false && String(a.status ?? '').toUpperCase() !== 'HELD',
+      apartado: String(a.status ?? '').toUpperCase() === 'HELD',
       extra: (a.characteristics ?? []).includes('EXTRA_LEGROOM'),
       ventana: (a.characteristics ?? []).includes('WINDOW'),
     })),
+  }));
+}
+
+/** Los asientos que esta compra apartó (y la aerolínea todavía muestra HELD) se ven libres para ella. */
+function conPropios(filas, propios) {
+  if (!propios?.size) return filas;
+  return filas.map((f) => ({
+    ...f,
+    asientos: f.asientos.map((a) => (!a.libre && a.apartado && propios.has(a.numero) ? { ...a, libre: true } : a)),
   }));
 }
 
