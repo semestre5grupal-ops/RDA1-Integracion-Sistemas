@@ -271,38 +271,6 @@ export function MisReservasPage() {
             mensaje: datos.detail || datos.title || 'La aerolínea no aceptó el check-in. Inténtalo de nuevo.',
           });
         }
-      } else if (reserva.tipo === 'alojamiento') {
-        try {
-          const idODoc = reserva.id || reserva.pnr;
-          const res = await api.post(`/alojamientos/orders/${encodeURIComponent(idODoc)}/checkin`, {
-            forzar_liberacion: true,
-          }).then((r) => r.data).catch(async () => {
-            return api.post(`/alojamientos/reservas/${encodeURIComponent(idODoc)}/checkin`, {
-              forzar_liberacion: true,
-            }).then((r) => r.data);
-          });
-
-          setCheckinStepResult({
-            vertical: 'alojamiento',
-            success: true,
-            mensaje: res.mensaje || '¡Check-in completado exitosamente! Llave digital y acceso habilitados.',
-            habitacion: res.habitacion_asignada || 'Habitación 204',
-            claveDigital: res.clave_acceso_digital || 'KEY-8492-QTO',
-            pnr: reserva.pnr,
-          });
-          updateCheckinState(reserva.id || reserva.pnr, 'CHECKED_IN', {
-            habitacion_asignada: res.habitacion_asignada,
-            clave_acceso_digital: res.clave_acceso_digital,
-          });
-          cargarTodasLasReservas(true);
-        } catch (fallo) {
-          const datos = fallo?.response?.data ?? {};
-          setCheckinStepResult({
-            vertical: 'alojamiento',
-            success: false,
-            mensaje: datos.mensaje || datos.detail || 'No se pudo realizar el check-in digital. Verifica el horario de entrada en el alojamiento.',
-          });
-        }
       }
     } finally {
       setCheckinProcessing(false);
@@ -1574,7 +1542,7 @@ export function MisReservasPage() {
                       <div className="trip-card-price">
                         {convertPrice(r.totalRaw)}
                       </div>
-                      {r.status !== 'CANCELLED' && r.status !== 'CHECKED_IN' && r.status !== 'CONFIRMADO_ASISTIDO' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                      {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
                         <button
                           type="button"
                           className="btn-card-checkin"
@@ -1614,7 +1582,7 @@ export function MisReservasPage() {
 
                         {activeMenuId === r.id && (
                           <div className="trip-dropdown-menu">
-                            {r.status !== 'CANCELLED' && r.status !== 'CHECKED_IN' && r.status !== 'CONFIRMADO_ASISTIDO' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && (
+                            {r.status !== 'CANCELLED' && r.tipo !== 'auto' && r.tipo !== 'atraccion' && r.tipo !== 'alojamiento' && (
                               <button
                                 type="button"
                                 className="trip-dropdown-item"
@@ -1826,7 +1794,18 @@ export function MisReservasPage() {
                     </button>
                   </div>
 
-                  {selectedReserva.status !== 'CANCELLED' && selectedReserva.status !== 'CHECKED_IN' && selectedReserva.status !== 'CONFIRMADO_ASISTIDO' && selectedReserva.tipo !== 'auto' && selectedReserva.tipo !== 'atraccion' && (
+                  {selectedReserva.tipo === 'alojamiento' && (
+                    <div style={{ marginTop: '12px', padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '0.85rem', color: '#334155' }}>
+                      <div style={{ fontWeight: 700, color: '#003580', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        🏨 Check-in en el alojamiento
+                      </div>
+                      <div>
+                        El check-in se realiza presencialmente en la recepción del hotel a tu llegada. Presenta tu documento de identidad y tu código de confirmación <strong>{selectedReserva.pnr}</strong>.
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedReserva.status !== 'CANCELLED' && selectedReserva.status !== 'CHECKED_IN' && selectedReserva.status !== 'CONFIRMADO_ASISTIDO' && selectedReserva.tipo !== 'auto' && selectedReserva.tipo !== 'atraccion' && selectedReserva.tipo !== 'alojamiento' && (
                     <button
                       type="button"
                       onClick={() => {
@@ -2396,52 +2375,7 @@ export function MisReservasPage() {
                 </div>
               )}
 
-              {/* VERTICAL: ALOJAMIENTOS */}
-              {checkinReserva.tipo === 'alojamiento' && (
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '1.05rem', color: '#1a1a1a' }}>
-                    {checkinReserva.titulo}
-                  </h4>
-                  <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '16px' }}>
-                    Check-in digital autónomo (Cátedra RDA2 §4): asignación de habitación y clave de cerradura inteligente.
-                  </p>
-
-                  {checkinStepResult?.success ? (
-                    <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-                      <span style={{ fontSize: '1.8rem' }}>🔑</span>
-                      <strong style={{ display: 'block', color: '#047857', marginTop: '6px', fontSize: '1rem' }}>
-                        {checkinStepResult.mensaje}
-                      </strong>
-                      <div style={{ margin: '14px 0', background: '#fff', padding: '14px', borderRadius: '8px', border: '1px dashed #003580' }}>
-                        <div style={{ fontSize: '0.95rem', color: '#1e293b' }}>
-                          Habitación Asignada: <strong>{checkinStepResult.habitacion}</strong>
-                        </div>
-                        <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#003580', marginTop: '6px' }}>
-                          Clave Cerradura: {checkinStepResult.claveDigital}
-                        </div>
-                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
-                          Código PNR: <strong>{checkinStepResult.pnr}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {checkinStepResult?.vertical === 'alojamiento' && checkinStepResult.success === false && (
-                        <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', fontSize: '0.88rem', marginBottom: '12px' }}>
-                          {checkinStepResult.mensaje}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => handleExecuteCheckin(checkinReserva)}
-                        disabled={checkinProcessing}
-                        style={{ width: '100%', background: '#006ce4', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer' }}
-                      >
-                        {checkinProcessing ? 'Conectando con cerradura...' : '🔑 Realizar Check-in Digital y Obtener Llave'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+              {/* El check-in de alojamientos SIEMPRE se realiza de forma presencial en el alojamiento (recepción del hotel). */}
 
               {/* VERTICAL: VUELOS */}
               {checkinReserva.tipo === 'vuelo' && (

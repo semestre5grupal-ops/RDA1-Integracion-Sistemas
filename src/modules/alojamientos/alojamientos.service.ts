@@ -1467,81 +1467,6 @@ export class AlojamientosService implements OnModuleInit {
     };
   }
 
-  /**
-   * Check-in Digital a las 14:00 (Consideraciones RDA2 §4).
-   * La clave de acceso a la habitación se libera estrictamente a partir de las 14:00 del día de ingreso.
-   */
-  async checkinDigital(orderId: string, forzarLiberacion?: boolean): Promise<any> {
-    const reserva = await this.reservaRepo.findOne({
-      where: [{ id: orderId }, { codigoReserva: orderId }],
-    });
-
-    if (!reserva) {
-      throw new NotFoundException(`La reserva o código '${orderId}' no fue localizada.`);
-    }
-
-    if (reserva.status === 'CANCELLED') {
-      throw new BadRequestException('No es posible realizar check-in de una reserva cancelada.');
-    }
-
-    const now = new Date();
-    const checkinDateStr = reserva.checkin; // 'YYYY-MM-DD'
-    const horaActual = now.getHours();
-    
-    const todayStr = now.toISOString().split('T')[0];
-    const esDiaCheckinOPosterior = todayStr >= checkinDateStr;
-    const esHora14OPosterior = horaActual >= 14 || forzarLiberacion === true;
-
-    if (!esDiaCheckinOPosterior || !esHora14OPosterior) {
-      return {
-        order_id: reserva.id,
-        codigo_reserva: reserva.codigoReserva,
-        estado: 'PENDIENTE_HORA_14',
-        checkin_liberado: false,
-        fecha_checkin: checkinDateStr,
-        hora_liberacion_programada: '14:00:00 local',
-        habitacion_asignada: reserva.habitacionAsignada || 'Habitación 304 (Asignada)',
-        clave_acceso_digital: null,
-        mensaje: 'Tu check-in digital está registrado. Por políticas de hospitalidad (Consideraciones RDA2 §4), la clave de acceso digital y código de cerradura se liberarán automáticamente a partir de las 14:00 del día de ingreso.',
-      };
-    }
-
-    const habitacion = reserva.habitacionAsignada || `Habitación ${Math.floor(Math.random() * 300) + 101}`;
-    const claveDigital = reserva.claveAccesoDigital || `KEY-${Math.floor(Math.random() * 9000) + 1000}-QTO`;
-
-    reserva.habitacionAsignada = habitacion;
-    reserva.claveAccesoDigital = claveDigital;
-    reserva.checkinLiberadoALas14 = true;
-    reserva.checkinCompletadoAt = now;
-    reserva.status = 'CHECKED_IN';
-    await this.reservaRepo.save(reserva);
-
-    await this.registrarEventoYAuditoria(
-      'ALOJAMIENTO_CHECKIN_DIGITAL_14H',
-      reserva.id,
-      {
-        order_id: reserva.id,
-        codigo_reserva: reserva.codigoReserva,
-        habitacion_asignada: habitacion,
-        clave_acceso_digital: claveDigital,
-        checkin_at: now.toISOString(),
-      },
-    );
-
-    return {
-      order_id: reserva.id,
-      codigo_reserva: reserva.codigoReserva,
-      estado: 'CHECKED_IN',
-      estado_habitacion: 'OCUPADA',
-      checkin_liberado: true,
-      fecha_checkin: checkinDateStr,
-      hora_checkin: now.toISOString(),
-      habitacion_asignada: habitacion,
-      clave_acceso_digital: claveDigital,
-      mensaje: '¡Check-in digital exitoso! Tu clave de acceso inteligente ha sido activada para abrir la cerradura de tu habitación.',
-    };
-  }
-
   // =========================================================================
   // 4. WEBHOOKS
   // =========================================================================
@@ -2532,49 +2457,6 @@ export class AlojamientosService implements OnModuleInit {
         cancel: { href: `/api/v1/alojamientos/orders/${reserva.id}/cancel`, type: 'POST' },
         accommodation: { href: `/api/v1/alojamientos/${reserva.alojamientoId}`, type: 'GET' },
       },
-    };
-  }
-
-  /**
-   * Check-in Digital de Alojamiento (Cátedra RDA2 §4).
-   * Liberado estrictamente a las 14:00 del día de ingreso; emite habitación asignada y clave de acceso digital.
-   */
-  async checkin(reservaId: string): Promise<any> {
-    const reserva = await this.reservaRepo.findOne({
-      where: [{ id: reservaId }, { codigoReserva: reservaId }],
-    });
-
-    if (!reserva) {
-      throw new HttpException('Reserva de alojamiento no encontrada', HttpStatus.NOT_FOUND);
-    }
-
-    const now = new Date();
-    const habitacion = reserva.habitacionAsignada || 'Habitación 304 (Suite Deluxe)';
-    const claveDigital = reserva.claveAccesoDigital || `KEY-${Math.floor(100000 + Math.random() * 900000)}`;
-
-    reserva.habitacionAsignada = habitacion;
-    reserva.claveAccesoDigital = claveDigital;
-    reserva.checkinLiberadoALas14 = true;
-    reserva.checkinCompletadoAt = now;
-    reserva.status = 'CHECKED_IN';
-    await this.reservaRepo.save(reserva);
-
-    await this.registrarEventoYAuditoria('ALOJAMIENTO_CHECKIN_DIGITAL_14H', reserva.id, {
-      reserva_id: reserva.id,
-      codigo_reserva: reserva.codigoReserva,
-      habitacion_asignada: habitacion,
-      clave_acceso_digital: claveDigital,
-      checkin_at: now.toISOString(),
-    });
-
-    return {
-      success: true,
-      reserva_id: reserva.id,
-      codigo_reserva: reserva.codigoReserva,
-      habitacion_asignada: habitacion,
-      clave_acceso_digital: claveDigital,
-      hora_checkin: now.toISOString(),
-      mensaje: '¡Check-in completado exitosamente! Llave digital y acceso habilitados.',
     };
   }
 

@@ -941,13 +941,7 @@ export function AlojamientoDetail() {
               <div className="dt-highlight-point">
                 <ClockIcon size={16} color="#006ce4" />
                 <div>
-                  <strong>Horarios:</strong> check-in desde las {alojamiento.politicas?.checkin_desde || alojamiento.checkInPermitidoDesde || '14:00'}{alojamiento.politicas?.checkin_hasta ? ` hasta las ${alojamiento.politicas.checkin_hasta}` : ''} · check-out hasta las {alojamiento.politicas?.checkout_hasta || alojamiento.checkOutHoraMaxima || '11:00'}
-                </div>
-              </div>
-              <div className="dt-highlight-point">
-                <CheckmarkIcon size={16} color="#008009" />
-                <div>
-                  <strong>Check-in Digital:</strong> Habilitado a la hora de entrada con llave inteligente
+                  <strong>Horarios:</strong> entrada desde las {alojamiento.politicas?.checkin_desde || alojamiento.checkInPermitidoDesde || '14:00'}{alojamiento.politicas?.checkin_hasta ? ` hasta las ${alojamiento.politicas.checkin_hasta}` : ''} · salida hasta las {alojamiento.politicas?.checkout_hasta || alojamiento.checkOutHoraMaxima || '11:00'}
                 </div>
               </div>
 
@@ -1354,7 +1348,7 @@ export function AlojamientoDetail() {
               <div className="dt-rule-right">
                 <strong>A partir de las {alojamiento?.politicas?.checkin_desde || alojamiento?.checkInPermitidoDesde || '14:00'}{alojamiento?.politicas?.checkin_hasta ? ` hasta las ${alojamiento.politicas.checkin_hasta}` : ''}</strong>
                 <div style={{ fontSize: '0.8rem', color: '#595959' }}>
-                  Check-in digital disponible desde Mis Reservas a la hora de entrada.
+                  El check-in se realiza presencialmente en la recepción del alojamiento a tu llegada.
                 </div>
               </div>
             </div>
