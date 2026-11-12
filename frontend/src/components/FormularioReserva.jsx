@@ -10,6 +10,7 @@ import { savePendingReservation } from '../services/offlineSync';
 import { enviarFacturaTrasCompra } from '../services/envioFactura';
 import { totalBooking } from '../utils/precioBooking';
 import { useTelemetry } from '../hooks/useTelemetry';
+import { SpinnerVuelos } from './SpinnerVuelos';
 import { OfflineReservaModal } from './OfflineReservaModal';
 
 const COUNTRIES = [
@@ -279,6 +280,8 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
   // Asientos que otros clientes están eligiendo ahora mismo: { [segmentId]: ['14D', ...] }
   const [bloqueosAjenos, setBloqueosAjenos] = useState({});
   const [enviando, setEnviando] = useState(false);
+  /** Etapa visible del pago (Verificando asientos → Procesando pago → Confirmando con la aerolínea). */
+  const [etapaPago, setEtapaPago] = useState(null);
   const [errorGeneral, setErrorGeneral] = useState(null);
   const claveIdempotencia = useRef(null);
   const refContenedor = useRef(null);
@@ -690,11 +693,13 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
       setErrorGeneral(null);
       trackEvent('payment_started', 'vuelos');
       try {
-        // Simulando pasarela de pagos
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Conexión con la pasarela simulada (antes eran 2 s fijos de espera).
+        setEtapaPago('Conectando con la pasarela de pago…');
+        await new Promise(resolve => setTimeout(resolve, 400));
 
         // Justo antes de cobrar: los asientos elegidos tienen que seguir libres.
         if (navigator.onLine) {
+          setEtapaPago('Verificando tus asientos…');
           const tomados = await revisarAsientos();
           if (tomados.length) {
             soltarTomados(tomados, true);
@@ -749,7 +754,14 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           await savePendingReservation('vuelo', { ...payload, fingerprint }, idempotencyKey, datosFactura);
           reserva = { bookingId: idempotencyKey, pnr: idempotencyKey, offline: true };
         } else {
-          reserva = await crearReserva(payload, idempotencyKey, fingerprint);
+          setEtapaPago('Procesando el pago…');
+          const siguiente = setTimeout(() => setEtapaPago('Confirmando con la aerolínea…'), 1500);
+          try {
+            reserva = await crearReserva(payload, idempotencyKey, fingerprint);
+          } finally {
+            clearTimeout(siguiente);
+          }
+          setEtapaPago('¡Listo! Emitiendo tu reserva…');
 
           // El PNR lo asigna el servidor. Se usa el suyo y solo se recurre a la
           // clave de idempotencia si la respuesta viniera sin él, porque pintar un
@@ -795,6 +807,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
         );
       } finally {
         setEnviando(false);
+        setEtapaPago(null);
       }
     },
     [enviando, lista, hold, validar, onConfirmada, pasoActual, cargarMapas, revisarAsientos, soltarTomados],
@@ -1267,7 +1280,7 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
                 <button type="submit" className="btn-primario" disabled={enviando}>
                   {pasoActual === 1 && 'Continuar a Extras'}
                   {pasoActual === 2 && (!user ? 'Inicia sesión para continuar' : 'Continuar al Pago')}
-                  {pasoActual === 3 && (enviando ? 'Procesando pago...' : 'Confirmar pago')}
+                  {pasoActual === 3 && (enviando ? <><SpinnerVuelos />{etapaPago || 'Procesando pago…'}</> : 'Confirmar pago')}
                 </button>
               )}
             </div>
