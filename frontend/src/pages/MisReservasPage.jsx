@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   listarReservas as listarReservasVuelos,
   obtenerReserva as obtenerReservaVuelo,
@@ -153,6 +153,7 @@ function mensajeErrorCheckin(datos) {
 }
 
 export function MisReservasPage() {
+  const location = useLocation();
   const [reservas, setReservas] = useState([]);
   const reservasRef = useRef([]);
   useEffect(() => {
@@ -1260,7 +1261,7 @@ export function MisReservasPage() {
           <p className="trips-empty-desc">
             Podrás consultar tus reservas de alojamientos, vuelos, autos y atracciones con toda la información y comprobantes disponibles.
           </p>
-          <Link to="/login" className="trips-btn-primary">
+          <Link to="/login" state={{ from: location.pathname + location.search }} onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)} className="trips-btn-primary">
             Iniciar sesión
           </Link>
         </div>

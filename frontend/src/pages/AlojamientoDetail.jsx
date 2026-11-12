@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { getAlojamiento, getDisponibilidadAlojamiento, consultarDisponibilidad } from '../services/alojamientosApi';
 import { BarraDisponibilidad, resumenOcupacion } from '../components/BarraDisponibilidad';
 import { API_BASE } from '../services/api';
@@ -161,6 +161,7 @@ const DEFAULT_ATTRACTIONS = [
 export function AlojamientoDetail() {
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currency, convertPrice } = useCurrency();
@@ -933,7 +934,7 @@ export function AlojamientoDetail() {
               {user ? (
                 <span>✓ Tienes beneficios y tarifas Genius activas aplicadas a tu estancia en <strong>{alojamiento.nombre}</strong>.</span>
               ) : (
-                <span>Podrías optar a un descuento Genius en {alojamiento.nombre}. Para comprobar si hay un descuento Genius disponible para tus fechas, <Link to="/login">inicia sesión</Link>.</span>
+                <span>Podrías optar a un descuento Genius en {alojamiento.nombre}. Para comprobar si hay un descuento Genius disponible para tus fechas, <Link to="/login" state={{ from: location.pathname + location.search }} onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)}>inicia sesión</Link>.</span>
               )}
             </div>
 
@@ -1055,10 +1056,10 @@ export function AlojamientoDetail() {
               <h3>Inicia sesión y ahorra dinero</h3>
               <p>Para comprobar si puedes ahorrar un 10% o más en este alojamiento, inicia sesión</p>
               <div className="dt-genius-btns">
-                <Link to="/login" className="dt-btn-blue">
+                <Link to="/login" state={{ from: location.pathname + location.search }} onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)} className="dt-btn-blue">
                   Iniciar sesión
                 </Link>
-                <Link to="/register" className="dt-link-blue">
+                <Link to="/register" state={{ from: location.pathname + location.search }} onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)} className="dt-link-blue">
                   Crear una cuenta gratis
                 </Link>
               </div>
@@ -1329,7 +1330,14 @@ export function AlojamientoDetail() {
                 type="button"
                 className="dt-reserve-btn-primary"
                 disabled={isSoldOut}
-                onClick={() => setShowCheckoutModal(true)}
+                onClick={() => {
+                  if (!user) {
+                    sessionStorage.setItem('booking_return_url', location.pathname + location.search);
+                    navigate('/login', { state: { from: location.pathname + location.search, message: 'Inicia sesión para completar tu reserva' } });
+                    return;
+                  }
+                  setShowCheckoutModal(true);
+                }}
                 style={{
                   width: '100%',
                   fontSize: '16px',

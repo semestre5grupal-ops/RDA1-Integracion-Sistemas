@@ -234,6 +234,8 @@ export function Navbar() {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <Link
                 to="/register"
+                state={{ from: location.pathname + location.search }}
+                onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)}
                 className="navbar-btn outline"
                 style={{
                   textDecoration: 'none',
@@ -253,6 +255,8 @@ export function Navbar() {
               </Link>
               <Link
                 to="/login"
+                state={{ from: location.pathname + location.search }}
+                onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)}
                 className="navbar-btn solid"
                 style={{
                   textDecoration: 'none',

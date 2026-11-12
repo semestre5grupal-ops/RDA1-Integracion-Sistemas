@@ -1,12 +1,34 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { supabase, supabaseAdmin } from '../services/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../services/api';
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
+
+  const resolveRedirect = () => {
+    const fromState = location.state?.from;
+    if (fromState) {
+      if (typeof fromState === 'string' && fromState !== '/register' && fromState !== '/login') return fromState;
+      if (typeof fromState === 'object' && fromState.pathname) {
+        return fromState.pathname + (fromState.search || '');
+      }
+    }
+    const params = new URLSearchParams(location.search);
+    const paramFrom = params.get('from') || params.get('returnUrl');
+    if (paramFrom && paramFrom !== '/register' && paramFrom !== '/login') return paramFrom;
+
+    const stored = sessionStorage.getItem('booking_return_url');
+    if (stored && stored !== '/register' && stored !== '/login') return stored;
+
+    return '/';
+  };
+
+  const redirectTo = resolveRedirect();
+
   const [nombre, setNombre] = useState('');
   const [apellido, setApellido] = useState('');
   const [tipoDocumento, setTipoDocumento] = useState('CEDULA'); // 'CEDULA' o 'PASAPORTE'
@@ -18,9 +40,10 @@ export function RegisterPage() {
 
   useEffect(() => {
     if (user) {
-      navigate('/', { replace: true });
+      sessionStorage.removeItem('booking_return_url');
+      navigate(redirectTo, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, navigate, redirectTo]);
 
 
   const [errors, setErrors] = useState({
@@ -246,7 +269,8 @@ export function RegisterPage() {
     }
 
     if (sessionEstablished) {
-      window.location.href = '/';
+      sessionStorage.removeItem('booking_return_url');
+      navigate(redirectTo, { replace: true });
     }
     setLoading(false);
   };
@@ -536,7 +560,7 @@ export function RegisterPage() {
         </form>
 
         <p style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.9rem' }}>
-          ¿Ya tienes cuenta? <Link to="/login" style={{ color: '#006ce4', fontWeight: '600', textDecoration: 'none' }}>Inicia sesión aquí</Link>
+          ¿Ya tienes cuenta? <Link to="/login" state={{ from: redirectTo }} style={{ color: '#006ce4', fontWeight: '600', textDecoration: 'none' }}>Inicia sesión aquí</Link>
         </p>
       </div>
     </main>

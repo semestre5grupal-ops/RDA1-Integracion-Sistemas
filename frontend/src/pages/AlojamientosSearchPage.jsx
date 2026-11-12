@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useSearchParams, useLocation, useNavigate, Link } from 'react-router-dom';
 import { getAlojamientos, searchAlojamientos } from '../services/alojamientosApi';
 import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
@@ -84,6 +84,7 @@ const getPropPrice = (p, noches = 1) => {
 
 export function AlojamientosSearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { convertPrice, currency } = useCurrency();
@@ -1641,10 +1642,10 @@ export function AlojamientosSearchPage() {
                 <h2>Inicia sesión y ahorra dinero</h2>
                 <p>Accede a descuentos exclusivos para miembros en {destination}</p>
                 <div style={{ marginTop: '14px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <Link to="/login" className="sr-genius-signin-btn">
+                  <Link to="/login" state={{ from: location.pathname + location.search }} onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)} className="sr-genius-signin-btn">
                     Iniciar sesión
                   </Link>
-                  <Link to="/register" className="sr-genius-register-link">
+                  <Link to="/register" state={{ from: location.pathname + location.search }} onClick={() => sessionStorage.setItem('booking_return_url', location.pathname + location.search)} className="sr-genius-register-link">
                     Crear una cuenta
                   </Link>
                 </div>

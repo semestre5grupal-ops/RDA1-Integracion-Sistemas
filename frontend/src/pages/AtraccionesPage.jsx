@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { getAtracciones } from '../services/atraccionesApi';
 import { useAuth } from '../hooks/useAuth';
 import { AtraccionesLoadingView } from '../components/AtraccionesLoadingView';
@@ -72,6 +72,7 @@ const getEcuadorImage = (idx) => ECUADOR_IMAGES[idx % ECUADOR_IMAGES.length];
 
 export function AtraccionesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [atracciones, setAtracciones] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -399,8 +400,8 @@ export function AtraccionesPage() {
                 <h3>Todos los detalles de tus viajes en un mismo lugar</h3>
                 <p>Inicia sesión para reservar más rápido y administrar tus viajes fácilmente</p>
                 <div className="account-actions">
-                  <button className="btn-iniciar-sesion" onClick={() => navigate('/login')}>Iniciar sesión</button>
-                  <button className="btn-registrate" onClick={() => navigate('/register')}>Regístrate</button>
+                  <button className="btn-iniciar-sesion" onClick={() => { sessionStorage.setItem('booking_return_url', location.pathname + location.search); navigate('/login', { state: { from: location.pathname + location.search } }); }}>Iniciar sesión</button>
+                  <button className="btn-registrate" onClick={() => { sessionStorage.setItem('booking_return_url', location.pathname + location.search); navigate('/register', { state: { from: location.pathname + location.search } }); }}>Regístrate</button>
                 </div>
               </div>
               <div className="account-banner-img">
