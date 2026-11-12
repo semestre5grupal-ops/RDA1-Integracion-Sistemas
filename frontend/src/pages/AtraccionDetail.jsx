@@ -220,16 +220,20 @@ export function AtraccionDetail() {
     const idempotencyKey = uuidv4();
     try {
       let result = null;
-      const dateCompact = (form.date || todayStr).replace(/-/g, '');
+      const safeDate = form.date || todayStr;
+      const dateCompact = safeDate.replace(/-/g, '');
       const timeNormalized = (form.time || '09:00').replace(/(a\.m\.|p\.m\.|\s)/gi, '').slice(0, 5) || '09:00';
       const time24 = timeNormalized.length === 4 ? `0${timeNormalized}` : timeNormalized;
       const timeCompact = time24.replace(/[^0-9]/g, '').slice(0, 4).padStart(4, '0');
-      const targetSlotId = selectedSlot?.slot_id || selectedSlot?.id || `slot-${dateCompact}-${timeCompact}`;
 
-      // Reconciliación automática y segura de fecha y hora según el slot seleccionado
-      const slotMatch = (targetSlotId || '').match(/^slot-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/);
-      const safeDate = slotMatch ? `${slotMatch[1]}-${slotMatch[2]}-${slotMatch[3]}` : (form.date || todayStr);
-      const safeTime = slotMatch ? `${slotMatch[4]}:${slotMatch[5]}` : time24;
+      // Siempre garantizar que el targetSlotId pertenezca a la fecha explícitamente elegida por el usuario
+      let targetSlotId = `slot-${dateCompact}-${timeCompact}`;
+      if (selectedSlot?.slot_id && selectedSlot.slot_id.startsWith(`slot-${dateCompact}-`)) {
+        targetSlotId = selectedSlot.slot_id;
+      } else if (selectedSlot?.id && selectedSlot.id.startsWith(`slot-${dateCompact}-`)) {
+        targetSlotId = selectedSlot.id;
+      }
+      const safeTime = time24;
 
       const payload = {
         atraccionId: id,

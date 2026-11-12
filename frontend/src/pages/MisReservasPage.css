@@ -231,8 +231,16 @@
   border: 1px solid #86efac;
 }
 
-.trip-card-status.cancelled {
-  color: #595959;
+.trip-card-status.cancelled,
+.trip-card-status.cancelado {
+  color: #b91c1c;
+  background: #fef2f2;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  border: 1px solid #fca5a5;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
 }
 
 .trip-card-status.pending {
@@ -261,8 +269,10 @@
   color: #4b5563;
 }
 
-.trip-card-alojamiento-status.cancelled {
-  color: #6b7280;
+.trip-card-alojamiento-status.cancelled,
+.trip-card-alojamiento-status.cancelado {
+  color: #dc2626;
+  font-weight: 700;
 }
 
 .trip-card-alojamiento-status.pending {

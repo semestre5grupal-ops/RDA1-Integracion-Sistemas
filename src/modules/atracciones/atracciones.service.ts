@@ -363,8 +363,16 @@ export class AtraccionesService implements OnModuleInit {
       fotosExtraidas.push(rawList);
     }
 
-    if (item.foto_url && typeof item.foto_url === 'string' && item.foto_url.startsWith('http') && !fotosExtraidas.includes(item.foto_url)) {
-      fotosExtraidas.push(item.foto_url);
+    if (fotosExtraidas.length === 0) {
+      if (item.foto_url && typeof item.foto_url === 'string' && item.foto_url.startsWith('http')) {
+        fotosExtraidas.push(item.foto_url);
+      } else {
+        fotosExtraidas.push(
+          'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+          'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=800&auto=format&fit=crop',
+          'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop',
+        );
+      }
     }
 
     const ciudad =
@@ -1063,6 +1071,15 @@ export class AtraccionesService implements OnModuleInit {
 
       await Promise.allSettled(probePromises);
       item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
+    }
+
+    if (item && (!item.fotosUrls || item.fotosUrls.length === 0)) {
+      item.fotosUrls = [
+        'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+        'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=800&auto=format&fit=crop',
+        'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop',
+      ];
+      this.atraccionRepo.update(item.id, { fotosUrls: item.fotosUrls }).catch(() => {});
     }
 
     if (!item) {
@@ -3689,15 +3706,21 @@ export class AtraccionesService implements OnModuleInit {
     }
 
     const atraccionIds = [...new Set(reservas.map((r) => r.atraccionId).filter(Boolean))];
-    const atraccionMap = new Map<string, string>();
+    const atraccionMap = new Map<string, { nombre: string; foto?: string }>();
     if (atraccionIds.length > 0) {
       try {
         const foundAtr = await this.atraccionRepo.find({ where: { id: In(atraccionIds) } });
-        foundAtr.forEach((a) => atraccionMap.set(a.id, a.nombre));
+        foundAtr.forEach((a) => {
+          const f = (a.fotosUrls && a.fotosUrls.length > 0) ? a.fotosUrls[0] : undefined;
+          atraccionMap.set(a.id, { nombre: a.nombre, foto: f });
+        });
       } catch (_) {}
     }
 
-    return reservas.map((r) => this.formatReservaResponse(r, atraccionMap.get(r.atraccionId)));
+    return reservas.map((r) => {
+      const atInfo = atraccionMap.get(r.atraccionId);
+      return this.formatReservaResponse(r, atInfo?.nombre, atInfo?.foto);
+    });
   }
 
   async getReservaById(reservationId: string): Promise<any> {
@@ -3713,11 +3736,15 @@ export class AtraccionesService implements OnModuleInit {
     }
     if (!reserva) throw new HttpException('Reserva no encontrada', HttpStatus.NOT_FOUND);
     let atraccionNombre = '';
+    let atraccionFoto = '';
     try {
       const at = await this.atraccionRepo.findOne({ where: [{ id: reserva.atraccionId }, { slug: reserva.atraccionId }] });
-      if (at) atraccionNombre = at.nombre;
+      if (at) {
+        atraccionNombre = at.nombre;
+        atraccionFoto = (at.fotosUrls && at.fotosUrls.length > 0) ? at.fotosUrls[0] : '';
+      }
     } catch (_) {}
-    return this.formatReservaResponse(reserva, atraccionNombre);
+    return this.formatReservaResponse(reserva, atraccionNombre, atraccionFoto);
   }
 
   private formatAtraccionResponse(item: Atraccion): any {
@@ -3838,8 +3865,19 @@ export class AtraccionesService implements OnModuleInit {
       guide_languages: item.idiomasSoportados || ['Español', 'Inglés'],
       punto_encuentro: item.puntoEncuentro || 'Boulevard Naciones Unidas y Av. Shyris (Parada Quinde)',
       coordenadas: { latitud: Number(item.latitud) || -0.1807, longitud: Number(item.longitud) || -78.4842 },
-      fotos_urls: item.fotosUrls,
-      photos: (item.fotosUrls || []).map((url) => ({ url })),
+      fotos_urls: (item.fotosUrls && item.fotosUrls.length > 0) ? item.fotosUrls : [
+        'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+        'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=800&auto=format&fit=crop',
+        'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop',
+      ],
+      photos: ((item.fotosUrls && item.fotosUrls.length > 0) ? item.fotosUrls : [
+        'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+        'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=800&auto=format&fit=crop',
+        'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop',
+      ]).map((url) => ({ url })),
+      foto_url: (item.fotosUrls && item.fotosUrls.length > 0) ? item.fotosUrls[0] : 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+      photoUrl: (item.fotosUrls && item.fotosUrls.length > 0) ? item.fotosUrls[0] : 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+      imagen: (item.fotosUrls && item.fotosUrls.length > 0) ? item.fotosUrls[0] : 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
       itinerario_cronologico: itineraryList,
       includes: item.inclusiones || ['Transporte', 'Guía bilingüe'],
       exclusiones: item.exclusiones,
@@ -3871,8 +3909,9 @@ export class AtraccionesService implements OnModuleInit {
     };
   }
 
-  private formatReservaResponse(reserva: ReservaAtraccion, atraccionNombre?: string): any {
+  private formatReservaResponse(reserva: ReservaAtraccion, atraccionNombre?: string, atraccionFoto?: string): any {
     const totalAmount = Number(reserva.totalAmount);
+    const fotoFinal = atraccionFoto || 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop';
     let titulo = atraccionNombre || (reserva.specialRequirements && !reserva.specialRequirements.includes('{') ? reserva.specialRequirements : null) || `Tour / Atracción (${reserva.ticketCount || 1} personas)`;
     return {
       id: reserva.id,
@@ -3887,6 +3926,12 @@ export class AtraccionesService implements OnModuleInit {
       name: titulo,
       status: reserva.status,
       estado: reserva.status,
+      foto_url: fotoFinal,
+      photo_url: fotoFinal,
+      photoUrl: fotoFinal,
+      imagen: fotoFinal,
+      photos: [{ url: fotoFinal }],
+      fotos_urls: [fotoFinal],
       date: reserva.date,
       fecha: reserva.date,
       time: reserva.time,

@@ -185,10 +185,12 @@ export function resolverGaleriaAtraccion(atraccion) {
     fotosSocio.push(atraccion.foto_url);
   }
 
-  // Si el socio no entregó ninguna foto válida en su sistema, proveer una imagen contextual
+  // Si el socio no entregó ninguna foto válida en su sistema, proveer galería contextual de calidad
   if (fotosSocio.length === 0) {
-    const fallback = resolverImagenAtraccion(atraccion, 0);
-    return [fallback];
+    const fallback0 = resolverImagenAtraccion(atraccion, 0);
+    const fallback1 = resolverImagenAtraccion(atraccion, 1);
+    const fallback2 = resolverImagenAtraccion(atraccion, 2);
+    return [fallback0, fallback1, fallback2];
   }
 
   return fotosSocio;
