@@ -1232,7 +1232,7 @@ export class AutosService implements OnModuleInit {
   // ============================================================================
   async getCatalog(query?: any): Promise<any> {
     this.evaluateCleaningCooldowns();
-    const limit = query?.limit ? parseInt(query.limit, 10) : 100;
+    const limit = query?.limit ? parseInt(query.limit, 10) : 300;
     const category = query?.category ? query.category.toUpperCase() : null;
     const transmission = query?.transmission ? query.transmission.toUpperCase() : null;
 
