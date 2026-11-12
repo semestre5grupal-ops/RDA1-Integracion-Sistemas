@@ -492,6 +492,16 @@ export function FormularioReserva({ abierto, hold, pasajeros, onCerrar, onConfir
           onHoldCambiado?.({ ...r.hold, compraId: holdActual.compraId });
         }
       } catch (fallo) {
+        // Para reintentar, Booking pudo rehacer el hold con los asientos que ya tenía: se sigue con ese.
+        const rehecho = fallo?.response?.data?.hold;
+        if (rehecho?.holdId && rehecho.holdId !== holdActual.holdId) {
+          holdRef.current = { ...holdActual, ...rehecho, compraId: holdActual.compraId };
+          holdsRehechos.current.add(rehecho.holdId);
+          onHoldCambiado?.({ ...rehecho, compraId: holdActual.compraId });
+        }
+        if (fallo?.response?.status === 410) {
+          setErrorGeneral('Tu reserva temporal venció mientras elegías asientos. Vuelve a seleccionar la tarifa.');
+        }
         const tomados = fallo?.response?.status === 409 ? fallo.response.data?.taken ?? [] : [];
         if (tomados.length) {
           ultimaFirma.current = '';
