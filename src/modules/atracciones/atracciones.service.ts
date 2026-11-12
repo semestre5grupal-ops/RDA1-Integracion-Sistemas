@@ -314,11 +314,14 @@ export class AtraccionesService implements OnModuleInit {
       precio = Number(item.precio_unitario_adulto || item.precio_base || item.precio);
     }
 
-    const photo =
-      (item.photos && item.photos[0]) ||
+    const rawPhoto =
+      (item.photos && (typeof item.photos[0] === 'string' ? item.photos[0] : item.photos[0]?.url)) ||
       (item.fotos_urls && item.fotos_urls[0]) ||
-      item.foto_url ||
-      'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800';
+      item.foto_url;
+    const photo =
+      typeof rawPhoto === 'string' && rawPhoto.startsWith('http')
+        ? rawPhoto
+        : 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800';
 
     const ciudad =
       item.ciudad ||
@@ -530,10 +533,13 @@ export class AtraccionesService implements OnModuleInit {
   }
 
   private lastGlobalSync = 0;
+  private isSyncingCatalogs = false;
   async syncAllCatalogs(): Promise<void> {
     const now = Date.now();
-    if (now - this.lastGlobalSync < 15000) return; // 15s throttle
+    if (this.isSyncingCatalogs) return;
+    if (now - this.lastGlobalSync < 30000) return; // 30s throttle
     this.lastGlobalSync = now;
+    this.isSyncingCatalogs = true;
     try {
       await Promise.allSettled([
         this.syncArielCatalog(),
@@ -542,7 +548,10 @@ export class AtraccionesService implements OnModuleInit {
         this.syncAlissonCatalog(),
         this.syncGloriaCatalog(),
       ]);
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      this.isSyncingCatalogs = false;
+    }
   }
 
   // ============================================================================
@@ -886,8 +895,8 @@ export class AtraccionesService implements OnModuleInit {
   // ============================================================================
   async findAll(query: PaginationQueryDto): Promise<any> {
     this.logger.log(`Consultando catálogo en schema_atracciones.atracciones_items`);
-    // Sincronizar catálogos en tiempo real con todos los socios
-    await this.syncAllCatalogs();
+    // Sincronizar catálogos en segundo plano sin bloquear la respuesta HTTP
+    this.syncAllCatalogs().catch((err) => this.logger.warn(`Sync background warning: ${err.message}`));
 
     const take = Number(query.limit) || 100;
     const skip = ((Number(query.page) || 1) - 1) * take;
@@ -919,8 +928,8 @@ export class AtraccionesService implements OnModuleInit {
 
   async search(dto: SearchAtraccionesRequestDto): Promise<any> {
     this.logger.log('Búsqueda avanzada de atracciones con filtros', dto);
-    // Sincronizar catálogos en tiempo real con todos los socios
-    await this.syncAllCatalogs();
+    // Sincronizar catálogos en segundo plano sin bloquear la respuesta HTTP
+    this.syncAllCatalogs().catch((err) => this.logger.warn(`Sync background warning: ${err.message}`));
 
     const take = Number((dto as any).limit) || 50;
     const page = Number((dto as any).page) || 1;
