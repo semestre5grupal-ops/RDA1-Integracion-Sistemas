@@ -104,6 +104,8 @@ export class VuelosSociosService {
 
   /** Lista de aerolíneas en memoria unos segundos: cada búsqueda ya no consulta la base. */
   private nodosCache: { lista: ConfigProveedor[]; hasta: number } | null = null;
+  /** Para el encabezado Server-Timing de la búsqueda. */
+  ultimaBusquedaNodosMs = 0;
 
   async nodosActivos(hostPropio?: string): Promise<ConfigProveedor[]> {
     if (!this.nodosCache || this.nodosCache.hasta < Date.now()) {
@@ -296,7 +298,9 @@ export class VuelosSociosService {
     entrantes: Record<string, any>,
     hostPropio?: string,
   ): Promise<{ offers: any[]; sources: ResultadoSocio[] }> {
+    const t0 = Date.now();
     const nodos = await this.nodosActivos(hostPropio);
+    this.ultimaBusquedaNodosMs = Date.now() - t0;
     const resultados = await this.esperarBusquedas(nodos, body, entrantes);
     const offers = resultados.flatMap((r) => r.ofertas);
     offers.sort((a, b) => precioTotal(a) - precioTotal(b));

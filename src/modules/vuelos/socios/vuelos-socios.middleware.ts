@@ -197,8 +197,10 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
   private async buscar(req: Request, res: Response, fuente: string, entrantes: Record<string, any>) {
     const t0 = Date.now();
-    const recargo = this.reservas.recargoPct(); // en paralelo con la búsqueda (nunca falla)
+    let tRecargo = 0;
+    const recargo = this.reservas.recargoPct().finally(() => (tRecargo = Date.now() - t0)); // en paralelo con la búsqueda
     const { offers, sources } = await this.socios.buscar(req.body, entrantes, req.headers.host);
+    const tBusqueda = Date.now() - t0;
     const it = req.body?.itineraries?.[0] || {};
     const okN = sources.filter((s) => s.ok).length;
     this.traza(
@@ -218,12 +220,15 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
         sources.push({ codigoNodo: 'BOOKING_LOCAL', nombre: 'Base local', ok: false, ms: 0, ofertas: 0, error: e?.message });
       }
     }
+    const pct = await recargo;
+    // Server-Timing: tiempos internos visibles en las DevTools (pestaña Network → Timing).
+    res.setHeader('Server-Timing', `nodos;dur=${this.socios.ultimaBusquedaNodosMs}, aerolineas;dur=${tBusqueda}, recargo;dur=${tRecargo}, total;dur=${Date.now() - t0}`);
     res.status(200).json({
       totalOffers: todas.length,
       offers: todas,
       // Los precios de las ofertas son los de la aerolínea; Booking cobra además
       // su cargo por servicio con este porcentaje (el frontend muestra el final).
-      bookingFee: { percentage: await recargo },
+      bookingFee: { percentage: pct },
       meta: {
         fuente,
         totalOffers: todas.length,
