@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { ActualizadoHace } from './panelUtils';
 import {
   getCatalogoGestion,
   crearAlojamiento,
@@ -245,13 +247,14 @@ export function GestionAlojamientos() {
   const [gestorTipos, setGestorTipos] = useState(null); // alojamiento
   const [verProveedores, setVerProveedores] = useState(false);
 
-  const cargar = useCallback(async () => {
-    setCargando(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setCargando(true);
     setError('');
     try {
       const params = Object.fromEntries(Object.entries(filtros).filter(([, v]) => v));
       setDatos(await getCatalogoGestion(params));
     } catch (err) {
+      if (silencioso) throw err;
       setError(mensajeDe(err, 'No se pudo cargar el catálogo de alojamientos.'));
     } finally {
       setCargando(false);
@@ -262,6 +265,9 @@ export function GestionAlojamientos() {
     const t = setTimeout(cargar, filtros.q ? 300 : 0);
     return () => clearTimeout(t);
   }, [cargar, filtros.q]);
+
+  // Se actualiza solo cada 15 s; se detiene mientras hay un formulario o una ventana abierta.
+  const auto = useAutoRefresh(cargar, 15000, { pausado: !!(formulario || ocupado || verIntegracion || gestorTipos || verProveedores) });
 
   const cambiarEstado = async (a) => {
     const nuevo = a.estado === 'INACTIVO' ? 'ACTIVO' : 'INACTIVO';
@@ -370,6 +376,7 @@ export function GestionAlojamientos() {
         </select>
       </div>
 
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}><ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={15000} /></div>
       <Aviso aviso={aviso} onCerrar={() => setAviso(null)} />
       {error && <div role="alert" style={{ background: '#ffebee', color: C.red, borderRadius: 6, padding: '10px 12px', fontSize: '0.85rem', fontWeight: 600 }}>{error} <button type="button" onClick={cargar} style={{ marginLeft: 8 }}>Reintentar</button></div>}
 

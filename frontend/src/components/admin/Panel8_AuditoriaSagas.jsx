@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../../services/api';
-import { mensajeError, ErrorBox, aLista } from './panelUtils';
+import { mensajeError, ErrorBox, aLista, ActualizadoHace } from './panelUtils';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
 /** Estados reales de SagaOrchestratorService (schema_auditoria.saga_transacciones). */
 const ESTADO_SAGA = {
@@ -23,18 +24,22 @@ export function Panel8_AuditoriaSagas({ refreshKey = 0 }) {
   const [detalle, setDetalle] = useState(null);
   const [errDetalle, setErrDetalle] = useState(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setLoading(true);
     try {
       setSagas(aLista(await api.get('/esb/sagas', { params: { limit: 50 } })));
       setErrSagas(null);
     } catch (e) {
+      if (silencioso) throw e;
       setErrSagas(mensajeError(e, 'No se pudieron leer las sagas.'));
     }
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData, refreshKey]);
+
+  // Se actualiza solo cada 5 s (sin botón).
+  const auto = useAutoRefresh(fetchData, 5000);
 
   const abrirDetalle = async (correlationId) => {
     setErrDetalle(null);
@@ -63,9 +68,7 @@ export function Panel8_AuditoriaSagas({ refreshKey = 0 }) {
             Cada compra multi-servicio queda en <code>schema_auditoria</code> con sus pasos; si un paso falla se compensan los anteriores en orden inverso. Toca una saga para ver sus pasos.
           </p>
         </div>
-        <button onClick={fetchData} disabled={loading} style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
-          {loading ? 'Cargando…' : '🔄 Refrescar'}
-        </button>
+        <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={5000} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>

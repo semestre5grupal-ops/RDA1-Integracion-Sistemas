@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { ActualizadoHace } from './panelUtils';
 
 export function Panel4_LiquidacionesFinanzas() {
   const [liquidaciones, setLiquidaciones] = useState([]);
@@ -10,9 +12,9 @@ export function Panel4_LiquidacionesFinanzas() {
   const [error, setError] = useState(null);
 
   // Datos reales de schema_finanzas.liquidaciones_proveedores (sin ejemplos inventados).
-  const fetchLiquidaciones = async () => {
+  const fetchLiquidaciones = async ({ silencioso = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silencioso) setLoading(true);
       setError(null);
       const res = await api.get('/finanzas/liquidaciones');
       const filas = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
@@ -28,6 +30,7 @@ export function Panel4_LiquidacionesFinanzas() {
         revision: l.revision ?? null,
       })));
     } catch (e) {
+      if (silencioso) throw e;
       setLiquidaciones([]);
       setError(e?.response?.data?.detail || e?.message || 'No se pudieron leer las liquidaciones.');
     } finally {
@@ -38,6 +41,9 @@ export function Panel4_LiquidacionesFinanzas() {
   useEffect(() => {
     fetchLiquidaciones();
   }, []);
+
+  // Se actualiza sola cada 30 s (sin botón). No mientras se registra un pago.
+  const auto = useAutoRefresh(fetchLiquidaciones, 30000, { pausado: !!selectedId });
 
   const totalVentas = liquidaciones.reduce((acc, l) => acc + Number(l.total_ventas_bruto || 0), 0);
   const totalComision = liquidaciones.reduce((acc, l) => acc + Number(l.comision_booking_10pct || 0), 0);
@@ -71,12 +77,7 @@ export function Panel4_LiquidacionesFinanzas() {
             Booking compra el boleto a la aerolínea a su precio y se lo vende al cliente con su cargo por servicio. Cada venta suma a la liquidación de la quincena: la comisión es ese cargo y a la aerolínea se le paga su precio (menos lo que ella mandó devolver).
           </p>
         </div>
-        <button 
-          onClick={fetchLiquidaciones}
-          style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '8px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
-        >
-          🔄 Actualizar Ledger
-        </button>
+        <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={30000} />
       </div>
 
       {/* TARJETAS RESUMEN DE SALDOS */}

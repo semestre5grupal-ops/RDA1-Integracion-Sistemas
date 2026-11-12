@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import { ProcesoEnVivoAtracciones } from './ProcesoEnVivoAtracciones';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
+import { ActualizadoHace } from './panelUtils';
 
 /**
  * Vista de Atracciones en "Servicios & Prov." del admin: el proceso de reserva con
@@ -261,13 +263,14 @@ export function ProcesosAtraccionesTab({ refreshKey = 0 }) {
   const [error, setError] = useState(null);
   const [cargando, setCargando] = useState(true);
 
-  const cargar = useCallback(async () => {
-    setCargando(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setCargando(true);
     setError(null);
     try {
       const { data } = await api.get('/admin/procesos/atracciones');
       setDatos(data);
     } catch (e) {
+      if (silencioso) throw e;
       setError(e?.response?.data?.detail || e?.response?.data?.message || e?.message || 'No se pudieron cargar los datos del proceso.');
     } finally {
       setCargando(false);
@@ -277,6 +280,9 @@ export function ProcesosAtraccionesTab({ refreshKey = 0 }) {
   useEffect(() => {
     cargar();
   }, [cargar, refreshKey]);
+
+  // Se actualiza solo cada 5 s (sin botón).
+  const auto = useAutoRefresh(cargar, 5000);
 
   const grafo = GRAFOS.find((g) => g.id === activo) || GRAFOS[0];
   const definicion = useMemo(() => grafo.def(datos), [grafo, datos]);
@@ -299,10 +305,7 @@ export function ProcesosAtraccionesTab({ refreshKey = 0 }) {
           <h2 style={{ margin: 0, fontSize: '1.25rem', color: T.azul }}>Proceso de reserva de atracciones (Canal gRPC Punto a Punto)</h2>
           <div style={{ fontSize: '0.8rem', color: T.muted }}>Búsqueda, reserva directa con operador dueño vía gRPC (:50051), emisión de voucher QR y check-in · 4 grafos de análisis de fallas</div>
         </div>
-        <button type="button" onClick={cargar} disabled={cargando}
-          style={{ border: `1px solid ${T.border}`, background: T.surface, borderRadius: 8, padding: '7px 12px', cursor: 'pointer', fontSize: '0.8rem' }}>
-          {cargando ? '⏳' : '↻'} Actualizar datos
-        </button>
+        <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={5000} />
       </div>
 
       {error && (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../services/api';
-import { mensajeError, ErrorBox } from './panelUtils';
+import { mensajeError, ErrorBox, ActualizadoHace } from './panelUtils';
+import { useAutoRefresh } from '../../hooks/useAutoRefresh';
 
 /**
  * Flota de autos que ve Booking (GET /autos/flota): autos de las rentadoras
@@ -31,14 +32,15 @@ export function Panel2_GestionFlotaAutos({ refreshKey = 0 }) {
   const [busqueda, setBusqueda] = useState('');
   const [ahora, setAhora] = useState(Date.now());
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setLoading(true);
     setError(null);
     try {
       const { data } = await api.get('/autos/flota');
       setFlota(Array.isArray(data) ? data : []);
       setActualizado(Date.now());
     } catch (e) {
+      if (silencioso) throw e;
       setFlota([]);
       setError(mensajeError(e, 'No se pudo leer la flota de autos.'));
     } finally {
@@ -47,6 +49,9 @@ export function Panel2_GestionFlotaAutos({ refreshKey = 0 }) {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar, refreshKey]);
+
+  // Se actualiza solo cada 15 s (sin botón).
+  const auto = useAutoRefresh(cargar, 15000);
 
   // El cronómetro de limpieza solo corre si el backend informó los segundos restantes.
   const hayCronometro = flota.some((c) => c.estado_operativo === 'EN_LIMPIEZA' && Number(c.segundos_restantes_cooldown) > 0);
@@ -85,9 +90,7 @@ export function Panel2_GestionFlotaAutos({ refreshKey = 0 }) {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {actualizado && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Actualizado {new Date(actualizado).toLocaleTimeString('es-EC')}</span>}
-          <button type="button" onClick={cargar} disabled={loading} style={{ background: '#fff', border: '1px solid #cbd5e1', padding: '6px 12px', borderRadius: 6, cursor: loading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.8rem' }}>
-            {loading ? 'Cargando…' : '↻ Actualizar'}
-          </button>
+          <ActualizadoHace ultima={auto.ultima} fallos={auto.fallos} cada={15000} />
         </div>
       </div>
 
