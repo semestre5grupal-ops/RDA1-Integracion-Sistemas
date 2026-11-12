@@ -334,7 +334,7 @@ export function AtraccionDetail() {
     }
   };
 
-  if (loading) return <AtraccionesLoadingView titulo="Cargando detalles de la experiencia..." />;
+  if (loading) return <AtraccionesLoadingView />;
   if (error) return <main id="contenido-principal" className="state-container"><h1 className="sr-only">Error al cargar atracción</h1><div className="error-icon">⚠️</div><p className="state-subtitle">{error}</p><button className="retry-btn" onClick={() => navigate('/')}>Volver</button></main>;
   if (!atraccion) return null;
 
@@ -974,7 +974,7 @@ export function AtraccionDetail() {
                           disabled={isBooking || cuposExcedidos || isAgotadoSlot}
                         >
                           {isBooking 
-                            ? '⏳ Conectando con socio y emitiendo boletos...' 
+                            ? 'Procesando tu reserva y generando entradas...' 
                             : isAgotadoSlot 
                             ? 'Turno Agotado' 
                             : cuposExcedidos 

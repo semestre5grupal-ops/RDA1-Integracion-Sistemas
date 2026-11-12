@@ -235,7 +235,7 @@ export function AtraccionesPage() {
   });
 
   if (loading) {
-    return <AtraccionesLoadingView titulo="Buscando las mejores ofertas entre cientos de experiencias" />;
+    return <AtraccionesLoadingView />;
   }
 
   return (

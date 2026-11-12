@@ -531,18 +531,7 @@ export function AutosPage() {
   ];
 
   if (loading && autos.length === 0) {
-    return (
-      <AlojamientosLoadingView
-        destino={pickupLocation || 'Ecuador'}
-        frases={[
-          'Buscando las mejores ofertas entre cientos de marcas...',
-          'Verificando flota y disponibilidad de vehículos en tiempo real...',
-          'Comparando tarifas y coberturas para tu viaje...',
-          'Casi listo, organizando los coches disponibles...',
-        ]}
-        subtitulo={`Conectando con agencias de alquiler de autos${pickupLocation ? ` en ${pickupLocation}` : ''}`}
-      />
-    );
+    return <AlojamientosLoadingView />;
   }
 
   return (
