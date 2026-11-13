@@ -17,3 +17,4 @@
 - **Eliminación de Consultas en Cascada**: Queda prohibido consultar en cascada las bases de datos de Vuelos o Alojamientos cuando la orden ya está tipificada como auto, previniendo latencias de red (hasta 30s) y errores 404 falsos.
 - **Inserción de Rescate Completa**: Si una orden de auto validada no existe aún en `schema_autos.autos_reservas`, la inserción de rescate debe proveer valores por defecto válidos para todas las columnas `NOT NULL` (`auto_id`, `fecha_recogida`, `fecha_devolucion`, `dias_renta`, `total`, `idempotency_key`, `nombre_conductor`, `licencia_conducir`).
 - **Persistencia Monotónica**: El estado `CONFIRMADO_ASISTIDO` es irreversible una vez registrado y debe reflejarse tanto en el endpoint de consulta `/api/v3/reservas/:id/estado` como en la interfaz de "Mis Reservas".
+
