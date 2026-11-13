@@ -209,6 +209,15 @@ export class AutosService implements OnModuleInit {
     try {
       await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
     } catch (_) {}
+    try {
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas DROP CONSTRAINT IF EXISTS autos_reservas_auto_id_fkey`);
+    } catch (_) {}
+    try {
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ADD COLUMN IF NOT EXISTS external_order_id VARCHAR(100)`);
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ADD COLUMN IF NOT EXISTS pnr VARCHAR(50)`);
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ADD COLUMN IF NOT EXISTS checkin_at TIMESTAMPTZ`);
+      await this.orderRepo.query(`ALTER TABLE schema_autos.autos_reservas ADD COLUMN IF NOT EXISTS checkin_admin VARCHAR(100)`);
+    } catch (_) {}
     // Evaluador periódico de cooldown cada 30 segundos (§5 Consideraciones)
     const timer = setInterval(() => {
       this.evaluateCleaningCooldowns();
@@ -700,34 +709,47 @@ export class AutosService implements OnModuleInit {
     // Almacenar en memoria y en base de datos si está disponible
     this.memoryOrders.set(idempotencyKey, orderResponse);
     this.memoryOrders.set(pnr, orderResponse);
+    if (externalOrder?.order_id) {
+      this.memoryOrders.set(externalOrder.order_id, orderResponse);
+    }
+    if (externalOrder?.external_order_id) {
+      this.memoryOrders.set(externalOrder.external_order_id, orderResponse);
+    }
 
     try {
-      const dbOrder = this.orderRepo.create({
-        id: pnr,
-        autoId: auto.id,
-        idempotencyKey,
-        status: 'CONFIRMED',
-        diasRenta: dias,
-        pnr,
-        tipoCobertura,
-        depositoGarantia,
-        totalPrice: { currency: 'USD', total: totalPagar },
-        booker: orderData.booker || { country: 'EC' },
-        driver: {
-          age: driverAge,
-          nombre: orderResponse.conductor.nombre,
-          email: orderResponse.conductor.email,
-          telefono: orderResponse.conductor.telefono,
-          licencia: orderResponse.conductor.licencia,
-          numero_vuelo: orderResponse.conductor.numero_vuelo
-        },
-        route: orderData.route || {},
-        checkinStatus: 'PENDING_CHECKIN',
-        voucherQrData: qrData
-      });
-      await this.orderRepo.save(dbOrder);
-    } catch (e) {
-      this.logger.warn(`[AutosService] No se persistió en tabla física SQL, manteniéndose en memoria sincronizada.`);
+      const pickupDate = pickupDateStr ? new Date(pickupDateStr) : new Date();
+      const dropoffDate = dropoffDateStr ? new Date(dropoffDateStr) : new Date(Date.now() + dias * 24 * 3600 * 1000);
+      const extOrderId = externalOrder?.order_id || externalOrder?.external_order_id || pnr;
+
+      await this.orderRepo.query(
+        `INSERT INTO schema_autos.autos_reservas (
+           id, auto_id, cliente_id, nombre_conductor, licencia_conducir,
+           fecha_recogida, fecha_devolucion, dias_renta, total, estado,
+           idempotency_key, external_order_id, pnr, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+         ON CONFLICT (id) DO UPDATE SET 
+           estado = EXCLUDED.estado,
+           external_order_id = EXCLUDED.external_order_id,
+           pnr = EXCLUDED.pnr`,
+        [
+          pnr,
+          autoId,
+          orderData.cliente_id || null,
+          driverName,
+          driverLicense,
+          pickupDate,
+          dropoffDate,
+          dias,
+          totalPagar,
+          'CONFIRMADA',
+          idempotencyKey,
+          extOrderId,
+          pnr,
+        ],
+      );
+      this.logger.log(`[AutosService] Reserva de auto ${pnr} persistida en schema_autos.autos_reservas`);
+    } catch (e: any) {
+      this.logger.warn(`[AutosService] Error persistiendo reserva en schema_autos.autos_reservas: ${e.message}`);
     }
 
     // Observabilidad física Winston
