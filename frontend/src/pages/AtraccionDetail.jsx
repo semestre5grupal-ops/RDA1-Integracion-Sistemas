@@ -228,9 +228,21 @@ export function AtraccionDetail() {
       let result = null;
       const safeDate = form.date || todayStr;
       const dateCompact = safeDate.replace(/-/g, '');
-      const timeNormalized = (form.time || '09:00').replace(/(a\.m\.|p\.m\.|\s)/gi, '').slice(0, 5) || '09:00';
-      const time24 = timeNormalized.length === 4 ? `0${timeNormalized}` : timeNormalized;
-      const timeCompact = time24.replace(/[^0-9]/g, '').slice(0, 4).padStart(4, '0');
+      let hour24 = 9;
+      let minStr = '00';
+      const rawTimeStr = form.time || '09:00';
+      const isPm = /p\.m\.|pm/i.test(rawTimeStr);
+      const isAm = /a\.m\.|am/i.test(rawTimeStr);
+      const tMatch = rawTimeStr.match(/(\d{1,2}):(\d{2})/);
+      if (tMatch) {
+        let h = parseInt(tMatch[1], 10);
+        minStr = tMatch[2];
+        if (isPm && h < 12) h += 12;
+        if (isAm && h === 12) h = 0;
+        hour24 = h;
+      }
+      const time24 = `${String(hour24).padStart(2, '0')}:${minStr}`;
+      const timeCompact = `${String(hour24).padStart(2, '0')}${minStr}`;
 
       // Siempre garantizar que el targetSlotId pertenezca a la fecha explícitamente elegida por el usuario
       let targetSlotId = `slot-${dateCompact}-${timeCompact}`;

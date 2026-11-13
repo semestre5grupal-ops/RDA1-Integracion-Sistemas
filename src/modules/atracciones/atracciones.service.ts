@@ -1853,36 +1853,41 @@ export class AtraccionesService implements OnModuleInit {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
       const timeRaw = (dto.time || dto.hora || '09:00 a.m.').trim();
 
-      // Normalizar hora para TourGirls considerando formato 24h y slots
+      let slotIdMichael = dto.slot_id && dto.slot_id.startsWith('slot-') ? dto.slot_id : null;
+      let finalDate = dateStr;
       let timeFormatted = timeRaw;
-      if (timeRaw.includes('a.m.') || timeRaw.includes('p.m.')) {
-        timeFormatted = timeRaw;
-      } else {
-        const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})/);
-        if (timeMatch) {
-          const hour = parseInt(timeMatch[1], 10);
-          const min = timeMatch[2];
-          if (hour === 0) {
-            timeFormatted = `12:${min} a.m.`;
-          } else if (hour === 12) {
-            timeFormatted = `12:${min} p.m.`;
-          } else if (hour > 12) {
-            const h12 = String(hour - 12).padStart(2, '0');
-            timeFormatted = `${h12}:${min} p.m.`;
-          } else {
-            const h12 = String(hour).padStart(2, '0');
-            timeFormatted = `${h12}:${min} a.m.`;
-          }
-        } else {
-          timeFormatted = `${timeRaw} a.m.`;
-        }
-      }
 
-      const dateCompact = dateStr.replace(/-/g, '');
-      const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4).padEnd(4, '0');
-      const slotIdMichael = dto.slot_id && dto.slot_id.startsWith('slot-')
-        ? dto.slot_id
-        : `slot-${dateCompact}-${timeCompact}`;
+      // Si tenemos un slot_id con formato canónico slot-YYYYMMDD-HHMM, derivar fecha y hora exacta del slot
+      const slotMatch = slotIdMichael ? slotIdMichael.match(/slot-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/) : null;
+      if (slotMatch) {
+        finalDate = `${slotMatch[1]}-${slotMatch[2]}-${slotMatch[3]}`;
+        const sHour = parseInt(slotMatch[4], 10);
+        const sMin = slotMatch[5];
+        if (sHour === 0) timeFormatted = `12:${sMin} a.m.`;
+        else if (sHour === 12) timeFormatted = `12:${sMin} p.m.`;
+        else if (sHour > 12) timeFormatted = `${String(sHour - 12).padStart(2, '0')}:${sMin} p.m.`;
+        else timeFormatted = `${String(sHour).padStart(2, '0')}:${sMin} a.m.`;
+      } else {
+        // Fallback: calcular hora 24h y generar slot_id
+        let hour24 = 9;
+        let minStr = '00';
+        const isPm = /p\.m\.|pm/i.test(timeRaw);
+        const isAm = /a\.m\.|am/i.test(timeRaw);
+        const numMatch = timeRaw.match(/(\d{1,2}):(\d{2})/);
+        if (numMatch) {
+          let h = parseInt(numMatch[1], 10);
+          minStr = numMatch[2];
+          if (isPm && h < 12) h += 12;
+          if (isAm && h === 12) h = 0;
+          hour24 = h;
+        }
+        const hCompact = String(hour24).padStart(2, '0');
+        slotIdMichael = `slot-${dateStr.replace(/-/g, '')}-${hCompact}${minStr}`;
+        if (hour24 === 0) timeFormatted = `12:${minStr} a.m.`;
+        else if (hour24 === 12) timeFormatted = `12:${minStr} p.m.`;
+        else if (hour24 > 12) timeFormatted = `${String(hour24 - 12).padStart(2, '0')}:${minStr} p.m.`;
+        else timeFormatted = `${String(hour24).padStart(2, '0')}:${minStr} a.m.`;
+      }
 
       const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
       const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';
@@ -1903,7 +1908,7 @@ export class AtraccionesService implements OnModuleInit {
       const michaelPayload = {
         atraccion_id: id,
         slot_id: slotIdMichael,
-        date: dateStr,
+        date: finalDate,
         time: timeFormatted,
         adult_count: adultCount,
         child_count: childCount,
