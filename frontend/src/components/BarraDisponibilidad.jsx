@@ -53,7 +53,6 @@ export function BarraDisponibilidad({ valores, onAplicar, consultando = false, e
   const [errores, setErrores] = useState([]);
   const [mensaje, setMensaje] = useState('');
   const ref = useRef(null);
-  const autoAplicarTimer = useRef(null);
 
   // Si la página aplica valores nuevos (p. ej. desde la URL), el borrador se sincroniza.
   useEffect(() => {
@@ -63,14 +62,7 @@ export function BarraDisponibilidad({ valores, onAplicar, consultando = false, e
   // Cerrar popovers con clic fuera o Escape.
   useEffect(() => {
     if (!abierto) return undefined;
-    const fuera = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) {
-        setAbierto(null);
-        if (borrador.checkin && borrador.checkout && borrador.checkout > borrador.checkin) {
-          aplicar(borrador);
-        }
-      }
-    };
+    const fuera = (e) => { if (ref.current && !ref.current.contains(e.target)) setAbierto(null); };
     const esc = (e) => { if (e.key === 'Escape') setAbierto(null); };
     document.addEventListener('mousedown', fuera);
     document.addEventListener('keydown', esc);
@@ -78,25 +70,12 @@ export function BarraDisponibilidad({ valores, onAplicar, consultando = false, e
       document.removeEventListener('mousedown', fuera);
       document.removeEventListener('keydown', esc);
     };
-  }, [abierto, borrador]);
+  }, [abierto]);
 
   const cambiar = (parcial) => {
-    setBorrador((b) => {
-      const nuevo = { ...b, ...parcial };
-      setErrores([]);
-      setMensaje('');
-
-      // Auto-aplicar en vivo sin obligar al usuario a presionar "Cambiar búsqueda"
-      if (nuevo.checkin && nuevo.checkout && nuevo.checkout > nuevo.checkin) {
-        if (!nuevo.edadesNinos.some((e) => e === null || e === '' || e === undefined)) {
-          if (autoAplicarTimer.current) clearTimeout(autoAplicarTimer.current);
-          autoAplicarTimer.current = setTimeout(() => {
-            onAplicar?.(nuevo);
-          }, 300);
-        }
-      }
-      return nuevo;
-    });
+    setBorrador((b) => ({ ...b, ...parcial }));
+    setErrores([]);
+    setMensaje('');
   };
 
   const cambiarNinos = (n) => {
@@ -108,13 +87,12 @@ export function BarraDisponibilidad({ valores, onAplicar, consultando = false, e
 
   const errorDe = (campo) => errores.find((e) => e.campo === campo)?.mensaje;
 
-  const aplicar = async (customDraft) => {
-    const target = customDraft || borrador;
+  const aplicar = async () => {
     // Validaciones inmediatas (el backend vuelve a validarlo todo).
     const locales = [];
-    if (!target.checkin || !target.checkout) locales.push({ campo: 'fechas', mensaje: 'Selecciona las fechas de entrada y salida.' });
-    else if (target.checkout <= target.checkin) locales.push({ campo: 'fechas', mensaje: 'La fecha de salida debe ser posterior a la de entrada.' });
-    if (target.edadesNinos.some((e) => e === null || e === '' || e === undefined)) {
+    if (!borrador.checkin || !borrador.checkout) locales.push({ campo: 'fechas', mensaje: 'Selecciona las fechas de entrada y salida.' });
+    else if (borrador.checkout <= borrador.checkin) locales.push({ campo: 'fechas', mensaje: 'La fecha de salida debe ser posterior a la de entrada.' });
+    if (borrador.edadesNinos.some((e) => e === null || e === '' || e === undefined)) {
       locales.push({ campo: 'ocupacion', mensaje: 'Indica la edad de cada niño (es necesaria para darte el precio correcto).' });
     }
     if (locales.length > 0) {
@@ -124,7 +102,7 @@ export function BarraDisponibilidad({ valores, onAplicar, consultando = false, e
     }
 
     setAbierto(null);
-    const resultado = await onAplicar(target);
+    const resultado = await onAplicar(borrador);
     if (resultado && !resultado.ok) {
       setErrores(resultado.errores || []);
       setMensaje(resultado.mensaje || '');
@@ -238,13 +216,13 @@ export function BarraDisponibilidad({ valores, onAplicar, consultando = false, e
               )}
               <Contador etiqueta="Habitaciones" valor={borrador.habitaciones} min={1} max={MAX_HABITACIONES} onCambiar={(habitaciones) => cambiar({ habitaciones })} />
               {errOcupacion && <p className="bd-error" role="alert">{errOcupacion}</p>}
-              <button type="button" className="bd-listo" onClick={() => { setAbierto(null); aplicar(); }}>Listo</button>
+              <button type="button" className="bd-listo" onClick={() => setAbierto(null)}>Listo</button>
             </div>
           )}
         </div>
 
-        <button type="button" className="bd-aplicar" onClick={() => aplicar()} disabled={consultando}>
-          {consultando ? 'Actualizando en vivo…' : 'Actualizar'}
+        <button type="button" className="bd-aplicar" onClick={aplicar} disabled={consultando}>
+          {consultando ? 'Consultando…' : 'Cambiar búsqueda'}
         </button>
       </div>
 

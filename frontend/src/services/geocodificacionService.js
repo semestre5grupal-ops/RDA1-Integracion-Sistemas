@@ -152,4 +152,3 @@ export function obtenerCoordenadasAlojamiento(alojamiento) {
 
   return { lat: -0.180653, lng: -78.467834 };
 }
-

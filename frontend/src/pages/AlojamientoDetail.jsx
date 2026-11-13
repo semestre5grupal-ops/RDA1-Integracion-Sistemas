@@ -9,7 +9,6 @@ import { useCurrency } from '../hooks/CurrencyContext';
 import { formatearRegimen } from '../utils/regimenFormato';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
 import { ReportModal } from '../components/ReportModal';
-import { normalizarTexto } from '../utils/destinos';
 import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 import {
@@ -326,35 +325,40 @@ export function AlojamientoDetail() {
     }
   }, [id, checkin, checkout, user?.email]);
 
-  // Al abrir la página o al modificar fechas y ocupación, se cotiza en vivo.
+  // Al abrir la página se cotiza con las fechas y ocupación de la URL.
   useEffect(() => {
-    if (!id || !checkin || !checkout) return;
-    if (checkout <= checkin) return;
-    if (edadesNinos.some((e) => e === null || e === undefined)) return;
-
-    const timer = setTimeout(() => {
-      consultar({ checkin, checkout, adultos: adults, edadesNinos, habitaciones: rooms }).then((r) => {
-        if (r && !r.ok) {
-          const primero = r.errores?.[0]?.mensaje || r.mensaje;
-          if (primero) setErrorCotizacion(primero);
-        }
-      });
-    }, 300);
-
-    return () => clearTimeout(timer);
+    if (!id) return;
+    consultar({ checkin, checkout, adultos: adults, edadesNinos, habitaciones: rooms }).then((r) => {
+      if (r && !r.ok) {
+        const primero = r.errores?.[0]?.mensaje || r.mensaje;
+        if (primero) setErrorCotizacion(primero);
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, checkin, checkout, adults, rooms, edadesNinos.length]);
+  }, [id]);
 
-  // Sincronizar disponibilidad en tiempo real (Polling continuo cada 5s emulando stream gRPC)
+  // Sincronizar disponibilidad en tiempo real (Polling continuo cada 4 segundos)
   useEffect(() => {
     if (!id) return;
     let isCancelled = false;
-    const fetchAvail = async (silent = false) => {
-      if (!silent) setLoadingDisponibilidad(true);
+    let timer = null;
+
+    const fetchAvail = async (isSilent = false) => {
+      if (!isSilent) setLoadingDisponibilidad(true);
       try {
         const data = await getDisponibilidadAlojamiento(id, { checkin, checkout });
         if (!isCancelled && data) {
-          setDisponibilidad(data);
+          setDisponibilidad((prev) => {
+            if (
+              prev &&
+              prev.available_rooms === data.available_rooms &&
+              prev.estado === data.estado &&
+              prev.precio_total === data.precio_total
+            ) {
+              return prev;
+            }
+            return data;
+          });
           if (typeof data.available_rooms === 'number') {
             if (data.available_rooms > 0 && rooms > data.available_rooms) {
               setRooms(data.available_rooms);
@@ -364,14 +368,19 @@ export function AlojamientoDetail() {
       } catch (err) {
         console.warn('[AlojamientoDetail] Error transitorio verificando disponibilidad:', err?.message || err);
       } finally {
-        if (!isCancelled && !silent) setLoadingDisponibilidad(false);
+        if (!isCancelled && !isSilent) {
+          setLoadingDisponibilidad(false);
+        }
       }
     };
-    fetchAvail(false);
 
-    // Stream gRPC: consulta periódica para reflejar caídas de stock en tiempo real
-    const interval = setInterval(() => {
-      fetchAvail(true);
+    const runPoll = async (silent) => {
+      if (isCancelled) return;
+      if (silent && typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(() => runPoll(true), 4000);
+        return;
+      }
+      await fetchAvail(silent);
       if (checkin && checkout && checkout > checkin) {
         consultarDisponibilidad({
           id,
@@ -399,11 +408,16 @@ export function AlojamientoDetail() {
           })
           .catch(() => {});
       }
-    }, 5000);
+      if (!isCancelled) {
+        timer = setTimeout(() => runPoll(true), 4000);
+      }
+    };
+
+    runPoll(false);
 
     return () => {
       isCancelled = true;
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
     };
   }, [id, checkin, checkout, adults, rooms, edadesNinos, tipoElegidoId]);
 
@@ -412,6 +426,7 @@ export function AlojamientoDetail() {
   const availabilityRef = useRef(null);
   const facilitiesRef = useRef(null);
   const rulesRef = useRef(null);
+  const surroundingsRef = useRef(null);
   const reviewsRef = useRef(null);
 
   // Reviews State
@@ -496,11 +511,9 @@ export function AlojamientoDetail() {
   const nightsCount = cotizacion?.noches || nochesCalculadas;
 
   // Precio: el del backend para estas fechas (por habitación) × habitaciones.
-  const pricePerNight = Number(alojamiento?.precioPorNoche || alojamiento?.precio_noche) > 0
-    ? Number(alojamiento?.precioPorNoche || alojamiento?.precio_noche)
-    : 85;
-  const totalPrice = (cotizacion?.precio != null && Number(cotizacion.precio) > 0)
-    ? Math.round(Number(cotizacion.precio) * rooms * 100) / 100
+  const pricePerNight = Number(alojamiento?.precioPorNoche || alojamiento?.precio_noche || alojamiento?.precioBase || 0);
+  const totalPrice = cotizacion?.precio != null
+    ? Math.round(cotizacion.precio * rooms * 100) / 100
     : Math.round(pricePerNight * nightsCount * rooms);
   const originalPrice = Math.round(totalPrice * 1.14);
   const taxes = Math.round(totalPrice * 0.15);
@@ -559,18 +572,7 @@ export function AlojamientoDetail() {
             className="dt-search-bar"
             onSubmit={(e) => {
               e.preventDefault();
-              const destTrim = searchDest.trim();
-              const destNormal = normalizarTexto(destTrim);
-              const destActual = normalizarTexto(alojamiento?.destino || 'Quito');
-              const nombreActual = normalizarTexto(alojamiento?.nombre || '');
-              
-              // Si el destino ingresado coincide con el alojamiento actual o su ciudad, actualizar cotización en vivo
-              if (!destTrim || destNormal === destActual || (nombreActual && destNormal.includes(nombreActual)) || (nombreActual && nombreActual.includes(destNormal))) {
-                consultar({ checkin, checkout, adultos, edadesNinos, habitaciones: rooms });
-                scrollToSection(availabilityRef, 'price');
-              } else {
-                navigate(`/alojamientos/search?ss=${encodeURIComponent(destTrim)}&checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&group_children=${edadesNinos.length}&no_rooms=${rooms}`);
-              }
+              navigate(`/alojamientos/search?ss=${encodeURIComponent(searchDest)}&checkin=${checkin}&checkout=${checkout}&group_adults=${adults}&no_rooms=${rooms}`);
             }}
           >
             {/* Field 1: Destination */}
@@ -639,16 +641,7 @@ export function AlojamientoDetail() {
                       <input
                         type="date"
                         value={checkin}
-                        onChange={(e) => {
-                          const cIn = e.target.value;
-                          setCheckin(cIn);
-                          if (checkout && checkout <= cIn) {
-                            const [y, m, d] = cIn.split('-').map(Number);
-                            const next = new Date(y, m - 1, d + 1);
-                            const nextStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
-                            setCheckout(nextStr);
-                          }
-                        }}
+                        onChange={(e) => setCheckin(e.target.value)}
                         className="dt-popover-date-input"
                       />
                     </div>
@@ -759,8 +752,8 @@ export function AlojamientoDetail() {
             </div>
 
             {/* Field 4: Search Button */}
-            <button type="submit" className="dt-search-btn" disabled={consultando}>
-              {consultando ? 'Actualizando…' : 'Buscar'}
+            <button type="submit" className="dt-search-btn">
+              Buscar
             </button>
           </form>
         </div>
@@ -830,6 +823,13 @@ export function AlojamientoDetail() {
           </button>
           <button
             type="button"
+            className={`dt-nav-tab ${activeTab === 'surroundings' ? 'active' : ''}`}
+            onClick={() => scrollToSection(surroundingsRef, 'surroundings')}
+          >
+            Ubicación y mapa
+          </button>
+          <button
+            type="button"
             className={`dt-nav-tab ${activeTab === 'reviews' ? 'active' : ''}`}
             onClick={() => scrollToSection(reviewsRef, 'reviews')}
           >
@@ -865,7 +865,10 @@ export function AlojamientoDetail() {
               <PinIcon size={16} color="#006ce4" />
               <span>{alojamiento.ubicacion?.address || (typeof alojamiento.ubicacion === 'string' ? alojamiento.ubicacion : alojamiento.destino || 'Ecuador')}</span>
               <span>–</span>
-              <span className="dt-address-link" onClick={() => setShowMapModal(true)}>
+              <span
+                className="dt-address-link"
+                onClick={() => setShowMapModal(true)}
+              >
                 Ubicación excelente – mostrar en el mapa
               </span>
               <span className="dt-price-match-tag">
@@ -1019,7 +1022,7 @@ export function AlojamientoDetail() {
             <div
               className="dt-side-map-box"
               style={{
-                backgroundImage: 'url("https://tile.openstreetmap.org/13/2764/4096.png")',
+                backgroundImage: 'url("https://maps.googleapis.com/maps/api/staticmap?size=340x140&center=-0.1838,-78.4919&zoom=13&scale=2&sensor=false")',
                 backgroundColor: '#e5e3df',
               }}
             >
@@ -1099,13 +1102,7 @@ export function AlojamientoDetail() {
             ====================================================================== */}
         <section className="dt-availability-section" ref={availabilityRef} id="availability">
           <div className="dt-availability-header">
-            <div>
-              <h2>Disponibilidad</h2>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#008009', fontWeight: 600, marginTop: '2px' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#008009' }} />
-                <span>En vivo: inventario y aforo sincronizados</span>
-              </div>
-            </div>
+            <h2>Disponibilidad</h2>
             <span style={{ fontSize: '0.85rem', color: '#595959', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <PriceMatchIcon size={14} color="#008009" /> Igualamos el precio
             </span>
@@ -1204,11 +1201,7 @@ export function AlojamientoDetail() {
                         <div style={{ color: p.reembolsable === false ? '#d4111e' : (p.reembolsable ? '#008009' : '#595959'), fontWeight: 600, fontSize: '0.82rem', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                           {p.reembolsable ? <CheckmarkIcon size={14} /> : (p.reembolsable === false ? '✕' : null)} {p.cancellation_type || (p.reembolsable === false ? 'No reembolsable' : 'Cancelación gratis')}
                         </div>
-                        {libres <= 0 ? (
-                          <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
-                            Agotado para tus fechas
-                          </div>
-                        ) : libres <= 3 ? (
+                        {libres <= 3 ? (
                           <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
                             ¡Solo {libres === 1 ? 'queda 1' : `quedan ${libres}`} a este precio en nuestra web!
                           </div>
@@ -1248,18 +1241,12 @@ export function AlojamientoDetail() {
                 <tr>
                   <td>
                     <span className="dt-room-title-link">
-                      {alojamiento.tipo_alojamiento || alojamiento.nombre || 'Habitación estándar'}
+                      {alojamiento.tipo_alojamiento || 'Departamento de 2 dormitorios'}
                     </span>
                     <div className="dt-room-features-list">
-                      <span>
-                        {[
-                          alojamiento.habitaciones ? `${alojamiento.habitaciones} ${alojamiento.habitaciones === 1 ? 'dormitorio' : 'dormitorios'}` : null,
-                          alojamiento.banos ? `${alojamiento.banos} ${alojamiento.banos === 1 ? 'baño privado' : 'baños'}` : null,
-                        ].filter(Boolean).join(' · ')}
-                      </span>
-                      <span>
-                        {alojamiento.descripcion_camas || (alojamiento.camas ? `${alojamiento.camas} ${alojamiento.camas === 1 ? 'cama' : 'camas'}` : '1 cama')}
-                      </span>
+                      <span>Departamento entero · {alojamiento.habitaciones || 2} dormitorios · 1 sala de estar · {alojamiento.banos || 1} {Number(alojamiento.banos) === 1 ? 'baño privado' : 'baños'}</span>
+                      <span>1 cocina · 95 m²</span>
+                      <span>{alojamiento.descripcion_camas || `${alojamiento.camas || 1} ${alojamiento.camas === 1 ? 'cama' : 'camas'}`}</span>
                       <span style={{ color: '#008009', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <CheckmarkIcon size={14} /> WiFi gratis incluido
                       </span>
@@ -1278,16 +1265,14 @@ export function AlojamientoDetail() {
                     </div>
                   </td>
                   <td>
-                    {originalPrice > 0 && (
-                      <div style={{ fontSize: '0.85rem', color: '#d4111e', textDecoration: 'line-through' }}>
-                        {currency} {convertPrice(originalPrice)}
-                      </div>
-                    )}
+                    <div style={{ fontSize: '0.85rem', color: '#d4111e', textDecoration: 'line-through' }}>
+                      {currency} {convertPrice(originalPrice)}
+                    </div>
                     <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#1a1a1a' }}>
-                      {currency} {convertPrice(totalPrice > 0 ? totalPrice : (alojamiento.precioPorNoche || 0) * nightsCount)}
+                      {currency} {convertPrice(totalPrice)}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: '#595959' }}>
-                      {nightsCount} {nightsCount === 1 ? 'noche' : 'noches'}, 1 habitación · +{currency} {convertPrice(taxes > 0 ? taxes : Math.round(((totalPrice > 0 ? totalPrice : (alojamiento.precioPorNoche || 0) * nightsCount)) * 0.15))} de impuestos
+                      +{currency} {convertPrice(taxes)} de impuestos y cargos
                     </div>
                   </td>
                   <td>
@@ -1484,32 +1469,28 @@ export function AlojamientoDetail() {
           </div>
 
           <div className="dt-rules-box">
-            {alojamiento.politicas?.checkin_desde && (
-              <div className="dt-rule-row">
-                <div className="dt-rule-left">
-                  <ClockIcon size={18} color="#003580" />
-                  <span>Entrada</span>
-                </div>
-                <div className="dt-rule-right">
-                  <strong>A partir de las {alojamiento.politicas.checkin_desde}{alojamiento.politicas.checkin_hasta ? ` hasta las ${alojamiento.politicas.checkin_hasta}` : ''}</strong>
-                  <div style={{ fontSize: '0.8rem', color: '#595959' }}>
-                    Indica tu horario previsto de llegada al realizar la reserva.
-                  </div>
+            <div className="dt-rule-row">
+              <div className="dt-rule-left">
+                <ClockIcon size={18} color="#003580" />
+                <span>Entrada</span>
+              </div>
+              <div className="dt-rule-right">
+                <strong>A partir de las {getHorarioCheckin(alojamiento)}{getHorarioCheckinHasta(alojamiento) ? ` hasta las ${getHorarioCheckinHasta(alojamiento)}` : ''}</strong>
+                <div style={{ fontSize: '0.8rem', color: '#595959' }}>
+                  El check-in se realiza presencialmente en la recepción del alojamiento a tu llegada.
                 </div>
               </div>
-            )}
+            </div>
 
-            {alojamiento.politicas?.checkout_hasta && (
-              <div className="dt-rule-row">
-                <div className="dt-rule-left">
-                  <ClockIcon size={18} color="#003580" />
-                  <span>Salida</span>
-                </div>
-                <div className="dt-rule-right">
-                  <strong>Hasta las {alojamiento.politicas.checkout_hasta}</strong>
-                </div>
+            <div className="dt-rule-row">
+              <div className="dt-rule-left">
+                <ClockIcon size={18} color="#003580" />
+                <span>Salida</span>
               </div>
-            )}
+              <div className="dt-rule-right">
+                <strong>Hasta las {getHorarioCheckout(alojamiento)}</strong>
+              </div>
+            </div>
 
             {alojamiento.politicas?.cancelacion && (
               <div className="dt-rule-row">
@@ -1564,7 +1545,7 @@ export function AlojamientoDetail() {
         {/* ======================================================================
             SURROUNDINGS & LANDMARKS
             ====================================================================== */}
-        <section style={{ marginBottom: '40px' }} id="surroundings">
+        <section ref={surroundingsRef} style={{ marginBottom: '40px' }} id="surroundings">
           <h2 style={{ fontSize: '1.45rem', fontWeight: 800, marginBottom: '14px' }}>
             Alrededores y lugares de interés cercanos
           </h2>
