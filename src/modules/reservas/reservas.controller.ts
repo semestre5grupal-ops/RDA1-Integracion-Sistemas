@@ -105,7 +105,7 @@ export class ReservasController {
    * Consultar estado en tiempo real de una reserva
    */
   @Get(':id/estado')
-  @Version(['2', '3'])
+  @Version(['1', '2', '3'])
   @ApiOperation({ summary: 'Consultar el estado del ciclo de vida de una reserva (RESERVADO / CONFIRMADO_ASISTIDO)' })
   @ApiParam({ name: 'id', description: 'ID o localizador de la reserva' })
   async getEstado(@Param('id') id: string) {
