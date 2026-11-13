@@ -1146,25 +1146,46 @@ export class AtraccionesService implements OnModuleInit {
 
     const partnerCode = item?.proveedorCodigo || '';
 
+    const gloriaKnownIds = new Set([
+      '1bb26d24-f79d-4833-b9da-a35b8d5ef44d',
+      '6e97ed14-3094-4e49-a093-452f028bee97',
+      '6f163ba9-f1c1-4593-8100-92390373688c',
+      'cc25f94a-7246-41a0-8832-7ca662277107',
+      '772f0145-fdf7-4f3f-bc97-d402f5607854',
+      'df3d1877-88f8-4183-805d-ced39a36811d',
+    ]);
+
     let isAlisson = partnerCode === 'NODE_ATR_ALISSON';
     let isMichael = partnerCode === 'NODE_ATR_MOLINA';
-    let isGloria = partnerCode === 'NODE_ATR_GLORIA';
+    let isGloria = partnerCode === 'NODE_ATR_GLORIA' || gloriaKnownIds.has(id);
     let isDilan = partnerCode === 'NODE_ATR_DILAN';
     let isAriel = partnerCode === 'NODE_ATR_ARIEL';
 
     if (!isAlisson && !isMichael && !isGloria && !isDilan && !isAriel) {
       if (DILAN_KNOWN_IDS.has(id) || id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
         isDilan = true;
-      } else if (id === '1bb26d24-f79d-4833-b9da-a35b8d5ef44d') {
+      } else if (gloriaKnownIds.has(id)) {
         isGloria = true;
       } else if (id.startsWith('PRhu') || id === 's7PpJcyvtY2Q') {
         isAlisson = true;
       } else if (id === 'rLohsmEh6809') {
         isMichael = true;
-      } else if (id.startsWith('0bef') || id.length > 30 || id.includes('-')) {
-        isAriel = true;
       } else if (id.length === 12) {
         isMichael = true;
+      } else if (id.includes('-')) {
+        // Consultar rápidamente si existe en el catálogo de Gloria antes de asumir Ariel
+        try {
+          const { data: gData } = await firstValueFrom(
+            this.httpService.get(`https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v3/atracciones/${id}`, { timeout: 1500 })
+          );
+          if (gData && (gData.id || gData.nombre || gData.name)) {
+            isGloria = true;
+          } else {
+            isAriel = true;
+          }
+        } catch (_) {
+          isAriel = true;
+        }
       }
     }
 
@@ -1303,7 +1324,7 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && Array.isArray(data.horarios) && data.horarios.length > 0) {
           const dateCompact = targetDate.replace(/-/g, '');
-          const attrCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 0);
+          const attrCap = Number((data as any)?.capacidad_maxima || (data as any)?.capacidadMaxima || (data as any)?.capacidad || (item as any)?.capacidadMaxima || (item as any)?.capacidad || 5);
           const mappedSlots = data.horarios.map((h: any) => {
             const timeRaw = h.hora || '09:00:00';
             const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4);
@@ -1610,13 +1631,14 @@ export class AtraccionesService implements OnModuleInit {
 
     // Si no existen turnos en la base para esa fecha, generar slots predeterminados en memoria
     if (!turnos || turnos.length === 0) {
-      let s09 = 14, s11 = 3, s14 = 18;
+      const fallbackCap = isGloria ? 5 : Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 20);
+      let s09 = Math.min(14, fallbackCap), s11 = Math.min(3, fallbackCap), s14 = Math.min(18, fallbackCap);
       if (this.inventoryService) {
         const grpcStock = this.inventoryService.getInventory(id, targetDate);
         grpcStock.forEach((s) => {
-          if (s.time_slot.includes('09')) s09 = s.available_units;
-          if (s.time_slot.includes('11')) s11 = s.available_units;
-          if (s.time_slot.includes('14') || s.time_slot.includes('02')) s14 = s.available_units;
+          if (s.time_slot.includes('09')) s09 = Math.min(s.available_units, fallbackCap);
+          if (s.time_slot.includes('11')) s11 = Math.min(s.available_units, fallbackCap);
+          if (s.time_slot.includes('14') || s.time_slot.includes('02')) s14 = Math.min(s.available_units, fallbackCap);
         });
       }
 
@@ -1629,8 +1651,8 @@ export class AtraccionesService implements OnModuleInit {
           hora_inicio: '09:00 a.m.',
           time_24h: '09:00:00',
           hora_24h: '09:00:00',
-          capacidad_total: 20,
-          cupos_totales: 20,
+          capacidad_total: fallbackCap,
+          cupos_totales: fallbackCap,
           cupos_disponibles: s09,
           status: s09 <= 0 ? 'AGOTADO' : (s09 <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
           estado: s09 <= 0 ? 'AGOTADO' : (s09 <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
@@ -1645,8 +1667,8 @@ export class AtraccionesService implements OnModuleInit {
           hora_inicio: '11:30 a.m.',
           time_24h: '11:30:00',
           hora_24h: '11:30:00',
-          capacidad_total: 20,
-          cupos_totales: 20,
+          capacidad_total: fallbackCap,
+          cupos_totales: fallbackCap,
           cupos_disponibles: s11,
           status: s11 <= 0 ? 'AGOTADO' : (s11 <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
           estado: s11 <= 0 ? 'AGOTADO' : (s11 <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
@@ -1661,8 +1683,8 @@ export class AtraccionesService implements OnModuleInit {
           hora_inicio: '02:30 p.m.',
           time_24h: '14:30:00',
           hora_24h: '14:30:00',
-          capacidad_total: 20,
-          cupos_totales: 20,
+          capacidad_total: fallbackCap,
+          cupos_totales: fallbackCap,
           cupos_disponibles: s14,
           status: s14 <= 0 ? 'AGOTADO' : (s14 <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
           estado: s14 <= 0 ? 'AGOTADO' : (s14 <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),

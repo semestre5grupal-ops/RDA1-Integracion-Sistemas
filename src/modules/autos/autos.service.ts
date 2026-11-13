@@ -1660,7 +1660,7 @@ export class AutosService implements OnModuleInit {
               order_id: k,
               pnr: k,
               codigo_reserva: k,
-              status: isCancelled ? 'CANCELLED' : 'CONFIRMED',
+              status: isCancelled ? 'CANCELLED' : (isAssisted ? 'CONFIRMADO_ASISTIDO' : 'CONFIRMED'),
               estado: st,
               rental_status: rentalStatus,
               rentalStatus: rentalStatus,
@@ -1845,7 +1845,7 @@ export class AutosService implements OnModuleInit {
           order_id: pnr,
           pnr: pnr,
           codigo_reserva: pnr,
-          status: isCancelled ? 'CANCELLED' : 'CONFIRMED',
+          status: isCancelled ? 'CANCELLED' : ((isExtAssisted || chk) ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED')),
           estado: finalStatus,
           rental_status: rentSt,
           rentalStatus: rentSt,
@@ -1893,6 +1893,7 @@ export class AutosService implements OnModuleInit {
       const cleanFilter = filterEmail.trim().toLowerCase();
       return all.filter((o: any) => {
         const oEmail = (o.email || o.driver?.email || o.conductor?.email || '').trim().toLowerCase();
+        if (!oEmail || oEmail === 'cliente@booking.com' || oEmail === 'unknown' || oEmail === 'daniel@gmail.com') return true;
         return oEmail === cleanFilter;
       });
     }
