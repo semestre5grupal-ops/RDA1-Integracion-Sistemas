@@ -5,8 +5,11 @@ export function AutoCard({ auto, dias = 3, startDate, endDate, pickupLocation })
   const id = auto.vehicle_id || auto.id || 'auto-spark-01';
   const precioDiario = auto.precio_diario || auto.price || 35.50;
   const precioTotal = (precioDiario * dias).toFixed(2);
-  const make = auto.marca || auto.make || 'Chevrolet';
-  const model = auto.modelo || auto.model || 'Spark GT';
+  const make = auto.marca || auto.make || (id === 'auto-047' ? 'Prueba2AutoSpot' : 'Chevrolet');
+  const model = auto.modelo || auto.model || (id === 'auto-047' ? 'Prueba2AutoSpot' : 'Spark GT');
+  const carDisplayName = make === model || (model && model.toLowerCase().includes(make.toLowerCase()))
+    ? model
+    : `${make} ${model}`.trim();
   const categoria = auto.categoria || auto.category || 'Económico';
   const seats = auto.asientos || auto.seats || 5;
   const doors = auto.puertas || auto.doors || 4;
@@ -73,7 +76,7 @@ export function AutoCard({ auto, dias = 3, startDate, endDate, pickupLocation })
         <div style={{ position: 'relative' }}>
           <img 
             src={auto.images && auto.images.length > 0 ? auto.images[0] : (auto.foto_url || 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=300&q=80')} 
-            alt={`${make} ${model}`}
+            alt={carDisplayName}
             style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '6px' }}
           />
           <span style={{ 
@@ -109,7 +112,7 @@ export function AutoCard({ auto, dias = 3, startDate, endDate, pickupLocation })
       {/* Center: Details & Badges */}
       <div style={{ flex: 1, paddingRight: '15px' }}>
         <h3 style={{ fontSize: '1.35rem', fontWeight: 'bold', color: '#1a1a1a', margin: '0 0 10px 0' }}>
-          {make} {model}{' '}
+          {carDisplayName}{' '}
           <span style={{ fontSize: '0.85rem', color: '#006ce4', fontWeight: 'normal', cursor: 'pointer' }}>
             o similar ℹ️
           </span>

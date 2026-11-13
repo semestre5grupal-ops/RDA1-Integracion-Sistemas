@@ -654,11 +654,11 @@ export class AutosService implements OnModuleInit {
       auto_id: autoId,
       email: driverEmail,
       vehiculo: {
-        marca: orderData.vehiculo?.marca || (externalOrder ? 'Toyota' : auto.marca),
-        modelo: orderData.vehiculo?.modelo || (externalOrder ? 'Toyota Yaris Cross 2026 Prueba' : auto.modelo),
-        categoria: orderData.vehiculo?.categoria || auto.categoria,
-        transmision: orderData.vehiculo?.transmision || auto.transmision,
-        foto_url: orderData.vehiculo?.foto_url || (orderData.vehiculo?.images?.[0]) || auto.foto_url
+        marca: orderData.vehiculo?.marca || (autoId === 'auto-047' ? 'Prueba2AutoSpot' : (autoId.length === 36 ? 'Maneja de Una' : (autoId.includes('pds-7648') ? 'Mercedes-Benz' : (auto?.marca || 'Vehículo')))),
+        modelo: orderData.vehiculo?.modelo || (autoId === 'auto-047' ? 'Prueba2AutoSpot' : (autoId.length === 36 ? 'Flota Ejecutiva' : (autoId.includes('pds-7648') ? 'GLA 200' : (auto?.modelo || 'Económico')))),
+        categoria: orderData.vehiculo?.categoria || auto?.categoria || 'Económico',
+        transmision: orderData.vehiculo?.transmision || auto?.transmision || 'Manual',
+        foto_url: orderData.vehiculo?.foto_url || (orderData.vehiculo?.images?.[0]) || auto?.foto_url
       },
       dias_renta: dias,
       pickup_date: pickupDateStr || new Date().toISOString().split('T')[0],
@@ -1520,6 +1520,40 @@ export class AutosService implements OnModuleInit {
   async getOrders(filterEmail?: string): Promise<any> {
     const unique = new Map<string, any>();
 
+    // Mapa de vehículos para enriquecer con nombres legibles canónicos (marca y modelo)
+    const vehicleInfoMap = new Map<string, { marca: string; modelo: string; categoria?: string; foto_url?: string }>();
+    for (const c of this.memoryFleet) {
+      if (c.id) {
+        const item = { marca: c.marca, modelo: c.modelo, categoria: c.categoria, foto_url: c.foto_url };
+        vehicleInfoMap.set(c.id, item);
+        vehicleInfoMap.set(c.id.toLowerCase(), item);
+      }
+    }
+    // Añadir vehículos conocidos de socios externos
+    vehicleInfoMap.set('auto-047', { marca: 'Prueba2AutoSpot', modelo: 'Prueba2AutoSpot', categoria: 'ECONOMICO' });
+    vehicleInfoMap.set('auto-pds-7648', { marca: 'Mercedes-Benz', modelo: 'GLA 200', categoria: 'SUV' });
+    vehicleInfoMap.set('auto-pru-1234', { marca: 'Toyota', modelo: 'Yaris Cross 2026 Prueba', categoria: 'SUV' });
+    vehicleInfoMap.set('auto-pru-1235', { marca: 'Toyota', modelo: 'Yaris Cross 2026 Prueba', categoria: 'SUV' });
+
+    try {
+      const extCars = await this.circuitBreakerAdapter.fetchExternalCars({ all_units: 'true' });
+      if (Array.isArray(extCars)) {
+        for (const ec of extCars) {
+          const vId = ec.vehicle_id || ec.id || ec.auto_id;
+          if (vId) {
+            const m = {
+              marca: ec.marca || ec.brand || 'Vehículo',
+              modelo: ec.modelo || ec.model || 'Económico',
+              categoria: ec.categoria || ec.category || 'Económico',
+              foto_url: ec.foto_url || (Array.isArray(ec.images) ? ec.images[0] : null)
+            };
+            vehicleInfoMap.set(String(vId), m);
+            vehicleInfoMap.set(String(vId).toLowerCase(), m);
+          }
+        }
+      }
+    } catch (_) {}
+
     // 1. Obtener auditoría de check-ins presenciales para enriquecer estados en tiempo real
     const checkinMap = new Map<string, any>();
     try {
@@ -1547,6 +1581,11 @@ export class AutosService implements OnModuleInit {
             const chk = checkinMap.get(k.toUpperCase());
             const isAssisted = d.status === 'CONFIRMADO_ASISTIDO' || (d as any).checkinStatus === 'COMPLETED' || !!chk;
             const st = isAssisted ? 'CONFIRMADO_ASISTIDO' : (d.status || 'CONFIRMED');
+            const vId = String(d.autoId || '').trim();
+            const vInfo = vehicleInfoMap.get(vId) || vehicleInfoMap.get(vId.toLowerCase());
+            const isMateo = vId.length === 36 || (k && k.toUpperCase().startsWith('MDU-'));
+            const brand = vInfo?.marca || (isMateo ? 'Maneja de Una' : (vId === 'auto-047' ? 'Prueba2AutoSpot' : 'Vehículo'));
+            const model = vInfo?.modelo || (isMateo ? 'Flota Ejecutiva' : (vId === 'auto-047' ? 'Prueba2AutoSpot' : 'Económico'));
             unique.set(k, {
               order_id: k,
               pnr: k,
@@ -1558,6 +1597,12 @@ export class AutosService implements OnModuleInit {
               checkin: chk || (isAssisted ? { status: 'COMPLETED' } : null),
               email: d.driver?.email || 'cliente@booking.com',
               conductor: d.driver,
+              vehiculo: {
+                marca: brand,
+                modelo: model,
+                categoria: vInfo?.categoria || 'Económico',
+                foto_url: vInfo?.foto_url || null,
+              },
               dias_renta: d.diasRenta || 3,
               total_price: d.totalPrice,
               createdAt: (d as any).createdAt,
@@ -1576,6 +1621,17 @@ export class AutosService implements OnModuleInit {
           order.estado = 'CONFIRMADO_ASISTIDO';
           order.checkin = chk;
           order.placa = chk.placa || order.placa;
+        }
+        const vId = String(order.auto_id || order.vehicle_id || '').trim();
+        const vInfo = vehicleInfoMap.get(vId) || vehicleInfoMap.get(vId.toLowerCase());
+        if (vInfo && (!order.vehiculo || !order.vehiculo.marca || order.vehiculo.marca === 'Vehículo' || order.vehiculo.marca === 'Toyota')) {
+          order.vehiculo = {
+            ...(order.vehiculo || {}),
+            marca: vInfo.marca,
+            modelo: vInfo.modelo,
+            categoria: vInfo.categoria || order.vehiculo?.categoria || 'Económico',
+            foto_url: vInfo.foto_url || order.vehiculo?.foto_url || null
+          };
         }
         unique.set(key, order);
       }
@@ -1603,6 +1659,12 @@ export class AutosService implements OnModuleInit {
                               checkinMap.has((ext.order_id || '').toUpperCase()) ||
                               checkinMap.has((ext.id || '').toUpperCase());
 
+        const extVid = String(ext.auto_id || ext.vehicle_id || '').trim();
+        const vInfo = vehicleInfoMap.get(extVid) || vehicleInfoMap.get(extVid.toLowerCase());
+        const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || extVid.length === 36;
+        const brandName = ext.vehiculo?.marca || ext.marca || vInfo?.marca || (isMateoOrder ? 'Maneja de Una' : (extVid.startsWith('auto-0') ? 'AutoSpot' : 'Toyota'));
+        const modelName = ext.vehiculo?.modelo || ext.modelo || vInfo?.modelo || (isMateoOrder ? 'Vehículo de Flota' : (extVid === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : (extVid === 'auto-pru-1234' ? 'Yaris Cross 2026 Prueba' : (extVid.startsWith('auto-0') ? 'Prueba2AutoSpot' : 'Vehículo'))));
+
         const existingKey = (pnr && unique.has(pnr)) ? pnr : (ext.order_id && unique.has(ext.order_id)) ? ext.order_id : (ext.id && unique.has(ext.id)) ? ext.id : null;
 
         if (existingKey) {
@@ -1617,12 +1679,30 @@ export class AutosService implements OnModuleInit {
           if (ext.plate || ext.placa) {
             existing.placa = ext.plate || ext.placa;
           }
+          if (!existing.vehiculo || !existing.vehiculo.marca || existing.vehiculo.marca === 'Vehículo' || existing.vehiculo.marca === 'Toyota') {
+            existing.vehiculo = {
+              marca: brandName,
+              modelo: modelName,
+              categoria: ext.vehiculo?.categoria || vInfo?.categoria || 'SUV',
+              transmision: ext.vehiculo?.transmision || 'Manual',
+              foto_url: ext.vehiculo?.foto_url || vInfo?.foto_url || null,
+            };
+          }
           const mem = this.memoryOrders.get(existingKey) || (pnr ? this.memoryOrders.get(pnr) : null);
           if (mem) {
             if ((isExtAssisted || yaEraAsistido) && mem.status !== 'CANCELLED') {
               mem.status = 'CONFIRMADO_ASISTIDO';
               mem.estado = 'CONFIRMADO_ASISTIDO';
               if (ext.plate || ext.placa) mem.placa = ext.plate || ext.placa;
+            }
+            if (!mem.vehiculo || !mem.vehiculo.marca || mem.vehiculo.marca === 'Vehículo' || mem.vehiculo.marca === 'Toyota') {
+              mem.vehiculo = {
+                marca: brandName,
+                modelo: modelName,
+                categoria: ext.vehiculo?.categoria || vInfo?.categoria || 'SUV',
+                transmision: ext.vehiculo?.transmision || 'Manual',
+                foto_url: ext.vehiculo?.foto_url || vInfo?.foto_url || null,
+              };
             }
           }
           continue;
@@ -1642,9 +1722,6 @@ export class AutosService implements OnModuleInit {
           this.orderRepo.update({ pnr }, { status: 'CONFIRMADO_ASISTIDO' } as any).catch(() => {});
         }
 
-        const isMateoOrder = (pnr && pnr.toUpperCase().startsWith('MDU-')) || (ext.auto_id && ext.auto_id.length === 36);
-        const brandName = ext.vehiculo?.marca || (isMateoOrder ? 'Maneja de Una' : 'Toyota');
-        const modelName = ext.vehiculo?.modelo || (isMateoOrder ? 'Vehículo de Flota' : (ext.auto_id === 'auto-pru-1235' ? 'Yaris Cross 2026 Prueba' : 'Yaris Cross 2026 Prueba'));
         const plateName = chk?.placa || ext.placa || (isMateoOrder ? (ext.auto_id ? ext.auto_id.substring(0, 8) : '') : (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : '')));
 
         unique.set(pnr, {
@@ -1669,9 +1746,9 @@ export class AutosService implements OnModuleInit {
           vehiculo: {
             marca: brandName,
             modelo: modelName,
-            categoria: ext.vehiculo?.categoria || 'SUV',
+            categoria: ext.vehiculo?.categoria || vInfo?.categoria || 'SUV',
             transmision: ext.vehiculo?.transmision || 'Manual',
-            foto_url: ext.vehiculo?.foto_url || (isMateoOrder ? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800' : 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1'),
+            foto_url: ext.vehiculo?.foto_url || vInfo?.foto_url || (isMateoOrder ? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800' : 'https://rutalibre-autos-api.azurewebsites.net/api/images/ec516572-33ac-4149-8c8b-556e831bf0d1'),
           },
           dias_renta: ext.dias_renta || ext.dias || 3,
           pickup_date: ext.pickup_date || ext.retiro?.fecha || ext.pickup || ext.fecha_inicio || ext.fecha_recogida,

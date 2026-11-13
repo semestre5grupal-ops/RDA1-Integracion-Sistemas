@@ -203,6 +203,11 @@ export function AtraccionDetail() {
       return;
     }
 
+    if (totalTickets <= 0) {
+      alert('Debes seleccionar al menos un boleto para continuar con la reserva.');
+      return;
+    }
+
     if (cuposExcedidos) {
       alert(`El turno seleccionado solo dispone de ${cuposDisponibles} cupos. Reduce la cantidad de boletos a un máximo de ${cuposDisponibles}.`);
       return;
@@ -785,7 +790,12 @@ export function AtraccionDetail() {
 
             {/* MATRIZ DE CONFIGURACIÓN DE ENTRADAS POR EDAD */}
             <div className="ticket-configuration" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
-              <strong style={{ fontSize: '0.95rem', display: 'block', marginBottom: '12px' }}>Cantidad de boletos:</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <strong style={{ fontSize: '0.95rem' }}>Cantidad de boletos:</strong>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: totalTickets >= cuposDisponibles ? '#b91c1c' : '#15803d' }}>
+                  {totalTickets} / {cuposDisponibles} cupos
+                </span>
+              </div>
 
               {/* Adulto */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', background: '#f9fafb', padding: '10px 12px', borderRadius: '8px' }}>
@@ -796,20 +806,21 @@ export function AtraccionDetail() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button 
                     type="button" 
-                    onClick={() => setForm({ ...form, adult_count: Math.max(1, form.adult_count - 1) })}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                    disabled={form.adult_count <= (totalTickets > form.adult_count ? 0 : 1)}
+                    onClick={() => setForm({ ...form, adult_count: Math.max((totalTickets > form.adult_count ? 0 : 1), form.adult_count - 1) })}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.adult_count <= (totalTickets > form.adult_count ? 0 : 1) ? '#f3f4f6' : '#fff', cursor: form.adult_count <= (totalTickets > form.adult_count ? 0 : 1) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.adult_count <= (totalTickets > form.adult_count ? 0 : 1) ? 0.5 : 1 }}
                   >
                     -
                   </button>
                   <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.adult_count}</span>
                   <button 
                     type="button" 
-                    disabled={!canAddMoreTickets || form.adult_count >= 10}
+                    disabled={!canAddMoreTickets}
                     onClick={() => {
                       if (!canAddMoreTickets) return;
-                      setForm({ ...form, adult_count: Math.min(10, form.adult_count + 1) });
+                      setForm({ ...form, adult_count: form.adult_count + 1 });
                     }}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets || form.adult_count >= 10) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets || form.adult_count >= 10) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets || form.adult_count >= 10) ? 0.5 : 1 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets) ? 0.5 : 1 }}
                     title={!canAddMoreTickets ? `Límite de aforo alcanzado (${cuposDisponibles} cupos libres)` : 'Agregar boleto'}
                   >
                     +
@@ -826,20 +837,21 @@ export function AtraccionDetail() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button 
                     type="button" 
+                    disabled={form.child_count <= 0}
                     onClick={() => setForm({ ...form, child_count: Math.max(0, form.child_count - 1) })}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.child_count <= 0 ? '#f3f4f6' : '#fff', cursor: form.child_count <= 0 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.child_count <= 0 ? 0.5 : 1 }}
                   >
                     -
                   </button>
                   <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.child_count}</span>
                   <button 
                     type="button" 
-                    disabled={!canAddMoreTickets || form.child_count >= 10}
+                    disabled={!canAddMoreTickets}
                     onClick={() => {
                       if (!canAddMoreTickets) return;
-                      setForm({ ...form, child_count: Math.min(10, form.child_count + 1) });
+                      setForm({ ...form, child_count: form.child_count + 1 });
                     }}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets || form.child_count >= 10) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets || form.child_count >= 10) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets || form.child_count >= 10) ? 0.5 : 1 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets) ? 0.5 : 1 }}
                     title={!canAddMoreTickets ? `Límite de aforo alcanzado (${cuposDisponibles} cupos libres)` : 'Agregar boleto'}
                   >
                     +
@@ -856,20 +868,21 @@ export function AtraccionDetail() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button 
                     type="button" 
+                    disabled={form.senior_count <= 0}
                     onClick={() => setForm({ ...form, senior_count: Math.max(0, form.senior_count - 1) })}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.senior_count <= 0 ? '#f3f4f6' : '#fff', cursor: form.senior_count <= 0 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.senior_count <= 0 ? 0.5 : 1 }}
                   >
                     -
                   </button>
                   <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.senior_count}</span>
                   <button 
                     type="button" 
-                    disabled={!canAddMoreTickets || form.senior_count >= 10}
+                    disabled={!canAddMoreTickets}
                     onClick={() => {
                       if (!canAddMoreTickets) return;
-                      setForm({ ...form, senior_count: Math.min(10, form.senior_count + 1) });
+                      setForm({ ...form, senior_count: form.senior_count + 1 });
                     }}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets || form.senior_count >= 10) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets || form.senior_count >= 10) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets || form.senior_count >= 10) ? 0.5 : 1 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets) ? 0.5 : 1 }}
                     title={!canAddMoreTickets ? `Límite de aforo alcanzado (${cuposDisponibles} cupos libres)` : 'Agregar boleto'}
                   >
                     +
@@ -886,20 +899,21 @@ export function AtraccionDetail() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button 
                     type="button" 
+                    disabled={form.infant_count <= 0}
                     onClick={() => setForm({ ...form, infant_count: Math.max(0, form.infant_count - 1) })}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.infant_count <= 0 ? '#f3f4f6' : '#fff', cursor: form.infant_count <= 0 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.infant_count <= 0 ? 0.5 : 1 }}
                   >
                     -
                   </button>
                   <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.infant_count}</span>
                   <button 
                     type="button" 
-                    disabled={!canAddMoreTickets || form.infant_count >= 10}
+                    disabled={!canAddMoreTickets}
                     onClick={() => {
                       if (!canAddMoreTickets) return;
-                      setForm({ ...form, infant_count: Math.min(10, form.infant_count + 1) });
+                      setForm({ ...form, infant_count: form.infant_count + 1 });
                     }}
-                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets || form.infant_count >= 10) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets || form.infant_count >= 10) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets || form.infant_count >= 10) ? 0.5 : 1 }}
+                    style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: (!canAddMoreTickets) ? '#f3f4f6' : '#fff', cursor: (!canAddMoreTickets) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (!canAddMoreTickets) ? 0.5 : 1 }}
                     title={!canAddMoreTickets ? `Límite de aforo alcanzado (${cuposDisponibles} cupos libres)` : 'Agregar boleto'}
                   >
                     +

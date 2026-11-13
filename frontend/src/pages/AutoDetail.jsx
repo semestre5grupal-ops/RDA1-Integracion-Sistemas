@@ -63,12 +63,15 @@ export function AutoDetail() {
   const auto = { ...(location.state?.auto || {}), ...(fetchedAuto || {}) };
 
   const precioDiario = auto.precio_diario || auto.price || 35.50;
-  const make = auto.make || 'Chevrolet';
-  const model = auto.model || 'Spark';
-  const seats = auto.seats || 5;
-  const doors = auto.doors || 4;
-  const bag_capacity = auto.bag_capacity || 1;
-  const transmission = auto.transmission || 'Manual';
+  const make = auto.marca || auto.make || auto.brand || (id === 'auto-047' ? 'Prueba2AutoSpot' : 'Vehículo');
+  const model = auto.modelo || auto.model || (id === 'auto-047' ? 'Prueba2AutoSpot' : 'Económico');
+  const vehicleDisplayName = make === model || (model && model.toLowerCase().includes(make.toLowerCase()))
+    ? model
+    : `${make} ${model}`.trim();
+  const seats = auto.asientos || auto.seats || 5;
+  const doors = auto.puertas || auto.doors || 4;
+  const bag_capacity = auto.maletas_grandes || auto.bag_capacity || 1;
+  const transmission = auto.transmision || auto.transmission || 'Manual';
   const supplierId = auto.supplier_id || 1;
 
   const suppliersMap = {
@@ -280,7 +283,7 @@ export function AutoDetail() {
     };
 
     let orderId = idempotencyKey;
-    const tituloReserva = `Renta de ${make} ${model} (${dias} días) - Cobertura ${tipoCobertura}`;
+    const tituloReserva = `Renta de ${vehicleDisplayName} (${dias} días) - Cobertura ${tipoCobertura}`;
 
     const datosFactura = {
       tipo: 'auto',
@@ -419,13 +422,13 @@ export function AutoDetail() {
                 <div style={{ width: '250px' }}>
                   <img
                     src={auto.images && auto.images.length > 0 ? auto.images[0] : 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=300&q=80'}
-                    alt={`${make} ${model}`}
+                    alt={vehicleDisplayName}
                     style={{ width: '100%', borderRadius: '4px' }}
                   />
                 </div>
                 <div>
                   <h2 style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#333', marginBottom: '15px' }}>
-                    {make} {model}{' '}
+                    {vehicleDisplayName}{' '}
                     <span style={{ position: 'relative', cursor: 'pointer', fontSize: '0.9rem', color: '#006ce4', fontWeight: 'normal' }} onClick={() => setShowSimilarModal(!showSimilarModal)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowSimilarModal(!showSimilarModal); } }}>
                       o un coche pequeño similar ℹ️
                       {showSimilarModal && (
