@@ -293,11 +293,28 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       correlationId,
       body: {
         alojamientoId: idSocio,
+        alojamiento_id: idSocio,
         tipoHabitacionCodigo: opcion.codigo,
+        producto_id: opcion.productId || opcion.codigo,
+        product_id: opcion.productId || opcion.codigo,
         fechaInicio: d.checkin,
         fechaFin: d.checkout,
+        checkin: d.checkin,
+        checkout: d.checkout,
         cantidadHabitaciones: d.habitaciones,
+        number_of_rooms: d.habitaciones,
+        rooms: d.habitaciones,
         ocupantes,
+        adultos: d.adultos,
+        number_of_adults: d.adultos,
+        ninos: d.ninos,
+        number_of_children: d.ninos,
+        guests: {
+          number_of_adults: d.adultos,
+          number_of_children: d.ninos,
+          adults: d.adultos,
+          children: d.ninos,
+        },
         ...(opcion.plan ? { planTarifaCodigo: opcion.plan } : {}),
       },
     });
@@ -314,7 +331,12 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     this.traza(d, 'cotizar', 'ok', `Precio congelado en ${nodo.nombreProveedor}`, nodo.codigoNodo, total);
 
     // 4. Orden en el socio con la MISMA Idempotency-Key del cliente.
+    const nochesCalc = Math.max(
+      1,
+      Math.round((new Date(d.checkout).getTime() - new Date(d.checkin).getTime()) / 86400000) || 1,
+    );
     const cuerpoOrden: Record<string, any> = {
+      // Formato oficial RDA1 (camelCase)
       alojamientoId: idSocio,
       tipoHabitacionCodigo: opcion.codigo,
       fechaInicio: d.checkin,
@@ -332,6 +354,43 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         ...(d.telefono ? { telefono: d.telefono.replace(/[^\d+]/g, '') } : {}),
       },
       ...(d.peticiones ? { peticionesEspeciales: d.peticiones.slice(0, 1000) } : {}),
+
+      // Compatibilidad multi-nodo (James, Sam, etc. - snake_case y raíz plana)
+      alojamiento_id: idSocio,
+      hotel_id: idSocio,
+      producto_id: opcion.productId || opcion.codigo,
+      product_id: opcion.productId || opcion.codigo,
+      tipo_habitacion_codigo: opcion.codigo,
+      checkin: d.checkin,
+      checkout: d.checkout,
+      check_in: d.checkin,
+      check_out: d.checkout,
+      noches: nochesCalc,
+      number_of_adults: d.adultos,
+      adultos: d.adultos,
+      number_of_children: d.ninos,
+      ninos: d.ninos,
+      number_of_rooms: d.habitaciones,
+      habitaciones: d.habitaciones,
+      cantidad_habitaciones: d.habitaciones,
+      rooms: d.habitaciones,
+      guests: {
+        number_of_adults: d.adultos,
+        number_of_children: d.ninos,
+        adults: d.adultos,
+        children: d.ninos,
+      },
+      huesped_nombre: d.nombre.trim(),
+      customer_name: d.nombre.trim(),
+      huesped_correo: d.email.trim().toLowerCase(),
+      customer_email: d.email.trim().toLowerCase(),
+      huesped_identificacion: identificacion,
+      customer_identification: identificacion,
+      huesped_telefono: d.telefono ? d.telefono.replace(/[^\d+]/g, '') : null,
+      phone: d.telefono ? d.telefono.replace(/[^\d+]/g, '') : null,
+      total_price: total,
+      totalPrice: total,
+      precio_total: total,
     };
     const extra: Record<string, string> = cliente.clientId ? { 'X-Client-Id': cliente.clientId } : {};
     let orden = await this.socios.llamar(nodo, 'POST', '/alojamientos/orders/create', {

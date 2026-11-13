@@ -362,16 +362,25 @@ export function AlojamientoCheckoutModal({
         tipo: a.tipo,
         ...(a.tipo === 'NINO' && a.edad !== '' ? { edad: Number(a.edad) } : {}),
       }));
+    const cantAdultos = Math.max(1, parseInt(adults, 10) || 1);
+    const cantNinos = Math.max(0, parseInt(children, 10) || 0);
+    const cantHabs = Math.max(1, parseInt(rooms, 10) || 1);
+    const cantNoches = Math.max(1, parseInt(nightsCount, 10) || 1);
+    const prodId = tipoHabitacion?.product_id || tipoHabitacion?.productId || tipoHabitacion?.codigo || null;
     const payload = {
       checkin: checkin || new Date().toISOString().split('T')[0],
-      checkout: checkout || new Date(Date.now() + 86400000 * (nightsCount || 1)).toISOString().split('T')[0],
-      habitaciones_count: Math.max(1, parseInt(rooms, 10) || 1),
-      nights: Math.max(1, parseInt(nightsCount, 10) || 1),
+      checkout: checkout || new Date(Date.now() + 86400000 * cantNoches).toISOString().split('T')[0],
+      habitaciones_count: cantHabs,
+      number_of_rooms: cantHabs,
+      nights: cantNoches,
       customer_name: `${nombre} ${apellidos}`.trim() || 'Huésped',
       customer_email: email.trim(),
-      adultos: Math.max(1, parseInt(adults, 10) || 2),
-      ninos: Math.max(0, parseInt(children, 10) || 0),
-      ...(tipoHabitacion?.product_id ? { tipo_habitacion_id: tipoHabitacion.product_id } : {}),
+      adultos: cantAdultos,
+      number_of_adults: cantAdultos,
+      ninos: cantNinos,
+      number_of_children: cantNinos,
+      huespedes: cantAdultos + cantNinos,
+      ...(prodId ? { tipo_habitacion_id: prodId, producto_id: prodId } : {}),
       ...(telefono.trim() ? { phone: `${telefonoPrefijo} ${telefono.trim()}`.slice(0, 30) } : {}),
       ...(esDeSocio && documentoNumero.trim() ? { documento_tipo: documentoTipo, documento_numero: documentoNumero.trim().toUpperCase() } : {}),
       ...(peticionesEspeciales.trim() ? { special_requests: peticionesEspeciales.trim().slice(0, 1000) } : {}),
@@ -422,6 +431,11 @@ export function AlojamientoCheckoutModal({
         fecha: payload.checkin,
         habitaciones: payload.habitaciones_count,
         huespedes: payload.huespedes,
+        adultos: payload.adultos,
+        ninos: payload.ninos,
+        tipoHabitacion: tipoHabitacion?.room_name || tipoHabitacion?.nombre || null,
+        camas: tipoHabitacion?.camas || alojamiento?.camas || null,
+        descripcionCamas: tipoHabitacion?.descripcion_camas || alojamiento?.descripcion_camas || null,
         huesped: `${nombre} ${apellidos}`.trim(),
         email: email.trim(),
         status: 'PENDING_OFFLINE',
@@ -476,6 +490,11 @@ export function AlojamientoCheckoutModal({
         fecha: payload.checkin,
         habitaciones: payload.habitaciones_count,
         huespedes: payload.huespedes,
+        adultos: payload.adultos,
+        ninos: payload.ninos,
+        tipoHabitacion: tipoHabitacion?.room_name || tipoHabitacion?.nombre || null,
+        camas: tipoHabitacion?.camas || alojamiento?.camas || null,
+        descripcionCamas: tipoHabitacion?.descripcion_camas || alojamiento?.descripcion_camas || null,
         huesped: `${nombre} ${apellidos}`.trim(),
         email: email.trim(),
         status: res.status || 'CONFIRMED',
@@ -875,11 +894,7 @@ export function AlojamientoCheckoutModal({
                 Duración total de la estancia: <strong>{nightsCount} {nightsCount === 1 ? 'noche' : 'noches'}</strong>
                 <br />
                 <strong>
-                  {rooms} {Number(rooms) === 1
-                    ? (alojamiento?.tipo_propiedad === 'APARTAMENTO' ? 'apartamento' : 'habitación')
-                    : (alojamiento?.tipo_propiedad === 'APARTAMENTO' ? 'apartamentos' : 'habitaciones')}
-                  {tipoHabitacion?.room_name ? ` (${tipoHabitacion.room_name})` : ''} para {adults} {Number(adults) === 1 ? 'adulto' : 'adultos'}
-                  {Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
+                  {rooms} {Number(rooms) === 1 ? (alojamiento?.tipo_propiedad === 'HOTEL' ? 'habitación' : 'alojamiento') : (alojamiento?.tipo_propiedad === 'HOTEL' ? 'habitaciones' : 'alojamientos')} para {adults} {Number(adults) === 1 ? 'adulto' : 'adultos'}{Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
                 </strong>
               </div>
 
@@ -1247,20 +1262,20 @@ export function AlojamientoCheckoutModal({
                 {/* CARD 2: ROOM SUMMARY */}
                 <div className="bkg-card">
                   <h4 className="bkg-card-title">
-                    {rooms > 1 ? `${rooms} × ` : ''}{tipoHabitacion?.room_name || alojamiento.tipo_alojamiento || 'Habitación'}
+                    {rooms > 1 ? `${rooms} × ` : ''}{tipoHabitacion?.room_name || tipoHabitacion?.nombre || alojamiento.tipo_alojamiento || 'Habitación'}
                   </h4>
                   <div className="bkg-room-summary-box">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: '#1a1a1a' }}>
-                      <div style={{ fontWeight: 700, color: '#003580' }}>
-                        {rooms} {Number(rooms) === 1 ? 'habitación reservada' : 'habitaciones reservadas'}
-                      </div>
-                      <div style={{ fontWeight: 600, color: '#262626' }}>
-                        {tipoHabitacion?.descripcion_camas || (tipoHabitacion?.camas ? `${tipoHabitacion.camas} ${tipoHabitacion.camas === 1 ? 'cama' : 'camas'}` : '1 cama doble grande')}
-                        {tipoHabitacion?.tamano_m2 ? ` · ${tipoHabitacion.tamano_m2} m²` : ''}
-                      </div>
-                      <div style={{ color: '#595959', fontSize: '12px' }}>
-                        Para {adults} {Number(adults) === 1 ? 'adulto' : 'adultos'}{Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}
-                      </div>
+                    <div style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: 600 }}>
+                      {(() => {
+                        const bedDesc =
+                          tipoHabitacion?.descripcion_camas ||
+                          (tipoHabitacion?.camas ? `${tipoHabitacion.camas} ${tipoHabitacion.camas === 1 ? 'cama' : 'camas'}` : null) ||
+                          alojamiento?.descripcion_camas ||
+                          (alojamiento?.camas ? `${alojamiento.camas} ${alojamiento.camas === 1 ? 'cama' : 'camas'}` : null);
+                        const tamano = tipoHabitacion?.tamano_m2 || alojamiento?.tamano_m2;
+                        const huespedesTxt = `${adults} ${Number(adults) === 1 ? 'adulto' : 'adultos'}${Number(children) > 0 ? ` y ${children} ${Number(children) === 1 ? 'niño' : 'niños'}` : ''}`;
+                        return [bedDesc, tamano ? `${tamano} m²` : null, huespedesTxt].filter(Boolean).join(' · ');
+                      })()}
                     </div>
                     <div className="bkg-room-badge-row">
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: tipoHabitacion?.reembolsable === false ? '#d4111e' : '#008009', fontWeight: 600 }}>
