@@ -616,7 +616,17 @@ export function AutoDetail() {
                 <p style={{ margin: '6px 0 0 0' }}>
                   El auto ya cuenta con reserva activa en las fechas seleccionadas ({fechasOcupadas.map(f => `${f.pickup} al ${f.dropoff}`).join(', ')}).
                   <br />
-                  💡 <em>Sugerencia: Cambia las fechas en el panel derecho "Ajustar Reserva" (por ejemplo, a partir del 23 de noviembre).</em>
+                  💡 <em>Sugerencia: Cambia las fechas en el panel derecho "Ajustar Reserva" por fechas posteriores disponibles.</em>
+                </p>
+              </div>
+            )}
+
+            {/* Alerta de Auto Reservado / No disponible */}
+            {(auto.unidades_disponibles === 0 || auto.estado === 'RESERVADO') && !hayConflictoFechas && (
+              <div style={{ background: '#fce8e6', color: '#c5221f', border: '1px solid #fad2cf', padding: '14px', borderRadius: '4px', fontSize: '0.92rem', lineHeight: '1.4' }}>
+                <strong>🚫 Vehículo actualmente no disponible:</strong>
+                <p style={{ margin: '6px 0 0 0' }}>
+                  Todas las unidades de este modelo se encuentran temporalmente reservadas en la agencia. Por favor revisa otras fechas o elige otro vehículo en el catálogo.
                 </p>
               </div>
             )}
@@ -627,8 +637,21 @@ export function AutoDetail() {
 
             {/* Continuar button form */}
             <form onSubmit={handleBooking} style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-              <button type="submit" disabled={hayConflictoFechas} style={{ background: hayConflictoFechas ? '#9ca3af' : '#006ce4', color: 'white', border: 'none', padding: '12px 24px', fontSize: '1rem', fontWeight: 'bold', borderRadius: '4px', cursor: hayConflictoFechas ? 'not-allowed' : 'pointer' }}>
-                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : 'Continuar a Pago')}
+              <button 
+                type="submit" 
+                disabled={hayConflictoFechas || auto.unidades_disponibles === 0} 
+                style={{ 
+                  background: (hayConflictoFechas || auto.unidades_disponibles === 0) ? '#9ca3af' : '#006ce4', 
+                  color: 'white', 
+                  border: 'none', 
+                  padding: '12px 24px', 
+                  fontSize: '1rem', 
+                  fontWeight: 'bold', 
+                  borderRadius: '4px', 
+                  cursor: (hayConflictoFechas || auto.unidades_disponibles === 0) ? 'not-allowed' : 'pointer' 
+                }}
+              >
+                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : (auto.unidades_disponibles === 0 ? 'Vehículo No Disponible' : 'Continuar a Pago'))}
               </button>
             </form>
 

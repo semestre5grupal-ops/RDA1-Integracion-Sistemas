@@ -632,9 +632,38 @@ export class AutosCircuitBreakerAdapter {
    * Consulta las reservas activas en el proveedor para determinar fechas ya ocupadas.
    */
   async getOccupiedDates(vehicleId: string): Promise<{ pickup: string; dropoff: string }[]> {
+    const cleanId = (vehicleId || '').toLowerCase().replace(/^auto-/, '');
+    const occupied: { pickup: string; dropoff: string }[] = [];
+
+    // 1. Si es vehículo de Mateo (UUID de 36 caracteres)
+    if (cleanId.length === 36) {
+      try {
+        const mateoKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
+        const mRes = await firstValueFrom(
+          this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/orders', {
+            headers: { 'X-API-Key': mateoKey },
+            timeout: 4000,
+          })
+        );
+        const list = Array.isArray(mRes.data) ? mRes.data : (mRes.data?.data || []);
+        for (const o of list) {
+          const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase();
+          const oStatus = (o.status || o.estado || '').toUpperCase();
+          if (oVid === cleanId && (oStatus === 'RESERVADO' || oStatus === 'CONFIRMED' || oStatus === 'PENDING' || oStatus === 'ENTREGADO' || oStatus === 'CONFIRMADO_ASISTIDO')) {
+            const p = o.pickup_date || o.pickup;
+            const d = o.dropoff_date || o.dropoff;
+            if (p && d) occupied.push({ pickup: p, dropoff: d });
+          }
+        }
+        return occupied;
+      } catch (_) {
+        return occupied;
+      }
+    }
+
+    // 2. Daniel (RutaLibre)
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
-      const cleanId = (vehicleId || '').toLowerCase().replace(/^auto-/, '');
       const response = await firstValueFrom(
         this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/orders', {
           headers: {
@@ -659,7 +688,7 @@ export class AutosCircuitBreakerAdapter {
         }))
         .filter((o: any) => o.pickup && o.dropoff);
     } catch (_) {
-      return [];
+      return occupied;
     }
   }
 
