@@ -122,7 +122,16 @@ export class VuelosSociosService {
   }
 
   async nodoPorCodigo(codigo: string): Promise<ConfigProveedor | null> {
-    return this.nodos.findOne({ where: { codigoNodo: codigo } });
+    // Cada llamada a una aerolínea pasaba por aquí (una consulta a la base de ~0,2 s).
+    // Se usa la misma caché de 15 s que la búsqueda; si no está, se consulta la base.
+    if (!this.nodosCache || this.nodosCache.hasta < Date.now()) {
+      try {
+        this.nodosCache = { lista: await this.nodos.find({ where: { vertical: 'VUELOS' } }), hasta: Date.now() + 15_000 };
+      } catch {
+        /* sin caché: se consulta directo */
+      }
+    }
+    return this.nodosCache?.lista.find((n) => n.codigoNodo === codigo) ?? this.nodos.findOne({ where: { codigoNodo: codigo } });
   }
 
   // ───────────────────────────── Ids ─────────────────────────────
@@ -438,6 +447,7 @@ export class VuelosSociosService {
   private readonly sinAfter = new Set<string>();
   private monitorSalud: NodeJS.Timeout | null = null;
   private monitorOcupado = false;
+  private readonly escrituraSalud = new Map<string, number>();
 
   /** Último resultado del ping de integración de una aerolínea (o null si aún no hay). */
   saludDe(codigoNodo: string): SaludIntegracion | null {
@@ -592,6 +602,11 @@ export class VuelosSociosService {
         ms: Math.round(s.ms),
       });
     }
+    // El panel lee el último resultado en memoria; la base se actualiza solo si cambia el
+    // estado o cada 60 s (antes eran 5 escrituras cada 10 s que competían con las compras).
+    const ultimaEscritura = this.escrituraSalud.get(nodo.codigoNodo) ?? 0;
+    if (antes === s.estado && Date.now() - ultimaEscritura < 60_000) return s;
+    this.escrituraSalud.set(nodo.codigoNodo, Date.now());
     try {
       await this.nodos.update(
         { codigoNodo: nodo.codigoNodo, killSwitchActivo: false },
