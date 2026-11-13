@@ -21,6 +21,7 @@ import {
 import './AlojamientosSearchPage.css';
 import { fechaLocal } from '../utils/fechas';
 import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
+import { MapaAlojamientos } from '../components/MapaAlojamientos';
 
 // Histogram bar heights to replicate Booking.com desktop distribution curve
 const HISTOGRAM_BARS = [
@@ -137,6 +138,10 @@ export function AlojamientosSearchPage() {
   const [viewMode, setViewMode] = useState('list');
   const [sortBy, setSortBy] = useState('popularity');
   const [wishlist, setWishlist] = useState(new Set());
+  const [lastSyncTime, setLastSyncTime] = useState(new Date());
+  const [syncPulse, setSyncPulse] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
+  const [selectedMapProperty, setSelectedMapProperty] = useState(null);
   const isFetchingRef = useRef(false);
 
   // Destinos reales del catálogo para el autocompletado aprovechando los resultados cargados.
@@ -241,6 +246,11 @@ export function AlojamientosSearchPage() {
         }
         return list;
       });
+      setLastSyncTime(new Date());
+      setSyncPulse(true);
+      setTimeout(() => {
+        setSyncPulse(false);
+      }, 800);
       if (isSilent) setError(null);
     } catch (err) {
       // Fallback to general list
@@ -886,6 +896,28 @@ export function AlojamientosSearchPage() {
       <div className="sr-main-container">
         {/* ================= LEFT SIDEBAR FILTERS ================= */}
         <aside className="sr-sidebar">
+          {/* 1. Map preview card */}
+          <div
+            className="sr-map-entry"
+            style={{
+              backgroundImage:
+                'url("https://tile.openstreetmap.org/13/2764/4096.png")',
+              backgroundColor: '#e5e3df',
+            }}
+          >
+            <button
+              type="button"
+              className="sr-map-btn"
+              onClick={() => {
+                setSelectedMapProperty(null);
+                setShowMapModal(true);
+              }}
+            >
+              <PinIcon size={18} color="currentColor" />
+              Mostrar en el mapa
+            </button>
+          </div>
+
           {/* Filters Box */}
           <div className="sr-filters-box">
             <h2 className="sr-filters-heading">Filtrar por:</h2>
@@ -1150,9 +1182,26 @@ export function AlojamientosSearchPage() {
         <div className="sr-results-content">
           {/* Header Bar */}
           <div className="sr-results-header">
-            <h1 className="sr-results-title">
-              {destination}: {filteredProperties.length} {filteredProperties.length === 1 ? 'alojamiento encontrado' : 'alojamientos encontrados'}
-            </h1>
+            <div>
+              <h1 className="sr-results-title">
+                {destination}: {filteredProperties.length} {filteredProperties.length === 1 ? 'alojamiento encontrado' : 'alojamientos encontrados'}
+              </h1>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '0.8rem', color: '#008009', fontWeight: 600, marginTop: '4px' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    background: '#008009',
+                    boxShadow: syncPulse ? '0 0 8px #008009' : 'none',
+                    transform: syncPulse ? 'scale(1.25)' : 'scale(1)',
+                    transition: 'all 0.3s ease-in-out',
+                  }}
+                />
+                <span>En vivo: inventario actualizado ({lastSyncTime.toLocaleTimeString()})</span>
+              </div>
+            </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
               {/* List / Grid Toggle */}
@@ -1518,14 +1567,20 @@ export function AlojamientosSearchPage() {
                       <div className="sr-card-location">
                         <span
                           className="sr-map-link"
-                          onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((prop.nombre || '') + ' ' + (prop.destino || destination || 'Ecuador'))}`, '_blank')}
+                          onClick={() => {
+                            setSelectedMapProperty(prop);
+                            setShowMapModal(true);
+                          }}
                         >
                           {prop.destino || destination}
                         </span>
                         <span>•</span>
                         <span
                           className="sr-map-link"
-                          onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((prop.nombre || '') + ' ' + (prop.destino || destination || 'Ecuador'))}`, '_blank')}
+                          onClick={() => {
+                            setSelectedMapProperty(prop);
+                            setShowMapModal(true);
+                          }}
                         >
                           Mostrar en el mapa
                         </span>
@@ -1669,6 +1724,20 @@ export function AlojamientosSearchPage() {
           )}
         </div>
       </div>
+
+      {/* Modal de Mapa Interactivo con Leaflet y OpenStreetMap */}
+      <MapaAlojamientos
+        mode="modal"
+        isOpen={showMapModal}
+        onClose={() => {
+          setShowMapModal(false);
+          setSelectedMapProperty(null);
+        }}
+        properties={filteredProperties}
+        destination={destination}
+        selectedPropertyId={selectedMapProperty?.id}
+        searchParamsString={searchParams.toString()}
+      />
     </main>
   );
 }

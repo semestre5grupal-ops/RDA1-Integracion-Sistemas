@@ -50,6 +50,7 @@ import {
 } from '../components/BookingIcons';
 import './AlojamientoDetail.css';
 import { fechaLocal } from '../utils/fechas';
+import { MapaAlojamientos } from '../components/MapaAlojamientos';
 
 export function getHorarioCheckin(al) {
   if (!al) return '14:00';
@@ -221,6 +222,7 @@ export function AlojamientoDetail() {
   // Booking Form State
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   // Cotización REAL del backend para las fechas y ocupación elegidas
   // (POST /alojamientos/availability): precio, noches y habitaciones libres.
@@ -379,6 +381,33 @@ export function AlojamientoDetail() {
         return;
       }
       await fetchAvail(silent);
+      if (checkin && checkout && checkout > checkin) {
+        consultarDisponibilidad({
+          id,
+          checkin,
+          checkout,
+          adultos: adults,
+          edadesNinos,
+          habitaciones: rooms,
+        })
+          .then((data) => {
+            if (!isCancelled && data) {
+              const productos = data.products || [];
+              setCotizacion((prev) => {
+                if (!prev) return prev;
+                const prod = productos.find((p) => p.product_id === tipoElegidoId || p.codigo === tipoElegidoId) || productos[0] || prev.producto;
+                return {
+                  ...prev,
+                  libres: prod ? prod.available_rooms : data.available_rooms,
+                  libresHotel: data.available_rooms,
+                  producto: prod,
+                  productos,
+                };
+              });
+            }
+          })
+          .catch(() => {});
+      }
       if (!isCancelled) {
         timer = setTimeout(() => runPoll(true), 4000);
       }
@@ -390,13 +419,14 @@ export function AlojamientoDetail() {
       isCancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [id, checkin, checkout]);
+  }, [id, checkin, checkout, adults, rooms, edadesNinos, tipoElegidoId]);
 
   // References for Smooth Scrolling
   const overviewRef = useRef(null);
   const availabilityRef = useRef(null);
   const facilitiesRef = useRef(null);
   const rulesRef = useRef(null);
+  const surroundingsRef = useRef(null);
   const reviewsRef = useRef(null);
 
   // Reviews State
@@ -793,6 +823,13 @@ export function AlojamientoDetail() {
           </button>
           <button
             type="button"
+            className={`dt-nav-tab ${activeTab === 'surroundings' ? 'active' : ''}`}
+            onClick={() => scrollToSection(surroundingsRef, 'surroundings')}
+          >
+            Ubicación y mapa
+          </button>
+          <button
+            type="button"
             className={`dt-nav-tab ${activeTab === 'reviews' ? 'active' : ''}`}
             onClick={() => scrollToSection(reviewsRef, 'reviews')}
           >
@@ -830,7 +867,7 @@ export function AlojamientoDetail() {
               <span>–</span>
               <span
                 className="dt-address-link"
-                onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((alojamiento.nombre || '') + ' ' + (alojamiento.destino || 'Ecuador'))}`, '_blank')}
+                onClick={() => setShowMapModal(true)}
               >
                 Ubicación excelente – mostrar en el mapa
               </span>
@@ -992,7 +1029,7 @@ export function AlojamientoDetail() {
               <button
                 type="button"
                 className="dt-btn-blue"
-                onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((alojamiento.nombre || '') + ' ' + (alojamiento.destino || 'Ecuador'))}`, '_blank')}
+                onClick={() => setShowMapModal(true)}
               >
                 <PinIcon size={16} /> Mostrar en el mapa
               </button>
@@ -1455,62 +1492,60 @@ export function AlojamientoDetail() {
               </div>
             </div>
 
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <InfoIcon size={18} color="#003580" />
-                <span>Cancelación / prepago</span>
-              </div>
-              <div className="dt-rule-right">
-                {alojamiento?.politicas?.cancelacion || 'Las condiciones de cancelación y pago por adelantado pueden variar según el tipo de alojamiento.'}
-              </div>
-            </div>
-
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <FamilyIcon size={18} color="#003580" />
-                <span>Camas y niños</span>
-              </div>
-              <div className="dt-rule-right">
-                <div>
-                  <strong>Políticas sobre menores:</strong> Se pueden alojar niños de cualquier edad.
+            {alojamiento.politicas?.cancelacion && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <InfoIcon size={18} color="#003580" />
+                  <span>Cancelación / prepago</span>
                 </div>
-                <div style={{ marginTop: '4px' }}>
-                  <strong>Cunas y camas supletorias:</strong> Hay cunas y camas supletorias disponibles a petición sin costo adicional.
+                <div className="dt-rule-right">
+                  {alojamiento.politicas.cancelacion}
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <UserIcon size={18} color="#003580" />
-                <span>Restricción de edad</span>
-              </div>
-              <div className="dt-rule-right">
-                Edad mínima para el check-in: 18 años
-              </div>
-            </div>
-
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <CreditCardIcon size={18} color="#003580" />
-                <span>Tarjetas aceptadas</span>
-              </div>
-              <div className="dt-rule-right">
-                <div className="dt-payment-cards-row">
-                  <span className="dt-card-badge">American Express</span>
-                  <span className="dt-card-badge">Visa</span>
-                  <span className="dt-card-badge">Mastercard</span>
-                  <span style={{ fontSize: '0.8rem', color: '#595959', marginLeft: '8px' }}>No se acepta efectivo</span>
+            {alojamiento.politicas?.mascotas !== undefined && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <PetsIcon size={18} color="#003580" />
+                  <span>Mascotas</span>
+                </div>
+                <div className="dt-rule-right">
+                  {alojamiento.politicas.mascotas ? 'Se admiten mascotas en el establecimiento.' : 'No se admiten mascotas en las habitaciones.'}
                 </div>
               </div>
-            </div>
+            )}
+
+            {alojamiento.politicas?.fumar !== undefined && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <NoSmokingIcon size={18} color="#003580" />
+                  <span>Fumar</span>
+                </div>
+                <div className="dt-rule-right">
+                  {alojamiento.politicas.fumar ? 'Permitido fumar en áreas exteriores habilitadas.' : 'No se permite fumar en el interior del establecimiento.'}
+                </div>
+              </div>
+            )}
+
+            {(!alojamiento.politicas || Object.values(alojamiento.politicas).every((v) => v === null || v === undefined || v === '')) && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <InfoIcon size={18} color="#003580" />
+                  <span>Condiciones</span>
+                </div>
+                <div className="dt-rule-right" style={{ color: '#595959' }}>
+                  El establecimiento no tiene normas adicionales registradas. Las condiciones estándar de estadía se coordinan directamente a tu llegada.
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
         {/* ======================================================================
             SURROUNDINGS & LANDMARKS
             ====================================================================== */}
-        <section style={{ marginBottom: '40px' }} id="surroundings">
+        <section ref={surroundingsRef} style={{ marginBottom: '40px' }} id="surroundings">
           <h2 style={{ fontSize: '1.45rem', fontWeight: 800, marginBottom: '14px' }}>
             Alrededores y lugares de interés cercanos
           </h2>
@@ -1574,6 +1609,19 @@ export function AlojamientoDetail() {
                 </li>
               </ul>
             </div>
+          </div>
+
+          {/* Mapa Interactivo de Ubicación y Alrededores */}
+          <div style={{ marginTop: '24px' }}>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '12px', color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <PinIcon size={18} color="#003580" />
+              Ubicación en el mapa interactivo
+            </h3>
+            <MapaAlojamientos
+              mode="inline"
+              alojamiento={alojamiento}
+              height="380px"
+            />
           </div>
         </section>
 
@@ -1822,6 +1870,14 @@ export function AlojamientoDetail() {
         entityName={alojamiento?.nombre || 'Alojamiento'} 
         pnrOrId={alojamiento?.id || 'HOTEL'} 
         type="Hospedaje" 
+      />
+
+      {/* Modal de Mapa Interactivo con Leaflet y OpenStreetMap */}
+      <MapaAlojamientos
+        mode="modal"
+        isOpen={showMapModal}
+        onClose={() => setShowMapModal(false)}
+        alojamiento={alojamiento}
       />
     </main>
   );
