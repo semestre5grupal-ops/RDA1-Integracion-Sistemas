@@ -444,44 +444,62 @@ export class AutosCircuitBreakerAdapter {
     });
 
     if (allCars.length > 0) {
-      // 1b. Cruzar con órdenes activas para actualizar el estado del auto a RESERVADO o CONFIRMADO_ASISTIDO
+      // 1b. Cruzar con órdenes activas y validar estado operativo de la unidad.
+      // Regla de Negocio General (Mateo, Daniel y todos los socios):
+      // Si un vehículo tiene una orden activa (CONFIRMED, RESERVADO, PICKED_UP, ENTREGADO) o su estado físico reportado
+      // por el socio NO es 'DISPONIBLE', el auto queda BLOQUEADO para fechas futuras hasta que sea físicamente devuelto.
       try {
         const activeOrders = await this.getOrdersDirect();
         const searchPickup = searchParams?.pickup_date;
         const searchDropoff = searchParams?.dropoff_date;
 
         for (const car of allCars) {
+          // Si el vehículo ya viene con estado no disponible desde el socio (ej. RESERVADO, ENTREGADO, MANTENIMIENTO, ALQUILADO)
+          const rawCarState = (car.estado || '').toUpperCase();
+          const esNoDisponibleEnSocio = rawCarState !== 'DISPONIBLE' && rawCarState !== '';
+
           const matchingOrders = activeOrders.filter((o: any) => {
             const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
             const cVid = car.vehicle_id.toLowerCase().replace(/^auto-/, '');
-            return oVid === cVid && o.status !== 'CANCELLED';
+            return oVid === cVid && o.status !== 'CANCELLED' && o.status !== 'CANCELADA';
           });
 
-          if (matchingOrders.length > 0) {
-            // Verificar si alguna orden coincide con las fechas solicitadas o si está activa
+          if (matchingOrders.length > 0 || esNoDisponibleEnSocio) {
             let isReservedForDates = false;
             let isAssisted = false;
 
+            if (esNoDisponibleEnSocio) {
+              if (rawCarState === 'CONFIRMADO_ASISTIDO' || rawCarState === 'ENTREGADO' || rawCarState === 'PICKED_UP') {
+                isAssisted = true;
+              } else {
+                isReservedForDates = true;
+              }
+            }
+
             for (const ord of matchingOrders) {
               const ordStatus = (ord.status || ord.estado || '').toUpperCase();
-              if (ordStatus === 'CONFIRMADO_ASISTIDO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
+              if (ordStatus === 'CONFIRMADO_ASISTIDO' || ordStatus === 'ENTREGADO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
                 isAssisted = true;
               }
 
-              if (searchPickup && searchDropoff) {
-                const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
-                const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
-                if (oPickup && oDropoff) {
-                  // Conflicto de fechas: solapamiento de intervalos
-                  if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
+              // Si tiene orden activa CONFIRMED, RESERVADO o PENDING:
+              if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING' || ordStatus === 'ENTREGADO') {
+                if (searchPickup && searchDropoff) {
+                  const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
+                  const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
+                  if (oPickup && oDropoff) {
+                    // Conflicto si se solapan las fechas O si la búsqueda es para fechas posteriores mientras la orden siga activa
+                    // (debido a que los backends de socios no permiten reservas a futuro mientras el auto no esté devuelto 'DISPONIBLE')
+                    if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
+                      isReservedForDates = true;
+                    } else if (searchPickup >= oPickup) {
+                      // Búsqueda para fecha posterior con orden aún activa no devuelta físicamente
+                      isReservedForDates = true;
+                    }
+                  } else {
                     isReservedForDates = true;
                   }
                 } else {
-                  isReservedForDates = true;
-                }
-              } else {
-                // Sin fechas específicas de búsqueda: si tiene orden activa PENDING o RESERVADO
-                if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
                   isReservedForDates = true;
                 }
               }
