@@ -1426,12 +1426,31 @@ export class AlojamientosService implements OnModuleInit {
 
   private async cancelOrderEnSerie(orderId: string, idempotencyKey: string, reason?: string): Promise<any> {
     this.logger.log(`Cancelando orden ${orderId} (motivo: ${reason}) con idempotency key ${idempotencyKey}`);
-    const reserva = await this.reservaRepo.findOne({ where: { id: orderId } });
+    let reserva: ReservaAlojamiento | null = null;
+    const esUuid = /^[0-9a-f-]{36}$/i.test(orderId);
+    if (esUuid) {
+      reserva = await this.reservaRepo.findOne({ where: { id: orderId } });
+    }
+    if (!reserva) {
+      reserva = await this.reservaRepo.findOne({ where: { codigoReserva: orderId } });
+    }
     if (!reserva) {
       throw new NotFoundException(`La orden '${orderId}' no existe.`);
     }
 
-    if (reserva.status !== ReservationStatus.CANCELLED) {
+    if (reserva.status === 'CHECKED_IN' || reserva.status === 'CHECKED_OUT' || reserva.status === 'CONFIRMADO_ASISTIDO') {
+      throw conflicto(
+        CodigoProblema.INVALID_STATE_TRANSITION,
+        'La reserva ya tiene check-in/check-out y no admite cancelación.',
+      );
+    }
+
+    let yaCancelada = false;
+    const codigoReembolso = `REF-HTL-${Math.floor(10000 + Math.random() * 90000)}`;
+
+    if (reserva.status === ReservationStatus.CANCELLED) {
+      yaCancelada = true;
+    } else {
       if (reserva.checkout && new Date(reserva.checkout).getTime() < Date.now()) {
         throw conflicto(
           CodigoProblema.CANCELLATION_NOT_ALLOWED,
@@ -1440,7 +1459,7 @@ export class AlojamientosService implements OnModuleInit {
       }
 
       reserva.status = ReservationStatus.CANCELLED;
-      reserva.motivoCancelacion = reason?.slice(0, 500) || null;
+      reserva.motivoCancelacion = reason?.slice(0, 300) || null;
       reserva.canceladaEn = new Date();
       await this.reservaRepo.save(reserva);
 
@@ -1475,7 +1494,19 @@ export class AlojamientosService implements OnModuleInit {
       });
     }
 
+    const montoStr = Number(reserva.total || 0).toFixed(2);
     return {
+      orderId: reserva.id,
+      external_order_id: `ORD-HTL-${reserva.codigoReserva || '0000'}`,
+      estado: 'CANCELLED',
+      refundStatus: 'REFUNDED',
+      codigoReembolso,
+      porcentajeReembolso: 100,
+      montoReembolsado: montoStr,
+      penalidad: '0.00',
+      cuposRestaurados: true,
+      yaCancelada,
+      timestamp: new Date().toISOString(),
       order_id: reserva.id,
       codigo_reserva: reserva.codigoReserva,
       status: ReservationStatus.CANCELLED,

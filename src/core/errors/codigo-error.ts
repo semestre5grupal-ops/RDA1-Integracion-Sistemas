@@ -56,6 +56,7 @@ export enum CodigoProblema {
   ROOM_NO_LONGER_AVAILABLE = 'ROOM_NO_LONGER_AVAILABLE',
   PRICE_CHANGED = 'PRICE_CHANGED',
   CANCELLATION_NOT_ALLOWED = 'CANCELLATION_NOT_ALLOWED',
+  INVALID_STATE_TRANSITION = 'INVALID_STATE_TRANSITION',
 }
 
 /** Una fila de `codigo_error`: estado HTTP, `title` y `type` del contrato. */
@@ -207,6 +208,11 @@ export const CATALOGO_ERROR: Record<CodigoProblema, EntradaCatalogo> = {
     estado: 409,
     titulo: 'Cancellation Not Allowed',
     tipoUri: 'urn:gds:error:cancellation-not-allowed',
+  },
+  [CodigoProblema.INVALID_STATE_TRANSITION]: {
+    estado: 409,
+    titulo: 'Invalid State Transition',
+    tipoUri: 'urn:gds:error:invalid-state-transition',
   },
 };
 
