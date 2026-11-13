@@ -600,7 +600,9 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
       const res = await Promise.all(tocan.map((r) => this.eventos.reconciliar(r.codigoNodo, r.bookingId).catch(() => false)));
       return cambios || res.some(Boolean);
     })().catch(() => false);
-    const limite = new Promise<boolean>((ok) => setTimeout(() => ok(false), 3_500).unref?.());
+    // Se espera como mucho 1 s: si la aerolínea tarda, la lista sale ya y el cambio aparece en la
+    // siguiente recarga (la sincronización sigue en segundo plano). Antes eran 3,5 s en cada carga.
+    const limite = new Promise<boolean>((ok) => setTimeout(() => ok(false), 1_000).unref?.());
     return Promise.race([trabajo, limite]);
   }
 
