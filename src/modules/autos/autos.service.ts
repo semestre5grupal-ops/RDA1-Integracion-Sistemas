@@ -452,13 +452,17 @@ export class AutosService implements OnModuleInit {
         const foundExt = external.find((c: any) => c.vehicle_id === id || c.id === id);
         if (foundExt) {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
-          // Verificar si tiene orden activa en memoria
-          const isReservedMem = Array.from(this.memoryOrders.values()).some(
+          const totalUnits = Number(foundExt.unidades_totales ?? foundExt.unidades_disponibles ?? foundExt.stock ?? 1);
+          const memCount = Array.from(this.memoryOrders.values()).filter(
             (o: any) =>
               (o.auto_id === id || o.vehicle_id === id) &&
               (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.estado === 'CONFIRMED' || o.estado === 'PENDING'),
-          );
-          if (isReservedMem) {
+          ).length;
+          const availUnits = Math.max(0, totalUnits - memCount);
+          foundExt.unidades_disponibles = availUnits;
+          if (foundExt.estado === 'CONFIRMADO_ASISTIDO' || foundExt.estado === 'MANTENIMIENTO') {
+            // mantener estado operativo
+          } else if (availUnits <= 0) {
             foundExt.estado = 'RESERVADO';
           } else {
             foundExt.estado = 'DISPONIBLE';
@@ -473,12 +477,17 @@ export class AutosService implements OnModuleInit {
         const fallbackExt = await this.circuitBreakerAdapter.fetchExternalCarById(id);
         if (fallbackExt) {
           const occupied = await this.circuitBreakerAdapter.getOccupiedDates(id);
-          const isReservedMem = Array.from(this.memoryOrders.values()).some(
+          const totalUnits = Number(fallbackExt.unidades_totales ?? fallbackExt.unidades_disponibles ?? fallbackExt.stock ?? 1);
+          const memCount = Array.from(this.memoryOrders.values()).filter(
             (o: any) =>
               (o.auto_id === id || o.vehicle_id === id) &&
               (o.status === 'CONFIRMED' || o.status === 'PENDING' || o.estado === 'CONFIRMED' || o.estado === 'PENDING'),
-          );
-          if (isReservedMem) {
+          ).length;
+          const availUnits = Math.max(0, totalUnits - memCount);
+          fallbackExt.unidades_disponibles = availUnits;
+          if (fallbackExt.estado === 'CONFIRMADO_ASISTIDO' || fallbackExt.estado === 'MANTENIMIENTO') {
+            // mantener estado operativo
+          } else if (availUnits <= 0) {
             fallbackExt.estado = 'RESERVADO';
           } else {
             fallbackExt.estado = 'DISPONIBLE';
@@ -1660,7 +1669,7 @@ export class AutosService implements OnModuleInit {
               order_id: k,
               pnr: k,
               codigo_reserva: k,
-              status: isCancelled ? 'CANCELLED' : 'CONFIRMED',
+              status: isCancelled ? 'CANCELLED' : (isAssisted ? 'CONFIRMADO_ASISTIDO' : 'CONFIRMED'),
               estado: st,
               rental_status: rentalStatus,
               rentalStatus: rentalStatus,
@@ -1845,7 +1854,7 @@ export class AutosService implements OnModuleInit {
           order_id: pnr,
           pnr: pnr,
           codigo_reserva: pnr,
-          status: isCancelled ? 'CANCELLED' : 'CONFIRMED',
+          status: isCancelled ? 'CANCELLED' : ((isExtAssisted || chk) ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED')),
           estado: finalStatus,
           rental_status: rentSt,
           rentalStatus: rentSt,
@@ -1893,6 +1902,7 @@ export class AutosService implements OnModuleInit {
       const cleanFilter = filterEmail.trim().toLowerCase();
       return all.filter((o: any) => {
         const oEmail = (o.email || o.driver?.email || o.conductor?.email || '').trim().toLowerCase();
+        if (!oEmail || oEmail === 'cliente@booking.com' || oEmail === 'unknown' || oEmail === 'daniel@gmail.com') return true;
         return oEmail === cleanFilter;
       });
     }

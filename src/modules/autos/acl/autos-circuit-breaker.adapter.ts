@@ -393,6 +393,10 @@ export class AutosCircuitBreakerAdapter {
       for (const c of rawCars) {
         const vId = c.vehicle_id || c.auto_id || c.id;
         if (!vId) continue;
+        const stockDisp = Number(c.stock_disponible ?? c.unidades_disponibles ?? c.stock ?? c.available_units ?? 3);
+        const stockTotal = Number(c.stock_total ?? c.stock ?? stockDisp);
+        const rawSt = String(c.estado || c.status || 'DISPONIBLE').toUpperCase();
+        const isAvail = (rawSt === 'DISPONIBLE' || rawSt === 'AVAILABLE' || rawSt === 'ACTIVO' || rawSt === 'ACTIVE') && !c.mantenimiento_requerido && stockDisp > 0;
         allCars.push({
           vehicle_id: vId,
           marca: c.marca || c.brand || 'Suzuki',
@@ -419,7 +423,11 @@ export class AutosCircuitBreakerAdapter {
             rating: 9.4,
             ubicacion: 'Quito — Tababela Express',
           },
-          estado: c.mantenimiento_requerido ? 'MANTENIMIENTO' : (c.estado || c.status || 'DISPONIBLE'),
+          stock_total: stockTotal,
+          unidades_totales: stockTotal,
+          stock_disponible: stockDisp,
+          unidades_disponibles: stockDisp,
+          estado: isAvail ? 'DISPONIBLE' : (c.mantenimiento_requerido ? 'MANTENIMIENTO' : 'RESERVADO'),
           images: [c.foto_url || 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800'],
         });
       }
@@ -483,7 +491,8 @@ export class AutosCircuitBreakerAdapter {
         for (const car of allCars) {
           // Si el vehículo ya viene con estado no disponible desde el socio (ej. RESERVADO, ENTREGADO, MANTENIMIENTO, ALQUILADO)
           const rawCarState = (car.estado || '').toUpperCase();
-          const esNoDisponibleEnSocio = rawCarState !== 'DISPONIBLE' && rawCarState !== '';
+          const esNoDisponibleEnSocio = !['DISPONIBLE', 'AVAILABLE', 'ACTIVO', 'ACTIVE', ''].includes(rawCarState);
+          const totalUnits = Number(car.unidades_totales ?? car.unidades_disponibles ?? car.stock ?? 1);
 
           const matchingOrders = activeOrders.filter((o: any) => {
             const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
@@ -491,46 +500,42 @@ export class AutosCircuitBreakerAdapter {
             return oVid === cVid && o.status !== 'CANCELLED' && o.status !== 'CANCELADA';
           });
 
-          if (matchingOrders.length > 0 || esNoDisponibleEnSocio) {
-            let isReservedForDates = false;
-            let isAssisted = false;
+          let overlappingCount = 0;
+          let isAssisted = false;
 
-            if (esNoDisponibleEnSocio) {
-              if (rawCarState === 'CONFIRMADO_ASISTIDO' || rawCarState === 'ENTREGADO' || rawCarState === 'PICKED_UP') {
-                isAssisted = true;
-              } else {
-                isReservedForDates = true;
-              }
-            }
-
-            for (const ord of matchingOrders) {
-              const ordStatus = (ord.status || ord.estado || '').toUpperCase();
-              // Si el auto ya fue retirado físicamente en mostrador, no está disponible para ninguna fecha futura hasta que sea devuelto
-              if (ordStatus === 'CONFIRMADO_ASISTIDO' || ordStatus === 'ENTREGADO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
-                isAssisted = true;
-              } else if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
-                // Antes del check-in (reserva futura confirmada): el auto solo se bloquea en las fechas que se solapan con la reserva
-                if (searchPickup && searchDropoff) {
-                  const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
-                  const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
-                  if (oPickup && oDropoff) {
-                    if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
-                      isReservedForDates = true;
-                    }
-                  } else {
-                    isReservedForDates = true;
+          for (const ord of matchingOrders) {
+            const ordStatus = (ord.status || ord.estado || '').toUpperCase();
+            if (ordStatus === 'CONFIRMADO_ASISTIDO' || ordStatus === 'ENTREGADO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
+              isAssisted = true;
+              overlappingCount++;
+            } else if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
+              if (searchPickup && searchDropoff) {
+                const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
+                const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
+                if (oPickup && oDropoff) {
+                  if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
+                    overlappingCount++;
                   }
                 } else {
-                  isReservedForDates = true;
+                  overlappingCount++;
                 }
+              } else {
+                overlappingCount++;
               }
             }
+          }
 
-            if (isAssisted) {
-              car.estado = 'CONFIRMADO_ASISTIDO';
-            } else if (isReservedForDates) {
-              car.estado = 'RESERVADO';
-            }
+          if (car.unidades_disponibles !== undefined) {
+            car.unidades_disponibles = Math.max(0, totalUnits - overlappingCount);
+          }
+
+          if (isAssisted && totalUnits <= 1) {
+            car.estado = 'CONFIRMADO_ASISTIDO';
+          } else if (esNoDisponibleEnSocio || overlappingCount >= totalUnits) {
+            car.estado = esNoDisponibleEnSocio ? (rawCarState || 'RESERVADO') : 'RESERVADO';
+            if (car.unidades_disponibles !== undefined) car.unidades_disponibles = 0;
+          } else {
+            car.estado = 'DISPONIBLE';
           }
         }
       } catch (err: any) {

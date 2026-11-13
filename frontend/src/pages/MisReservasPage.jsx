@@ -68,10 +68,10 @@ function getAlojamientoStatus(r) {
   if (isPast) {
     return { text: 'Check-out completado', cls: 'checked_out' };
   }
-  if (r.status === 'CHECKED_IN') {
+  if (r.status === 'CHECKED_IN' || r.status === 'CONFIRMADO_ASISTIDO') {
     return { text: 'Check-in realizado', cls: 'checked_in' };
   }
-  if (r.status === 'CONFIRMED' || r.status === 'CONFIRMADO_ASISTIDO') {
+  if (r.status === 'CONFIRMED') {
     return { text: 'Confirmada', cls: 'confirmed' };
   }
   return { text: ESTADOS_ES[r.status] ?? r.status, cls: (r.status || '').toLowerCase() };
@@ -523,6 +523,8 @@ export function MisReservasPage() {
           const isMarkedCheckedIn = checkedInStorage.has(a.pnr) || checkedInStorage.has(a.order_id) || checkedInStorage.has(a.id) ||
                                     checkedInStorage.has(pnrReal) || (a.pnr && checkedInStorage.has(a.pnr.replace(/^MDU-/, '')));
           const isAutoAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'].includes(rawStatus) ||
+                                ['CONFIRMADO_ASISTIDO', 'ASISTIDO', 'CHECKED_IN', 'PICKED_UP', 'RETURNED', 'ENTREGADO', 'COMPLETED'].includes((a.estado || '').toUpperCase()) ||
+                                a.status === 'CONFIRMADO_ASISTIDO' ||
                                 a.rentalStatus === 'PICKED_UP' || a.rental_status === 'PICKED_UP' || a.rentalStatus === 'RETURNED' || a.rental_status === 'RETURNED' ||
                                 a.checkin_status === 'CHECKIN_COMPLETED' || a.checkin?.status === 'COMPLETED' || a.checkin?.estado === 'CONFIRMADO_ASISTIDO' ||
                                 isMarkedCheckedIn;
@@ -571,6 +573,11 @@ export function MisReservasPage() {
         const carNameLocal = getFriendlyCarName(a);
         const hasTechnicalTitle = a.titulo && /auto-\d+|veh-\d+|[0-9a-f]{8}-[0-9a-f]{4}/i.test(a.titulo);
         const displayTitleLocal = (a.titulo && !hasTechnicalTitle) ? a.titulo : `Renta de ${carNameLocal} (${diasLocal} días)`;
+        const isLocalAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED'].includes((a.status || a.estado || '').toUpperCase()) ||
+                               checkedInStorage.has(a.id) || checkedInStorage.has(a.orderId) || checkedInStorage.has(a.pnr);
+        const localAutoStatus = (cancelledStorage.has(a.id) || cancelledStorage.has(a.orderId) || cancelledStorage.has(a.pnr) || a.status === 'CANCELLED')
+          ? 'CANCELLED'
+          : (isLocalAssisted ? 'CONFIRMADO_ASISTIDO' : (a.status || 'CONFIRMED'));
         return {
           id: a.id || a.orderId,
           pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
@@ -587,7 +594,7 @@ export function MisReservasPage() {
           cantidad: 1,
           cantidadTexto: `1 Vehículo (${diasLocal} días)`,
           rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
-          status: (cancelledStorage.has(a.id) || cancelledStorage.has(a.orderId) || cancelledStorage.has(a.pnr)) ? 'CANCELLED' : (a.status || 'CONFIRMED'),
+          status: localAutoStatus,
           totalRaw: a.totalPrice?.total || a.total || 106.50,
           imagen: a.foto_url || DEFAULT_IMAGES.auto,
           email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
@@ -837,11 +844,25 @@ export function MisReservasPage() {
             ((pnrVal && e.pnr === pnrVal) || (idVal && e.id === idVal))
           );
           if (existente) {
-            // Regla Monotónica de Check-in: Si el estado local ya está en CHECKED_IN o CONFIRMADO_ASISTIDO,
-            // no permitir que una respuesta rezagada del servidor lo degrade a CONFIRMED
-            const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED'];
-            if (estadosAsistidos.includes(item.status) && !estadosAsistidos.includes(existente.status)) {
-              existente.status = item.status;
+            // Regla Monotónica de Check-in: Si el estado local o servidor ya está asistido, preservar CONFIRMADO_ASISTIDO
+            const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'ENTREGADO', 'COMPLETED'];
+            if (estadosAsistidos.includes(item.status) || estadosAsistidos.includes(existente.status)) {
+              existente.status = 'CONFIRMADO_ASISTIDO';
+              try {
+                const savedCheckedIn = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+                if (item.id) savedCheckedIn.add(item.id);
+                if (item.pnr) savedCheckedIn.add(item.pnr);
+                if (existente.id) savedCheckedIn.add(existente.id);
+                if (existente.pnr) savedCheckedIn.add(existente.pnr);
+                localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
+
+                const localAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
+                const upd = localAutos.map((la) => {
+                  const m = la.id === idVal || la.orderId === idVal || (pnrVal && (la.pnr === pnrVal || la.orderId === pnrVal));
+                  return m ? { ...la, status: 'CONFIRMADO_ASISTIDO' } : la;
+                });
+                localStorage.setItem('reservas_autos', JSON.stringify(upd));
+              } catch (_) {}
             }
             if (item.placa && !existente.placa) {
               existente.placa = item.placa;
@@ -904,6 +925,35 @@ export function MisReservasPage() {
         localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
         localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
       } catch (_) { }
+
+      // Consulta reactiva de estado en tiempo real para autos pendientes de confirmación (AutoSpot Esteban, RutaLibre Daniel, MDU Mateo)
+      const autosParaVerificar = listaFinal.filter(
+        (it) => it.tipo === 'auto' && it.status !== 'CANCELLED' && !estadosAsistidos.includes(it.status) && it.pnr && it.pnr !== 'AUTO'
+      );
+      if (autosParaVerificar.length > 0) {
+        Promise.allSettled(
+          autosParaVerificar.map(async (auto) => {
+            try {
+              const res = await api.get(`/reservas/${auto.pnr}/estado`);
+              if (res?.data && (estadosAsistidos.includes(res.data.estado) || estadosAsistidos.includes(res.data.status))) {
+                auto.status = 'CONFIRMADO_ASISTIDO';
+                if (res.data.placa && !auto.placa) auto.placa = res.data.placa;
+                const savedChk = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+                if (auto.id) savedChk.add(auto.id);
+                if (auto.pnr) savedChk.add(auto.pnr);
+                localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedChk)));
+                const localAutos = JSON.parse(localStorage.getItem('reservas_autos') || '[]');
+                const upd = localAutos.map((la) => {
+                  const m = la.id === auto.id || la.orderId === auto.id || la.pnr === auto.pnr || la.orderId === auto.pnr;
+                  return m ? { ...la, status: 'CONFIRMADO_ASISTIDO', placa: res.data.placa || la.placa } : la;
+                });
+                localStorage.setItem('reservas_autos', JSON.stringify(upd));
+                setReservas((prev) => prev.map((r) => ((r.id === auto.id || r.pnr === auto.pnr) ? { ...r, status: 'CONFIRMADO_ASISTIDO', placa: res.data.placa || r.placa } : r)));
+              }
+            } catch (_) {}
+          })
+        );
+      }
 
       // Reactividad tipo Composable (Android):
       // Si la lista de reservas no ha sufrido cambios en sus atributos visibles (status, placa, etc.),

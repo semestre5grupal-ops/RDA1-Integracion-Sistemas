@@ -625,7 +625,7 @@ export function AutoDetail() {
             )}
 
             {/* Alerta de Auto Reservado / No disponible */}
-            {(auto.unidades_disponibles === 0 || auto.estado === 'RESERVADO') && !hayConflictoFechas && (
+            {((auto.unidades_disponibles === 0) || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) && !hayConflictoFechas && (
               <div style={{ background: '#fce8e6', color: '#c5221f', border: '1px solid #fad2cf', padding: '14px', borderRadius: '4px', fontSize: '0.92rem', lineHeight: '1.4' }}>
                 <strong>🚫 Vehículo actualmente no disponible:</strong>
                 <p style={{ margin: '6px 0 0 0' }}>
@@ -642,19 +642,19 @@ export function AutoDetail() {
             <form onSubmit={handleBooking} style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
               <button 
                 type="submit" 
-                disabled={hayConflictoFechas || auto.unidades_disponibles === 0} 
+                disabled={hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))} 
                 style={{ 
-                  background: (hayConflictoFechas || auto.unidades_disponibles === 0) ? '#9ca3af' : '#006ce4', 
+                  background: (hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? '#9ca3af' : '#006ce4', 
                   color: 'white', 
                   border: 'none', 
                   padding: '12px 24px', 
                   fontSize: '1rem', 
                   fontWeight: 'bold', 
                   borderRadius: '4px', 
-                  cursor: (hayConflictoFechas || auto.unidades_disponibles === 0) ? 'not-allowed' : 'pointer' 
+                  cursor: (hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? 'not-allowed' : 'pointer' 
                 }}
               >
-                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : (auto.unidades_disponibles === 0 ? 'Vehículo No Disponible' : 'Continuar a Pago'))}
+                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : ((auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? 'Vehículo No Disponible' : 'Continuar a Pago'))}
               </button>
             </form>
 
