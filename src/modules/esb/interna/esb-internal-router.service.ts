@@ -36,9 +36,14 @@ export class EsbInternalRouterService {
       ).catch(() => []),
 
       this.dataSource.query(
-        `SELECT id, estado, total, fecha_recogida, fecha_devolucion, nombre_conductor, km_salida, km_retorno 
+        `SELECT id, pnr, external_order_id, estado, total, fecha_recogida, fecha_devolucion, nombre_conductor, licencia_conducir, km_salida, km_retorno, checkin_at 
          FROM schema_autos.autos_reservas 
-         WHERE cliente_id::text = $1 OR nombre_conductor ILIKE $2
+         WHERE cliente_id::text = $1 
+            OR licencia_conducir = $1 
+            OR id = $1 
+            OR pnr = $1 
+            OR external_order_id = $1 
+            OR nombre_conductor ILIKE $2
          ORDER BY created_at DESC LIMIT 20`,
         [clienteIdOrEmail, `%${clienteIdOrEmail}%`],
       ).catch(() => []),
