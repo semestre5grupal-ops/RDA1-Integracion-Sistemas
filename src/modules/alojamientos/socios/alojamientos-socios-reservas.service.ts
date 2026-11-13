@@ -274,17 +274,7 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
         fechaInicio: d.checkin,
         fechaFin: d.checkout,
         cantidadHabitaciones: d.habitaciones,
-        number_of_rooms: d.habitaciones,
-        habitaciones: d.habitaciones,
         ocupantes,
-        adultos: d.adultos,
-        number_of_adults: d.adultos,
-        cantidadAdultos: d.adultos,
-        ninos: d.ninos,
-        guests: {
-          number_of_adults: d.adultos,
-          number_of_rooms: d.habitaciones,
-        },
         ...(opcion.plan ? { planTarifaCodigo: opcion.plan } : {}),
       },
     });
