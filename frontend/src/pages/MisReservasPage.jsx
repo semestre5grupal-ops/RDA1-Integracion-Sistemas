@@ -815,7 +815,9 @@ export function MisReservasPage() {
 
       todasLasReservas.forEach((item) => {
         // Regla de Aislamiento y Privacidad Cross-Platform (Defensa Cátedra):
-        if (!isAdmin) {
+        // Vuelos no pasa por este filtro: el backend ya devuelve solo las reservas del dueño
+        // (JWT/huella del navegador) y sus registros no traen correo ni cédula.
+        if (!isAdmin && item.tipo !== 'vuelo') {
           if (!correoSesion) {
             // Usuario sin sesión activa: no mostrar ninguna reserva
             return;

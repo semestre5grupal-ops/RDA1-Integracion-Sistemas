@@ -51,7 +51,10 @@ import { ServiceMeshModule } from './modules/service-mesh/service-mesh.module';
           autoLoadEntities: true,
           synchronize: false,
           ssl: { rejectUnauthorized: false },
-          extra: { max: 10 },
+          // La base (Supabase, us-west-2) está lejos de Azure: abrir una conexión cuesta ~1,3 s.
+          // Por defecto pg cierra las conexiones con 10 s sin uso y cada pausa obligaba a reconectar
+          // (consultas simples de 0,4 s pasaban a 1-4 s). Se mantienen abiertas 10 min con keepAlive.
+          extra: { max: 10, idleTimeoutMillis: 600_000, keepAlive: true, connectionTimeoutMillis: 15_000 },
         };
       },
     }),
