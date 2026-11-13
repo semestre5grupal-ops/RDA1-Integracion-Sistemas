@@ -309,12 +309,12 @@ export function AlojamientosSearchPage() {
     const runPoll = async (silent) => {
       if (isCancelled) return;
       if (silent && typeof document !== 'undefined' && document.hidden) {
-        timer = setTimeout(() => runPoll(true), 5000);
+        timer = setTimeout(() => runPoll(true), 15000);
         return;
       }
       await fetchResults(currentQuery, silent);
       if (!isCancelled) {
-        timer = setTimeout(() => runPoll(true), 5000);
+        timer = setTimeout(() => runPoll(true), 15000);
       }
     };
 
@@ -901,7 +901,7 @@ export function AlojamientosSearchPage() {
             className="sr-map-entry"
             style={{
               backgroundImage:
-                'url("https://tile.openstreetmap.org/13/2764/4096.png")',
+                'url("https://tile.openstreetmap.org/14/4620/8200.png")',
               backgroundColor: '#e5e3df',
             }}
           >

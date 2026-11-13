@@ -1022,7 +1022,7 @@ export function AlojamientoDetail() {
             <div
               className="dt-side-map-box"
               style={{
-                backgroundImage: 'url("https://maps.googleapis.com/maps/api/staticmap?size=340x140&center=-0.1838,-78.4919&zoom=13&scale=2&sensor=false")',
+                backgroundImage: 'url("https://tile.openstreetmap.org/14/4620/8200.png")',
                 backgroundColor: '#e5e3df',
               }}
             >
