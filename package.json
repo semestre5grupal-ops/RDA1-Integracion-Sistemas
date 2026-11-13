@@ -28,7 +28,8 @@
     "test:api:clientes": "node run_api_tests.js",
     "test:contracts": "jest --config jest-contracts.config.js --runInBand --forceExit",
     "test:pact": "jest --config jest-pact.config.js --runInBand --forceExit",
-    "test:live:posada": "node test/live/posada-ec/ejecutar.js"
+    "test:live:posada": "node test/live/posada-ec/ejecutar.js",
+    "deploy:azure": "npm run build && powershell -ExecutionPolicy Bypass -File scripts/create_azure_zip.ps1 && az webapp deploy --resource-group rg-booking-puce --name booking-core-api --src-path deploy_booking.zip --type zip --async false"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
