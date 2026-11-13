@@ -1,5 +1,3 @@
-import { Agent, setGlobalDispatcher } from 'undici';
-
 /**
  * Reutiliza las conexiones HTTPS hacia aerolíneas y socios.
  *
@@ -13,15 +11,19 @@ import { Agent, setGlobalDispatcher } from 'undici';
  */
 export function activarConexionesPersistentes(): void {
   try {
-    setGlobalDispatcher(
-      new Agent({
-        keepAliveTimeout: 60_000,
-        keepAliveMaxTimeout: 300_000,
-        connections: 64,
-        connect: { timeout: 10_000 },
-      }),
-    );
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Agent, setGlobalDispatcher } = require('undici');
+    if (typeof setGlobalDispatcher === 'function' && typeof Agent === 'function') {
+      setGlobalDispatcher(
+        new Agent({
+          keepAliveTimeout: 60_000,
+          keepAliveMaxTimeout: 300_000,
+          connections: 64,
+          connect: { timeout: 10_000 },
+        }),
+      );
+    }
   } catch {
-    /* si falla, se queda el agente por defecto de Node */
+    /* si falla o no está instalado undici, se queda el agente por defecto de Node */
   }
 }
