@@ -1515,79 +1515,53 @@ export function AlojamientoDetail() {
               </div>
             </div>
 
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <InfoIcon size={18} color="#003580" />
-                <span>Cancelación / prepago</span>
-              </div>
-              <div className="dt-rule-right">
-                {alojamiento.politicas?.cancelacion || 'Las condiciones de cancelación y pago por adelantado pueden variar según el tipo de alojamiento y la tarifa seleccionada.'}
-              </div>
-            </div>
-
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <FamilyIcon size={18} color="#003580" />
-                <span>Camas y niños</span>
-              </div>
-              <div className="dt-rule-right">
-                <div>
-                  <strong>Políticas sobre menores:</strong> Se pueden alojar niños de cualquier edad.
+            {alojamiento.politicas?.cancelacion && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <InfoIcon size={18} color="#003580" />
+                  <span>Cancelación / prepago</span>
                 </div>
-                <div style={{ marginTop: '4px' }}>
-                  <strong>Cunas y camas supletorias:</strong> Hay cunas y camas adicionales disponibles a petición según disponibilidad.
+                <div className="dt-rule-right">
+                  {alojamiento.politicas.cancelacion}
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <UserIcon size={18} color="#003580" />
-                <span>Restricción de edad</span>
-              </div>
-              <div className="dt-rule-right">
-                Edad mínima para el check-in: 18 años
-              </div>
-            </div>
-
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <PetsIcon size={18} color="#003580" />
-                <span>Mascotas</span>
-              </div>
-              <div className="dt-rule-right">
-                {alojamiento.politicas?.mascotas !== undefined
-                  ? (alojamiento.politicas.mascotas ? 'Se admiten mascotas en el establecimiento.' : 'No se admiten mascotas en las habitaciones.')
-                  : 'Consultar directamente con el establecimiento antes de la llegada.'}
-              </div>
-            </div>
-
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <NoSmokingIcon size={18} color="#003580" />
-                <span>Fumar</span>
-              </div>
-              <div className="dt-rule-right">
-                {alojamiento.politicas?.fumar !== undefined
-                  ? (alojamiento.politicas.fumar ? 'Permitido fumar en áreas exteriores habilitadas.' : 'No se permite fumar en el interior del establecimiento.')
-                  : 'No se permite fumar en las habitaciones ni en áreas comunes interiores.'}
-              </div>
-            </div>
-
-            <div className="dt-rule-row">
-              <div className="dt-rule-left">
-                <CreditCardIcon size={18} color="#003580" />
-                <span>Tarjetas aceptadas</span>
-              </div>
-              <div className="dt-rule-right">
-                <div className="dt-payment-cards-row">
-                  <span className="dt-card-badge">American Express</span>
-                  <span className="dt-card-badge">Visa</span>
-                  <span className="dt-card-badge">Mastercard</span>
-                  <span style={{ fontSize: '0.8rem', color: '#595959', marginLeft: '8px' }}>Pagos electrónicos y tarjetas aceptadas</span>
+            {alojamiento.politicas?.mascotas !== undefined && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <PetsIcon size={18} color="#003580" />
+                  <span>Mascotas</span>
+                </div>
+                <div className="dt-rule-right">
+                  {alojamiento.politicas.mascotas ? 'Se admiten mascotas en el establecimiento.' : 'No se admiten mascotas en las habitaciones.'}
                 </div>
               </div>
-            </div>
+            )}
+
+            {alojamiento.politicas?.fumar !== undefined && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <NoSmokingIcon size={18} color="#003580" />
+                  <span>Fumar</span>
+                </div>
+                <div className="dt-rule-right">
+                  {alojamiento.politicas.fumar ? 'Permitido fumar en áreas exteriores habilitadas.' : 'No se permite fumar en el interior del establecimiento.'}
+                </div>
+              </div>
+            )}
+
+            {(!alojamiento.politicas || Object.values(alojamiento.politicas).every((v) => v === null || v === undefined || v === '')) && (
+              <div className="dt-rule-row">
+                <div className="dt-rule-left">
+                  <InfoIcon size={18} color="#003580" />
+                  <span>Condiciones</span>
+                </div>
+                <div className="dt-rule-right" style={{ color: '#595959' }}>
+                  El establecimiento no tiene normas adicionales registradas. Las condiciones estándar de estadía se coordinan directamente a tu llegada.
+                </div>
+              </div>
+            )}
           </div>
         </section>
 

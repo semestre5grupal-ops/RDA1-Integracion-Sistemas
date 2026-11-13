@@ -758,7 +758,7 @@ export class AlojamientosSociosService {
     const lista: any[] = Array.isArray(b) ? b : b?.habitaciones || ficha?.habitaciones || [];
     const polFicha = ficha?.politicaCancelacion;
     return lista
-      .filter((t) => t && (t.codigo || t.id))
+      .filter((t) => t && (t.codigo || t.id || t.tipo_habitacion || t.tipoHabitacion || t.room_type || t.tipo))
       .map((t, i) => {
         const plan = Array.isArray(t.planesTarifa) ? t.planesTarifa.find((p: any) => p.esPlanPorDefecto) || t.planesTarifa[0] : null;
         const pol = plan?.politicaCancelacion || t?.politicaCancelacion || polFicha;
@@ -769,7 +769,7 @@ export class AlojamientosSociosService {
               : (typeof pol?.descripcion === 'string' ? !/no reembolsable|100%/i.test(pol.descripcion) : null));
         const horas = num(pol?.horasLimiteCancelacion);
         const descPol = pol?.descripcion || (esReembolsable === false ? 'No reembolsable' : (horas !== null ? `Cancelación gratuita hasta ${horas} horas antes` : null));
-        const codigo = String(t.codigo || t.id);
+        const codigo = String(t.codigo || t.id || t.tipo_habitacion || t.tipoHabitacion || t.room_type || t.tipo);
         const bedData = formatearCamas(
           t.descripcionCamas ??
           t.descripcion_camas ??
@@ -835,15 +835,17 @@ export class AlojamientosSociosService {
     const porCodigo = new Map(tipos.map((t) => [t.codigo, t]));
     const b = r.status === 200 ? desempacar(r.body) : null;
     // El contrato v2.2.0 (Posada) devuelve `opciones`. Otros socios exponen la
-    // disponibilidad como `tipos`/`habitaciones` (p. ej. Hábitat): se aceptan ambos.
-    const listaDisp = b?.opciones || b?.options || b?.tipos || b?.habitaciones;
+    // disponibilidad como `tipos`/`habitaciones` (p. ej. Hábitat, Kawsay): se aceptan ambos.
+    const listaDisp = Array.isArray(b)
+      ? b
+      : (b?.opciones || b?.options || b?.tipos || b?.habitaciones || b?.disponibilidad || b?.rooms || b?.data);
     const lista: any[] = (Array.isArray(listaDisp) && listaDisp.length > 0)
       ? listaDisp
       : (tipos.length > 0 ? tipos : []);
     const opciones: OpcionSocio[] = lista
-      .filter((o) => o && (o.tipoHabitacionCodigo || o.codigo || o.id))
+      .filter((o) => o && (o.tipoHabitacionCodigo || o.codigo || o.tipo_habitacion || o.tipoHabitacion || o.room_type || o.roomType || o.tipo || o.id))
       .map((o) => {
-        const codigo = String(o.tipoHabitacionCodigo || o.codigo || o.id);
+        const codigo = String(o.tipoHabitacionCodigo || o.codigo || o.tipo_habitacion || o.tipoHabitacion || o.room_type || o.roomType || o.tipo || o.id);
         const plan = o.planTarifaCodigo ? String(o.planTarifaCodigo) : null;
         const t = porCodigo.get(codigo);
         const remanentes = num(
@@ -853,6 +855,11 @@ export class AlojamientosSociosService {
           o.disponibles ??
           o.cantidadDisponible ??
           o.available_rooms ??
+          o.available_units ??
+          o.availableUnits ??
+          o.cupo ??
+          o.cupos ??
+          o.unidadesDisponibles ??
           o.stock ??
           t?.disponibles ??
           t?.cantidad

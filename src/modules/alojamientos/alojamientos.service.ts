@@ -720,8 +720,8 @@ export class AlojamientosService implements OnModuleInit {
       const pedidas = dto.guests?.number_of_rooms || dto.habitaciones || 1;
       const noches = calcularNoches(checkinDate, checkoutDate);
       const conCupo: any[] = [];
-      // Se evalúan como máximo los primeros 18 candidatos para garantizar tiempos de respuesta ágiles
-      const candidatos = itemsSocios.slice(0, 18);
+      // Se evalúan los candidatos del destino (hasta 60) en lotes concurrentes para no descartar hoteles
+      const candidatos = itemsSocios.slice(0, Math.max(60, rowsCount * 2));
       for (let i = 0; i < candidatos.length; i += 6) {
         const lote = candidatos.slice(i, i + 6);
         const disp = await Promise.all(
