@@ -83,40 +83,12 @@ export class ReservationRequestDto {
   @IsOptional()
   adultos?: number;
 
-  @ApiProperty({ description: 'Cantidad de adultos (alias de adultos)', example: 2, required: false })
-  @IsInt()
-  @Min(1)
-  @Max(30)
-  @IsOptional()
-  number_of_adults?: number;
-
   @ApiProperty({ description: 'Cantidad de niños', example: 0, required: false })
   @IsInt()
   @Min(0)
   @Max(10)
   @IsOptional()
   ninos?: number;
-
-  @ApiProperty({ description: 'Cantidad de niños (alias de ninos)', example: 0, required: false })
-  @IsInt()
-  @Min(0)
-  @Max(10)
-  @IsOptional()
-  number_of_children?: number;
-
-  @ApiProperty({ description: 'Cantidad de habitaciones (alias de habitaciones_count)', example: 1, required: false })
-  @IsInt()
-  @Min(1)
-  @Max(30)
-  @IsOptional()
-  number_of_rooms?: number;
-
-  @ApiProperty({ description: 'Cantidad total de huéspedes', example: 2, required: false })
-  @IsInt()
-  @Min(1)
-  @Max(50)
-  @IsOptional()
-  huespedes?: number;
 
   @ApiProperty({ description: 'Email del cliente', example: 'juan@example.com', required: false })
   @IsEmail()
@@ -172,16 +144,6 @@ export class ReservationRequestDto {
   @MaxLength(60)
   @IsOptional()
   tipo_habitacion_id?: string;
-
-  @ApiProperty({
-    required: false,
-    example: 'PROD-31-8982',
-    description: 'Alias de tipo_habitacion_id para compatibilidad con nodos socios.',
-  })
-  @IsString()
-  @MaxLength(60)
-  @IsOptional()
-  producto_id?: string;
 
   @ApiProperty({
     required: false,
@@ -259,15 +221,4 @@ export class CancelReservationRequestDto {
   @MaxLength(500)
   @IsOptional()
   reason?: string;
-
-  @ApiProperty({ description: 'Motivo de la cancelación (OpenAPI v2)', example: 'Cancelada por el cliente desde Booking', required: false })
-  @IsString()
-  @MaxLength(300)
-  @IsOptional()
-  motivo?: string;
-
-  @ApiProperty({ description: 'Quién solicita la cancelación (CLIENTE, ADMIN, etc.)', example: 'CLIENTE', required: false })
-  @IsString()
-  @IsOptional()
-  solicitadoPor?: string;
 }

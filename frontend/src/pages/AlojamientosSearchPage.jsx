@@ -5,7 +5,6 @@ import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { DestinoAutocomplete } from '../components/DestinoAutocomplete';
 import { destinoExacto, combinarDestinos } from '../utils/destinos';
-import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 import {
   BedIcon,
   CalendarIcon,
@@ -21,7 +20,7 @@ import {
 } from '../components/BookingIcons';
 import './AlojamientosSearchPage.css';
 import { fechaLocal } from '../utils/fechas';
-import { MapaAlojamientos } from '../components/MapaAlojamientos';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 // Histogram bar heights to replicate Booking.com desktop distribution curve
 const HISTOGRAM_BARS = [
@@ -114,7 +113,6 @@ export function AlojamientosSearchPage() {
   const [showOccupancyPopover, setShowOccupancyPopover] = useState(false);
   const occupancyRef = useRef(null);
   const datesRef = useRef(null);
-  const isFetchingRef = useRef(false);
 
   // Helper for formatting Booking date ranges (e.g. vie. 9 oct. — dom. 11 oct.)
   const formatBookingDateRange = (startStr, endStr) => {
@@ -139,8 +137,15 @@ export function AlojamientosSearchPage() {
   const [viewMode, setViewMode] = useState('list');
   const [sortBy, setSortBy] = useState('popularity');
   const [wishlist, setWishlist] = useState(new Set());
-  const [lastSyncTime, setLastSyncTime] = useState(new Date());
-  const [syncPulse, setSyncPulse] = useState(false);
+  const isFetchingRef = useRef(false);
+
+  // Destinos reales del catálogo para el autocompletado aprovechando los resultados cargados.
+  useEffect(() => {
+    if (properties && properties.length > 0) {
+      const nombres = properties.map((a) => a?.destino || a?.ubicacion?.city).filter(Boolean);
+      if (nombres.length) setDestinosCatalogo(combinarDestinos(nombres));
+    }
+  }, [properties]);
 
   // Filter States
   // El extremo derecho del control ("US$250+") significa SIN LÍMITE, como en Booking.
@@ -155,10 +160,6 @@ export function AlojamientosSearchPage() {
   const [selectedNeighbourhoods, setSelectedNeighbourhoods] = useState([]);
   const [selectedPolicies, setSelectedPolicies] = useState([]);
   const [bedroomsCount, setBedroomsCount] = useState(0);
-
-  // Modal de Mapa Leaflet + OpenStreetMap
-  const [showMapModal, setShowMapModal] = useState(false);
-  const [selectedMapProperty, setSelectedMapProperty] = useState(null);
 
   // Expanded toggles for long filter lists
   const [showAllFacilities, setShowAllFacilities] = useState(false);
@@ -315,41 +316,6 @@ export function AlojamientosSearchPage() {
     };
   }, [searchParams]);
 
-  // Sincronización continua de inventario en vivo (Simulando stream gRPC cada 5 segundos)
-  useEffect(() => {
-    let isCancelled = false;
-
-    const interval = setInterval(async () => {
-      try {
-        const destQuery = destination.trim() || 'Quito';
-        const res = await searchAlojamientos({
-          destino: destQuery,
-          adultos: adults,
-          ninos: children,
-          habitaciones: rooms,
-          dates: { checkin, checkout },
-          rows: 25,
-        });
-        const items = res.data || res;
-        if (!isCancelled && Array.isArray(items) && items.length > 0) {
-          setProperties(items);
-          setLastSyncTime(new Date());
-          setSyncPulse(true);
-          setTimeout(() => {
-            if (!isCancelled) setSyncPulse(false);
-          }, 900);
-        }
-      } catch (err) {
-        // Silencioso para no interrumpir al usuario
-      }
-    }, 5000);
-
-    return () => {
-      isCancelled = true;
-      clearInterval(interval);
-    };
-  }, [destination, checkin, checkout, adults, children, rooms]);
-
   // Handle Search Submission
   const handleSearchSubmit = (e) => {
     if (e) e.preventDefault();
@@ -368,7 +334,7 @@ export function AlojamientosSearchPage() {
     setShowDatesPopover(false);
     setShowOccupancyPopover(false);
 
-    // "quito" / "QUÍTO" se normaliza al nombre oficial del destino si coincide exactamente.
+    // "quito" / "QUÍTO" se normaliza al nombre oficial del destino.
     const dest = destinoExacto(typed)?.nombre || typed;
     setDestination(dest);
     setSearchParams({
@@ -379,7 +345,6 @@ export function AlojamientosSearchPage() {
       group_children: children,
       no_rooms: rooms,
     });
-    // El useEffect([searchParams]) detectará el cambio en la URL y lanzará fetchResults.
   };
 
   // Toggle wishlist heart
@@ -691,20 +656,10 @@ export function AlojamientosSearchPage() {
                     setDestination(val);
                     if (val.trim()) setDestinationError('');
                   }}
-                  onSelect={(destObj) => {
-                    const destName = destObj?.nombre || destination;
-                    setDestination(destName);
+                  onSelect={() => {
                     setDestinationError('');
                     setShowOccupancyPopover(false);
-                    setSearchParams({
-                      ss: destName,
-                      checkin,
-                      checkout,
-                      group_adults: adults,
-                      group_children: children,
-                      no_rooms: rooms,
-                    });
-                    // fetchResults lo dispara el useEffect([searchParams])
+                    setShowDatesPopover(true);
                   }}
                   onInvalidChars={() => setDestinationError('Solo se permiten letras, espacios y los signos , . - \' &')}
                   invalid={Boolean(destinationError)}
@@ -777,20 +732,7 @@ export function AlojamientosSearchPage() {
                     type="button"
                     className="sr-smart-btn"
                     style={{ marginTop: '12px' }}
-                    onClick={() => {
-                      setShowDatesPopover(false);
-                      if (checkin && checkout && checkout > checkin) {
-                        setSearchParams({
-                          ss: destination,
-                          checkin,
-                          checkout,
-                          group_adults: adults,
-                          group_children: children,
-                          no_rooms: rooms,
-                        });
-                        // fetchResults lo dispara el useEffect([searchParams])
-                      }
-                    }}
+                    onClick={() => setShowDatesPopover(false)}
                   >
                     Confirmar fechas
                   </button>
@@ -901,18 +843,7 @@ export function AlojamientosSearchPage() {
                     type="button"
                     className="sr-smart-btn"
                     style={{ marginTop: '12px' }}
-                    onClick={() => {
-                      setShowOccupancyPopover(false);
-                      setSearchParams({
-                        ss: destination,
-                        checkin,
-                        checkout,
-                        group_adults: adults,
-                        group_children: children,
-                        no_rooms: rooms,
-                      });
-                      // fetchResults lo dispara el useEffect([searchParams])
-                    }}
+                    onClick={() => setShowOccupancyPopover(false)}
                   >
                     Listo
                   </button>
@@ -921,8 +852,8 @@ export function AlojamientosSearchPage() {
             </div>
 
             {/* 4. Search Button */}
-            <button type="submit" className="sr-search-btn" disabled={loading}>
-              {loading ? 'Buscando…' : 'Buscar'}
+            <button type="submit" className="sr-search-btn">
+              Buscar
             </button>
           </form>
         </div>
@@ -955,29 +886,7 @@ export function AlojamientosSearchPage() {
       <div className="sr-main-container">
         {/* ================= LEFT SIDEBAR FILTERS ================= */}
         <aside className="sr-sidebar">
-          {/* 1. Map preview card */}
-          <div
-            className="sr-map-entry"
-            style={{
-              backgroundImage:
-                'url("https://tile.openstreetmap.org/13/2764/4096.png")',
-              backgroundColor: '#e5e3df',
-            }}
-          >
-            <button
-              type="button"
-              className="sr-map-btn"
-              onClick={() => {
-                setSelectedMapProperty(null);
-                setShowMapModal(true);
-              }}
-            >
-              <PinIcon size={18} color="currentColor" />
-              <span>Mostrar en el mapa</span>
-            </button>
-          </div>
-
-          {/* 2. Filters Box */}
+          {/* Filters Box */}
           <div className="sr-filters-box">
             <h2 className="sr-filters-heading">Filtrar por:</h2>
 
@@ -1241,26 +1150,9 @@ export function AlojamientosSearchPage() {
         <div className="sr-results-content">
           {/* Header Bar */}
           <div className="sr-results-header">
-            <div>
-              <h1 className="sr-results-title">
-                {destination}: {filteredProperties.length} {filteredProperties.length === 1 ? 'alojamiento encontrado' : 'alojamientos encontrados'}
-              </h1>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '0.8rem', color: '#008009', fontWeight: 600, marginTop: '4px' }}>
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    background: '#008009',
-                    boxShadow: syncPulse ? '0 0 10px #00a812' : 'none',
-                    transform: syncPulse ? 'scale(1.3)' : 'scale(1)',
-                    transition: 'all 0.3s ease-in-out',
-                  }}
-                />
-                <span>En vivo: inventario actualizado ({lastSyncTime.toLocaleTimeString()})</span>
-              </div>
-            </div>
+            <h1 className="sr-results-title">
+              {destination}: {filteredProperties.length} {filteredProperties.length === 1 ? 'alojamiento encontrado' : 'alojamientos encontrados'}
+            </h1>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
               {/* List / Grid Toggle */}
@@ -1626,20 +1518,14 @@ export function AlojamientosSearchPage() {
                       <div className="sr-card-location">
                         <span
                           className="sr-map-link"
-                          onClick={() => {
-                            setSelectedMapProperty(prop);
-                            setShowMapModal(true);
-                          }}
+                          onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((prop.nombre || '') + ' ' + (prop.destino || destination || 'Ecuador'))}`, '_blank')}
                         >
                           {prop.destino || destination}
                         </span>
                         <span>•</span>
                         <span
                           className="sr-map-link"
-                          onClick={() => {
-                            setSelectedMapProperty(prop);
-                            setShowMapModal(true);
-                          }}
+                          onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((prop.nombre || '') + ' ' + (prop.destino || destination || 'Ecuador'))}`, '_blank')}
                         >
                           Mostrar en el mapa
                         </span>
@@ -1691,17 +1577,11 @@ export function AlojamientosSearchPage() {
                         <div className="sr-urgency-note">
                           {libres !== undefined && (
                             libres <= 0 ? (
-                              <span style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.8rem' }}>
-                                Agotado para tus fechas
-                              </span>
+                              <span style={{ color: '#b3121b', fontWeight: 600 }}>¡Agotado para tus fechas!</span>
                             ) : libres <= 3 ? (
-                              <span style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.78rem' }}>
-                                ¡Solo {libres === 1 ? 'queda 1 habitación' : `quedan ${libres} habitaciones`} a este precio en nuestra web!
-                              </span>
+                              <span style={{ color: '#b3121b', fontWeight: 600 }}>¡Solo {libres === 1 ? 'queda 1 habitación' : `quedan ${libres} habitaciones`} para tus fechas!</span>
                             ) : (
-                              <span style={{ color: '#008009', fontWeight: 600, fontSize: '0.78rem' }}>
-                                {libres} habitaciones disponibles
-                              </span>
+                              <span>{libres} habitaciones disponibles</span>
                             )
                           )}
                         </div>
@@ -1789,17 +1669,6 @@ export function AlojamientosSearchPage() {
           )}
         </div>
       </div>
-
-      {/* Modal de Mapa Interactivo con Leaflet y OpenStreetMap */}
-      <MapaAlojamientos
-        mode="modal"
-        isOpen={showMapModal}
-        onClose={() => setShowMapModal(false)}
-        properties={filteredProperties}
-        destination={destination}
-        selectedPropertyId={selectedMapProperty?.id}
-        searchParamsString={searchParams.toString()}
-      />
     </main>
   );
 }

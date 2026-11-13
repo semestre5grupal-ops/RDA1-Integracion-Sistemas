@@ -721,7 +721,7 @@ export class AlojamientosService implements OnModuleInit {
       const noches = calcularNoches(checkinDate, checkoutDate);
       const conCupo: any[] = [];
       // Se evalúan los candidatos del destino (hasta 60) en lotes concurrentes para no descartar hoteles
-      const candidatos = itemsSocios.slice(0, Math.max(60, rowsCount * 2));
+      const candidatos = itemsSocios.slice(0, Math.max(60, (dto.rows || 25) * 2));
       for (let i = 0; i < candidatos.length; i += 6) {
         const lote = candidatos.slice(i, i + 6);
         const disp = await Promise.all(
@@ -1426,31 +1426,12 @@ export class AlojamientosService implements OnModuleInit {
 
   private async cancelOrderEnSerie(orderId: string, idempotencyKey: string, reason?: string): Promise<any> {
     this.logger.log(`Cancelando orden ${orderId} (motivo: ${reason}) con idempotency key ${idempotencyKey}`);
-    let reserva: ReservaAlojamiento | null = null;
-    const esUuid = /^[0-9a-f-]{36}$/i.test(orderId);
-    if (esUuid) {
-      reserva = await this.reservaRepo.findOne({ where: { id: orderId } });
-    }
-    if (!reserva) {
-      reserva = await this.reservaRepo.findOne({ where: { codigoReserva: orderId } });
-    }
+    const reserva = await this.reservaRepo.findOne({ where: { id: orderId } });
     if (!reserva) {
       throw new NotFoundException(`La orden '${orderId}' no existe.`);
     }
 
-    if (reserva.status === 'CHECKED_IN' || reserva.status === 'CHECKED_OUT' || reserva.status === 'CONFIRMADO_ASISTIDO') {
-      throw conflicto(
-        CodigoProblema.INVALID_STATE_TRANSITION,
-        'La reserva ya tiene check-in/check-out y no admite cancelación.',
-      );
-    }
-
-    let yaCancelada = false;
-    const codigoReembolso = `REF-HTL-${Math.floor(10000 + Math.random() * 90000)}`;
-
-    if (reserva.status === ReservationStatus.CANCELLED) {
-      yaCancelada = true;
-    } else {
+    if (reserva.status !== ReservationStatus.CANCELLED) {
       if (reserva.checkout && new Date(reserva.checkout).getTime() < Date.now()) {
         throw conflicto(
           CodigoProblema.CANCELLATION_NOT_ALLOWED,
@@ -1459,7 +1440,7 @@ export class AlojamientosService implements OnModuleInit {
       }
 
       reserva.status = ReservationStatus.CANCELLED;
-      reserva.motivoCancelacion = reason?.slice(0, 300) || null;
+      reserva.motivoCancelacion = reason?.slice(0, 500) || null;
       reserva.canceladaEn = new Date();
       await this.reservaRepo.save(reserva);
 
@@ -1494,19 +1475,7 @@ export class AlojamientosService implements OnModuleInit {
       });
     }
 
-    const montoStr = Number(reserva.total || 0).toFixed(2);
     return {
-      orderId: reserva.id,
-      external_order_id: `ORD-HTL-${reserva.codigoReserva || '0000'}`,
-      estado: 'CANCELLED',
-      refundStatus: 'REFUNDED',
-      codigoReembolso,
-      porcentajeReembolso: 100,
-      montoReembolsado: montoStr,
-      penalidad: '0.00',
-      cuposRestaurados: true,
-      yaCancelada,
-      timestamp: new Date().toISOString(),
       order_id: reserva.id,
       codigo_reserva: reserva.codigoReserva,
       status: ReservationStatus.CANCELLED,
@@ -1759,10 +1728,10 @@ export class AlojamientosService implements OnModuleInit {
         idCompuesto: id,
         checkin,
         checkout,
-        habitaciones: Math.max(1, dto.habitaciones_count || dto.number_of_rooms || 1),
-        adultos: dto.adultos ?? dto.number_of_adults ?? 1,
-        ninos: dto.ninos ?? dto.number_of_children ?? 0,
-        productId: dto.tipo_habitacion_id ?? dto.producto_id ?? null,
+        habitaciones: Math.max(1, dto.habitaciones_count || 1),
+        adultos: dto.adultos || 1,
+        ninos: dto.ninos || 0,
+        productId: dto.tipo_habitacion_id ?? null,
         nombre: dto.guest_name?.trim() || dto.customer_name,
         email: (dto.customer_email || usuario?.email || '').trim(),
         telefono: dto.phone ?? null,
