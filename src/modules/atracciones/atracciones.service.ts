@@ -3387,21 +3387,24 @@ export class AtraccionesService implements OnModuleInit {
           'X-API-Key': 'atr-ariel-ecua-travel-2026',
           'Content-Type': 'application/json',
         };
+        const targetArielId = (reservationId && reservationId.startsWith('ECT-')) 
+          ? reservationId 
+          : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : partnerCancelId);
         try {
           await firstValueFrom(
             this.httpService.post(
-              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${partnerCancelId}/cancel`,
-              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${targetArielId}/cancel`,
+              { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'CLIENTE' },
               { headers: arielHeaders, timeout: 6000 },
             ),
           );
-          this.logger.log(`[Ariel Cancel] Reserva ${partnerCancelId} cancelada exitosamente en Ecuatravel`);
+          this.logger.log(`[Ariel Cancel] Reserva ${targetArielId} cancelada exitosamente en Ecuatravel`);
         } catch (err1: any) {
-          if (err1.response?.status === 404 && partnerCancelId !== reservationId) {
+          if (err1.response?.status === 404 && targetArielId !== reservationId) {
             await firstValueFrom(
               this.httpService.post(
                 `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${reservationId}/cancel`,
-                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'CLIENTE' },
                 { headers: arielHeaders, timeout: 6000 },
               ),
             );
@@ -3772,7 +3775,7 @@ export class AtraccionesService implements OnModuleInit {
           }
 
           // 3. EcuaTravel (Ariel)
-          if (r.id.startsWith('ECT-') || (r.atraccionId?.length > 30 && !r.id.startsWith('DEC-'))) {
+          if (r.id.startsWith('ECT-')) {
             try {
               const { data } = await firstValueFrom(
                 this.httpService.get(`https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${r.id}`, {
