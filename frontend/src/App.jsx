@@ -1,5 +1,14 @@
-import { useCallback, useState } from 'react';
-import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, useParams, useLocation } from 'react-router-dom';
+
+/** Sube al tope de la página en cada cambio de ruta (comportamiento nativo del navegador). */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [pathname]);
+  return null;
+}
 
 // --- Modulo de Alojamientos ---
 import { AlojamientosPage } from './pages/AlojamientosPage';
@@ -71,6 +80,7 @@ function App() {
     <LanguageProvider>
     <CurrencyProvider>
     <BrowserRouter>
+      <ScrollToTop />
       <a className="skip-link" href="#contenido-principal">
         Saltar al contenido
       </a>

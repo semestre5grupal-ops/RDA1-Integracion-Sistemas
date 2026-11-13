@@ -377,15 +377,7 @@ export function AlojamientosSearchPage() {
       group_children: children,
       no_rooms: rooms,
     });
-    // Forzar la consulta inmediata para garantizar que la búsqueda se refresque
-    fetchResults({
-      destino: dest,
-      checkin,
-      checkout,
-      adultos: adults,
-      ninos: children,
-      habitaciones: rooms,
-    });
+    // El useEffect([searchParams]) detectará el cambio en la URL y lanzará fetchResults.
   };
 
   // Toggle wishlist heart
@@ -710,14 +702,7 @@ export function AlojamientosSearchPage() {
                       group_children: children,
                       no_rooms: rooms,
                     });
-                    fetchResults({
-                      destino: destName,
-                      checkin,
-                      checkout,
-                      adultos: adults,
-                      ninos: children,
-                      habitaciones: rooms,
-                    });
+                    // fetchResults lo dispara el useEffect([searchParams])
                   }}
                   onInvalidChars={() => setDestinationError('Solo se permiten letras, espacios y los signos , . - \' &')}
                   invalid={Boolean(destinationError)}
@@ -801,14 +786,7 @@ export function AlojamientosSearchPage() {
                           group_children: children,
                           no_rooms: rooms,
                         });
-                        fetchResults({
-                          destino: destination,
-                          checkin,
-                          checkout,
-                          adultos: adults,
-                          ninos: children,
-                          habitaciones: rooms,
-                        });
+                        // fetchResults lo dispara el useEffect([searchParams])
                       }
                     }}
                   >
@@ -931,14 +909,7 @@ export function AlojamientosSearchPage() {
                         group_children: children,
                         no_rooms: rooms,
                       });
-                      fetchResults({
-                        destino: destination,
-                        checkin,
-                        checkout,
-                        adultos: adults,
-                        ninos: children,
-                        habitaciones: rooms,
-                      });
+                      // fetchResults lo dispara el useEffect([searchParams])
                     }}
                   >
                     Listo
