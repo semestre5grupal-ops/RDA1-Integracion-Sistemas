@@ -313,9 +313,9 @@ export function AutoDetail() {
       } catch (err) {
         console.error('Error al crear reserva de auto:', err);
         const isConflict = err.response?.status === 409 || err.status === 409;
-        const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message || (
+        const errMsg = err.response?.data?.detail || err.response?.data?.message || err.message || (
           isConflict
-            ? 'El vehículo ya está reservado para las fechas seleccionadas en la agencia. Por favor selecciona otras fechas libres.'
+            ? 'El vehículo no está disponible para las fechas seleccionadas en la agencia. Por favor selecciona otras fechas libres.'
             : 'Error al procesar la reserva del vehículo.'
         );
         setError(errMsg);

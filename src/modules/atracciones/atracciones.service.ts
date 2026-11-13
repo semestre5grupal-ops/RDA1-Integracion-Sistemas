@@ -3403,29 +3403,21 @@ export class AtraccionesService implements OnModuleInit {
           'X-API-Key': 'atr-ariel-ecua-travel-2026',
           'Content-Type': 'application/json',
         };
+        const qrMatch = (reserva?.voucherQrPayload || '').match(/ECT-[A-Z0-9]+/);
         const targetArielId = (reservationId && reservationId.startsWith('ECT-')) 
           ? reservationId 
-          : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : (partnerCancelId && partnerCancelId.startsWith('ECT-') ? partnerCancelId : reservationId));
-        try {
-          await firstValueFrom(
-            this.httpService.post(
-              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${targetArielId}/cancel`,
-              { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR' },
-              { headers: arielHeaders, timeout: 6000 },
-            ),
-          );
-          this.logger.log(`[Ariel Cancel] Reserva ${targetArielId} cancelada exitosamente en Ecuatravel`);
-        } catch (err1: any) {
-          if (err1.response?.status === 404 && targetArielId !== reservationId) {
+          : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : (partnerCancelId && partnerCancelId.startsWith('ECT-') ? partnerCancelId : (qrMatch ? qrMatch[0] : null)));
+        if (targetArielId) {
+          try {
             await firstValueFrom(
               this.httpService.post(
-                `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${reservationId}/cancel`,
+                `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${targetArielId}/cancel`,
                 { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR' },
                 { headers: arielHeaders, timeout: 6000 },
               ),
             );
-            this.logger.log(`[Ariel Cancel] Reserva ${reservationId} cancelada exitosamente en Ecuatravel (fallback id)`);
-          } else {
+            this.logger.log(`[Ariel Cancel] Reserva ${targetArielId} cancelada exitosamente en Ecuatravel`);
+          } catch (err1: any) {
             this.logger.warn(`[Ariel Cancel] Aviso de API externa Ariel: ${err1.response?.status || err1.message}`);
           }
         }

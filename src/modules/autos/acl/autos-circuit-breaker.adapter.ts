@@ -297,16 +297,42 @@ export class AutosCircuitBreakerAdapter {
           timeout: this.TIMEOUT_MS,
         }),
       ),
-      ...sociosCfg.map((cfg, idx) =>
-        cfg.activo
-          ? firstValueFrom(
+      ...sociosCfg.map((cfg, idx) => {
+        const def = this.SOCIOS_PANEL[idx];
+        if (!cfg.activo) {
+          return Promise.reject(new Error(`${def.nombre} desactivado (kill switch)`));
+        }
+        // Si es AutoSpot y se proporcionaron fechas de búsqueda, consultar su endpoint oficial POST /autos/search
+        if (def.clave === 'AUTOSPOT' && searchParams?.pickup_date && searchParams?.dropoff_date) {
+          const autospotSearchPayload = {
+            pickup_location: searchParams.pickup_location || 'Quito Aeropuerto',
+            dropoff_location: searchParams.dropoff_location || searchParams.pickup_location || 'Quito Aeropuerto',
+            pickup_date: searchParams.pickup_date,
+            dropoff_date: searchParams.dropoff_date,
+            pickup_time: searchParams.pickup_time || '10:00',
+            dropoff_time: searchParams.dropoff_time || '10:00',
+          };
+          return firstValueFrom(
+            this.httpService.post(`${cfg.baseUrl}/autos/search`, autospotSearchPayload, {
+              headers: this.socioHeaders(cfg.apiKey, correlationId ? { 'X-Correlation-Id': correlationId } : {}),
+              timeout: this.TIMEOUT_MS,
+            }),
+          ).catch(() =>
+            firstValueFrom(
               this.httpService.get(`${cfg.baseUrl}/autos?limit=100`, {
                 headers: this.socioHeaders(cfg.apiKey),
                 timeout: this.TIMEOUT_MS,
               }),
-            )
-          : Promise.reject(new Error(`${this.SOCIOS_PANEL[idx].nombre} desactivado (kill switch)`)),
-      ),
+            ),
+          );
+        }
+        return firstValueFrom(
+          this.httpService.get(`${cfg.baseUrl}/autos?limit=100`, {
+            headers: this.socioHeaders(cfg.apiKey),
+            timeout: this.TIMEOUT_MS,
+          }),
+        );
+      }),
     ]);
 
     // Procesar flota de Daniel (RutaLibre - NODE_AUT_RUTALIBRE)
@@ -479,22 +505,16 @@ export class AutosCircuitBreakerAdapter {
 
             for (const ord of matchingOrders) {
               const ordStatus = (ord.status || ord.estado || '').toUpperCase();
+              // Si el auto ya fue retirado físicamente en mostrador, no está disponible para ninguna fecha futura hasta que sea devuelto
               if (ordStatus === 'CONFIRMADO_ASISTIDO' || ordStatus === 'ENTREGADO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
                 isAssisted = true;
-              }
-
-              // Si tiene orden activa CONFIRMED, RESERVADO o PENDING:
-              if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING' || ordStatus === 'ENTREGADO') {
+              } else if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
+                // Antes del check-in (reserva futura confirmada): el auto solo se bloquea en las fechas que se solapan con la reserva
                 if (searchPickup && searchDropoff) {
                   const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
                   const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
                   if (oPickup && oDropoff) {
-                    // Conflicto si se solapan las fechas O si la búsqueda es para fechas posteriores mientras la orden siga activa
-                    // (debido a que los backends de socios no permiten reservas a futuro mientras el auto no esté devuelto 'DISPONIBLE')
                     if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
-                      isReservedForDates = true;
-                    } else if (searchPickup >= oPickup) {
-                      // Búsqueda para fecha posterior con orden aún activa no devuelta físicamente
                       isReservedForDates = true;
                     }
                   } else {
@@ -1067,6 +1087,38 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Notifica el check-in de devolución (retorno) a socios externos que lo soporten (ej. AutoSpot con km entero).
+   */
+  async notifyDevolucionToPartner(orderIdOrPnr: string, kmRetorno: number): Promise<boolean> {
+    if (!orderIdOrPnr) return false;
+    const cleanId = orderIdOrPnr.toUpperCase();
+    const integerKm = Math.round(Number(kmRetorno));
+    if (cleanId.startsWith('CAR') || cleanId.startsWith('RF')) {
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `https://alquiler-vehiculos-ijx3.onrender.com/api/v3/autos/orders/${orderIdOrPnr}/checkin-devolucion`,
+            { km_retorno: integerKm },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': 'xSQILcF-wlDGZ44NFmLpLbJlsX7rWooq',
+              },
+              timeout: 8000,
+            },
+          ),
+        );
+        this.logger.log(`[AutosCircuitBreaker] Devolución propagada a AutoSpot: ${orderIdOrPnr} (km: ${integerKm})`);
+        return true;
+      } catch (err: any) {
+        this.logger.debug(`[AutosCircuitBreaker] Aviso propagando devolución a AutoSpot: ${err.message}`);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Notifica la cancelación de una orden al socio externo (RutaLibre o Maneja de Una) con resiliencia dual.
    */
   async cancelOrder(orderId: string, reason = 'Cancelado por el cliente'): Promise<boolean> {
@@ -1316,11 +1368,16 @@ export class AutosCircuitBreakerAdapter {
       } catch (err: any) {
         this.logger.error(`[AutosCircuitBreaker] Error despachando a ${socio.nombre}: ${JSON.stringify(err.response?.data || err.message)}`);
         if (err.response?.status === 409) {
+          const detail = err.response?.data?.detail || err.response?.data?.message || 'El vehículo no está disponible en las fechas solicitadas.';
           throw new HttpException({
             type: 'https://api.booking.local/errors/conflict',
             title: 'Vehículo No Disponible',
             status: HttpStatus.CONFLICT,
-            detail: err.response?.data?.detail || 'El vehículo no está disponible en esas fechas.',
+            statusCode: HttpStatus.CONFLICT,
+            detail: detail,
+            message: detail,
+            code: 'VEHICLE_UNAVAILABLE',
+            correlation_id: cId,
           }, HttpStatus.CONFLICT);
         }
         throw new HttpException({
@@ -1468,11 +1525,16 @@ export class AutosCircuitBreakerAdapter {
       } catch (err: any) {
         this.logger.error(`[AutosCircuitBreaker] Error despachando a Maneja de Una: ${JSON.stringify(err.response?.data || err.message)}`);
         if (err.response?.status === 409) {
+          const detail = err.response?.data?.detail || err.response?.data?.message || 'El vehículo no está disponible en las fechas solicitadas.';
           throw new HttpException({
             type: 'https://api.booking.local/errors/conflict',
             title: 'Vehículo No Disponible',
             status: HttpStatus.CONFLICT,
-            detail: err.response?.data?.detail || 'El vehículo no está disponible en esas fechas.',
+            statusCode: HttpStatus.CONFLICT,
+            detail: detail,
+            message: detail,
+            code: 'VEHICLE_UNAVAILABLE',
+            correlation_id: cId,
           }, HttpStatus.CONFLICT);
         }
         throw new HttpException({
