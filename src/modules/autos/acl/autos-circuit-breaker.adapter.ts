@@ -97,7 +97,8 @@ export class AutosCircuitBreakerAdapter {
       baseDefecto: 'https://alquiler-vehiculos-ijx3.onrender.com/api/v3', env: 'AUTOSPOT', proveedorId: 8,
       apiKeyDefecto: 'xSQILcF-wlDGZ44NFmLpLbJlsX7rWooq',
       vehRegex: /^auto-\d+$/i,
-      pnrRegex: /^CAR[A-Z0-9]{5,6}$/i,
+      // pnrRegex removido: los PNR CAR... son compartidos con RutaLibre (Daniel).
+      // La identificación del socio se hace por socioPnrs (mapa llenado al crear la reserva).
     },
   ];
   private readonly socioCfgCache = new Map<string, { nodo: string; baseUrl: string; apiKey: string; activo: boolean; at: number }>();
