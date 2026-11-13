@@ -70,6 +70,11 @@ export function MapaAlojamientos({
     const L = window.L;
     if (!L) return;
 
+    // Limpiar id residual en el DOM si se perdió la instancia para evitar error de contenedor inicializado
+    if (mapContainerRef.current && mapContainerRef.current._leaflet_id && !mapInstanceRef.current) {
+      delete mapContainerRef.current._leaflet_id;
+    }
+
     // Crear mapa si no existe
     if (!mapInstanceRef.current) {
       const defaultCenter = DESTINOS_COORDENADAS_FALLBACK.quito;
@@ -92,11 +97,15 @@ export function MapaAlojamientos({
 
     const map = mapInstanceRef.current;
     const markersGroup = markersLayerRef.current;
+    if (!map || !markersGroup) return;
+
     markersGroup.clearLayers();
 
     // Asegurar redimensionamiento de Leaflet tras apertura de modal
     setTimeout(() => {
-      map.invalidateSize();
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
     }, 200);
 
     // Caso A: Modo alojamiento individual (Ficha de detalle)
@@ -129,10 +138,13 @@ export function MapaAlojamientos({
     const listado = Array.isArray(properties) ? properties : [];
 
     if (listado.length > 0) {
+      let selectedMarker = null;
+      let selectedCoords = null;
+
       listado.forEach((prop) => {
         const coords = obtenerCoordenadasAlojamiento(prop);
         const precio = prop.disponibilidad?.price_per_night || prop.precioPorNoche || prop.precio_noche || 45;
-        const esSeleccionado = selectedPropertyId === prop.id;
+        const esSeleccionado = String(selectedPropertyId) === String(prop.id);
         const icon = crearIconoPrecio(L, `$${Math.round(precio)}`, esSeleccionado);
 
         const marker = L.marker([coords.lat, coords.lng], { icon });
@@ -197,16 +209,32 @@ export function MapaAlojamientos({
         });
 
         marker.addTo(markersGroup);
+
+        if (esSeleccionado) {
+          selectedMarker = marker;
+          selectedCoords = coords;
+        }
       });
 
-      // Centrar el mapa para abarcar todos los pines
-      try {
-        const bounds = markersGroup.getBounds();
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      // Centrar en el alojamiento seleccionado o abarcar todos los pines
+      if (selectedMarker && selectedCoords) {
+        map.setView([selectedCoords.lat, selectedCoords.lng], 15);
+        setTimeout(() => {
+          try {
+            selectedMarker.openPopup();
+          } catch (e) {
+            // ignore
+          }
+        }, 300);
+      } else {
+        try {
+          const bounds = markersGroup.getBounds();
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+          }
+        } catch (err) {
+          console.warn('Error al ajustar límites de mapa:', err);
         }
-      } catch (err) {
-        console.warn('Error al ajustar límites de mapa:', err);
       }
     } else if (destination) {
       // Buscar coordenadas con Nominatim si la lista está vacía
@@ -218,15 +246,20 @@ export function MapaAlojamientos({
     }
   }, [mapReady, alojamiento, properties, destination, isOpen, mode, selectedPropertyId]);
 
-  // Limpieza al desmontar
+  // Limpieza al desmontar o al cerrar el modal
   useEffect(() => {
     return () => {
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
+        try {
+          mapInstanceRef.current.remove();
+        } catch (e) {
+          // ignore
+        }
         mapInstanceRef.current = null;
+        markersLayerRef.current = null;
       }
     };
-  }, []);
+  }, [isOpen, mode]);
 
   // Forzar redimensionamiento si cambia el tamaño
   const invalidateMap = () => {
@@ -287,7 +320,11 @@ export function MapaAlojamientos({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '1.2rem' }}>🗺️</span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                <line x1="8" y1="2" x2="8" y2="18"></line>
+                <line x1="16" y1="6" x2="16" y2="22"></line>
+              </svg>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>
                   {alojamiento ? alojamiento.nombre : `Alojamientos en ${destination || 'Ecuador'}`}
