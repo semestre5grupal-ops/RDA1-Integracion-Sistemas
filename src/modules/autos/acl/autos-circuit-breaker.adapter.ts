@@ -823,8 +823,11 @@ export class AutosCircuitBreakerAdapter {
           timeout: 4000,
         })
       );
-      if (Array.isArray(response.data)) {
-        orders.push(...response.data);
+      const dData = Array.isArray(response.data)
+        ? response.data
+        : (response.data?.data || response.data?.orders || response.data?.items || []);
+      if (Array.isArray(dData)) {
+        orders.push(...dData);
       }
     } catch (_) {}
 
@@ -841,17 +844,21 @@ export class AutosCircuitBreakerAdapter {
         if (Array.isArray(adminRes.data)) {
           for (const r of adminRes.data) {
             const loc = (r.locator || r.id || '').toUpperCase();
-            const existing = orders.find(o => ((o.pnr || o.order_id || o.codigo_reserva || '').toUpperCase()) === loc);
+            const existing = orders.find(o => {
+              const oPnr = (o.pnr || o.order_id || o.codigo_reserva || o.id || '').toUpperCase();
+              return oPnr === loc || (r.id && oPnr === String(r.id).toUpperCase());
+            });
             const isAssisted = r.rentalStatus === 'PICKED_UP' ||
                                r.rentalStatus === 'RETURNED' ||
                                r.status === 'CONFIRMADO_ASISTIDO' ||
                                r.status === 'COMPLETED' ||
-                               r.status === 'ENTREGADO';
+                               r.status === 'ENTREGADO' ||
+                               r.status === 'ASISTIDO';
             if (existing) {
               existing.rentalStatus = r.rentalStatus;
               existing.rental_status = r.rentalStatus;
-              existing.plate = r.plate || existing.plate;
-              if (isAssisted) {
+              if (r.plate) existing.plate = r.plate;
+              if (isAssisted && existing.status !== 'CANCELLED') {
                 existing.status = 'CONFIRMADO_ASISTIDO';
                 existing.estado = 'CONFIRMADO_ASISTIDO';
               }

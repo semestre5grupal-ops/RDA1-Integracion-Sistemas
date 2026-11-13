@@ -398,7 +398,7 @@ export function MisReservasPage() {
           status: filtroStatus || undefined,
           limit: 20,
         }),
-        getOrdersAuto(),
+        getOrdersAuto(isAdmin ? undefined : (correoSesion || undefined)),
         getReservasAtracciones(isAdmin ? undefined : (correoSesion || undefined)),
         (user?.email || user?.id) ? getReservasAlojamientos() : Promise.resolve([]),
       ]);
@@ -462,6 +462,11 @@ export function MisReservasPage() {
             ? (dropoffFmt ? `${pickupFmt} – ${dropoffFmt}` : `${pickupFmt} (${diasRenta} días)`)
             : `${diasRenta} días de renta`;
           const fReserva = (a.createdAt || a.created_at) ? safeFormatearFecha(a.createdAt || a.created_at) : safeFormatearFecha(new Date().toISOString());
+          const rawStatus = (a.status || a.estado || '').toUpperCase();
+          const isAutoAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'].includes(rawStatus) ||
+                                a.rentalStatus === 'PICKED_UP' || a.rental_status === 'PICKED_UP' || a.rentalStatus === 'RETURNED' || a.rental_status === 'RETURNED' ||
+                                a.checkin_status === 'CHECKIN_COMPLETED' || a.checkin?.status === 'COMPLETED' || a.checkin?.estado === 'CONFIRMADO_ASISTIDO';
+          const autoFinalStatus = (rawStatus === 'CANCELLED' || rawStatus === 'CANCELADA') ? 'CANCELLED' : (isAutoAssisted ? 'CONFIRMADO_ASISTIDO' : (rawStatus || 'CONFIRMED'));
           return {
             id: a.order_id || a.id,
             pnr: pnrReal,
@@ -478,12 +483,14 @@ export function MisReservasPage() {
             cantidad: 1,
             cantidadTexto: `1 Vehículo (${diasRenta} días)`,
             rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
-            status: a.status || 'CONFIRMED',
+            status: autoFinalStatus,
             placa: a.placa || a.checkin?.placa,
             checkin: a.checkin,
             totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
             imagen: a.vehiculo?.foto_url || DEFAULT_IMAGES.auto,
             email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+            documentId: (a.conductor?.licencia || a.driver?.license_number || a.licencia || a.driver?.licencia || '').trim(),
+            raw: a,
             link: '/autos',
           };
         });
@@ -521,6 +528,8 @@ export function MisReservasPage() {
           totalRaw: a.totalPrice?.total || a.total || 106.50,
           imagen: a.foto_url || DEFAULT_IMAGES.auto,
           email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+          documentId: (a.conductor?.licencia || a.driver?.license_number || a.licencia || a.documentId || '').trim(),
+          raw: a,
           link: '/autos',
           isLocal: true,
         };
@@ -732,19 +741,16 @@ export function MisReservasPage() {
             // Usuario sin sesión activa: no mostrar ninguna reserva
             return;
           }
-          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || '').trim().toLowerCase();
-          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || '').trim();
-          const userCedula = (user?.user_metadata?.cedula || '').trim();
+          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || item.raw?.conductor?.email || item.conductor?.email || item.driver?.email || '').trim().toLowerCase();
+          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || item.raw?.conductor?.licencia || item.conductor?.licencia || item.raw?.driver?.license_number || '').trim();
+          const userCedula = (user?.user_metadata?.cedula || user?.user_metadata?.cedula_ruc || '').trim();
 
-          // Si el item tiene email, debe coincidir estrictamente con el correo de la sesión actual
-          if (itemEmail) {
-            if (itemEmail !== correoSesion) {
-              return;
-            }
-          } else if (itemDoc) {
-            if (userCedula && itemDoc !== userCedula) {
-              return;
-            }
+          const coincideEmail = Boolean(itemEmail && itemEmail === correoSesion);
+          const coincideDoc = Boolean(itemDoc && userCedula && itemDoc === userCedula);
+
+          // Si el elemento no coincide ni por email ni por cédula con el usuario en sesión, descartar
+          if (!coincideEmail && !coincideDoc) {
+            return;
           }
         }
 
@@ -804,14 +810,19 @@ export function MisReservasPage() {
       let listaFinal = Array.from(mapaCombinado.values());
       listaFinal.sort((a, b) => b.rawDate - a.rawDate);
 
-      // Persistencia monotónica en localStorage: si un PNR/ID ya asistió, nunca permitir degradación al recargar
+      // Persistencia monotónica en localStorage: si un PNR/ID ya asistió o se canceló, nunca permitir degradación
       const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'];
       try {
         const savedCheckedIn = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+        const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
         for (const item of listaFinal) {
           const itemKey = item.id;
           const pnrKey = item.pnr;
-          if ((itemKey && savedCheckedIn.has(itemKey)) || (pnrKey && savedCheckedIn.has(pnrKey))) {
+          if ((itemKey && savedCancelled.has(itemKey)) || (pnrKey && savedCancelled.has(pnrKey)) || item.status === 'CANCELLED' || item.status === 'CANCELADO') {
+            item.status = 'CANCELLED';
+            if (itemKey) savedCancelled.add(itemKey);
+            if (pnrKey) savedCancelled.add(pnrKey);
+          } else if ((itemKey && savedCheckedIn.has(itemKey)) || (pnrKey && savedCheckedIn.has(pnrKey))) {
             item.status = 'CONFIRMADO_ASISTIDO';
           } else if (estadosAsistidos.includes(item.status)) {
             if (itemKey) savedCheckedIn.add(itemKey);
@@ -819,6 +830,7 @@ export function MisReservasPage() {
           }
         }
         localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
+        localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
       } catch (_) { }
 
       // Reactividad tipo Composable (Android):
@@ -963,6 +975,25 @@ export function MisReservasPage() {
     if (!selectedReserva) return;
     setCancelling(true);
     setCancelError('');
+
+    const idToCancel = selectedReserva.id;
+    const pnrToCancel = selectedReserva.pnr;
+
+    // Reactividad inmediata (0ms): persistir e impactar en UI de inmediato
+    try {
+      const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
+      if (idToCancel) savedCancelled.add(idToCancel);
+      if (pnrToCancel) savedCancelled.add(pnrToCancel);
+      localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
+    } catch (_) {}
+
+    setSelectedReserva(prev => prev ? ({ ...prev, status: 'CANCELLED' }) : null);
+    setReservas(prev => prev.map(r => {
+      if (r.id === idToCancel || (pnrToCancel && r.pnr === pnrToCancel)) {
+        return { ...r, status: 'CANCELLED' };
+      }
+      return r;
+    }));
 
     try {
       const motivoFinal = `${cancelReason}${cancelDetails.trim() ? `: ${cancelDetails.trim()}` : ''}`;
