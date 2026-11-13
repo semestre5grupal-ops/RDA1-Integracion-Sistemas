@@ -462,6 +462,11 @@ export function MisReservasPage() {
             ? (dropoffFmt ? `${pickupFmt} – ${dropoffFmt}` : `${pickupFmt} (${diasRenta} días)`)
             : `${diasRenta} días de renta`;
           const fReserva = (a.createdAt || a.created_at) ? safeFormatearFecha(a.createdAt || a.created_at) : safeFormatearFecha(new Date().toISOString());
+          const rawStatus = (a.status || a.estado || '').toUpperCase();
+          const isAutoAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'].includes(rawStatus) ||
+                                a.rentalStatus === 'PICKED_UP' || a.rental_status === 'PICKED_UP' || a.rentalStatus === 'RETURNED' || a.rental_status === 'RETURNED' ||
+                                a.checkin_status === 'CHECKIN_COMPLETED' || a.checkin?.status === 'COMPLETED' || a.checkin?.estado === 'CONFIRMADO_ASISTIDO';
+          const autoFinalStatus = (rawStatus === 'CANCELLED' || rawStatus === 'CANCELADA') ? 'CANCELLED' : (isAutoAssisted ? 'CONFIRMADO_ASISTIDO' : (rawStatus || 'CONFIRMED'));
           return {
             id: a.order_id || a.id,
             pnr: pnrReal,
@@ -478,7 +483,7 @@ export function MisReservasPage() {
             cantidad: 1,
             cantidadTexto: `1 Vehículo (${diasRenta} días)`,
             rawDate: a.createdAt ? new Date(a.createdAt).getTime() : new Date().getTime(),
-            status: a.status || 'CONFIRMED',
+            status: autoFinalStatus,
             placa: a.placa || a.checkin?.placa,
             checkin: a.checkin,
             totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
@@ -805,14 +810,19 @@ export function MisReservasPage() {
       let listaFinal = Array.from(mapaCombinado.values());
       listaFinal.sort((a, b) => b.rawDate - a.rawDate);
 
-      // Persistencia monotónica en localStorage: si un PNR/ID ya asistió, nunca permitir degradación al recargar
+      // Persistencia monotónica en localStorage: si un PNR/ID ya asistió o se canceló, nunca permitir degradación
       const estadosAsistidos = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'];
       try {
         const savedCheckedIn = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+        const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
         for (const item of listaFinal) {
           const itemKey = item.id;
           const pnrKey = item.pnr;
-          if ((itemKey && savedCheckedIn.has(itemKey)) || (pnrKey && savedCheckedIn.has(pnrKey))) {
+          if ((itemKey && savedCancelled.has(itemKey)) || (pnrKey && savedCancelled.has(pnrKey)) || item.status === 'CANCELLED' || item.status === 'CANCELADO') {
+            item.status = 'CANCELLED';
+            if (itemKey) savedCancelled.add(itemKey);
+            if (pnrKey) savedCancelled.add(pnrKey);
+          } else if ((itemKey && savedCheckedIn.has(itemKey)) || (pnrKey && savedCheckedIn.has(pnrKey))) {
             item.status = 'CONFIRMADO_ASISTIDO';
           } else if (estadosAsistidos.includes(item.status)) {
             if (itemKey) savedCheckedIn.add(itemKey);
@@ -820,6 +830,7 @@ export function MisReservasPage() {
           }
         }
         localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedCheckedIn)));
+        localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
       } catch (_) { }
 
       // Reactividad tipo Composable (Android):
@@ -964,6 +975,25 @@ export function MisReservasPage() {
     if (!selectedReserva) return;
     setCancelling(true);
     setCancelError('');
+
+    const idToCancel = selectedReserva.id;
+    const pnrToCancel = selectedReserva.pnr;
+
+    // Reactividad inmediata (0ms): persistir e impactar en UI de inmediato
+    try {
+      const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
+      if (idToCancel) savedCancelled.add(idToCancel);
+      if (pnrToCancel) savedCancelled.add(pnrToCancel);
+      localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
+    } catch (_) {}
+
+    setSelectedReserva(prev => prev ? ({ ...prev, status: 'CANCELLED' }) : null);
+    setReservas(prev => prev.map(r => {
+      if (r.id === idToCancel || (pnrToCancel && r.pnr === pnrToCancel)) {
+        return { ...r, status: 'CANCELLED' };
+      }
+      return r;
+    }));
 
     try {
       const motivoFinal = `${cancelReason}${cancelDetails.trim() ? `: ${cancelDetails.trim()}` : ''}`;
