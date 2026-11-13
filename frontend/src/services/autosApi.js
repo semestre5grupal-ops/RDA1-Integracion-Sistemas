@@ -66,8 +66,9 @@ export async function cancelOrderAuto(orderId, cancelData, idempotencyKey) {
   return data;
 }
 
-export async function getOrdersAuto() {
-  const { data } = await api.get('/autos/orders');
+export async function getOrdersAuto(email) {
+  const params = email ? { email } : {};
+  const { data } = await api.get('/autos/orders', { params });
   return data;
 }
 

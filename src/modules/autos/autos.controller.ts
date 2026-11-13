@@ -87,11 +87,12 @@ export class AutosController {
     return this.autosService.getFlota();
   }
 
-  // 6. Órdenes y Reservas (Gestión Admin)
+  // 6. Órdenes y Reservas (Gestión Admin / Filtrado de Usuario)
   @Get('orders')
-  @ApiOperation({ summary: 'Obtener historial de órdenes (Admin)' })
-  getOrders() {
-    return this.autosService.getOrders();
+  @ApiOperation({ summary: 'Obtener historial de órdenes (Admin / Usuario)' })
+  @ApiQuery({ name: 'email', required: false, description: 'Filtrar por correo del cliente' })
+  getOrders(@Query('email') email?: string) {
+    return this.autosService.getOrders(email);
   }
 
   @Get('orders/:orderId')

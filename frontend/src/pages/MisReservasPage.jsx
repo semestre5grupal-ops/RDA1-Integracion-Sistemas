@@ -398,7 +398,7 @@ export function MisReservasPage() {
           status: filtroStatus || undefined,
           limit: 20,
         }),
-        getOrdersAuto(),
+        getOrdersAuto(isAdmin ? undefined : (correoSesion || undefined)),
         getReservasAtracciones(isAdmin ? undefined : (correoSesion || undefined)),
         (user?.email || user?.id) ? getReservasAlojamientos() : Promise.resolve([]),
       ]);
@@ -484,6 +484,8 @@ export function MisReservasPage() {
             totalRaw: a.total_price?.total || a.totalPrice?.total || 106.50,
             imagen: a.vehiculo?.foto_url || DEFAULT_IMAGES.auto,
             email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+            documentId: (a.conductor?.licencia || a.driver?.license_number || a.licencia || a.driver?.licencia || '').trim(),
+            raw: a,
             link: '/autos',
           };
         });
@@ -521,6 +523,8 @@ export function MisReservasPage() {
           totalRaw: a.totalPrice?.total || a.total || 106.50,
           imagen: a.foto_url || DEFAULT_IMAGES.auto,
           email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
+          documentId: (a.conductor?.licencia || a.driver?.license_number || a.licencia || a.documentId || '').trim(),
+          raw: a,
           link: '/autos',
           isLocal: true,
         };
@@ -732,19 +736,16 @@ export function MisReservasPage() {
             // Usuario sin sesión activa: no mostrar ninguna reserva
             return;
           }
-          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || '').trim().toLowerCase();
-          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || '').trim();
-          const userCedula = (user?.user_metadata?.cedula || '').trim();
+          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || item.raw?.conductor?.email || item.conductor?.email || item.driver?.email || '').trim().toLowerCase();
+          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || item.raw?.conductor?.licencia || item.conductor?.licencia || item.raw?.driver?.license_number || '').trim();
+          const userCedula = (user?.user_metadata?.cedula || user?.user_metadata?.cedula_ruc || '').trim();
 
-          // Si el item tiene email, debe coincidir estrictamente con el correo de la sesión actual
-          if (itemEmail) {
-            if (itemEmail !== correoSesion) {
-              return;
-            }
-          } else if (itemDoc) {
-            if (userCedula && itemDoc !== userCedula) {
-              return;
-            }
+          const coincideEmail = Boolean(itemEmail && itemEmail === correoSesion);
+          const coincideDoc = Boolean(itemDoc && userCedula && itemDoc === userCedula);
+
+          // Si el elemento no coincide ni por email ni por cédula con el usuario en sesión, descartar
+          if (!coincideEmail && !coincideDoc) {
+            return;
           }
         }
 

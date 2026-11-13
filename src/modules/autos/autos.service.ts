@@ -1422,7 +1422,7 @@ export class AutosService implements OnModuleInit {
     };
   }
 
-  async getOrders(): Promise<any> {
+  async getOrders(filterEmail?: string): Promise<any> {
     const unique = new Map<string, any>();
 
     // 1. Obtener auditoría de check-ins presenciales para enriquecer estados en tiempo real
@@ -1592,7 +1592,16 @@ export class AutosService implements OnModuleInit {
       }
     } catch (_) {}
 
-    return Array.from(unique.values());
+    const all = Array.from(unique.values());
+    if (filterEmail) {
+      const cleanFilter = filterEmail.trim().toLowerCase();
+      return all.filter((o: any) => {
+        const oEmail = (o.email || o.driver?.email || o.conductor?.email || '').trim().toLowerCase();
+        return oEmail === cleanFilter;
+      });
+    }
+
+    return all;
   }
 
   markOrderAsistido(orderIdOrPnr: string, details?: any): void {
