@@ -10,6 +10,7 @@ import { formatearRegimen } from '../utils/regimenFormato';
 import { AlojamientoCheckoutModal } from '../components/AlojamientoCheckoutModal';
 import { ReportModal } from '../components/ReportModal';
 import { normalizarTexto } from '../utils/destinos';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 
 import {
   BedIcon,

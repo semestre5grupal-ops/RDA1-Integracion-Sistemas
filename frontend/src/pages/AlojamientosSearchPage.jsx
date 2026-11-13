@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useCurrency } from '../hooks/CurrencyContext';
 import { DestinoAutocomplete } from '../components/DestinoAutocomplete';
 import { destinoExacto, combinarDestinos } from '../utils/destinos';
+import { AlojamientosLoadingView } from '../components/AlojamientosLoadingView';
 import {
   BedIcon,
   CalendarIcon,
@@ -113,6 +114,7 @@ export function AlojamientosSearchPage() {
   const [showOccupancyPopover, setShowOccupancyPopover] = useState(false);
   const occupancyRef = useRef(null);
   const datesRef = useRef(null);
+  const isFetchingRef = useRef(false);
 
   // Helper for formatting Booking date ranges (e.g. vie. 9 oct. — dom. 11 oct.)
   const formatBookingDateRange = (startStr, endStr) => {
