@@ -2030,7 +2030,11 @@ export class AutosService implements OnModuleInit {
           cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
         );
       } catch (err: any) {
-        this.logger.warn(`[Cancel Autos] Proveedor externo retornó estado ${err.status || err.response?.status || 409} (${err.message}). Aplicando compensación Saga y reverso local en Booking Central.`);
+        // Si el socio devuelve un error de negocio (409), propagarlo al cliente
+        if (err?.status === 409 || err?.response?.status === 409) {
+          throw err;
+        }
+        this.logger.warn(`[Cancel Autos] Proveedor externo retornó estado ${err.status || err.response?.status || 'ERR'} (${err.message}). Aplicando compensación Saga y reverso local en Booking Central.`);
       }
     }
 
