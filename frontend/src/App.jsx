@@ -1,14 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, useParams, useLocation } from 'react-router-dom';
-
-/** Sube al tope de la página en cada cambio de ruta (comportamiento nativo del navegador). */
-function ScrollToTop() {
-  const { pathname } = useLocation();
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  }, [pathname]);
-  return null;
-}
+import { useCallback, useState } from 'react';
+import { BrowserRouter, Routes, Route, useParams } from 'react-router-dom';
 
 // --- Modulo de Alojamientos ---
 import { AlojamientosPage } from './pages/AlojamientosPage';
@@ -45,6 +36,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 
 // --- Banner global de consentimiento ---
 import { BannerCookies } from './components/BannerCookies';
+import { ScrollToTop } from './components/ScrollToTop';
 
 // --- Estado Offline ---
 import { OfflineBanner } from './components/OfflineBanner';
