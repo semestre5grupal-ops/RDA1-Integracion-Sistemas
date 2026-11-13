@@ -284,13 +284,43 @@ export class AutosCircuitBreakerAdapter {
     const sociosCfg = await Promise.all(this.SOCIOS_PANEL.map((d) => this.getSocioConfig(d)));
 
     // 1. Consultar flota canónica OpenAPI v3 de RutaLibre (Daniel González) y Maneja de Una (Mateo Morales) en paralelo (limit=100 para no truncar la flota)
+    // Para Daniel: si hay fechas de búsqueda, consultar su endpoint oficial POST /autos/search con fecha_inicio y fecha_fin
+    const danielPromise = (searchParams?.pickup_date && searchParams?.dropoff_date)
+      ? firstValueFrom(
+          this.httpService.post(
+            'https://rutalibre-autos-api.azurewebsites.net/api/v3/autos/search',
+            {
+              fecha_inicio: searchParams.pickup_date,
+              fecha_fin: searchParams.dropoff_date,
+              pickup_date: searchParams.pickup_date,
+              dropoff_date: searchParams.dropoff_date,
+            },
+            {
+              headers: {
+                'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA',
+                'Content-Type': 'application/json',
+                ...(correlationId ? { 'X-Correlation-Id': correlationId } : {}),
+              },
+              timeout: this.TIMEOUT_MS,
+            },
+          ),
+        ).catch(() =>
+          firstValueFrom(
+            this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
+              headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
+              timeout: this.TIMEOUT_MS,
+            }),
+          ),
+        )
+      : firstValueFrom(
+          this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
+            headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
+            timeout: this.TIMEOUT_MS,
+          }),
+        );
+
     const [danielRes, mateoRes, ...sociosRes] = await Promise.allSettled([
-      firstValueFrom(
-        this.httpService.get('https://rutalibre-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
-          headers: { 'X-API-Key': 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA' },
-          timeout: this.TIMEOUT_MS,
-        }),
-      ),
+      danielPromise,
       firstValueFrom(
         this.httpService.get('https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos?limit=100', {
           headers: { 'X-API-Key': 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=' },
@@ -349,6 +379,10 @@ export class AutosCircuitBreakerAdapter {
       for (const c of rawCars) {
         const vId = c.vehicle_id || c.auto_id || c.id;
         if (!vId) continue;
+        // Si se buscó con fechas, usar estado/status del periodo; ignorar estado_actual (estado de hoy como EN_LIMPIEZA)
+        const estadoPeriodo = c.estado || c.status || 'DISPONIBLE';
+        // Excluir solo si el auto está bloqueado para las fechas pedidas (no si solo está en limpieza hoy)
+        if (['MANTENIMIENTO', 'EN_TALLER', 'BAJA'].includes(estadoPeriodo.toUpperCase())) continue;
         const baseP = Number(c.precio_diario || c.daily_price || 39.0);
         // Daniel aplica 15% IVA en su catálogo y reservas (PVP Daniel: $72.00 base + 15% IVA = $82.80)
         const finalPvp = Number((baseP * 1.15).toFixed(2));
@@ -385,7 +419,7 @@ export class AutosCircuitBreakerAdapter {
             rating: 9.5,
             ubicacion: c.ubicacion?.agencia || 'Andes — Aeropuerto Mariscal Sucre (UIO)',
           },
-          estado: c.estado || c.status || 'DISPONIBLE',
+          estado: estadoPeriodo,
           images: Array.isArray(c.images) && c.images.length > 0 ? c.images : [this.resolveImageUrl(c.foto_url)],
         });
       }
