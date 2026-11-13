@@ -3389,8 +3389,11 @@ export class AtraccionesService implements OnModuleInit {
       urlIcs.includes('tourgirls') ||
       partnerCancelId.startsWith('TG-') ||
       guiaLower.includes('tourgirls') ||
+      guiaLower.includes('molina') ||
       atraccionId === 'Fy6d7XTppVZ5' ||
-      atraccionId === 'rLohsmEh6809';
+      atraccionId === 'rLohsmEh6809' ||
+      atraccionId === '1X755jE2isp4' ||
+      (reserva?.voucherQrPayload || '').toUpperCase().includes('TOURGIRLS');
 
     if (isGloria) {
       try {
@@ -3488,14 +3491,20 @@ export class AtraccionesService implements OnModuleInit {
       try {
         const michaelHeaders = {
           'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w',
+          'Idempotency-Key': crypto.randomUUID(),
+          'X-Correlation-Id': cId || crypto.randomUUID(),
           'Content-Type': 'application/json',
+        };
+        const michaelBody = {
+          reason: dto?.reason || 'Cancelación solicitada por el usuario',
+          solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR',
         };
         const michaelTargetId = partnerCancelId || reservationId;
         try {
           await firstValueFrom(
             this.httpService.post(
               `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${michaelTargetId}/cancel`,
-              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+              michaelBody,
               { headers: michaelHeaders, timeout: 5000 },
             ),
           );
@@ -3505,7 +3514,7 @@ export class AtraccionesService implements OnModuleInit {
             await firstValueFrom(
               this.httpService.post(
                 `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/reservas/${michaelTargetId}/cancel`,
-                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                michaelBody,
                 { headers: michaelHeaders, timeout: 5000 },
               ),
             );
@@ -3518,11 +3527,50 @@ export class AtraccionesService implements OnModuleInit {
         this.logger.warn(`[Michael Cancel] Error notificando cancelación a Michael: ${err.message}`);
       }
     } else {
+      let dilanOk = false;
       try {
         await this.dilanAdapter.cancelarReserva(partnerCancelId || reservationId, dto?.reason || 'Cancelación solicitada por el usuario', idempotencyKey, cId);
         this.logger.log(`[Dilan Cancel] Reserva notificada exitosamente a Descubre EC (${partnerCancelId || reservationId})`);
+        dilanOk = true;
       } catch (adapterErr: any) {
         this.logger.warn(`ACL: No se pudo notificar reverso a tienda externa de Dilan: ${adapterErr.message}`);
+      }
+      if (!dilanOk) {
+        // Fallback defensivo: si Dilan rechaza o no encuentra el código (ej. DEC- emitido por Michael/TourGirls), intentar Michael
+        try {
+          const mHeaders = {
+            'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w',
+            'Idempotency-Key': crypto.randomUUID(),
+            'X-Correlation-Id': cId || crypto.randomUUID(),
+            'Content-Type': 'application/json',
+          };
+          const mBody = {
+            reason: dto?.reason || 'Cancelación solicitada por el usuario',
+            solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR',
+          };
+          const mTarget = partnerCancelId || reservationId;
+          try {
+            await firstValueFrom(
+              this.httpService.post(
+                `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${mTarget}/cancel`,
+                mBody,
+                { headers: mHeaders, timeout: 5000 },
+              ),
+            );
+            this.logger.log(`[Michael Cancel Fallback] Cancelada exitosamente en TourGirls (/atracciones/reservas): ${mTarget}`);
+          } catch (mErr1: any) {
+            if (mErr1.response?.status === 404) {
+              await firstValueFrom(
+                this.httpService.post(
+                  `https://tourgirls-gateway-mm.azurewebsites.net/api/v3/reservas/${mTarget}/cancel`,
+                  mBody,
+                  { headers: mHeaders, timeout: 5000 },
+                ),
+              );
+              this.logger.log(`[Michael Cancel Fallback /reservas] Cancelada exitosamente en TourGirls (/reservas): ${mTarget}`);
+            }
+          }
+        } catch (_) {}
       }
     }
 
