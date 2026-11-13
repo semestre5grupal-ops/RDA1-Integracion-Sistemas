@@ -301,26 +301,14 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     this.traza(d, 'cotizar', 'ok', `Precio congelado en ${nodo.nombreProveedor}`, nodo.codigoNodo, total);
 
     // 4. Orden en el socio con la MISMA Idempotency-Key del cliente.
-    const cuerpoOrden: Record<string, any> = {
+    // Se envía el contrato canónico estricto v2 (OrderCreateRequestV2).
+    const cuerpoOrdenCanonica: Record<string, any> = {
       alojamientoId: idSocio,
       tipoHabitacionCodigo: opcion.codigo,
       fechaInicio: d.checkin,
       fechaFin: d.checkout,
       cantidadHabitaciones: d.habitaciones,
-      number_of_rooms: d.habitaciones,
-      habitaciones: d.habitaciones,
       ocupantes,
-      adultos: d.adultos,
-      number_of_adults: d.adultos,
-      cantidadAdultos: d.adultos,
-      ninos: d.ninos,
-      number_of_children: d.ninos,
-      cantidadNinos: d.ninos,
-      huespedes: d.adultos + d.ninos,
-      guests: {
-        number_of_adults: d.adultos,
-        number_of_rooms: d.habitaciones,
-      },
       totalPagar: total,
       ...(c.cotizacionId ? { cotizacionId: c.cotizacionId } : {}),
       ...(opcion.plan ? { planTarifaCodigo: opcion.plan } : {}),
@@ -335,11 +323,27 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     };
     const extra: Record<string, string> = cliente.clientId ? { 'X-Client-Id': cliente.clientId } : {};
     let orden = await this.socios.llamar(nodo, 'POST', '/alojamientos/orders/create', {
-      body: cuerpoOrden,
+      body: cuerpoOrdenCanonica,
       idempotencyKey: d.idempotencyKey,
       correlationId,
       extra,
     });
+
+    // Si un socio legacy no soporta el objeto ocupantes y exige campos planos, reintentar con alias
+    if (orden.status === 400 && /ocupantes|adultos|habitaciones/i.test(JSON.stringify(orden.body || '')) && !/should not exist/i.test(JSON.stringify(orden.body || ''))) {
+      const cuerpoConAlias = {
+        ...cuerpoOrdenCanonica,
+        number_of_rooms: d.habitaciones,
+        adultos: d.adultos,
+        ninos: d.ninos,
+      };
+      orden = await this.socios.llamar(nodo, 'POST', '/alojamientos/orders/create', {
+        body: cuerpoConAlias,
+        idempotencyKey: d.idempotencyKey,
+        correlationId,
+        extra,
+      });
+    }
 
     // 4b. Sin respuesta o 5xx: ¿llegó a crearse? (contrato §3, recuperación tras timeout)
     if (orden.status === 0 || orden.status >= 500) {
