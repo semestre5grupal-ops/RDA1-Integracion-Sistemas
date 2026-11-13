@@ -846,10 +846,19 @@ export class AutosService implements OnModuleInit {
         ],
       );
       await this.orderRepo.query(
-        `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO' WHERE id = $1 OR idempotency_key = $1`,
+        `UPDATE schema_autos.autos_reservas 
+         SET estado = 'CONFIRMADO_ASISTIDO', checkin_at = COALESCE(checkin_at, NOW()) 
+         WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1) OR idempotency_key = $1`,
         [order.pnr],
       );
     } catch (_) {}
+
+    const isMateoOrder = (order.pnr && order.pnr.toUpperCase().startsWith('MDU-')) || (order.auto_id && String(order.auto_id).length === 36);
+    if (isMateoOrder) {
+      this.circuitBreakerAdapter
+        .notifyCheckinToPartner(order.order_id || order.pnr, dto.documento_identidad || dto.licencia_conducir || '1720375003')
+        .catch(() => {});
+    }
 
     this.winstonLogger.logAudit('CHECKIN_AUTO_VALIDADO', {
       pnr: order.pnr,
@@ -959,10 +968,19 @@ export class AutosService implements OnModuleInit {
         ],
       );
       await this.orderRepo.query(
-        `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO' WHERE id = $1 OR idempotency_key = $1`,
+        `UPDATE schema_autos.autos_reservas 
+         SET estado = 'CONFIRMADO_ASISTIDO', checkin_at = COALESCE(checkin_at, NOW()) 
+         WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1) OR idempotency_key = $1`,
         [order.pnr],
       );
     } catch (_) {}
+
+    const isMateoOrder = (order.pnr && order.pnr.toUpperCase().startsWith('MDU-')) || (order.auto_id && String(order.auto_id).length === 36);
+    if (isMateoOrder) {
+      this.circuitBreakerAdapter
+        .notifyCheckinToPartner(order.order_id || order.pnr, dto.licencia_conducir || '1720375003')
+        .catch(() => {});
+    }
 
     this.winstonLogger.logAudit('CHECKIN_ENTREGA_AUTO_COMPLETADO', {
       order_id: order.order_id,
@@ -1565,8 +1583,14 @@ export class AutosService implements OnModuleInit {
           const id = (a.registro_id || '').toUpperCase();
           const det = a.detalles_json || {};
           const pnr = (det.pnr || det.external_order_id || det.order_id || id || '').toUpperCase();
-          if (pnr) checkinMap.set(pnr, det);
-          if (id) checkinMap.set(id, det);
+          if (pnr) {
+            checkinMap.set(pnr, det);
+            checkinMap.set(pnr.replace(/^MDU-/, ''), det);
+          }
+          if (id) {
+            checkinMap.set(id, det);
+            checkinMap.set(id.replace(/^MDU-/, ''), det);
+          }
         }
       }
     } catch (_) {}
@@ -1578,9 +1602,16 @@ export class AutosService implements OnModuleInit {
         for (const d of dbOrders) {
           const k = d.pnr || d.id;
           if (k && !unique.has(k)) {
-            const chk = checkinMap.get(k.toUpperCase());
-            const isAssisted = d.status === 'CONFIRMADO_ASISTIDO' || (d as any).checkinStatus === 'COMPLETED' || !!chk;
-            const st = isAssisted ? 'CONFIRMADO_ASISTIDO' : (d.status || 'CONFIRMED');
+            const kUp = (k || '').toUpperCase();
+            const kClean = kUp.replace(/^MDU-/, '');
+            const idUp = (d.id || '').toUpperCase();
+            const idClean = idUp.replace(/^MDU-/, '');
+            const isCancelled = this.circuitBreakerAdapter.isOrderCancelled(k) ||
+                                this.circuitBreakerAdapter.isOrderCancelled(d.id) ||
+                                d.estado === 'CANCELADA' || d.estado === 'CANCELLED';
+            const chk = checkinMap.get(kUp) || checkinMap.get(kClean) || checkinMap.get(idUp) || checkinMap.get(idClean);
+            const isAssisted = !isCancelled && (d.status === 'CONFIRMADO_ASISTIDO' || d.estado === 'CONFIRMADO_ASISTIDO' || !!d.checkinAt || (d as any).checkinStatus === 'COMPLETED' || !!chk);
+            const st = isCancelled ? 'CANCELLED' : (isAssisted ? 'CONFIRMADO_ASISTIDO' : (d.status || 'CONFIRMED'));
             const vId = String(d.autoId || '').trim();
             const vInfo = vehicleInfoMap.get(vId) || vehicleInfoMap.get(vId.toLowerCase());
             const isMateo = vId.length === 36 || (k && k.toUpperCase().startsWith('MDU-'));
@@ -1615,8 +1646,12 @@ export class AutosService implements OnModuleInit {
     for (const order of this.memoryOrders.values()) {
       const key = order.pnr || order.order_id || order.idempotency_key;
       if (key && !unique.has(key)) {
-        const chk = checkinMap.get(key.toUpperCase());
-        if (chk && order.status !== 'CANCELLED') {
+        const chk = checkinMap.get(key.toUpperCase()) || checkinMap.get(key.toUpperCase().replace(/^MDU-/, ''));
+        const isCancelled = this.circuitBreakerAdapter.isOrderCancelled(key) || order.status === 'CANCELLED' || order.estado === 'CANCELLED';
+        if (isCancelled) {
+          order.status = 'CANCELLED';
+          order.estado = 'CANCELLED';
+        } else if (chk) {
           order.status = 'CONFIRMADO_ASISTIDO';
           order.estado = 'CONFIRMADO_ASISTIDO';
           order.checkin = chk;
@@ -1668,13 +1703,31 @@ export class AutosService implements OnModuleInit {
         const existingKey = (pnr && unique.has(pnr)) ? pnr : (ext.order_id && unique.has(ext.order_id)) ? ext.order_id : (ext.id && unique.has(ext.id)) ? ext.id : null;
 
         if (existingKey) {
-          // Si ya existe en memoria o local, sincronizar el estado confirmado/asistido con regla monotónica
           const existing = unique.get(existingKey);
+          const isCancelled = ext.status === 'CANCELLED' || ext.estado === 'CANCELLED' ||
+                              this.circuitBreakerAdapter.isOrderCancelled(existingKey) ||
+                              this.circuitBreakerAdapter.isOrderCancelled(pnr);
+          if (isCancelled) {
+            existing.status = 'CANCELLED';
+            existing.estado = 'CANCELLED';
+            this.orderRepo.query(
+              `UPDATE schema_autos.autos_reservas SET estado = 'CANCELADA', updated_at = NOW() 
+               WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1)`,
+              [existingKey]
+            ).catch(() => {});
+            continue;
+          }
+
+          // Si ya existe en memoria o local, sincronizar el estado confirmado/asistido con regla monotónica
           const yaEraAsistido = existing.status === 'CONFIRMADO_ASISTIDO' || existing.estado === 'CONFIRMADO_ASISTIDO';
           if ((isExtAssisted || yaEraAsistido) && existing.status !== 'CANCELLED') {
             existing.status = 'CONFIRMADO_ASISTIDO';
             existing.estado = 'CONFIRMADO_ASISTIDO';
-            this.orderRepo.update({ pnr: existingKey }, { status: 'CONFIRMADO_ASISTIDO' } as any).catch(() => {});
+            this.orderRepo.query(
+              `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO', checkin_at = COALESCE(checkin_at, NOW()) 
+               WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1)`,
+              [existingKey]
+            ).catch(() => {});
           }
           if (ext.plate || ext.placa) {
             existing.placa = ext.plate || ext.placa;
@@ -1690,7 +1743,10 @@ export class AutosService implements OnModuleInit {
           }
           const mem = this.memoryOrders.get(existingKey) || (pnr ? this.memoryOrders.get(pnr) : null);
           if (mem) {
-            if ((isExtAssisted || yaEraAsistido) && mem.status !== 'CANCELLED') {
+            if (isCancelled) {
+              mem.status = 'CANCELLED';
+              mem.estado = 'CANCELLED';
+            } else if ((isExtAssisted || yaEraAsistido) && mem.status !== 'CANCELLED') {
               mem.status = 'CONFIRMADO_ASISTIDO';
               mem.estado = 'CONFIRMADO_ASISTIDO';
               if (ext.plate || ext.placa) mem.placa = ext.plate || ext.placa;
@@ -1716,10 +1772,21 @@ export class AutosService implements OnModuleInit {
           email = 'cliente@booking.com';
         }
 
-        const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase());
-        let finalStatus = (isExtAssisted || chk) ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED');
+        const chk = checkinMap.get(pnr.toUpperCase()) || checkinMap.get((ext.order_id || '').toUpperCase()) || checkinMap.get(pnr.toUpperCase().replace(/^MDU-/, ''));
+        const isCancelled = ext.status === 'CANCELLED' || ext.estado === 'CANCELLED' || this.circuitBreakerAdapter.isOrderCancelled(pnr);
+        let finalStatus = isCancelled ? 'CANCELLED' : ((isExtAssisted || chk) ? 'CONFIRMADO_ASISTIDO' : (ext.status || ext.estado || 'CONFIRMED'));
         if (finalStatus === 'CONFIRMADO_ASISTIDO') {
-          this.orderRepo.update({ pnr }, { status: 'CONFIRMADO_ASISTIDO' } as any).catch(() => {});
+          this.orderRepo.query(
+            `UPDATE schema_autos.autos_reservas SET estado = 'CONFIRMADO_ASISTIDO', checkin_at = COALESCE(checkin_at, NOW()) 
+             WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1)`,
+            [pnr]
+          ).catch(() => {});
+        } else if (finalStatus === 'CANCELLED') {
+          this.orderRepo.query(
+            `UPDATE schema_autos.autos_reservas SET estado = 'CANCELADA', updated_at = NOW() 
+             WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1)`,
+            [pnr]
+          ).catch(() => {});
         }
 
         const plateName = chk?.placa || ext.placa || (isMateoOrder ? (ext.auto_id ? ext.auto_id.substring(0, 8) : '') : (ext.auto_id === 'auto-pru-1235' ? 'PRU-1235' : (ext.auto_id === 'auto-pru-1234' ? 'PRU-1234' : '')));
@@ -1936,7 +2003,8 @@ export class AutosService implements OnModuleInit {
 
     try {
       await this.orderRepo.query(
-        `UPDATE schema_autos.autos_reservas SET estado = 'CANCELADA', updated_at = NOW() WHERE id = $1 OR pnr = $1 OR external_order_id = $1`,
+        `UPDATE schema_autos.autos_reservas SET estado = 'CANCELADA', updated_at = NOW() 
+         WHERE id = $1 OR UPPER(id) = UPPER($1) OR pnr = $1 OR UPPER(pnr) = UPPER($1) OR external_order_id = $1 OR UPPER(external_order_id) = UPPER($1)`,
         [targetCancelId],
       );
     } catch (_) {}

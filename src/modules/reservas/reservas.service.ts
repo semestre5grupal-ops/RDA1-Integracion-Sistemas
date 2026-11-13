@@ -422,6 +422,9 @@ export class ReservasService {
               OR idempotency_key = $1
               OR licencia_conducir = $1
               OR ($2::text IS NOT NULL AND licencia_conducir = $2::text)
+              OR REPLACE(UPPER(COALESCE(pnr, '')), 'MDU-', '') = REPLACE(UPPER($1), 'MDU-', '')
+              OR REPLACE(UPPER(COALESCE(id, '')), 'MDU-', '') = REPLACE(UPPER($1), 'MDU-', '')
+              OR REPLACE(UPPER(COALESCE(external_order_id, '')), 'MDU-', '') = REPLACE(UPPER($1), 'MDU-', '')
            RETURNING *`,
           [targetId, docId, adminId],
         );

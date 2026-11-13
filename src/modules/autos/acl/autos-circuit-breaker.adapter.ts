@@ -97,6 +97,7 @@ export class AutosCircuitBreakerAdapter {
       baseDefecto: 'https://alquiler-vehiculos-ijx3.onrender.com/api/v3', env: 'AUTOSPOT', proveedorId: 8,
       apiKeyDefecto: 'xSQILcF-wlDGZ44NFmLpLbJlsX7rWooq',
       vehRegex: /^auto-\d+$/i,
+      pnrRegex: /^CAR[A-Z0-9]{5,6}$/i,
     },
   ];
   private readonly socioCfgCache = new Map<string, { nodo: string; baseUrl: string; apiKey: string; activo: boolean; at: number }>();
@@ -661,7 +662,34 @@ export class AutosCircuitBreakerAdapter {
       }
     }
 
-    // 2. Daniel (RutaLibre)
+    // 2. Socios del panel (AutoSpot / Esteban, RentaFacil, RodadoEc)
+    const socio = this.socioDeVehiculo(vehicleId);
+    if (socio) {
+      try {
+        const orders = await this.fetchSocioOrders(socio);
+        for (const o of orders) {
+          const oVid = (o.auto_id || o.vehicle_id || '').toLowerCase().replace(/^auto-/, '');
+          const oVidRaw = (o.auto_id || o.vehicle_id || '').toLowerCase();
+          const oStatus = (o.status || o.estado || '').toUpperCase();
+          if (
+            (oVid === cleanId || oVidRaw === (vehicleId || '').toLowerCase()) &&
+            oStatus !== 'CANCELLED' &&
+            oStatus !== 'CANCELADA' &&
+            oStatus !== 'COMPLETED' &&
+            oStatus !== 'COMPLETADA'
+          ) {
+            const p = o.pickup_date || o.recogida?.fecha_hora || o.pickup;
+            const d = o.dropoff_date || o.devolucion?.fecha_hora || o.dropoff;
+            if (p && d) occupied.push({ pickup: String(p).split('T')[0], dropoff: String(d).split('T')[0] });
+          }
+        }
+        return occupied;
+      } catch (_) {
+        return occupied;
+      }
+    }
+
+    // 3. Daniel (RutaLibre)
     try {
       const key = this.EXTERNAL_API_KEY || process.env.TIENDA_AUTOS_API_KEY || 'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA';
       const response = await firstValueFrom(
@@ -984,12 +1012,58 @@ export class AutosCircuitBreakerAdapter {
   }
 
   /**
+   * Consulta si una orden ha sido marcada como cancelada en memoria de resiliencia.
+   */
+  isOrderCancelled(orderId: string): boolean {
+    if (!orderId) return false;
+    const up = orderId.toUpperCase();
+    const clean = up.replace(/^MDU-/, '').replace(/^AUTO-/, '');
+    return (
+      this.cancelledOrderIds.has(orderId) ||
+      this.cancelledOrderIds.has(up) ||
+      this.cancelledOrderIds.has(clean) ||
+      this.cancelledOrderIds.has(`MDU-${clean}`)
+    );
+  }
+
+  /**
    * Registra manualmente un ID de orden como cancelado para actualización inmediata de inventario.
    */
   markOrderAsCancelled(orderId: string): void {
     if (!orderId) return;
+    const up = orderId.toUpperCase();
+    const clean = up.replace(/^MDU-/, '').replace(/^AUTO-/, '');
     this.cancelledOrderIds.add(orderId);
-    this.cancelledOrderIds.add(orderId.toUpperCase());
+    this.cancelledOrderIds.add(up);
+    this.cancelledOrderIds.add(orderId.toLowerCase());
+    this.cancelledOrderIds.add(clean);
+    this.cancelledOrderIds.add(`MDU-${clean}`);
+  }
+
+  /**
+   * Notifica el check-in digital al socio externo correspondiente (ej. Maneja de Una).
+   */
+  async notifyCheckinToPartner(orderIdOrPnr: string, documento: string): Promise<boolean> {
+    if (!orderIdOrPnr) return false;
+    const cleanId = orderIdOrPnr.toUpperCase();
+    if (cleanId.startsWith('MDU-') || orderIdOrPnr.length === 36) {
+      try {
+        const mKey = 'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=';
+        await firstValueFrom(
+          this.httpService.post(
+            `https://maneja-de-una-autos-api.azurewebsites.net/api/v3/autos/reservas/${orderIdOrPnr}/checkin`,
+            { documento_identidad: documento || '1720375003' },
+            { headers: { 'X-API-Key': mKey, 'Content-Type': 'application/json' }, timeout: 5000 }
+          )
+        );
+        this.logger.log(`[AutosCircuitBreaker] Check-in digital propagado a Maneja de Una: ${orderIdOrPnr}`);
+        return true;
+      } catch (err: any) {
+        this.logger.debug(`[AutosCircuitBreaker] Aviso propagando check-in a Mateo: ${err.message}`);
+        return false;
+      }
+    }
+    return false;
   }
 
   /**
@@ -997,10 +1071,9 @@ export class AutosCircuitBreakerAdapter {
    */
   async cancelOrder(orderId: string, reason = 'Cancelado por el cliente'): Promise<boolean> {
     const cleanId = orderId.toUpperCase();
-    this.cancelledOrderIds.add(orderId);
-    this.cancelledOrderIds.add(cleanId);
+    this.markOrderAsCancelled(orderId);
 
-    // 0. Socios del panel (Anthony RFxxxxxx, RodadoEc por PNR registrado)
+    // 0. Socios del panel (Anthony RFxxxxxx, RodadoEc por PNR registrado, AutoSpot)
     const socioCancel = await this.socioDePnr(cleanId);
     if (socioCancel) {
       const cfg = await this.getSocioConfig(socioCancel);
@@ -1008,7 +1081,7 @@ export class AutosCircuitBreakerAdapter {
         await firstValueFrom(
           this.httpService.post(
             `${cfg.baseUrl}/autos/orders/${cleanId}/cancel`,
-            { reason },
+            { reason, motivo: reason, solicitante: 'SAGA_ORCHESTRATOR' },
             { headers: this.socioHeaders(cfg.apiKey, { 'Idempotency-Key': uuidv4() }), timeout: 8000 }
           )
         );
