@@ -189,6 +189,13 @@ export class NodesService {
         latencia_ms: n.latenciaMs,
         latenciaMs: n.latenciaMs,
         ultimo_ping_at: n.ultimoPingAt,
+        // Vuelos: el ping de integración más reciente está en memoria (la base se actualiza cada 60 s).
+        ...(() => {
+          const s = n.vertical === 'VUELOS' && !n.killSwitchActivo && socios?.saludDe ? socios.saludDe(n.codigoNodo) : null;
+          if (!s) return {};
+          const hs = s.estado === 'INTEGRADO' ? 'HEALTHY' : s.estado === 'SIN_INTEGRACION' ? 'DEGRADED' : 'DOWN';
+          return { latencia_ms: Math.round(s.ms), latenciaMs: Math.round(s.ms), ultimo_ping_at: s.en, health_status: hs };
+        })(),
         kill_switch_activo: n.killSwitchActivo,
         killSwitchActivo: n.killSwitchActivo,
         circuit_breaker_estado: n.circuitBreakerEstado,

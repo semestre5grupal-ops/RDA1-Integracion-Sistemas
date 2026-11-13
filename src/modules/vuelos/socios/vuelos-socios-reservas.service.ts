@@ -401,13 +401,22 @@ export class VuelosSociosReservasService implements OnModuleInit {
   }
 
   /** Último evento leído del feed de una aerolínea. */
+  /** Cursor del feed en memoria: se lee de la base una vez por aerolínea y se mantiene al guardarlo. */
+  private readonly cursores = new Map<string, string | null>();
+
   async cursorEventos(codigoNodo: string): Promise<string | null> {
+    if (this.cursores.has(codigoNodo)) return this.cursores.get(codigoNodo)!;
     if (!(await this.asegurarTabla())) return null;
     const f = await this.dataSource.query(`SELECT ultimo_evento FROM public.vuelos_eventos_cursor WHERE codigo_nodo = $1`, [codigoNodo]);
-    return f[0]?.ultimo_evento ?? null;
+    const c = f[0]?.ultimo_evento ?? null;
+    this.cursores.set(codigoNodo, c);
+    return c;
   }
 
   async guardarCursor(codigoNodo: string, ultimo: string, leidos: number): Promise<void> {
+    // Sin cambios no se escribe (antes se escribía en cada ciclo aunque no hubiera eventos nuevos).
+    if (this.cursores.get(codigoNodo) === ultimo && !leidos) return;
+    this.cursores.set(codigoNodo, ultimo);
     if (!(await this.asegurarTabla())) return;
     await this.dataSource.query(
       `INSERT INTO public.vuelos_eventos_cursor (codigo_nodo, ultimo_evento, leidos) VALUES ($1, $2, $3)
