@@ -3241,7 +3241,9 @@ export class AtraccionesService implements OnModuleInit {
       try {
         const rawTime = (reserva.time || '10:00').trim().split(' ')[0];
         const cleanTime = rawTime.length === 5 ? rawTime : '10:00';
-        const eventDateStr = `${reserva.date}T${cleanTime}:00`;
+        const dateOnly = reserva.date.includes('T') ? reserva.date.split('T')[0] : reserva.date;
+        // La operación de atracciones se rige por la hora local de Ecuador (UTC-5)
+        const eventDateStr = `${dateOnly}T${cleanTime}:00-05:00`;
         const eventTime = new Date(eventDateStr).getTime();
         if (!isNaN(eventTime)) {
           const diffHours = (eventTime - Date.now()) / (1000 * 60 * 60);
@@ -3250,6 +3252,7 @@ export class AtraccionesService implements OnModuleInit {
               type: 'https://api.booking.local/errors/conflict',
               title: 'Cancelación Fuera de Plazo',
               status: HttpStatus.CONFLICT,
+              message: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
               detail: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
             }, HttpStatus.CONFLICT);
           }

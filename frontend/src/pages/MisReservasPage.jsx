@@ -2052,7 +2052,7 @@ export function MisReservasPage() {
                             if (/a\.?m\.?/i.test(String(targetTimeStr)) && h === 12) h = 0;
                             cleanTime = `${h.toString().padStart(2, '0')}:${m}`;
                           }
-                          targetMs = new Date(`${cleanDate}T${cleanTime}:00`).getTime();
+                          targetMs = new Date(`${cleanDate}T${cleanTime}:00-05:00`).getTime();
                         }
                         if (isNaN(targetMs)) return Infinity;
                         return (targetMs - Date.now()) / (1000 * 60 * 60);
