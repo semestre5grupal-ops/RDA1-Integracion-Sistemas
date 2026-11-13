@@ -302,18 +302,24 @@ export class AutosCircuitBreakerAdapter {
         if (!cfg.activo) {
           return Promise.reject(new Error(`${def.nombre} desactivado (kill switch)`));
         }
-        // Si es AutoSpot y se proporcionaron fechas de búsqueda, consultar su endpoint oficial POST /autos/search
-        if (def.clave === 'AUTOSPOT' && searchParams?.pickup_date && searchParams?.dropoff_date) {
-          const autospotSearchPayload = {
-            pickup_location: searchParams.pickup_location || 'Quito Aeropuerto',
-            dropoff_location: searchParams.dropoff_location || searchParams.pickup_location || 'Quito Aeropuerto',
+        // Si es AutoSpot o RodadoEc y se proporcionaron fechas de búsqueda, usar POST /autos/search para disponibilidad real por fechas
+        if ((def.clave === 'AUTOSPOT' || def.clave === 'RODADO') && searchParams?.pickup_date && searchParams?.dropoff_date) {
+          const searchPayload: Record<string, string> = {
             pickup_date: searchParams.pickup_date,
             dropoff_date: searchParams.dropoff_date,
             pickup_time: searchParams.pickup_time || '10:00',
             dropoff_time: searchParams.dropoff_time || '10:00',
+            fecha_inicio: searchParams.pickup_date,
+            fecha_fin: searchParams.dropoff_date,
           };
+          // RODADO requiere pickup_location no vacío; AUTOSPOT acepta campo adicional dropoff_location
+          const rawLoc = searchParams.pickup_location || searchParams.q || '';
+          searchPayload.pickup_location = rawLoc || 'Quito';
+          if (def.clave === 'AUTOSPOT') {
+            searchPayload.dropoff_location = searchParams.dropoff_location || rawLoc || 'Quito Aeropuerto';
+          }
           return firstValueFrom(
-            this.httpService.post(`${cfg.baseUrl}/autos/search`, autospotSearchPayload, {
+            this.httpService.post(`${cfg.baseUrl}/autos/search`, searchPayload, {
               headers: this.socioHeaders(cfg.apiKey, correlationId ? { 'X-Correlation-Id': correlationId } : {}),
               timeout: this.TIMEOUT_MS,
             }),
@@ -505,13 +511,24 @@ export class AutosCircuitBreakerAdapter {
 
           for (const ord of matchingOrders) {
             const ordStatus = (ord.status || ord.estado || '').toUpperCase();
+            const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
+            const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
             if (ordStatus === 'CONFIRMADO_ASISTIDO' || ordStatus === 'ENTREGADO' || ord.rentalStatus === 'PICKED_UP' || ord.rental_status === 'PICKED_UP') {
-              isAssisted = true;
-              overlappingCount++;
+              // Solo bloquear si las fechas de búsqueda solapan con el período real de la orden;
+              // si ya terminó (oDropoff < searchPickup) o es para fechas futuras distintas, el auto queda libre.
+              if (searchPickup && searchDropoff && oPickup && oDropoff) {
+                if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
+                  isAssisted = true;
+                  overlappingCount++;
+                }
+                // Si no hay solapamiento, la orden ya terminó → no bloquear
+              } else {
+                // Sin fechas de búsqueda: bloquear por precaución (comportamiento previo conservador)
+                isAssisted = true;
+                overlappingCount++;
+              }
             } else if (ordStatus === 'RESERVADO' || ordStatus === 'CONFIRMED' || ordStatus === 'PENDING') {
               if (searchPickup && searchDropoff) {
-                const oPickup = ord.pickup_date || ord.retiro?.fecha || ord.pickup || ord.fecha_inicio;
-                const oDropoff = ord.dropoff_date || ord.devolucion?.fecha || ord.dropoff || ord.fecha_fin;
                 if (oPickup && oDropoff) {
                   if (searchPickup <= oDropoff && searchDropoff >= oPickup) {
                     overlappingCount++;
