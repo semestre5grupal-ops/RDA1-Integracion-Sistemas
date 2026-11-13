@@ -1259,6 +1259,37 @@ export class AtraccionesService implements OnModuleInit {
     }
 
     if (isGloria) {
+      // 1. Consultar cupos y aforo real configurado en el endpoint admin de Gloria
+      let adminSlotsMap = new Map<string, { total: number; available: number }>();
+      try {
+        const token = await this.getGloriaToken();
+        if (token) {
+          const { data: cuposData } = await firstValueFrom(
+            this.httpService.get(
+              `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/atracciones/admin/${id}/cupos`,
+              {
+                params: { desde: targetDate, hasta: targetDate },
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 4000,
+              },
+            ),
+          );
+          if (Array.isArray(cuposData?.slots)) {
+            for (const s of cuposData.slots) {
+              if (s.date === targetDate && s.timeSlot) {
+                adminSlotsMap.set(s.timeSlot.slice(0, 5), {
+                  total: Number(s.total ?? 10),
+                  available: Number(s.available ?? 10),
+                });
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`[Gloria] Error consultando admin cupos para enriquecer: ${err.message}`);
+      }
+
+      // 2. Consultar disponibilidad pública v3 de Gloria
       try {
         const { data } = await firstValueFrom(
           this.httpService.get(
@@ -1273,21 +1304,38 @@ export class AtraccionesService implements OnModuleInit {
         if (data && Array.isArray(data.horarios) && data.horarios.length > 0) {
           const dateCompact = targetDate.replace(/-/g, '');
           const mappedSlots = data.horarios.map((h: any) => {
-            const timeRaw = h.hora || '09:16:00';
+            const timeRaw = h.hora || '09:00:00';
             const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4);
             const timeFormatted = timeRaw.slice(0, 5);
+            const adminInfo = adminSlotsMap.get(timeFormatted);
+            const availSpots = adminInfo !== undefined
+              ? adminInfo.available
+              : (typeof h.available_spots === 'number'
+                ? h.available_spots
+                : (typeof h.cupos_disponibles === 'number'
+                  ? h.cupos_disponibles
+                  : (h.disponible ? 10 : 0)));
+            const totalSpots = adminInfo !== undefined
+              ? adminInfo.total
+              : (typeof h.total_spots === 'number'
+                ? h.total_spots
+                : (typeof h.capacidad_total === 'number'
+                  ? h.capacidad_total
+                  : Math.max(availSpots, 10)));
+            const isAvail = h.disponible !== false && availSpots > 0;
             return {
               id: `slot-${dateCompact}-${timeCompact}`,
               slot_id: `slot-${dateCompact}-${timeCompact}`,
               time: timeFormatted,
               hora: timeFormatted,
               hora_inicio: timeFormatted,
-              capacidad_total: 20,
-              cupos_totales: 20,
-              cupos: h.disponible ? 20 : 0,
-              cupos_disponibles: h.disponible ? 20 : 0,
-              status: h.disponible ? 'DISPONIBLE' : 'AGOTADO',
-              estado: h.disponible ? 'DISPONIBLE' : 'AGOTADO',
+              capacidad_total: totalSpots,
+              cupos_totales: totalSpots,
+              cupos: availSpots,
+              cupos_disponibles: availSpots,
+              available_spots: availSpots,
+              status: isAvail ? 'DISPONIBLE' : 'AGOTADO',
+              estado: isAvail ? 'DISPONIBLE' : 'AGOTADO',
               precio_adulto_slot: 25,
             };
           });
@@ -1322,7 +1370,7 @@ export class AtraccionesService implements OnModuleInit {
 
           const slots = cuposData?.slots || [];
           const dateSlots = slots.filter((s: any) => s.date === targetDate);
-          const activeSlots = dateSlots.length > 0 ? dateSlots : slots;
+          const activeSlots = dateSlots.length > 0 ? dateSlots : [];
 
           if (activeSlots.length > 0) {
             const dateCompact = targetDate.replace(/-/g, '');
@@ -1341,6 +1389,7 @@ export class AtraccionesService implements OnModuleInit {
                 cupos_totales: tot,
                 cupos: avail,
                 cupos_disponibles: avail,
+                available_spots: avail,
                 status: avail > 0 ? 'DISPONIBLE' : 'AGOTADO',
                 estado: avail > 0 ? 'DISPONIBLE' : 'AGOTADO',
                 precio_adulto_slot: 25,
@@ -2178,8 +2227,28 @@ export class AtraccionesService implements OnModuleInit {
             this.logger.log(`[Gloria] Horario ${timeClean} no disponible en lista v3, ajustando a disponible: ${timeFormattedList[0]}`);
             timeClean = timeFormattedList[0];
           }
+
+          // Validar cupos disponibles antes de despachar a Gloria
+          const chosenSlot = dispData.horarios.find((h: any) => (h.hora || '').slice(0, 5) === timeClean);
+          if (chosenSlot && typeof chosenSlot.available_spots === 'number') {
+            if (chosenSlot.available_spots < totalTickets) {
+              throw new HttpException(
+                {
+                  type: 'https://booking.epn.edu.ec/errors/out-of-stock',
+                  title: 'Cupos Insuficientes',
+                  status: HttpStatus.CONFLICT,
+                  statusCode: HttpStatus.CONFLICT,
+                  message: `El turno seleccionado (${timeClean}) solo dispone de ${chosenSlot.available_spots} cupo(s) disponible(s). Solicitaste ${totalTickets} boletos.`,
+                  detail: `Cupos disponibles: ${chosenSlot.available_spots}, solicitados: ${totalTickets}`,
+                  code: 'OUT_OF_STOCK',
+                },
+                HttpStatus.CONFLICT,
+              );
+            }
+          }
         }
       } catch (err: any) {
+        if (err instanceof HttpException) throw err;
         this.logger.debug(`[Gloria] No se pudo consultar disponibilidad v3: ${err.message}`);
         try {
           const token = await this.getGloriaToken();
@@ -3172,7 +3241,9 @@ export class AtraccionesService implements OnModuleInit {
       try {
         const rawTime = (reserva.time || '10:00').trim().split(' ')[0];
         const cleanTime = rawTime.length === 5 ? rawTime : '10:00';
-        const eventDateStr = `${reserva.date}T${cleanTime}:00`;
+        const dateOnly = reserva.date.includes('T') ? reserva.date.split('T')[0] : reserva.date;
+        // La operación de atracciones se rige por la hora local de Ecuador (UTC-5)
+        const eventDateStr = `${dateOnly}T${cleanTime}:00-05:00`;
         const eventTime = new Date(eventDateStr).getTime();
         if (!isNaN(eventTime)) {
           const diffHours = (eventTime - Date.now()) / (1000 * 60 * 60);
@@ -3181,6 +3252,7 @@ export class AtraccionesService implements OnModuleInit {
               type: 'https://api.booking.local/errors/conflict',
               title: 'Cancelación Fuera de Plazo',
               status: HttpStatus.CONFLICT,
+              message: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
               detail: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
             }, HttpStatus.CONFLICT);
           }

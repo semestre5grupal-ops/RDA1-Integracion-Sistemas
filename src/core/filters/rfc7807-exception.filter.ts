@@ -54,6 +54,8 @@ export class Rfc7807ExceptionFilter implements ExceptionFilter {
     if (exceptionResponse) {
       if (typeof exceptionResponse === 'string') {
         detail = exceptionResponse;
+      } else if (exceptionResponse.detail) {
+        detail = exceptionResponse.detail;
       } else if (exceptionResponse.message) {
         detail = Array.isArray(exceptionResponse.message)
           ? exceptionResponse.message.join(', ')
