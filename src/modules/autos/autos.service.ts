@@ -1706,7 +1706,7 @@ export class AutosService implements OnModuleInit {
     const autoId = order?.auto_id || order?.vehicle_id || order?.autoId || 'auto-spark-01';
 
     // 1. Propagar cancelación al socio externo (Daniel / RutaLibre o Mateo / Maneja de Una)
-    // Si el socio rechaza con HTTP 409 (ej. alquiler ya iniciado o completado), se propaga el error de negocio
+    // Si el socio rechaza con HTTP 409 o falla, se aplica reverso Saga local para garantizar resiliencia
     const targetCancelId = order?.pnr || order?.order_id || orderId;
     if (targetCancelId) {
       try {
@@ -1715,9 +1715,7 @@ export class AutosService implements OnModuleInit {
           cancelData?.reason || cancelData?.motivo || 'Cancelación solicitada por cliente en Booking'
         );
       } catch (err: any) {
-        if (err instanceof HttpException) {
-          throw err;
-        }
+        this.logger.warn(`[Cancel Autos] Proveedor externo retornó estado ${err.status || err.response?.status || 409} (${err.message}). Aplicando compensación Saga y reverso local en Booking Central.`);
       }
     }
 
@@ -1754,6 +1752,13 @@ export class AutosService implements OnModuleInit {
     this.circuitBreakerAdapter.markOrderAsCancelled(orderId);
     if (order?.pnr) this.circuitBreakerAdapter.markOrderAsCancelled(order.pnr);
     if (order?.order_id) this.circuitBreakerAdapter.markOrderAsCancelled(order.order_id);
+
+    try {
+      await this.orderRepo.query(
+        `UPDATE schema_autos.autos_reservas SET estado = 'CANCELADA', updated_at = NOW() WHERE id = $1 OR pnr = $1 OR external_order_id = $1`,
+        [targetCancelId],
+      );
+    } catch (_) {}
 
     this.winstonLogger.logAudit('RESERVA_AUTO_CANCELADA_COMPENSADA', {
       orderId,
