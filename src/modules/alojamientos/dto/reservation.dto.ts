@@ -259,4 +259,15 @@ export class CancelReservationRequestDto {
   @MaxLength(500)
   @IsOptional()
   reason?: string;
+
+  @ApiProperty({ description: 'Motivo de la cancelación (OpenAPI v2)', example: 'Cancelada por el cliente desde Booking', required: false })
+  @IsString()
+  @MaxLength(300)
+  @IsOptional()
+  motivo?: string;
+
+  @ApiProperty({ description: 'Quién solicita la cancelación (CLIENTE, ADMIN, etc.)', example: 'CLIENTE', required: false })
+  @IsString()
+  @IsOptional()
+  solicitadoPor?: string;
 }

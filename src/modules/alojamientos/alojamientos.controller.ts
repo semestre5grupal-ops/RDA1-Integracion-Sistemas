@@ -327,7 +327,8 @@ export class AlojamientosController {
     @Body() dto?: CancelReservationRequestDto,
   ): Promise<any> {
     const keyValida = exigirIdempotencyKey(idempotencyKey);
-    return this.alojamientosService.cancelOrder(orderId, keyValida, dto?.reason);
+    const motivoFinal = dto?.motivo || dto?.reason || 'Cancelada por el cliente desde Booking';
+    return this.alojamientosService.cancelOrder(orderId, keyValida, motivoFinal);
   }
 
   // =========================================================================

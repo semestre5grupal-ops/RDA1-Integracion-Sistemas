@@ -686,6 +686,8 @@ export function MisReservasPage() {
           const habNum = Number(al.habitaciones_count || al.habitaciones || al.number_of_rooms || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
           const bedTxt = al.tipo_habitacion?.descripcion_camas || (al.tipo_habitacion?.camas ? `${al.tipo_habitacion.camas} cama${al.tipo_habitacion.camas > 1 ? 's' : ''}` : '');
+          const esReembolsable = al.es_reembolsable ?? al.reembolsable ?? true;
+          const cancelTexto = al.politica_cancelacion || (esReembolsable ? 'Cancelación gratuita hasta 48 horas antes de la llegada' : 'No reembolsable');
           const isAlojCancelled = cancelledStorage.has(al.reservation_id) || cancelledStorage.has(al.id) || cancelledStorage.has(al.codigo_reserva) || cancelledStorage.has(al.pnr);
           const rawAlojStatus = (al.status || al.estado || '').toUpperCase();
           const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (rawAlojStatus || 'CONFIRMED');
@@ -741,6 +743,8 @@ export function MisReservasPage() {
         const habLocalNum = Number(al.habitaciones || al.habitaciones_count || al.number_of_rooms || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
         const bedLocalTxt = al.descripcionCamas || (al.camas ? `${al.camas} cama${al.camas > 1 ? 's' : ''}` : '');
+        const esReemLoc = al.esReembolsable ?? al.es_reembolsable ?? true;
+        const cancelTextoLoc = al.politicaCancelacion || al.politica_cancelacion || (esReemLoc ? 'Cancelación gratuita hasta 48 horas antes de la llegada' : 'No reembolsable');
         return {
           id: al.reservationId || al.id,
           pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
