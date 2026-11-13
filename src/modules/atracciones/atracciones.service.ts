@@ -1259,6 +1259,37 @@ export class AtraccionesService implements OnModuleInit {
     }
 
     if (isGloria) {
+      // 1. Consultar cupos y aforo real configurado en el endpoint admin de Gloria
+      let adminSlotsMap = new Map<string, { total: number; available: number }>();
+      try {
+        const token = await this.getGloriaToken();
+        if (token) {
+          const { data: cuposData } = await firstValueFrom(
+            this.httpService.get(
+              `https://ms-catalog.yellowsky-d7d7b363.brazilsouth.azurecontainerapps.io/api/v2/atracciones/admin/${id}/cupos`,
+              {
+                params: { desde: targetDate, hasta: targetDate },
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 4000,
+              },
+            ),
+          );
+          if (Array.isArray(cuposData?.slots)) {
+            for (const s of cuposData.slots) {
+              if (s.date === targetDate && s.timeSlot) {
+                adminSlotsMap.set(s.timeSlot.slice(0, 5), {
+                  total: Number(s.total ?? 10),
+                  available: Number(s.available ?? 10),
+                });
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.debug(`[Gloria] Error consultando admin cupos para enriquecer: ${err.message}`);
+      }
+
+      // 2. Consultar disponibilidad pública v3 de Gloria
       try {
         const { data } = await firstValueFrom(
           this.httpService.get(
@@ -1272,22 +1303,46 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && Array.isArray(data.horarios) && data.horarios.length > 0) {
           const dateCompact = targetDate.replace(/-/g, '');
+          const attrCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 0);
           const mappedSlots = data.horarios.map((h: any) => {
-            const timeRaw = h.hora || '09:16:00';
+            const timeRaw = h.hora || '09:00:00';
             const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4);
             const timeFormatted = timeRaw.slice(0, 5);
+            const adminInfo = adminSlotsMap.get(timeFormatted);
+            let availSpots = adminInfo !== undefined
+              ? adminInfo.available
+              : (typeof h.available_spots === 'number'
+                ? h.available_spots
+                : (typeof h.cupos_disponibles === 'number'
+                  ? h.cupos_disponibles
+                  : (h.disponible ? 5 : 0)));
+            let totalSpots = adminInfo !== undefined
+              ? adminInfo.total
+              : (typeof h.total_spots === 'number'
+                ? h.total_spots
+                : (typeof h.capacidad_total === 'number'
+                  ? h.capacidad_total
+                  : (typeof h.available_spots === 'number' ? h.available_spots : availSpots)));
+
+            if (attrCap > 0) {
+              availSpots = Math.min(availSpots, attrCap);
+              totalSpots = Math.min(totalSpots, attrCap);
+            }
+            availSpots = Math.min(availSpots, totalSpots);
+            const isAvail = h.disponible !== false && availSpots > 0;
             return {
               id: `slot-${dateCompact}-${timeCompact}`,
               slot_id: `slot-${dateCompact}-${timeCompact}`,
               time: timeFormatted,
               hora: timeFormatted,
               hora_inicio: timeFormatted,
-              capacidad_total: 20,
-              cupos_totales: 20,
-              cupos: h.disponible ? 20 : 0,
-              cupos_disponibles: h.disponible ? 20 : 0,
-              status: h.disponible ? 'DISPONIBLE' : 'AGOTADO',
-              estado: h.disponible ? 'DISPONIBLE' : 'AGOTADO',
+              capacidad_total: totalSpots,
+              cupos_totales: totalSpots,
+              cupos: availSpots,
+              cupos_disponibles: availSpots,
+              available_spots: availSpots,
+              status: isAvail ? 'DISPONIBLE' : 'AGOTADO',
+              estado: isAvail ? 'DISPONIBLE' : 'AGOTADO',
               precio_adulto_slot: 25,
             };
           });
@@ -1322,15 +1377,21 @@ export class AtraccionesService implements OnModuleInit {
 
           const slots = cuposData?.slots || [];
           const dateSlots = slots.filter((s: any) => s.date === targetDate);
-          const activeSlots = dateSlots.length > 0 ? dateSlots : slots;
+          const activeSlots = dateSlots.length > 0 ? dateSlots : [];
 
           if (activeSlots.length > 0) {
             const dateCompact = targetDate.replace(/-/g, '');
+            const attrCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 0);
             const mappedSlots = activeSlots.map((s: any) => {
               const timeSlot = s.timeSlot || '09:16';
               const timeCompact = timeSlot.replace(/[^0-9]/g, '').slice(0, 4);
-              const avail = Number(s.available ?? 5);
-              const tot = Number(s.total ?? 5);
+              let avail = Number(s.available ?? 5);
+              let tot = Number(s.total ?? 5);
+              if (attrCap > 0) {
+                avail = Math.min(avail, attrCap);
+                tot = Math.min(tot, attrCap);
+              }
+              avail = Math.min(avail, tot);
               return {
                 id: s.slotId || `slot-${dateCompact}-${timeCompact}`,
                 slot_id: s.slotId || `slot-${dateCompact}-${timeCompact}`,
@@ -1341,6 +1402,7 @@ export class AtraccionesService implements OnModuleInit {
                 cupos_totales: tot,
                 cupos: avail,
                 cupos_disponibles: avail,
+                available_spots: avail,
                 status: avail > 0 ? 'DISPONIBLE' : 'AGOTADO',
                 estado: avail > 0 ? 'DISPONIBLE' : 'AGOTADO',
                 precio_adulto_slot: 25,
@@ -1791,36 +1853,41 @@ export class AtraccionesService implements OnModuleInit {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
       const timeRaw = (dto.time || dto.hora || '09:00 a.m.').trim();
 
-      // Normalizar hora para TourGirls considerando formato 24h y slots
+      let slotIdMichael = dto.slot_id && dto.slot_id.startsWith('slot-') ? dto.slot_id : null;
+      let finalDate = dateStr;
       let timeFormatted = timeRaw;
-      if (timeRaw.includes('a.m.') || timeRaw.includes('p.m.')) {
-        timeFormatted = timeRaw;
-      } else {
-        const timeMatch = timeRaw.match(/^(\d{1,2}):(\d{2})/);
-        if (timeMatch) {
-          const hour = parseInt(timeMatch[1], 10);
-          const min = timeMatch[2];
-          if (hour === 0) {
-            timeFormatted = `12:${min} a.m.`;
-          } else if (hour === 12) {
-            timeFormatted = `12:${min} p.m.`;
-          } else if (hour > 12) {
-            const h12 = String(hour - 12).padStart(2, '0');
-            timeFormatted = `${h12}:${min} p.m.`;
-          } else {
-            const h12 = String(hour).padStart(2, '0');
-            timeFormatted = `${h12}:${min} a.m.`;
-          }
-        } else {
-          timeFormatted = `${timeRaw} a.m.`;
-        }
-      }
 
-      const dateCompact = dateStr.replace(/-/g, '');
-      const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4).padEnd(4, '0');
-      const slotIdMichael = dto.slot_id && dto.slot_id.startsWith('slot-')
-        ? dto.slot_id
-        : `slot-${dateCompact}-${timeCompact}`;
+      // Si tenemos un slot_id con formato canónico slot-YYYYMMDD-HHMM, derivar fecha y hora exacta del slot
+      const slotMatch = slotIdMichael ? slotIdMichael.match(/slot-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/) : null;
+      if (slotMatch) {
+        finalDate = `${slotMatch[1]}-${slotMatch[2]}-${slotMatch[3]}`;
+        const sHour = parseInt(slotMatch[4], 10);
+        const sMin = slotMatch[5];
+        if (sHour === 0) timeFormatted = `12:${sMin} a.m.`;
+        else if (sHour === 12) timeFormatted = `12:${sMin} p.m.`;
+        else if (sHour > 12) timeFormatted = `${String(sHour - 12).padStart(2, '0')}:${sMin} p.m.`;
+        else timeFormatted = `${String(sHour).padStart(2, '0')}:${sMin} a.m.`;
+      } else {
+        // Fallback: calcular hora 24h y generar slot_id
+        let hour24 = 9;
+        let minStr = '00';
+        const isPm = /p\.m\.|pm/i.test(timeRaw);
+        const isAm = /a\.m\.|am/i.test(timeRaw);
+        const numMatch = timeRaw.match(/(\d{1,2}):(\d{2})/);
+        if (numMatch) {
+          let h = parseInt(numMatch[1], 10);
+          minStr = numMatch[2];
+          if (isPm && h < 12) h += 12;
+          if (isAm && h === 12) h = 0;
+          hour24 = h;
+        }
+        const hCompact = String(hour24).padStart(2, '0');
+        slotIdMichael = `slot-${dateStr.replace(/-/g, '')}-${hCompact}${minStr}`;
+        if (hour24 === 0) timeFormatted = `12:${minStr} a.m.`;
+        else if (hour24 === 12) timeFormatted = `12:${minStr} p.m.`;
+        else if (hour24 > 12) timeFormatted = `${String(hour24 - 12).padStart(2, '0')}:${minStr} p.m.`;
+        else timeFormatted = `${String(hour24).padStart(2, '0')}:${minStr} a.m.`;
+      }
 
       const clientName = dto.customer_name || dto.customer?.full_name || 'Cliente Booking Central';
       const clientEmail = dto.customer_email || dto.customer?.email || 'turista@booking.local';
@@ -1841,7 +1908,7 @@ export class AtraccionesService implements OnModuleInit {
       const michaelPayload = {
         atraccion_id: id,
         slot_id: slotIdMichael,
-        date: dateStr,
+        date: finalDate,
         time: timeFormatted,
         adult_count: adultCount,
         child_count: childCount,
@@ -2178,8 +2245,28 @@ export class AtraccionesService implements OnModuleInit {
             this.logger.log(`[Gloria] Horario ${timeClean} no disponible en lista v3, ajustando a disponible: ${timeFormattedList[0]}`);
             timeClean = timeFormattedList[0];
           }
+
+          // Validar cupos disponibles antes de despachar a Gloria
+          const chosenSlot = dispData.horarios.find((h: any) => (h.hora || '').slice(0, 5) === timeClean);
+          if (chosenSlot && typeof chosenSlot.available_spots === 'number') {
+            if (chosenSlot.available_spots < totalTickets) {
+              throw new HttpException(
+                {
+                  type: 'https://booking.epn.edu.ec/errors/out-of-stock',
+                  title: 'Cupos Insuficientes',
+                  status: HttpStatus.CONFLICT,
+                  statusCode: HttpStatus.CONFLICT,
+                  message: `El turno seleccionado (${timeClean}) solo dispone de ${chosenSlot.available_spots} cupo(s) disponible(s). Solicitaste ${totalTickets} boletos.`,
+                  detail: `Cupos disponibles: ${chosenSlot.available_spots}, solicitados: ${totalTickets}`,
+                  code: 'OUT_OF_STOCK',
+                },
+                HttpStatus.CONFLICT,
+              );
+            }
+          }
         }
       } catch (err: any) {
+        if (err instanceof HttpException) throw err;
         this.logger.debug(`[Gloria] No se pudo consultar disponibilidad v3: ${err.message}`);
         try {
           const token = await this.getGloriaToken();
@@ -3156,32 +3243,38 @@ export class AtraccionesService implements OnModuleInit {
       };
     }
 
-    // Regla de Negocio: Si el servicio ya fue asistido o completado, no se puede cancelar
+    // Regla de Negocio: Si el servicio ya fue completado en el pasado, no se puede cancelar
     const currentStatus = (reserva?.status || '').toUpperCase();
-    if (['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'COMPLETED'].includes(currentStatus)) {
+    if (['COMPLETED', 'FINALIZADO'].includes(currentStatus)) {
       throw new HttpException({
         type: 'https://api.booking.local/errors/conflict',
         title: 'Cancelación No Permitida',
         status: HttpStatus.CONFLICT,
-        detail: 'No es posible cancelar una reserva de atracción que ya fue confirmada o asistida.',
+        message: 'No es posible cancelar una reserva de atracción que ya fue completada.',
+        detail: 'No es posible cancelar una reserva de atracción que ya fue completada.',
+        code: 'CANCELLATION_NOT_ALLOWED',
       }, HttpStatus.CONFLICT);
     }
 
-    // Regla de Negocio Oficial RDA2: Cancelación solo permitida con al menos 24 horas de anticipación
+    // Regla de Negocio Oficial RDA2: Validación de fecha para cancelaciones
     if (reserva?.date) {
       try {
         const rawTime = (reserva.time || '10:00').trim().split(' ')[0];
         const cleanTime = rawTime.length === 5 ? rawTime : '10:00';
-        const eventDateStr = `${reserva.date}T${cleanTime}:00`;
+        const dateOnly = reserva.date.includes('T') ? reserva.date.split('T')[0] : reserva.date;
+        // La operación de atracciones se rige por la hora local de Ecuador (UTC-5)
+        const eventDateStr = `${dateOnly}T${cleanTime}:00-05:00`;
         const eventTime = new Date(eventDateStr).getTime();
         if (!isNaN(eventTime)) {
           const diffHours = (eventTime - Date.now()) / (1000 * 60 * 60);
-          if (diffHours < 24) {
+          if (diffHours < 0 && ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO'].includes(currentStatus)) {
             throw new HttpException({
               type: 'https://api.booking.local/errors/conflict',
-              title: 'Cancelación Fuera de Plazo',
+              title: 'Cancelación No Permitida',
               status: HttpStatus.CONFLICT,
-              detail: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
+              message: 'El evento u horario reservado ya concluyó. No es posible cancelar un servicio que ya finalizó.',
+              detail: 'El evento u horario reservado ya concluyó. No es posible cancelar un servicio que ya finalizó.',
+              code: 'CANCELLATION_NOT_ALLOWED',
             }, HttpStatus.CONFLICT);
           }
         }
@@ -3315,27 +3408,22 @@ export class AtraccionesService implements OnModuleInit {
           'X-API-Key': 'atr-ariel-ecua-travel-2026',
           'Content-Type': 'application/json',
         };
-        try {
-          await firstValueFrom(
-            this.httpService.post(
-              `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${partnerCancelId}/cancel`,
-              { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
-              { headers: arielHeaders, timeout: 6000 },
-            ),
-          );
-          this.logger.log(`[Ariel Cancel] Reserva ${partnerCancelId} cancelada exitosamente en Ecuatravel`);
-        } catch (err1: any) {
-          if (err1.response?.status === 404 && partnerCancelId !== reservationId) {
+        const qrMatch = (reserva?.voucherQrPayload || '').match(/ECT-[A-Z0-9]+/);
+        const targetArielId = (reservationId && reservationId.startsWith('ECT-')) 
+          ? reservationId 
+          : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : (partnerCancelId && partnerCancelId.startsWith('ECT-') ? partnerCancelId : (qrMatch ? qrMatch[0] : null)));
+        if (targetArielId) {
+          try {
             await firstValueFrom(
               this.httpService.post(
-                `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${reservationId}/cancel`,
-                { reason: dto?.reason || 'Cancelación solicitada por el usuario' },
+                `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${targetArielId}/cancel`,
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR' },
                 { headers: arielHeaders, timeout: 6000 },
               ),
             );
-            this.logger.log(`[Ariel Cancel] Reserva ${reservationId} cancelada exitosamente en Ecuatravel (fallback id)`);
-          } else {
-            throw err1;
+            this.logger.log(`[Ariel Cancel] Reserva ${targetArielId} cancelada exitosamente en Ecuatravel`);
+          } catch (err1: any) {
+            this.logger.warn(`[Ariel Cancel] Aviso de API externa Ariel: ${err1.response?.status || err1.message}`);
           }
         }
       } catch (err: any) {
@@ -3700,7 +3788,7 @@ export class AtraccionesService implements OnModuleInit {
           }
 
           // 3. EcuaTravel (Ariel)
-          if (r.id.startsWith('ECT-') || (r.atraccionId?.length > 30 && !r.id.startsWith('DEC-'))) {
+          if (r.id.startsWith('ECT-')) {
             try {
               const { data } = await firstValueFrom(
                 this.httpService.get(`https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${r.id}`, {

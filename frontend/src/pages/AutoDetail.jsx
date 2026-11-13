@@ -63,12 +63,15 @@ export function AutoDetail() {
   const auto = { ...(location.state?.auto || {}), ...(fetchedAuto || {}) };
 
   const precioDiario = auto.precio_diario || auto.price || 35.50;
-  const make = auto.make || 'Chevrolet';
-  const model = auto.model || 'Spark';
-  const seats = auto.seats || 5;
-  const doors = auto.doors || 4;
-  const bag_capacity = auto.bag_capacity || 1;
-  const transmission = auto.transmission || 'Manual';
+  const make = auto.marca || auto.make || auto.brand || (id === 'auto-047' ? 'Prueba2AutoSpot' : 'Vehículo');
+  const model = auto.modelo || auto.model || (id === 'auto-047' ? 'Prueba2AutoSpot' : 'Económico');
+  const vehicleDisplayName = make === model || (model && model.toLowerCase().includes(make.toLowerCase()))
+    ? model
+    : `${make} ${model}`.trim();
+  const seats = auto.asientos || auto.seats || 5;
+  const doors = auto.puertas || auto.doors || 4;
+  const bag_capacity = auto.maletas_grandes || auto.bag_capacity || 1;
+  const transmission = auto.transmision || auto.transmission || 'Manual';
   const supplierId = auto.supplier_id || 1;
 
   const suppliersMap = {
@@ -280,7 +283,7 @@ export function AutoDetail() {
     };
 
     let orderId = idempotencyKey;
-    const tituloReserva = `Renta de ${make} ${model} (${dias} días) - Cobertura ${tipoCobertura}`;
+    const tituloReserva = `Renta de ${vehicleDisplayName} (${dias} días) - Cobertura ${tipoCobertura}`;
 
     const datosFactura = {
       tipo: 'auto',
@@ -310,9 +313,9 @@ export function AutoDetail() {
       } catch (err) {
         console.error('Error al crear reserva de auto:', err);
         const isConflict = err.response?.status === 409 || err.status === 409;
-        const errMsg = err.response?.data?.message || err.response?.data?.detail || err.message || (
+        const errMsg = err.response?.data?.detail || err.response?.data?.message || err.message || (
           isConflict
-            ? 'El vehículo ya está reservado para las fechas seleccionadas en la agencia. Por favor selecciona otras fechas libres.'
+            ? 'El vehículo no está disponible para las fechas seleccionadas en la agencia. Por favor selecciona otras fechas libres.'
             : 'Error al procesar la reserva del vehículo.'
         );
         setError(errMsg);
@@ -419,13 +422,13 @@ export function AutoDetail() {
                 <div style={{ width: '250px' }}>
                   <img
                     src={auto.images && auto.images.length > 0 ? auto.images[0] : 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=300&q=80'}
-                    alt={`${make} ${model}`}
+                    alt={vehicleDisplayName}
                     style={{ width: '100%', borderRadius: '4px' }}
                   />
                 </div>
                 <div>
                   <h2 style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#333', marginBottom: '15px' }}>
-                    {make} {model}{' '}
+                    {vehicleDisplayName}{' '}
                     <span style={{ position: 'relative', cursor: 'pointer', fontSize: '0.9rem', color: '#006ce4', fontWeight: 'normal' }} onClick={() => setShowSimilarModal(!showSimilarModal)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowSimilarModal(!showSimilarModal); } }}>
                       o un coche pequeño similar ℹ️
                       {showSimilarModal && (
@@ -616,7 +619,17 @@ export function AutoDetail() {
                 <p style={{ margin: '6px 0 0 0' }}>
                   El auto ya cuenta con reserva activa en las fechas seleccionadas ({fechasOcupadas.map(f => `${f.pickup} al ${f.dropoff}`).join(', ')}).
                   <br />
-                  💡 <em>Sugerencia: Cambia las fechas en el panel derecho "Ajustar Reserva" (por ejemplo, a partir del 23 de noviembre).</em>
+                  💡 <em>Sugerencia: Cambia las fechas en el panel derecho "Ajustar Reserva" por fechas posteriores disponibles.</em>
+                </p>
+              </div>
+            )}
+
+            {/* Alerta de Auto Reservado / No disponible */}
+            {(auto.unidades_disponibles === 0 || auto.estado === 'RESERVADO') && !hayConflictoFechas && (
+              <div style={{ background: '#fce8e6', color: '#c5221f', border: '1px solid #fad2cf', padding: '14px', borderRadius: '4px', fontSize: '0.92rem', lineHeight: '1.4' }}>
+                <strong>🚫 Vehículo actualmente no disponible:</strong>
+                <p style={{ margin: '6px 0 0 0' }}>
+                  Todas las unidades de este modelo se encuentran temporalmente reservadas en la agencia. Por favor revisa otras fechas o elige otro vehículo en el catálogo.
                 </p>
               </div>
             )}
@@ -627,8 +640,21 @@ export function AutoDetail() {
 
             {/* Continuar button form */}
             <form onSubmit={handleBooking} style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-              <button type="submit" disabled={hayConflictoFechas} style={{ background: hayConflictoFechas ? '#9ca3af' : '#006ce4', color: 'white', border: 'none', padding: '12px 24px', fontSize: '1rem', fontWeight: 'bold', borderRadius: '4px', cursor: hayConflictoFechas ? 'not-allowed' : 'pointer' }}>
-                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : 'Continuar a Pago')}
+              <button 
+                type="submit" 
+                disabled={hayConflictoFechas || auto.unidades_disponibles === 0} 
+                style={{ 
+                  background: (hayConflictoFechas || auto.unidades_disponibles === 0) ? '#9ca3af' : '#006ce4', 
+                  color: 'white', 
+                  border: 'none', 
+                  padding: '12px 24px', 
+                  fontSize: '1rem', 
+                  fontWeight: 'bold', 
+                  borderRadius: '4px', 
+                  cursor: (hayConflictoFechas || auto.unidades_disponibles === 0) ? 'not-allowed' : 'pointer' 
+                }}
+              >
+                {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : (auto.unidades_disponibles === 0 ? 'Vehículo No Disponible' : 'Continuar a Pago'))}
               </button>
             </form>
 

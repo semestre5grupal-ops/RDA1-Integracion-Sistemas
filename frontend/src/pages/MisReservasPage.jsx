@@ -90,6 +90,60 @@ const safeFormatearFecha = (val) => {
   return formatearFecha(str);
 };
 
+function getFriendlyCarName(auto) {
+  let make = (auto?.vehiculo?.marca || auto?.marca || '').trim();
+  let model = (auto?.vehiculo?.modelo || auto?.modelo || '').trim();
+  const rawId = String(auto?.auto_id || auto?.autoId || auto?.vehicle_id || '').trim();
+
+  // Si make o model parecen un ID técnico crudo (auto-047, veh-123, UUID de 36 caracteres)
+  const isTechnicalId = (str) => !str || /^(auto-|veh-|ext-|[0-9a-f]{8}-[0-9a-f]{4})/i.test(str);
+
+  if (isTechnicalId(make)) make = '';
+  if (isTechnicalId(model)) model = '';
+
+  // Diccionario canónico de resolución para vehículos conocidos si vinieron sin marca/modelo
+  if (!make && !model) {
+    if (rawId === 'auto-047' || rawId.toLowerCase() === 'auto-047') {
+      make = 'Prueba2AutoSpot';
+      model = 'Prueba2AutoSpot';
+    } else if (rawId.startsWith('auto-0')) {
+      make = 'AutoSpot';
+      model = 'Vehículo de Flota';
+    } else if (rawId.length === 36 || (auto?.pnr && String(auto.pnr).toUpperCase().startsWith('MDU-'))) {
+      make = 'Maneja de Una';
+      model = 'Flota Ejecutiva';
+    } else if (rawId.includes('pds-7648')) {
+      make = 'Mercedes-Benz';
+      model = 'GLA 200';
+    } else if (rawId.startsWith('auto-pru')) {
+      make = 'Toyota';
+      model = 'Yaris Cross 2026';
+    } else if (rawId.startsWith('auto-spark')) {
+      make = 'Chevrolet';
+      model = 'Spark GT';
+    } else if (rawId.startsWith('auto-yaris')) {
+      make = 'Toyota';
+      model = 'Yaris';
+    } else if (rawId.startsWith('auto-tucson')) {
+      make = 'Hyundai';
+      model = 'Tucson';
+    } else if (rawId.startsWith('auto-duster')) {
+      make = 'Renault';
+      model = 'Duster';
+    } else {
+      make = 'Vehículo';
+      model = 'Alquiler';
+    }
+  }
+
+  if (make && model) {
+    if (make.toLowerCase() === model.toLowerCase()) return make;
+    if (model.toLowerCase().includes(make.toLowerCase())) return model;
+    return `${make} ${model}`.trim();
+  }
+  return make || model || 'Vehículo de Renta';
+}
+
 // El check-in es un paso de una sola vía: una vez hecho (o cancelada la reserva),
 // el botón ya no se muestra. Autos, atracciones y alojamientos tienen su propio flujo.
 const ESTADOS_SIN_CHECKIN = ['CANCELLED', 'CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'ENTREGADO', 'COMPLETED', 'BOARDED'];
@@ -403,6 +457,9 @@ export function MisReservasPage() {
         (user?.email || user?.id) ? getReservasAlojamientos() : Promise.resolve([]),
       ]);
 
+      const cancelledStorage = new Set(JSON.parse(localStorage.getItem('cancelled_reservas_ids') || '[]'));
+      const checkedInStorage = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+
       // 1. Vuelos API
       let vuelosItems = [];
       if (vuelosRes.status === 'fulfilled' && vuelosRes.value) {
@@ -416,6 +473,7 @@ export function MisReservasPage() {
             ? safeFormatearFecha(r.itineraries[1].segments[0].departure.at)
             : (r.returnDate ? safeFormatearFecha(r.returnDate) : null);
           const fReserva = r.createdAt ? safeFormatearFecha(r.createdAt) : safeFormatearFecha(new Date().toISOString());
+          const isVueloCancelled = cancelledStorage.has(r.bookingId) || cancelledStorage.has(r.pnr);
           return {
             id: r.bookingId,
             pnr: r.pnr ?? '—',
@@ -431,7 +489,7 @@ export function MisReservasPage() {
             cantidad: paxCount,
             cantidadTexto: `${paxCount} Pasajero${paxCount > 1 ? 's' : ''}`,
             rawDate: r.createdAt ? new Date(r.createdAt).getTime() : new Date().getTime(),
-            status: r.status || 'CONFIRMED',
+            status: isVueloCancelled ? 'CANCELLED' : (r.status || 'CONFIRMED'),
             totalRaw: r.bookingPrice?.total ?? r.grandTotal?.total ?? 0,
             imagen: DEFAULT_IMAGES.vuelo,
             raw: r,
@@ -447,12 +505,9 @@ export function MisReservasPage() {
         const respuestaAutos = autosRes.value;
         const listaAutos = Array.isArray(respuestaAutos) ? respuestaAutos : (respuestaAutos?.orders || []);
         autosItems = listaAutos.map((a) => {
-          const autoModel = a.vehiculo?.modelo || a.auto_id || a.autoId || '';
-          const autoMake = a.vehiculo?.marca || '';
+          const carName = getFriendlyCarName(a);
           const diasRenta = Number(a.dias_renta || a.diasRenta || a.dias || 3);
-          const displayTitle = (autoMake || autoModel)
-            ? `Renta de ${autoMake} ${autoModel} (${diasRenta} días)`.trim()
-            : 'Renta de Auto';
+          const displayTitle = `Renta de ${carName} (${diasRenta} días)`;
           const pnrReal = a.pnr || a.codigo_reserva || a.order_id || a.id || 'AUTO';
           const pickupStr = a.pickup_date || a.fecha_inicio || a.pickup || a.date || a.fecha || (a.createdAt ? String(a.createdAt).split('T')[0] : '');
           const dropoffStr = a.dropoff_date || a.fecha_fin || a.dropoff || '';
@@ -463,10 +518,15 @@ export function MisReservasPage() {
             : `${diasRenta} días de renta`;
           const fReserva = (a.createdAt || a.created_at) ? safeFormatearFecha(a.createdAt || a.created_at) : safeFormatearFecha(new Date().toISOString());
           const rawStatus = (a.status || a.estado || '').toUpperCase();
+          const isMarkedCancelled = cancelledStorage.has(a.pnr) || cancelledStorage.has(a.order_id) || cancelledStorage.has(a.id) ||
+                                    cancelledStorage.has(pnrReal) || (a.pnr && cancelledStorage.has(a.pnr.replace(/^MDU-/, '')));
+          const isMarkedCheckedIn = checkedInStorage.has(a.pnr) || checkedInStorage.has(a.order_id) || checkedInStorage.has(a.id) ||
+                                    checkedInStorage.has(pnrReal) || (a.pnr && checkedInStorage.has(a.pnr.replace(/^MDU-/, '')));
           const isAutoAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'PICKED_UP', 'RETURNED', 'COMPLETED', 'ENTREGADO'].includes(rawStatus) ||
                                 a.rentalStatus === 'PICKED_UP' || a.rental_status === 'PICKED_UP' || a.rentalStatus === 'RETURNED' || a.rental_status === 'RETURNED' ||
-                                a.checkin_status === 'CHECKIN_COMPLETED' || a.checkin?.status === 'COMPLETED' || a.checkin?.estado === 'CONFIRMADO_ASISTIDO';
-          const autoFinalStatus = (rawStatus === 'CANCELLED' || rawStatus === 'CANCELADA') ? 'CANCELLED' : (isAutoAssisted ? 'CONFIRMADO_ASISTIDO' : (rawStatus || 'CONFIRMED'));
+                                a.checkin_status === 'CHECKIN_COMPLETED' || a.checkin?.status === 'COMPLETED' || a.checkin?.estado === 'CONFIRMADO_ASISTIDO' ||
+                                isMarkedCheckedIn;
+          const autoFinalStatus = (isMarkedCancelled || rawStatus === 'CANCELLED' || rawStatus === 'CANCELADA') ? 'CANCELLED' : (isAutoAssisted ? 'CONFIRMADO_ASISTIDO' : (rawStatus || 'CONFIRMED'));
           return {
             id: a.order_id || a.id,
             pnr: pnrReal,
@@ -508,13 +568,16 @@ export function MisReservasPage() {
           ? (dropoffLocalFmt ? `${pickupLocalFmt} – ${dropoffLocalFmt}` : `${pickupLocalFmt} (${diasLocal} días)`)
           : `${diasLocal} días de renta`;
         const fReservaLocal = (a.createdAt || a.date) ? safeFormatearFecha(a.createdAt || a.date) : safeFormatearFecha(new Date().toISOString());
+        const carNameLocal = getFriendlyCarName(a);
+        const hasTechnicalTitle = a.titulo && /auto-\d+|veh-\d+|[0-9a-f]{8}-[0-9a-f]{4}/i.test(a.titulo);
+        const displayTitleLocal = (a.titulo && !hasTechnicalTitle) ? a.titulo : `Renta de ${carNameLocal} (${diasLocal} días)`;
         return {
           id: a.id || a.orderId,
           pnr: a.pnr || a.codigo_reserva || a.id || a.orderId || 'AUTO',
           tipo: 'auto',
           servicioTexto: 'Renta de auto',
           destino: 'Quito',
-          titulo: a.titulo || `Renta de Auto (${diasLocal} días)`,
+          titulo: displayTitleLocal,
           fechasTexto: displayFechasLocal,
           fecha: pickupLocalFmt || safeFormatearFecha(new Date().toISOString()),
           fechaReserva: fReservaLocal,
@@ -524,7 +587,7 @@ export function MisReservasPage() {
           cantidad: 1,
           cantidadTexto: `1 Vehículo (${diasLocal} días)`,
           rawDate: a.createdAt || a.date ? new Date(a.createdAt || a.date).getTime() : new Date().getTime(),
-          status: a.status || 'CONFIRMED',
+          status: (cancelledStorage.has(a.id) || cancelledStorage.has(a.orderId) || cancelledStorage.has(a.pnr)) ? 'CANCELLED' : (a.status || 'CONFIRMED'),
           totalRaw: a.totalPrice?.total || a.total || 106.50,
           imagen: a.foto_url || DEFAULT_IMAGES.auto,
           email: (a.email || a.driver?.email || a.conductor?.email || a.booker?.email || '').trim().toLowerCase(),
@@ -546,6 +609,9 @@ export function MisReservasPage() {
           const tCount = Number(at.ticket_count || at.cupos || at.personas || at.cantidad || at.quantity || at.raw?.ticket_count || 1);
           const fechaAtracFmt = fechaAtrac ? safeFormatearFecha(fechaAtrac) : '';
           const fReservaAtrac = (at.createdAt || at.created_at) ? safeFormatearFecha(at.createdAt || at.created_at) : safeFormatearFecha(new Date().toISOString());
+          const isAtracCancelled = cancelledStorage.has(at.id) || cancelledStorage.has(at.reservation_id) || cancelledStorage.has(at.pnr);
+          const rawAtrStatus = (at.status || at.estado || '').toUpperCase();
+          const finalAtrStatus = isAtracCancelled ? 'CANCELLED' : (rawAtrStatus || 'CONFIRMED');
           return {
             id: at.id || at.reservation_id || at.pnr,
             pnr: at.pnr || at.codigo_reserva || at.reservation_id || at.id || 'ATRAC',
@@ -562,7 +628,7 @@ export function MisReservasPage() {
             cantidad: tCount,
             cantidadTexto: `${tCount} Entrada${tCount > 1 ? 's' : ''} (${tCount} Persona${tCount > 1 ? 's' : ''})`,
             rawDate: at.createdAt ? new Date(at.createdAt).getTime() : new Date().getTime(),
-            status: at.status || 'CONFIRMED',
+            status: finalAtrStatus,
             totalRaw: at.total_price?.total || at.total_price || 55.00,
             imagen: at.photoUrl || at.foto_url || resolverImagenAtraccion({ nombre: at.atraccionTitulo || at.titulo || at.nombre, ciudad: at.ciudad, photos: at.photos }, idx),
             email: (at.customer_email || at.email || at.customer?.email || at.userEmail || '').trim().toLowerCase(),
@@ -597,7 +663,7 @@ export function MisReservasPage() {
           cantidad: tCountLocal,
           cantidadTexto: `${tCountLocal} Entrada${tCountLocal > 1 ? 's' : ''} (${tCountLocal} Persona${tCountLocal > 1 ? 's' : ''})`,
           rawDate: at.createdAt || at.date ? new Date(at.createdAt || at.date).getTime() : new Date().getTime(),
-          status: at.status || 'CONFIRMED',
+          status: (cancelledStorage.has(at.id) || cancelledStorage.has(at.reservation_id) || cancelledStorage.has(at.pnr)) ? 'CANCELLED' : (at.status || 'CONFIRMED'),
           totalRaw: at.totalPrice?.total || at.total || 55.00,
           imagen: at.photoUrl || resolverImagenAtraccion({ nombre: at.atraccionTitulo || at.titulo || at.nombre, ciudad: at.ciudad }, idx),
           email: (at.customer_email || at.email || at.userEmail || '').trim().toLowerCase(),
@@ -622,6 +688,9 @@ export function MisReservasPage() {
           const bedTxt = al.tipo_habitacion?.descripcion_camas || (al.tipo_habitacion?.camas ? `${al.tipo_habitacion.camas} cama${al.tipo_habitacion.camas > 1 ? 's' : ''}` : '');
           const esReembolsable = al.es_reembolsable ?? al.reembolsable ?? true;
           const cancelTexto = al.politica_cancelacion || (esReembolsable ? 'Cancelación gratuita hasta 48 horas antes de la llegada' : 'No reembolsable');
+          const isAlojCancelled = cancelledStorage.has(al.reservation_id) || cancelledStorage.has(al.id) || cancelledStorage.has(al.codigo_reserva) || cancelledStorage.has(al.pnr);
+          const rawAlojStatus = (al.status || al.estado || '').toUpperCase();
+          const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (rawAlojStatus || 'CONFIRMED');
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -642,7 +711,7 @@ export function MisReservasPage() {
             cantidad: huespedesNum,
             cantidadTexto: `${huespedesNum} Huésped${huespedesNum > 1 ? 'es' : ''}${habNum > 1 ? ` · ${habNum} Habitaciones` : ' · 1 Habitación'}${bedTxt ? ` · ${bedTxt}` : ''}`,
             rawDate: al.created_at ? new Date(al.created_at).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
-            status: al.status || 'CONFIRMED',
+            status: alojFinalStatus,
             totalRaw: al.total_price?.total || al.total || 0,
             imagen: al.photo_url || DEFAULT_IMAGES.alojamiento,
             link: al.alojamiento_id ? `/alojamientos/${al.alojamiento_id}` : '/',
@@ -1193,6 +1262,15 @@ export function MisReservasPage() {
       });
 
       const estadoFinal = res?.status === 'CANCELLATION_PENDING' ? 'CANCELLATION_PENDING' : 'CANCELLED';
+      if (estadoFinal === 'CANCELLED') {
+        try {
+          const cancelledSet = new Set(JSON.parse(localStorage.getItem('cancelled_reservas_ids') || '[]'));
+          if (selectedReserva.id) cancelledSet.add(selectedReserva.id);
+          if (selectedReserva.pnr) cancelledSet.add(selectedReserva.pnr);
+          if (selectedReserva.order_id) cancelledSet.add(selectedReserva.order_id);
+          localStorage.setItem('cancelled_reservas_ids', JSON.stringify(Array.from(cancelledSet)));
+        } catch (_) {}
+      }
       setSelectedReserva(prev => ({
         ...prev,
         status: estadoFinal
@@ -2008,7 +2086,7 @@ export function MisReservasPage() {
                         </button>
                       );
                     }
-                    if (yaAsistio) {
+                    if (yaAsistio && selectedReserva.tipo !== 'atraccion') {
                       return (
                         <div style={{ marginTop: '4px', padding: '12px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', color: '#065f46', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '1.2rem' }}>✅</span>
@@ -2055,7 +2133,7 @@ export function MisReservasPage() {
                             if (/a\.?m\.?/i.test(String(targetTimeStr)) && h === 12) h = 0;
                             cleanTime = `${h.toString().padStart(2, '0')}:${m}`;
                           }
-                          targetMs = new Date(`${cleanDate}T${cleanTime}:00`).getTime();
+                          targetMs = new Date(`${cleanDate}T${cleanTime}:00-05:00`).getTime();
                         }
                         if (isNaN(targetMs)) return Infinity;
                         return (targetMs - Date.now()) / (1000 * 60 * 60);
@@ -2065,7 +2143,7 @@ export function MisReservasPage() {
                     };
 
                     const horasRestantes = calcularHorasRestantes(selectedReserva);
-                    const esFueraDePlazo24h = horasRestantes < 24;
+                    const esFueraDePlazo24h = selectedReserva.tipo === 'atraccion' ? horasRestantes < 0 : horasRestantes < 24;
 
                     if (esFueraDePlazo24h) {
                       return (

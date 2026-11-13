@@ -47,6 +47,18 @@ export class OrderAuto {
   @Column({ name: 'idempotency_key', type: 'varchar', length: 64, unique: true })
   idempotencyKey: string;
 
+  @Column({ name: 'external_order_id', type: 'varchar', length: 100, nullable: true })
+  externalOrderId: string;
+
+  @Column({ name: 'pnr', type: 'varchar', length: 50, nullable: true })
+  pnrColumn: string;
+
+  @Column({ name: 'checkin_at', type: 'timestamptz', nullable: true })
+  checkinAt: Date;
+
+  @Column({ name: 'checkin_admin', type: 'varchar', length: 100, nullable: true })
+  checkinAdmin: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
