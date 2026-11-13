@@ -670,11 +670,10 @@ export function MisReservasPage() {
         alojamientosApiItems = listaAlojamientos.map((al) => {
           const checkinStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
           const checkoutStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
-          const huespedesNum = Number(al.huespedes || al.personas || al.raw?.passengers?.length || 1);
-          const habNum = Number(al.habitaciones_count || al.habitaciones || 1);
+          const huespedesNum = Number(al.huespedes || al.personas || (al.adultos ? al.adultos + (al.ninos || 0) : null) || (al.number_of_adults ? al.number_of_adults + (al.number_of_children || 0) : null) || al.raw?.passengers?.length || 1);
+          const habNum = Number(al.habitaciones_count || al.habitaciones || al.number_of_rooms || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
-          const cancelTexto = 'Cancelación gratuita hasta 48 horas antes de la llegada';
-          const esReembolsable = true;
+          const bedTxt = al.tipo_habitacion?.descripcion_camas || (al.tipo_habitacion?.camas ? `${al.tipo_habitacion.camas} cama${al.tipo_habitacion.camas > 1 ? 's' : ''}` : '');
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -693,7 +692,7 @@ export function MisReservasPage() {
             checkinRaw: al.checkin,
             checkoutRaw: al.checkout,
             cantidad: huespedesNum,
-            cantidadTexto: `${huespedesNum} Huésped${huespedesNum > 1 ? 'es' : ''}${habNum > 1 ? ` · ${habNum} Habitaciones` : ' · 1 Habitación'}`,
+            cantidadTexto: `${huespedesNum} Huésped${huespedesNum > 1 ? 'es' : ''}${habNum > 1 ? ` · ${habNum} Habitaciones` : ' · 1 Habitación'}${bedTxt ? ` · ${bedTxt}` : ''}`,
             rawDate: al.created_at ? new Date(al.created_at).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
             status: al.status || 'CONFIRMED',
             totalRaw: al.total_price?.total || al.total || 0,
@@ -723,10 +722,10 @@ export function MisReservasPage() {
       const alojamientosLocalesFormatted = alojamientosLocales.map((al) => {
         const checkinLocalStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
         const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
-        const huespedesLocalNum = Number(al.huespedes || 1);
+        const huespedesLocalNum = Number(al.huespedes || (al.adultos ? al.adultos + (al.ninos || 0) : null) || (al.number_of_adults ? al.number_of_adults + (al.number_of_children || 0) : null) || 1);
+        const habLocalNum = Number(al.habitaciones || al.habitaciones_count || al.number_of_rooms || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
-        const cancelTextoLoc = 'Cancelación gratuita hasta 48 horas antes de la llegada';
-        const esReemLoc = true;
+        const bedLocalTxt = al.descripcionCamas || (al.camas ? `${al.camas} cama${al.camas > 1 ? 's' : ''}` : '');
         return {
           id: al.reservationId || al.id,
           pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
@@ -734,7 +733,7 @@ export function MisReservasPage() {
           servicioTexto: 'Alojamiento',
           destino: al.destino || 'Quito',
           titulo: al.nombreAlojamiento
-            ? `${al.nombreAlojamiento} (${huespedesLocalNum} persona${huespedesLocalNum > 1 ? 's' : ''})`
+            ? `${al.nombreAlojamiento}${al.tipoHabitacion ? ` · ${al.tipoHabitacion}` : ''} (${huespedesLocalNum} persona${huespedesLocalNum > 1 ? 's' : ''})`
             : al.titulo || 'Alojamiento reservado',
           fechasTexto: `${checkinLocalStr} – ${checkoutLocalStr}`,
           fecha: checkinLocalStr,
@@ -744,7 +743,7 @@ export function MisReservasPage() {
           checkinRaw: al.checkin,
           checkoutRaw: al.checkout,
           cantidad: huespedesLocalNum,
-          cantidadTexto: `${huespedesLocalNum} Huésped${huespedesLocalNum > 1 ? 'es' : ''}`,
+          cantidadTexto: `${huespedesLocalNum} Huésped${huespedesLocalNum > 1 ? 'es' : ''}${habLocalNum > 1 ? ` · ${habLocalNum} Habitaciones` : ' · 1 Habitación'}${bedLocalTxt ? ` · ${bedLocalTxt}` : ''}`,
           rawDate: al.createdAt ? new Date(al.createdAt).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
           status: al.status || 'CONFIRMED',
           totalRaw: al.totalPrice || al.total || 0,

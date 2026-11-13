@@ -36,6 +36,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 
 // --- Banner global de consentimiento ---
 import { BannerCookies } from './components/BannerCookies';
+import { ScrollToTop } from './components/ScrollToTop';
 
 // --- Estado Offline ---
 import { OfflineBanner } from './components/OfflineBanner';
@@ -71,6 +72,7 @@ function App() {
     <LanguageProvider>
     <CurrencyProvider>
     <BrowserRouter>
+      <ScrollToTop />
       <a className="skip-link" href="#contenido-principal">
         Saltar al contenido
       </a>
