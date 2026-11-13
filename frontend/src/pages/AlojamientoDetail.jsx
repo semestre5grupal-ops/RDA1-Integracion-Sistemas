@@ -891,17 +891,6 @@ export function AlojamientoDetail() {
           </div>
         )}
 
-        {/* Amenidades clave: las REALES que envía el hotel. */}
-        {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
-          <div className="dt-pills-bar">
-            {alojamiento.amenidades.map((a, i) => (
-              <span key={i} className="dt-pill-item">
-                <CheckmarkIcon size={16} /> {a}
-              </span>
-            ))}
-          </div>
-        )}
-
         {/* 2-Column Section: Overview & Property Highlights */}
         <div className="dt-overview-grid">
           {/* Left Column */}
@@ -1047,10 +1036,6 @@ export function AlojamientoDetail() {
           <div className="dt-availability-header">
             <div>
               <h2>Disponibilidad</h2>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#008009', fontWeight: 600, marginTop: '2px' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#008009' }} />
-                <span>En vivo: inventario y aforo sincronizados</span>
-              </div>
             </div>
             <span style={{ fontSize: '0.85rem', color: '#595959', display: 'flex', alignItems: 'center', gap: '4px' }}>
               <PriceMatchIcon size={14} color="#008009" /> Igualamos el precio
@@ -1150,15 +1135,15 @@ export function AlojamientoDetail() {
                           {p.reembolsable && <CheckmarkIcon size={14} />} {p.cancellation_type}
                         </div>
                         {libres <= 0 ? (
-                          <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem', background: '#fdf2f2', padding: '2px 6px', borderRadius: '4px', display: 'inline-block' }}>
-                            ❌ Agotado en vivo
+                          <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
+                            Agotado para tus fechas
                           </div>
                         ) : libres <= 3 ? (
                           <div style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.75rem' }}>
-                            ⚡ ¡Solo {libres === 1 ? 'queda 1' : `quedan ${libres}`} en vivo!
+                            ¡Solo {libres === 1 ? 'queda 1' : `quedan ${libres}`} a este precio en nuestra web!
                           </div>
                         ) : (
-                          <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.75rem' }}>⚡ {libres} disponibles (en vivo)</div>
+                          <div style={{ color: '#008009', fontWeight: 600, fontSize: '0.75rem' }}>{libres} disponibles</div>
                         )}
                       </td>
                       <td style={{ verticalAlign: 'top', paddingTop: '16px' }}>

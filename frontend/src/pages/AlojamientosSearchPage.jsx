@@ -1022,21 +1022,6 @@ export function AlojamientosSearchPage() {
               <h1 className="sr-results-title">
                 {destination}: {filteredProperties.length} {filteredProperties.length === 1 ? 'alojamiento encontrado' : 'alojamientos encontrados'}
               </h1>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '0.8rem', color: '#008009', fontWeight: 600, marginTop: '4px' }}>
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    background: '#008009',
-                    boxShadow: syncPulse ? '0 0 10px #00a812' : 'none',
-                    transform: syncPulse ? 'scale(1.3)' : 'scale(1)',
-                    transition: 'all 0.3s ease-in-out',
-                  }}
-                />
-                <span>En vivo: inventario actualizado ({lastSyncTime.toLocaleTimeString()})</span>
-              </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -1310,16 +1295,16 @@ export function AlojamientosSearchPage() {
                         <div className="sr-urgency-note">
                           {libres !== undefined && (
                             libres <= 0 ? (
-                              <span style={{ color: '#b3121b', fontWeight: 700, background: '#fdf2f2', padding: '2px 8px', borderRadius: '4px', border: '1px solid #f8b4b4', display: 'inline-block' }}>
-                                ❌ ¡Agotado para tus fechas!
+                              <span style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.8rem' }}>
+                                Agotado para tus fechas
                               </span>
                             ) : libres <= 3 ? (
-                              <span style={{ color: '#b3121b', fontWeight: 700, background: '#fdf2f2', padding: '2px 8px', borderRadius: '4px', border: '1px solid #f8b4b4', display: 'inline-block' }}>
-                                ⚡ ¡Solo {libres === 1 ? 'queda 1 habitación' : `quedan ${libres} habitaciones`} en vivo!
+                              <span style={{ color: '#d4111e', fontWeight: 700, fontSize: '0.78rem' }}>
+                                ¡Solo {libres === 1 ? 'queda 1 habitación' : `quedan ${libres} habitaciones`} a este precio en nuestra web!
                               </span>
                             ) : (
-                              <span style={{ color: '#008009', fontWeight: 600 }}>
-                                ⚡ {libres} habitaciones disponibles (en vivo)
+                              <span style={{ color: '#008009', fontWeight: 600, fontSize: '0.78rem' }}>
+                                {libres} habitaciones disponibles
                               </span>
                             )
                           )}
