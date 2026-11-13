@@ -54,7 +54,10 @@ import { ServiceMeshModule } from './modules/service-mesh/service-mesh.module';
           // La base (Supabase, us-west-2) está lejos de Azure: abrir una conexión cuesta ~1,3 s.
           // Por defecto pg cierra las conexiones con 10 s sin uso y cada pausa obligaba a reconectar
           // (consultas simples de 0,4 s pasaban a 1-4 s). Se mantienen abiertas 10 min con keepAlive.
-          extra: { max: 10, idleTimeoutMillis: 600_000, keepAlive: true, connectionTimeoutMillis: 15_000 },
+          // max 20: con ~0,2 s por consulta, 10 conexiones se llenaban cuando coincidían los paneles que se
+          // recargan solos, los ciclos de fondo y las compras (la base respondía en 0,19 s estable; la espera
+          // era por conexión libre). Supavisor (modo transacción) multiplexa, así que no satura la base.
+          extra: { max: 20, idleTimeoutMillis: 600_000, keepAlive: true, connectionTimeoutMillis: 15_000 },
         };
       },
     }),
