@@ -60,6 +60,10 @@ export class Rfc7807ExceptionFilter implements ExceptionFilter {
         detail = Array.isArray(exceptionResponse.message)
           ? exceptionResponse.message.join(', ')
           : exceptionResponse.message;
+      } else if (exceptionResponse.error) {
+        detail = exceptionResponse.error;
+      } else if (exceptionResponse.title) {
+        detail = exceptionResponse.title;
       }
     }
 

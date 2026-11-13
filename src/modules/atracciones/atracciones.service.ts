@@ -1303,25 +1303,32 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && Array.isArray(data.horarios) && data.horarios.length > 0) {
           const dateCompact = targetDate.replace(/-/g, '');
+          const attrCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 0);
           const mappedSlots = data.horarios.map((h: any) => {
             const timeRaw = h.hora || '09:00:00';
             const timeCompact = timeRaw.replace(/[^0-9]/g, '').slice(0, 4);
             const timeFormatted = timeRaw.slice(0, 5);
             const adminInfo = adminSlotsMap.get(timeFormatted);
-            const availSpots = adminInfo !== undefined
+            let availSpots = adminInfo !== undefined
               ? adminInfo.available
               : (typeof h.available_spots === 'number'
                 ? h.available_spots
                 : (typeof h.cupos_disponibles === 'number'
                   ? h.cupos_disponibles
-                  : (h.disponible ? 10 : 0)));
-            const totalSpots = adminInfo !== undefined
+                  : (h.disponible ? 5 : 0)));
+            let totalSpots = adminInfo !== undefined
               ? adminInfo.total
               : (typeof h.total_spots === 'number'
                 ? h.total_spots
                 : (typeof h.capacidad_total === 'number'
                   ? h.capacidad_total
-                  : Math.max(availSpots, 10)));
+                  : (typeof h.available_spots === 'number' ? h.available_spots : availSpots)));
+
+            if (attrCap > 0) {
+              availSpots = Math.min(availSpots, attrCap);
+              totalSpots = Math.min(totalSpots, attrCap);
+            }
+            availSpots = Math.min(availSpots, totalSpots);
             const isAvail = h.disponible !== false && availSpots > 0;
             return {
               id: `slot-${dateCompact}-${timeCompact}`,
@@ -1374,11 +1381,17 @@ export class AtraccionesService implements OnModuleInit {
 
           if (activeSlots.length > 0) {
             const dateCompact = targetDate.replace(/-/g, '');
+            const attrCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 0);
             const mappedSlots = activeSlots.map((s: any) => {
               const timeSlot = s.timeSlot || '09:16';
               const timeCompact = timeSlot.replace(/[^0-9]/g, '').slice(0, 4);
-              const avail = Number(s.available ?? 5);
-              const tot = Number(s.total ?? 5);
+              let avail = Number(s.available ?? 5);
+              let tot = Number(s.total ?? 5);
+              if (attrCap > 0) {
+                avail = Math.min(avail, attrCap);
+                tot = Math.min(tot, attrCap);
+              }
+              avail = Math.min(avail, tot);
               return {
                 id: s.slotId || `slot-${dateCompact}-${timeCompact}`,
                 slot_id: s.slotId || `slot-${dateCompact}-${timeCompact}`,
@@ -3225,18 +3238,20 @@ export class AtraccionesService implements OnModuleInit {
       };
     }
 
-    // Regla de Negocio: Si el servicio ya fue asistido o completado, no se puede cancelar
+    // Regla de Negocio: Si el servicio ya fue completado en el pasado, no se puede cancelar
     const currentStatus = (reserva?.status || '').toUpperCase();
-    if (['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO', 'COMPLETED'].includes(currentStatus)) {
+    if (['COMPLETED', 'FINALIZADO'].includes(currentStatus)) {
       throw new HttpException({
         type: 'https://api.booking.local/errors/conflict',
         title: 'Cancelación No Permitida',
         status: HttpStatus.CONFLICT,
-        detail: 'No es posible cancelar una reserva de atracción que ya fue confirmada o asistida.',
+        message: 'No es posible cancelar una reserva de atracción que ya fue completada.',
+        detail: 'No es posible cancelar una reserva de atracción que ya fue completada.',
+        code: 'CANCELLATION_NOT_ALLOWED',
       }, HttpStatus.CONFLICT);
     }
 
-    // Regla de Negocio Oficial RDA2: Cancelación solo permitida con al menos 24 horas de anticipación
+    // Regla de Negocio Oficial RDA2: Validación de fecha para cancelaciones
     if (reserva?.date) {
       try {
         const rawTime = (reserva.time || '10:00').trim().split(' ')[0];
@@ -3247,13 +3262,14 @@ export class AtraccionesService implements OnModuleInit {
         const eventTime = new Date(eventDateStr).getTime();
         if (!isNaN(eventTime)) {
           const diffHours = (eventTime - Date.now()) / (1000 * 60 * 60);
-          if (diffHours < 24) {
+          if (diffHours < 0 && ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO'].includes(currentStatus)) {
             throw new HttpException({
               type: 'https://api.booking.local/errors/conflict',
-              title: 'Cancelación Fuera de Plazo',
+              title: 'Cancelación No Permitida',
               status: HttpStatus.CONFLICT,
-              message: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
-              detail: 'La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.',
+              message: 'El evento u horario reservado ya concluyó. No es posible cancelar un servicio que ya finalizó.',
+              detail: 'El evento u horario reservado ya concluyó. No es posible cancelar un servicio que ya finalizó.',
+              code: 'CANCELLATION_NOT_ALLOWED',
             }, HttpStatus.CONFLICT);
           }
         }
@@ -3389,12 +3405,12 @@ export class AtraccionesService implements OnModuleInit {
         };
         const targetArielId = (reservationId && reservationId.startsWith('ECT-')) 
           ? reservationId 
-          : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : partnerCancelId);
+          : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : (partnerCancelId && partnerCancelId.startsWith('ECT-') ? partnerCancelId : reservationId));
         try {
           await firstValueFrom(
             this.httpService.post(
               `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${targetArielId}/cancel`,
-              { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'CLIENTE' },
+              { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR' },
               { headers: arielHeaders, timeout: 6000 },
             ),
           );
@@ -3404,13 +3420,13 @@ export class AtraccionesService implements OnModuleInit {
             await firstValueFrom(
               this.httpService.post(
                 `https://ecuatravel-atracciones-api.azurewebsites.net/api/v3/reservas/${reservationId}/cancel`,
-                { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'CLIENTE' },
+                { reason: dto?.reason || 'Cancelación solicitada por el usuario', solicitante: dto?.solicitante || 'SAGA_ORCHESTRATOR' },
                 { headers: arielHeaders, timeout: 6000 },
               ),
             );
             this.logger.log(`[Ariel Cancel] Reserva ${reservationId} cancelada exitosamente en Ecuatravel (fallback id)`);
           } else {
-            throw err1;
+            this.logger.warn(`[Ariel Cancel] Aviso de API externa Ariel: ${err1.response?.status || err1.message}`);
           }
         }
       } catch (err: any) {

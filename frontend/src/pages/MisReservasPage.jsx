@@ -2082,7 +2082,7 @@ export function MisReservasPage() {
                         </button>
                       );
                     }
-                    if (yaAsistio) {
+                    if (yaAsistio && selectedReserva.tipo !== 'atraccion') {
                       return (
                         <div style={{ marginTop: '4px', padding: '12px 14px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '6px', color: '#065f46', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '1.2rem' }}>✅</span>
@@ -2139,7 +2139,7 @@ export function MisReservasPage() {
                     };
 
                     const horasRestantes = calcularHorasRestantes(selectedReserva);
-                    const esFueraDePlazo24h = horasRestantes < 24;
+                    const esFueraDePlazo24h = selectedReserva.tipo === 'atraccion' ? horasRestantes < 0 : horasRestantes < 24;
 
                     if (esFueraDePlazo24h) {
                       return (
