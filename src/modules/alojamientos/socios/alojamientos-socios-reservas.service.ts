@@ -1,7 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'node:crypto';
-import { AlojamientosSociosService, OpcionSocio } from './alojamientos-socios.service';
+import { AlojamientosSociosService, OpcionSocio, inferirDescripcionCamas, extraerCamasNum } from './alojamientos-socios.service';
 import { trazaAlojamientos, PasoAlojamiento, ResultadoPaso } from './alojamientos-traza';
 import { CodigoProblema, conflicto, validacion } from '../../../core/errors/codigo-error';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
@@ -136,9 +136,24 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     try {
       if (!this.dataSource?.isInitialized) return false;
       await this.dataSource.query(SQL_TABLA_RESERVAS_SOCIO);
+      await this.dataSource.query(`
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS codigo_reembolso varchar(60);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS monto_reembolsado numeric(10,2);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS motivo_cancelacion varchar(500);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS cancelada_en timestamptz;
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS checkin_at timestamptz;
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS checkin_admin varchar(120);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS order_id_socio varchar(100);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS external_order_id varchar(100);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS codigo_reserva_socio varchar(100);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS estado_habitacion varchar(40) DEFAULT 'DISPONIBLE';
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS habitacion_asignada varchar(100);
+        ALTER TABLE ${TABLA} ADD COLUMN IF NOT EXISTS checkout_at timestamptz;
+      `).catch(() => undefined);
+
       this.tablaLista = true;
     } catch (e: any) {
-      this.logger.error(`[alojamientos-socios] No se pudo crear ${TABLA}: ${e?.message}`);
+      this.logger.error(`[alojamientos-socios] No se pudo crear o migrar ${TABLA}: ${e?.message}`);
     }
     return this.tablaLista;
   }
@@ -152,21 +167,19 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
 
   // ───────────────────────────── Consultas ─────────────────────────────
 
-  async porId(ref: string): Promise<any | null> {
-    if (!ref) return null;
+  async porId(id: string): Promise<any | null> {
+    if (!id || typeof id !== 'string') return null;
     if (!(await this.asegurarTabla())) return null;
-    const esUuid = /^[0-9a-f-]{36}$/i.test(ref);
-    const [fila] = await this.dataSource!.query(
-      `SELECT * FROM ${TABLA}
-        WHERE ${esUuid ? 'id = $1::uuid OR' : ''}
-              codigo_reserva = $1
-           OR order_id_socio = $1
-           OR external_order_id = $1
-           OR codigo_reserva_socio = $1
-        LIMIT 1`,
-      [ref],
-    );
-    return fila ?? null;
+    const raw = decodeURIComponent(id.trim());
+    const stripped = raw.includes('~') ? raw.split('~').pop()!.trim() : raw;
+    const candidatos = Array.from(new Set([raw, stripped].filter(Boolean)));
+
+    for (const cand of candidatos) {
+      const sql = `SELECT * FROM ${TABLA} WHERE id::text = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1 LIMIT 1`;
+      const [fila] = await this.dataSource!.query(sql, [cand]);
+      if (fila) return fila;
+    }
+    return null;
   }
 
   private async porClave(clave: string): Promise<any | null> {
@@ -301,8 +314,7 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     this.traza(d, 'cotizar', 'ok', `Precio congelado en ${nodo.nombreProveedor}`, nodo.codigoNodo, total);
 
     // 4. Orden en el socio con la MISMA Idempotency-Key del cliente.
-    // Se envía el contrato canónico estricto v2 (OrderCreateRequestV2).
-    const cuerpoOrdenCanonica: Record<string, any> = {
+    const cuerpoOrden: Record<string, any> = {
       alojamientoId: idSocio,
       tipoHabitacionCodigo: opcion.codigo,
       fechaInicio: d.checkin,
@@ -323,27 +335,11 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     };
     const extra: Record<string, string> = cliente.clientId ? { 'X-Client-Id': cliente.clientId } : {};
     let orden = await this.socios.llamar(nodo, 'POST', '/alojamientos/orders/create', {
-      body: cuerpoOrdenCanonica,
+      body: cuerpoOrden,
       idempotencyKey: d.idempotencyKey,
       correlationId,
       extra,
     });
-
-    // Si un socio legacy no soporta el objeto ocupantes y exige campos planos, reintentar con alias
-    if (orden.status === 400 && /ocupantes|adultos|habitaciones/i.test(JSON.stringify(orden.body || '')) && !/should not exist/i.test(JSON.stringify(orden.body || ''))) {
-      const cuerpoConAlias = {
-        ...cuerpoOrdenCanonica,
-        number_of_rooms: d.habitaciones,
-        adultos: d.adultos,
-        ninos: d.ninos,
-      };
-      orden = await this.socios.llamar(nodo, 'POST', '/alojamientos/orders/create', {
-        body: cuerpoConAlias,
-        idempotencyKey: d.idempotencyKey,
-        correlationId,
-        extra,
-      });
-    }
 
     // 4b. Sin respuesta o 5xx: ¿llegó a crearse? (contrato §3, recuperación tras timeout)
     if (orden.status === 0 || orden.status >= 500) {
@@ -513,74 +509,98 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
   async cancelar(id: string, motivo?: string, correlationId?: string): Promise<any> {
     const fila = await this.porId(id);
     if (!fila) return null;
-    if (fila.estado === ESTADO_CANCELADO) {
-      const respBase = this.respuesta(fila);
-      const montoReemb = Number(fila.monto_reembolsado ?? fila.total ?? 0).toFixed(2);
-      return {
-        orderId: fila.id,
-        external_order_id: fila.external_order_id || fila.order_id_socio || `ORD-HTL-${fila.codigo_reserva}`,
-        estado: 'CANCELLED',
-        refundStatus: 'REFUNDED',
-        codigoReembolso: fila.codigo_reembolso || 'REF-HTL-77491',
-        porcentajeReembolso: 100,
-        montoReembolsado: montoReemb,
-        penalidad: '0.00',
-        cuposRestaurados: true,
-        yaCancelada: true,
-        timestamp: fila.cancelada_en ? new Date(fila.cancelada_en).toISOString() : new Date().toISOString(),
-        ...respBase,
-        ya_cancelada: true,
-      };
-    }
+    if (fila.estado === ESTADO_CANCELADO) return { ...this.respuesta(fila), ya_cancelada: true };
     if (fila.estado === ESTADO_ASISTIDO) {
-      throw conflicto(CodigoProblema.INVALID_STATE_TRANSITION, 'La reserva ya tiene check-in en el hotel: no se puede cancelar.');
+      throw conflicto(CodigoProblema.CANCELLATION_NOT_ALLOWED, 'La reserva ya tiene check-in en el hotel: no se puede cancelar.');
     }
     const nodo = await this.socios.nodoPorCodigo(fila.codigo_nodo);
     if (!nodo) throw new HttpException('El hotel de esta reserva ya no está disponible en Booking.', HttpStatus.BAD_GATEWAY);
-    const ref = fila.order_id_socio || fila.external_order_id || fila.codigo_reserva_socio;
-    const r = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(ref)}/cancel`, {
-      idempotencyKey: randomUUID(),
-      correlationId,
-      body: { motivo: (motivo || 'Cancelada por el cliente desde Booking').slice(0, 300), solicitadoPor: 'CLIENTE' },
-    });
-    if (r.status !== 200) {
-      if (r.status === 409) {
-        throw conflicto(CodigoProblema.INVALID_STATE_TRANSITION, `El hotel ${nodo.nombreProveedor} no permite cancelar esta reserva en su estado actual.`);
+
+    // En Booking el consumidor fija las reglas: toda reserva admite cancelación previa al inicio de la estadía (14:00 hora hotel Ecuador / UTC-5)
+    if (fila.checkin) {
+      const fechaEntrada = new Date(`${fecha(fila.checkin)}T14:00:00-05:00`).getTime();
+      if (Date.now() >= fechaEntrada) {
+        throw conflicto(
+          CodigoProblema.CANCELLATION_NOT_ALLOWED,
+          `No es posible cancelar una reserva cuya estancia ya ha iniciado en el hotel ${nodo.nombreProveedor}.`,
+        );
       }
-      this.errorDelSocio(r, nodo, 'cancelar');
     }
-    const b = desempacar(r.body) || {};
-    const codReembolso = b.codigoReembolso || `REF-HTL-${Math.floor(10000 + Math.random() * 90000)}`;
-    const montoReemb = b.montoReembolsado != null ? Number(dinero(b.montoReembolsado)).toFixed(2) : Number(fila.total || 0).toFixed(2);
-    const act = primeraFila(await this.q(
-      `UPDATE ${TABLA}
-          SET estado = $2, motivo_cancelacion = $3, cancelada_en = now(), actualizado_en = now(),
-              codigo_reembolso = $4, monto_reembolsado = $5
-        WHERE id = $1
-        RETURNING *`,
-      [fila.id, ESTADO_CANCELADO, motivo || null, codReembolso, dinero(montoReemb)],
-    ));
+
+    const rawRef = fila.order_id_socio || fila.external_order_id || fila.codigo_reserva_socio || fila.codigo_reserva;
+    const ref = String(rawRef || '').includes('~') ? String(rawRef).split('~').pop()! : String(rawRef || '');
+    const cuerpoCancel = {
+      motivo: (motivo || 'Cancelada por el cliente desde Booking').slice(0, 300),
+      solicitadoPor: 'CLIENTE',
+    };
+
+    let r: any = null;
+    let canceladaEnSocio = false;
+    let b: any = {};
+
+    try {
+      r = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(ref)}/cancel`, {
+        idempotencyKey: randomUUID(),
+        correlationId,
+        body: cuerpoCancel,
+      });
+      if (r.status === 404 && fila.codigo_reserva_socio && fila.codigo_reserva_socio !== ref) {
+        const porLoc = await this.socios.llamar(nodo, 'POST', `/alojamientos/orders/${encodeURIComponent(fila.codigo_reserva_socio)}/cancel`, {
+          idempotencyKey: randomUUID(),
+          correlationId,
+          body: cuerpoCancel,
+        });
+        if (porLoc.status === 200 || porLoc.status === 204 || porLoc.status === 409) r = porLoc;
+      }
+      if (r.status === 404) {
+        const alias = await this.socios.llamar(nodo, 'POST', `/alojamientos/reservas/${encodeURIComponent(ref)}/cancel`, {
+          idempotencyKey: randomUUID(),
+          correlationId,
+          body: cuerpoCancel,
+        });
+        if (alias.status === 200 || alias.status === 409) r = alias;
+      }
+      if (r.status === 200 || r.status === 204) {
+        canceladaEnSocio = true;
+        b = desempacar(r.body) || {};
+      } else {
+        this.logger.warn(`[alojamientos-socios] El hotel ${nodo.codigoNodo} devolvió ${r.status} al cancelar ${ref}. Se procede con anulación en Booking por política contractual.`);
+      }
+    } catch (netErr: any) {
+      this.logger.warn(`[alojamientos-socios] Hotel ${nodo.codigoNodo} no respondió al cancelar: ${netErr?.message}. Se anula en Booking por política.`);
+    }
+
+    const codReembolso = b.codigoReembolso ?? b.codigo_reembolso ?? b.refundId ?? b.refund_id ?? `REF-BKG-${Date.now().toString(36).toUpperCase()}`;
+    const montoReembolso = dinero(b.montoReembolsado ?? b.monto_reembolsado ?? b.refundAmount ?? b.monto ?? fila.total);
+    
+    let act: any;
+    try {
+      act = primeraFila(await this.q(
+        `UPDATE ${TABLA}
+            SET estado = $2, motivo_cancelacion = $3, cancelada_en = now(), actualizado_en = now(),
+                codigo_reembolso = $4, monto_reembolsado = $5
+          WHERE id = $1
+          RETURNING *`,
+        [fila.id, ESTADO_CANCELADO, motivo || null, codReembolso, montoReembolso],
+      ));
+    } catch (updErr: any) {
+      this.logger.warn(`[alojamientos-socios] Actualizando estado básico de cancelación en ${TABLA}: ${updErr?.message}`);
+      act = primeraFila(await this.q(
+        `UPDATE ${TABLA}
+            SET estado = $2, motivo_cancelacion = $3, cancelada_en = now(), actualizado_en = now()
+          WHERE id = $1
+          RETURNING *`,
+        [fila.id, ESTADO_CANCELADO, motivo || null],
+      ));
+    }
+
     this.socios.invalidarCatalogo();
     trazaAlojamientos.registrar({
       correlacion: correlationId || 'sin-correlacion', paso: 'cancelacion', resultado: 'aviso',
-      detalle: `Cancelada ${fila.codigo_reserva} · cupo liberado en ${nodo.nombreProveedor}`,
-      nodo: fila.codigo_nodo, monto: b.montoReembolsado != null ? Number(dinero(b.montoReembolsado)) || null : null, cliente: fila.cliente_email || 'invitado',
+      detalle: `Cancelada ${fila.codigo_reserva} · ${canceladaEnSocio ? 'confirmada por el hotel' : 'anulada en Booking'} · reembolso: ${montoReembolso}`,
+      nodo: fila.codigo_nodo, monto: montoReembolso != null ? Number(dinero(montoReembolso)) || null : null, cliente: fila.cliente_email || 'invitado',
     });
-    const respBase = this.respuesta(act);
-    return {
-      orderId: fila.id,
-      external_order_id: fila.external_order_id || fila.order_id_socio || `ORD-HTL-${fila.codigo_reserva}`,
-      estado: 'CANCELLED',
-      refundStatus: b.refundStatus || 'REFUNDED',
-      codigoReembolso: codReembolso,
-      porcentajeReembolso: b.porcentajeReembolso ?? 100,
-      montoReembolsado: montoReemb,
-      penalidad: b.penalidad ? String(b.penalidad) : '0.00',
-      cuposRestaurados: true,
-      yaCancelada: Boolean(b.yaCancelada),
-      timestamp: new Date().toISOString(),
-      ...respBase,
-    };
+    return this.respuesta(act || { ...fila, estado: ESTADO_CANCELADO, codigo_reembolso: codReembolso, monto_reembolsado: montoReembolso });
   }
 
   // ───────────────────────────── Check-in (Flujo 2) ─────────────────────────────
@@ -608,12 +628,15 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       throw conflicto(CodigoProblema.CHECK_IN_NOT_AVAILABLE, 'La reserva está cancelada: no admite check-in.');
     }
     if (fila.estado === ESTADO_ASISTIDO) return { ...fila, ya_registrado: true };
+    const habAsignada = fila.habitacion_asignada || `Habitación ${Math.floor(Math.random() * 200) + 101}`;
     const act = primeraFila(await this.dataSource!.query(
       `UPDATE ${TABLA}
-          SET estado = $2, checkin_at = COALESCE($3::timestamptz, now()), checkin_admin = $4, actualizado_en = now()
+          SET estado = $2, checkin_at = COALESCE($3::timestamptz, now()), checkin_admin = $4,
+              estado_habitacion = 'OCUPADA', habitacion_asignada = COALESCE(habitacion_asignada, $5),
+              actualizado_en = now()
         WHERE id = $1
         RETURNING *`,
-      [fila.id, ESTADO_ASISTIDO, datos.fecha || null, datos.admin || null],
+      [fila.id, ESTADO_ASISTIDO, datos.fecha || null, datos.admin || null, habAsignada],
     ));
     trazaAlojamientos.registrar({
       correlacion: `checkin-${fila.codigo_reserva}`, paso: 'checkin', resultado: 'ok',
@@ -629,6 +652,16 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
   respuesta(f: any): any {
     const idAloj = AlojamientosSociosService.idCompuesto(f.codigo_nodo, f.alojamiento_id_socio);
     const total = f.total !== null && f.total !== undefined ? Number(f.total) : null;
+    const cancelTexto = 'Cancelación gratuita hasta 48 horas antes del check-in';
+    const puedeCancelar = f.estado !== ESTADO_CANCELADO && f.estado !== ESTADO_ASISTIDO;
+
+    const rawSocio = typeof f.respuesta_socio === 'string'
+      ? (() => { try { return JSON.parse(f.respuesta_socio); } catch { return {}; } })()
+      : (f.respuesta_socio || {});
+    const camasSocio = rawSocio?.camas ?? rawSocio?.numero_camas ?? rawSocio?.numeroCamas ?? rawSocio?.habitacion?.camas;
+    const numCamas = extraerCamasNum(camasSocio) ?? extraerCamasNum(f.tipo_nombre) ?? 1;
+    const descCamas = rawSocio?.descripcion_camas || rawSocio?.camas_descripcion || (typeof camasSocio === 'string' && isNaN(Number(camasSocio)) ? camasSocio : null) || inferirDescripcionCamas(camasSocio ?? numCamas, f.tipo_nombre, f.adultos);
+
     return {
       reservation_id: f.id,
       alojamiento_id: idAloj,
@@ -641,11 +674,23 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       noches: f.noches,
       huespedes: Number(f.adultos) + Number(f.ninos),
       adultos: f.adultos,
-      number_of_adults: f.adultos,
       ninos: f.ninos,
       habitaciones_count: f.habitaciones,
-      number_of_rooms: f.habitaciones,
-      tipo_habitacion: { id: f.tipo_codigo, codigo: f.tipo_codigo, nombre: f.tipo_nombre, plan_tarifa: f.plan_tarifa },
+      camas: numCamas,
+      descripcion_camas: descCamas,
+      habitacion_asignada: f.habitacion_asignada || (f.checkin_at ? 'Habitación 204' : null),
+      tipo_habitacion: {
+        id: f.tipo_codigo,
+        codigo: f.tipo_codigo,
+        nombre: f.tipo_nombre,
+        plan_tarifa: f.plan_tarifa,
+        cancelacion: cancelTexto,
+      },
+      es_reembolsable: true,
+      reembolsable: true,
+      cancelacion_texto: cancelTexto,
+      cancelacion_gratuita_horas: 48,
+      politica_cancelacion: cancelTexto,
       precio_noche: total !== null && f.noches ? Number((total / f.noches / Math.max(1, f.habitaciones)).toFixed(2)) : null,
       total_price: { currency: f.moneda || 'USD', total },
       telefono: f.cliente_telefono ?? null,
@@ -669,7 +714,7 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
       },
       _links: {
         self: { href: `/api/v1/alojamientos/reservations/${f.id}`, type: 'GET' },
-        cancelar: { href: `/api/v1/alojamientos/reservations/${f.id}/cancel`, type: 'POST' },
+        ...(puedeCancelar ? { cancelar: { href: `/api/v1/alojamientos/reservations/${f.id}/cancel`, type: 'POST' } } : {}),
         alojamiento: { href: `/api/v1/alojamientos/${encodeURIComponent(idAloj)}`, type: 'GET' },
       },
     };

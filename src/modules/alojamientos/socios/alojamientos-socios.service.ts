@@ -212,59 +212,6 @@ export function normalizarRegimen(reg?: string | null): string {
 
 const desempacar = (b: any) => (b && typeof b === 'object' && b.data && !Array.isArray(b.data) ? b.data : b);
 
-/** Parsea y normaliza información de camas (números, strings, listas o estructuras anidadas). */
-export function formatearCamas(c: unknown): { camas: number; descripcion: string | null } {
-  if (c === undefined || c === null || c === '') return { camas: 1, descripcion: null };
-  if (typeof c === 'number' && Number.isFinite(c)) {
-    const n = Math.max(1, Math.round(c));
-    return { camas: n, descripcion: `${n} ${n === 1 ? 'cama' : 'camas'}` };
-  }
-  if (typeof c === 'string') {
-    const s = c.trim();
-    if (!s) return { camas: 1, descripcion: null };
-    const numeros = s.match(/\d+/g);
-    let total = 1;
-    if (numeros) {
-      const sum = numeros.reduce((acc, val) => acc + parseInt(val, 10), 0);
-      if (sum > 0) total = sum;
-    }
-    return { camas: total, descripcion: s };
-  }
-  if (Array.isArray(c)) {
-    if (c.length === 0) return { camas: 1, descripcion: null };
-    const parts: string[] = [];
-    let total = 0;
-    for (const item of c) {
-      if (typeof item === 'string') {
-        const itemTrim = item.trim();
-        if (itemTrim) {
-          parts.push(itemTrim);
-          const nums = itemTrim.match(/\d+/g);
-          if (nums) {
-            total += nums.reduce((acc, val) => acc + parseInt(val, 10), 0);
-          } else {
-            total += 1;
-          }
-        }
-      } else if (item && typeof item === 'object') {
-        const cant = Number((item as any).cantidad ?? (item as any).count ?? (item as any).numero ?? 1) || 1;
-        const tipo = String((item as any).tipo ?? (item as any).type ?? (item as any).nombre ?? 'cama');
-        total += cant;
-        parts.push(`${cant} ${tipo}`);
-      }
-    }
-    const desc = parts.length > 0 ? parts.join(' + ') : null;
-    return { camas: Math.max(1, total), descripcion: desc };
-  }
-  if (typeof c === 'object') {
-    const obj = c as any;
-    if (obj.descripcion || obj.texto || obj.detalle || obj.nombre) {
-      return formatearCamas(obj.descripcion || obj.texto || obj.detalle || obj.nombre);
-    }
-  }
-  return { camas: 1, descripcion: null };
-}
-
 @Injectable()
 export class AlojamientosSociosService {
   private readonly logger = new Logger(AlojamientosSociosService.name);
@@ -569,47 +516,34 @@ export class AlojamientosSociosService {
 
   /** Alojamiento del socio → mismo formato que `transformAlojamiento` de Booking. */
   aHotelBooking(nodo: ConfigProveedor, h: any, tiposHabitacion?: any[]): any {
-    const rawId = h.id ?? h.alojamientoId ?? h.idAlojamiento ?? h.hotelId;
-    const id = AlojamientosSociosService.idCompuesto(nodo.codigoNodo, String(rawId));
+    const id = AlojamientosSociosService.idCompuesto(nodo.codigoNodo, String(h.id));
     const fotos: any[] = h.photos || h.fotos || h.galeriaFotos || (h.imagenUrl ? [h.imagenUrl] : []);
     const photos = fotos
-      .map((f: any) => (typeof f === 'string' ? { url: f, caption: h.nombre || h.alojamientoNombre } : f?.url ? { url: f.url, caption: f.caption || h.nombre || h.alojamientoNombre } : null))
+      .map((f: any) => (typeof f === 'string' ? { url: f, caption: h.nombre } : f?.url ? { url: f.url, caption: f.caption || h.nombre } : null))
       .filter(Boolean);
     const amenidades: string[] = Array.isArray(h.amenidades) ? h.amenidades : [];
     const gps = h.coordenadasGps || h.coordenadas || {};
     const score = num(h.scoreCalificacion ?? h.calificacion ?? h.ratings?.score);
-    const politica = h.politicaCancelacion || h.politicas?.cancelacion || h.politica_cancelacion;
-    const polDesc = typeof politica === 'string' ? politica : (politica?.descripcion || null);
-    const esReem = typeof politica === 'object' && politica !== null ? (politica.es_reembolsable ?? (politica.cancelacionGratuitaHoras !== null && politica.cancelacionGratuitaHoras !== undefined ? true : null)) : null;
-    const horasCancel = typeof politica === 'object' && politica !== null ? num(politica.cancelacionGratuitaHoras ?? politica.horas_antes ?? politica.horas) : null;
-
-    // Si el socio no envió precio en la raíz, inferir el precio base de la habitación más económica
-    const preciosTipos = Array.isArray(tiposHabitacion)
-      ? tiposHabitacion.map((t: any) => money(t.precio_noche ?? t.precioBaseNoche)).filter((p): p is number => p !== null && p > 0)
-      : [];
-    const minPrecioTipo = preciosTipos.length > 0 ? Math.min(...preciosTipos) : null;
-    const precioPorNoche = money(h.precioPorNoche ?? h.precioDesde ?? h.precio ?? minPrecioTipo) ?? 0;
-
+    const politica = h.politicaCancelacion || h.politicas?.cancelacion;
+    const polDesc = typeof politica === 'string' ? politica : (politica?.descripcion || h.politicas?.cancelacion || 'Cancelación gratuita hasta 48 horas antes del check-in');
+    const esReem = politica?.esReembolsable !== undefined ? Boolean(politica.esReembolsable) : true;
+    const horasCancel = num(politica?.horasLimiteCancelacion ?? h.politicas?.cancelacion_horas) ?? 48;
     return {
       id,
-      nombre: h.nombre || h.name || h.alojamientoNombre || h.hotelNombre || 'Alojamiento',
+      nombre: h.nombre || h.name || 'Alojamiento',
       descripcion: h.descripcion ?? null,
       tipo_propiedad: h.tipoPropiedad || 'HOTEL',
       tipo_alojamiento: h.tipoPropiedad || null,
       destino: h.destino || h.ciudad || h.ubicacion?.ciudad || '',
-      precioPorNoche,
+      precioPorNoche: money(h.precioPorNoche ?? h.precioDesde ?? h.precio) ?? 0,
       moneda: h.moneda || h.currency || 'USD',
-      capacidadAdultos: num(h.capacidadAdultos ?? h.capacidad_adultos) ?? 2,
-      capacidadNinos: num(h.capacidadNinos ?? h.capacidad_ninos) ?? 0,
-      habitaciones: num(h.habitaciones ?? h.habitacionesTotales) ?? 1,
-      ...(() => {
-        const bedData = formatearCamas(h.descripcionCamas ?? h.descripcion_camas ?? h.distribucionCamas ?? h.distribucion_camas ?? h.camas ?? h.beds);
-        return {
-          camas: bedData.camas,
-          descripcion_camas: bedData.descripcion,
-        };
-      })(),
-      banos: num(h.banos) ?? 1,
+      capacidadAdultos: num(h.capacidadAdultos) ?? 2,
+      capacidadNinos: num(h.capacidadNinos) ?? 0,
+      habitaciones: num(h.habitaciones) ?? (tiposHabitacion?.length ? tiposHabitacion.reduce((acc: number, t: any) => acc + (t.cantidad || 1), 0) : 1),
+      camas: extraerCamasNum(h.camas ?? h.numero_camas ?? h.numeroCamas ?? h.cantidad_camas) ?? (tiposHabitacion?.[0]?.camas ?? 1),
+      descripcion_camas: inferirDescripcionCamas(h.camas ?? h.numero_camas ?? h.numeroCamas ?? h.cantidad_camas ?? tiposHabitacion?.[0]?.descripcion_camas, h.nombre, num(h.capacidadAdultos) ?? 2),
+      banos: extraerBanosNum(h.banos ?? h.numeroBanos ?? h.numero_banos ?? h.cantidadBanos ?? h.cantidad_banos ?? h.bathrooms ?? h.baths ?? tiposHabitacion?.[0]?.banos)
+        ?? (amenidades.some((a) => /baño|bano|bath/i.test(a)) ? 1 : 1),
       tienePiscina: Boolean(h.tienePiscina) || amenidades.some((a) => /piscina|pool/i.test(a)),
       estrellas: num(h.estrellas),
       host: { id: nodo.codigoNodo, nombre: nodo.nombreProveedor },
@@ -770,32 +704,26 @@ export class AlojamientosSociosService {
         const horas = num(pol?.horasLimiteCancelacion);
         const descPol = pol?.descripcion || (esReembolsable === false ? 'No reembolsable' : (horas !== null ? `Cancelación gratuita hasta ${horas} horas antes` : null));
         const codigo = String(t.codigo || t.id);
-        const bedData = formatearCamas(
-          t.descripcionCamas ??
-          t.descripcion_camas ??
-          t.distribucionCamas ??
-          t.distribucion_camas ??
-          t.camas ??
-          t.beds ??
-          t.tipoCama ??
-          t.tipo_cama ??
-          t.configuracionCamas
-        );
+        const rawCamas = t.camas ?? t.numero_camas ?? t.numeroCamas ?? t.cantidad_camas;
+        const numCamas = extraerCamasNum(rawCamas) ?? 1;
+        const descCamas = inferirDescripcionCamas(rawCamas ?? t.descripcionCamas ?? t.descripcion_camas, t.nombre, num(t.capacidadAdultos) ?? 2);
+        const rawBanos = t.banos ?? t.numeroBanos ?? t.numero_banos ?? t.cantidadBanos ?? t.bathrooms ?? t.baths;
+        const numBanos = extraerBanosNum(rawBanos) ?? (Array.isArray(t.amenidades) && t.amenidades.some((a: string) => /baño|bano|bath/i.test(a)) ? 1 : 1);
         return {
           id: codigo,
           codigo,
           nombre: t.nombre || codigo,
           descripcion: t.descripcion ?? null,
-          capacidad_adultos: num(t.capacidadAdultos ?? t.capacidad_adultos) ?? 2,
-          capacidad_ninos: num(t.capacidadNinos ?? t.capacidad_ninos) ?? 0,
-          camas: bedData.camas,
-          descripcion_camas: bedData.descripcion,
-          tamano_m2: num(t.tamanoM2 ?? t.tamano_m2),
+          capacidad_adultos: num(t.capacidadAdultos) ?? 2,
+          capacidad_ninos: num(t.capacidadNinos) ?? 0,
+          camas: numCamas,
+          descripcion_camas: descCamas,
+          banos: numBanos,
+          tamano_m2: num(t.tamanoM2 ?? t.metrosCuadrados),
           precio_noche: money(t.precioBaseNoche ?? t.precioPorNoche ?? plan?.precioBaseNoche) ?? 0,
-          cantidad: num(t.habitacionesTotales ?? t.total_rooms ?? t.totalHabitaciones ?? t.cantidad ?? t.cantidadDisponible) ?? 0,
-          disponibles: num(t.habitacionesDisponibles ?? t.disponibles ?? t.remanentes ?? t.available_rooms ?? t.cantidadDisponible) ?? 1,
-          regimen: plan?.regimen || t.regimen || null,
-          regimen_texto: plan?.regimen || t.regimen || null,
+          cantidad: num(t.habitacionesTotales ?? t.cantidad ?? t.cantidadDisponible) ?? 0,
+          regimen: normalizarRegimen(plan?.regimen || t.regimen),
+          regimen_texto: normalizarRegimen(plan?.regimen || t.regimen),
           cancelacion_gratuita_horas: horas,
           cancelacion_texto: descPol,
           reembolsable: esReembolsable,
@@ -836,63 +764,43 @@ export class AlojamientosSociosService {
     const b = r.status === 200 ? desempacar(r.body) : null;
     // El contrato v2.2.0 (Posada) devuelve `opciones`. Otros socios exponen la
     // disponibilidad como `tipos`/`habitaciones` (p. ej. Hábitat): se aceptan ambos.
-    const listaDisp = b?.opciones || b?.options || b?.tipos || b?.habitaciones;
+    const listaDisp = Array.isArray(b) ? b : (b?.opciones || b?.options || b?.tipos || b?.habitaciones || b?.disponibilidad || b?.rooms || b?.data);
     const lista: any[] = (Array.isArray(listaDisp) && listaDisp.length > 0)
       ? listaDisp
       : (tipos.length > 0 ? tipos : []);
     const opciones: OpcionSocio[] = lista
-      .filter((o) => o && (o.tipoHabitacionCodigo || o.codigo || o.id))
+      .filter((o) => o && (o.tipoHabitacionCodigo || o.codigo || o.id || o.tipo_habitacion || o.tipoHabitacion || o.room_type || o.tipo))
       .map((o) => {
-        const codigo = String(o.tipoHabitacionCodigo || o.codigo || o.id);
+        const codigo = String(o.tipoHabitacionCodigo || o.codigo || o.id || o.tipo_habitacion || o.tipoHabitacion || o.room_type || o.tipo);
         const plan = o.planTarifaCodigo ? String(o.planTarifaCodigo) : null;
         const t = porCodigo.get(codigo);
-        const remanentes = num(
-          o.habitacionesRemanentes ??
-          o.habitacionesDisponibles ??
-          o.stockDisponible ??
-          o.disponibles ??
-          o.cantidadDisponible ??
-          o.available_rooms ??
-          o.stock ??
-          t?.disponibles ??
-          t?.cantidad
-        ) ?? (o.disponible === true || o.estaDisponible === true ? 1 : (t?.disponibles ?? 0));
-        const totalHabs = num(
-          o.habitacionesTotales ??
-          o.totalHabitaciones ??
-          o.total_rooms ??
-          o.total ??
-          t?.cantidad
-        ) ?? remanentes;
-        const bedRaw =
-          o.descripcionCamas ??
-          o.descripcion_camas ??
-          o.distribucionCamas ??
-          o.distribucion_camas ??
-          o.camas ??
-          o.beds ??
-          t?.descripcion_camas ??
-          t?.camas;
-        const bedInfo = formatearCamas(bedRaw);
-        const tamM2 = num(o.tamanoM2 ?? o.tamano_m2) ?? t?.tamano_m2 ?? null;
+        const remanentes = num(o.habitacionesRemanentes ?? o.available_rooms ?? o.available_units ?? o.cupo ?? o.cupos ?? o.unidadesDisponibles ?? o.stockDisponible ?? t?.cantidad) ?? (o.disponible === true || o.estaDisponible === true ? 1 : 0);
+        const rawCamas = o.camas ?? o.numero_camas ?? o.numeroCamas ?? o.cantidad_camas;
+        const numCamas = t?.camas ?? extraerCamasNum(rawCamas) ?? 1;
+        const descCamas = t?.descripcion_camas ?? inferirDescripcionCamas(rawCamas, o.nombre ?? t?.nombre, o.capacidadAdultos ?? t?.capacidad_adultos);
         return {
           productId: plan ? `${codigo}@${plan}` : codigo,
           codigo,
           plan,
           nombre: o.nombre || t?.nombre || codigo,
           remanentes,
-          disponible: o.estaDisponible ?? o.disponible ?? (remanentes > 0),
+          disponible: o.estaDisponible ?? o.disponible ?? remanentes > 0,
           precioNoche: money(o.precioNoche ?? o.precio_noche ?? o.precioBaseNoche) ?? t?.precio_noche ?? null,
           precioTotal: money(o.precioTotalEstancia ?? o.precioTotal),
-          regimen: o.regimen || t?.regimen || null,
-          capacidadAdultos: num(o.capacidadAdultos ?? o.capacidad_adultos) ?? t?.capacidad_adultos ?? null,
-          capacidadNinos: num(o.capacidadNinos ?? o.capacidad_ninos) ?? t?.capacidad_ninos ?? null,
-          totalHabitaciones: totalHabs,
+          regimen: normalizarRegimen(o.regimen || t?.regimen),
+          capacidadAdultos: t?.capacidad_adultos ?? num(o.capacidadAdultos) ?? null,
+          capacidadNinos: t?.capacidad_ninos ?? num(o.capacidadNinos) ?? null,
+          totalHabitaciones: t?.cantidad ?? num(o.total_rooms ?? o.totalHabitaciones) ?? null,
           cancelacionHoras: t?.cancelacion_gratuita_horas ?? null,
-          reembolsable: t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null,
-          camas: bedInfo.camas,
-          descripcionCamas: bedInfo.descripcion,
-          tamanoM2: tamM2,
+          cancelacionTexto: t?.cancelacion_texto ?? null,
+          reembolsable: t?.reembolsable !== undefined && t?.reembolsable !== null
+            ? t.reembolsable
+            : (t?.cancelacion_gratuita_horas !== null && t?.cancelacion_gratuita_horas !== undefined ? true : null),
+          camas: numCamas,
+          descripcionCamas: descCamas,
+          tamanoM2: t?.tamano_m2 ?? num(o.tamanoM2 ?? o.metrosCuadrados),
+          amenidades: t?.amenidades ?? [],
+          descripcion: t?.descripcion ?? null,
         };
       });
     this.aplicarStockGrpc(sep.nodo, sep.id, checkin, opciones);
@@ -957,9 +865,6 @@ export class AlojamientosSociosService {
         total_rooms: total,
         reserved_rooms: Math.max(0, total - o.remanentes),
         available_rooms: o.remanentes,
-        camas: o.camas ?? 1,
-        descripcion_camas: o.descripcionCamas ?? null,
-        tamano_m2: o.tamanoM2 ?? null,
       };
     });
     const libres = tipos.reduce((s, t) => s + t.available_rooms, 0);
@@ -1017,9 +922,9 @@ export class AlojamientosSociosService {
           available_rooms: o.remanentes,
           capacidad: { adultos: o.capacidadAdultos ?? 2, ninos: o.capacidadNinos ?? 0 },
           camas: o.camas ?? 1,
-          descripcion_camas: o.descripcionCamas ?? null,
+          descripcion_camas: o.descripcionCamas ?? (o.camas === 1 ? '1 cama' : `${o.camas ?? 1} camas`),
           tamano_m2: o.tamanoM2 ?? null,
-          amenidades: [],
+          amenidades: o.amenidades ?? [],
           photos: [],
         };
       });
