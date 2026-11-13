@@ -498,9 +498,9 @@ export function AutoDetail() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                
+
                 {/* Opción 1: Protección Básica */}
-                <div 
+                <div
                   onClick={() => setTipoCobertura('BASICA')}
                   style={{
                     border: tipoCobertura === 'BASICA' ? '2px solid #006ce4' : '1px solid #ddd',
@@ -516,11 +516,11 @@ export function AutoDetail() {
                     <div style={{ fontWeight: 700, fontSize: '1rem', color: '#333' }}>
                       Protección Básica
                     </div>
-                    <input 
-                      type="radio" 
-                      name="cobertura" 
-                      checked={tipoCobertura === 'BASICA'} 
-                      onChange={() => setTipoCobertura('BASICA')} 
+                    <input
+                      type="radio"
+                      name="cobertura"
+                      checked={tipoCobertura === 'BASICA'}
+                      onChange={() => setTipoCobertura('BASICA')}
                       style={{ accentColor: '#006ce4', width: '18px', height: '18px', cursor: 'pointer' }}
                     />
                   </div>
@@ -536,7 +536,7 @@ export function AutoDetail() {
                 </div>
 
                 {/* Opción 2: Cobertura Total / Protección Premium */}
-                <div 
+                <div
                   onClick={() => setTipoCobertura('TOTAL')}
                   style={{
                     border: tipoCobertura === 'TOTAL' ? '2px solid #008009' : '1px solid #ddd',
@@ -552,11 +552,11 @@ export function AutoDetail() {
                     <div style={{ fontWeight: 700, fontSize: '1rem', color: '#008009', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>🛡️</span> Cobertura Total
                     </div>
-                    <input 
-                      type="radio" 
-                      name="cobertura" 
-                      checked={tipoCobertura === 'TOTAL'} 
-                      onChange={() => setTipoCobertura('TOTAL')} 
+                    <input
+                      type="radio"
+                      name="cobertura"
+                      checked={tipoCobertura === 'TOTAL'}
+                      onChange={() => setTipoCobertura('TOTAL')}
                       style={{ accentColor: '#008009', width: '18px', height: '18px', cursor: 'pointer' }}
                     />
                   </div>
@@ -640,18 +640,18 @@ export function AutoDetail() {
 
             {/* Continuar button form */}
             <form onSubmit={handleBooking} style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-              <button 
-                type="submit" 
-                disabled={hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))} 
-                style={{ 
-                  background: (hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? '#9ca3af' : '#006ce4', 
-                  color: 'white', 
-                  border: 'none', 
-                  padding: '12px 24px', 
-                  fontSize: '1rem', 
-                  fontWeight: 'bold', 
-                  borderRadius: '4px', 
-                  cursor: (hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? 'not-allowed' : 'pointer' 
+              <button
+                type="submit"
+                disabled={hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))}
+                style={{
+                  background: (hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? '#9ca3af' : '#006ce4',
+                  color: 'white',
+                  border: 'none',
+                  padding: '12px 24px',
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  borderRadius: '4px',
+                  cursor: (hayConflictoFechas || auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? 'not-allowed' : 'pointer'
                 }}
               >
                 {!user ? 'Inicia sesión para continuar' : (hayConflictoFechas ? 'Fechas No Disponibles' : ((auto.unidades_disponibles === 0 || (auto.estado === 'RESERVADO' && (auto.unidades_disponibles === undefined || auto.unidades_disponibles <= 0))) ? 'Vehículo No Disponible' : 'Continuar a Pago'))}
@@ -707,16 +707,16 @@ export function AutoDetail() {
                   <label htmlFor="auto-dias" style={{ fontSize: '0.9rem', color: '#666' }}>Días de renta:</label>
                   <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>Máx 30 días</span>
                 </div>
-                <input 
-                  id="auto-dias" 
-                  type="text" 
+                <input
+                  id="auto-dias"
+                  type="text"
                   inputMode="numeric"
-                  maxLength={2} 
-                  value={dias} 
-                  onChange={handleDiasChange} 
-                  onKeyDown={handleNumberKeyDown} 
+                  maxLength={2}
+                  value={dias}
+                  onChange={handleDiasChange}
+                  onKeyDown={handleNumberKeyDown}
                   aria-invalid={!!diasError}
-                  style={{ width: '100%', padding: '8px', border: diasError ? '2px solid #d93025' : '1px solid #ccc', borderRadius: '4px' }} 
+                  style={{ width: '100%', padding: '8px', border: diasError ? '2px solid #d93025' : '1px solid #ccc', borderRadius: '4px' }}
                 />
                 {diasError && <span role="alert" style={{ fontSize: '0.78rem', color: '#d93025', display: 'block', marginTop: '4px', fontWeight: 600 }}>{diasError}</span>}
               </div>
@@ -725,16 +725,16 @@ export function AutoDetail() {
                   <label htmlFor="auto-edad" style={{ fontSize: '0.9rem', color: '#666' }}>Edad del conductor:</label>
                   <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>18 - 99 años</span>
                 </div>
-                <input 
-                  id="auto-edad" 
-                  type="text" 
+                <input
+                  id="auto-edad"
+                  type="text"
                   inputMode="numeric"
-                  maxLength={2} 
-                  value={driverAge} 
-                  onChange={handleAgeChange} 
-                  onKeyDown={handleNumberKeyDown} 
+                  maxLength={2}
+                  value={driverAge}
+                  onChange={handleAgeChange}
+                  onKeyDown={handleNumberKeyDown}
                   aria-invalid={!!driverAgeError}
-                  style={{ width: '100%', padding: '8px', border: driverAgeError ? '2px solid #d93025' : '1px solid #ccc', borderRadius: '4px' }} 
+                  style={{ width: '100%', padding: '8px', border: driverAgeError ? '2px solid #d93025' : '1px solid #ccc', borderRadius: '4px' }}
                 />
                 {driverAgeError && <span role="alert" style={{ fontSize: '0.78rem', color: '#d93025', display: 'block', marginTop: '4px', fontWeight: 600 }}>{driverAgeError}</span>}
               </div>
@@ -879,10 +879,10 @@ export function AutoDetail() {
               <div style={{ background: supplierInfo.bg, color: supplierInfo.color, padding: '4px 8px', borderRadius: '2px', fontWeight: 'bold', fontSize: '0.8rem' }}>{supplierInfo.label}</div>
               <span style={{ fontSize: '0.95rem' }}>Proveedor: <strong>{supplierInfo.label} By Europcar</strong></span>
             </div>
-            
+
             <h3 style={{ fontSize: '1rem', marginBottom: '5px' }}>Lugar de {instructionsType}</h3>
             <p style={{ fontSize: '0.9rem', color: '#333', marginBottom: '20px' }}>Aeropuerto Internacional Mariscal Sucre, Planta Baja, Tababela, Quito, Ecuador, 170907</p>
-            
+
             <h3 style={{ fontSize: '1rem', marginBottom: '5px' }}>Horario de apertura</h3>
             <p style={{ fontSize: '0.9rem', color: '#333', marginBottom: '20px' }}>Lun - Dom 00:00 - 23:59</p>
 
@@ -910,7 +910,7 @@ export function AutoDetail() {
               <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 'bold' }}>Información importante</h2>
               <button onClick={() => setShowImportantInfoModal(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#666' }}>&times;</button>
             </div>
-            
+
             <div style={{ padding: '30px' }}>
               <div style={{ display: 'flex', gap: '20px', marginBottom: '30px' }}>
                 <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>👤 Documentación necesaria</div>
@@ -923,27 +923,27 @@ export function AutoDetail() {
               </div>
 
               <div style={{ display: 'flex', gap: '20px', marginBottom: '30px', borderTop: '1px solid #e7e7e7', paddingTop: '20px' }}>
-                <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>💳 Depósito de seguridad<br/><span style={{ fontWeight: 'normal', fontSize: '0.85rem', color: '#666' }}>1750,00 US$</span></div>
+                <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>💳 Depósito de seguridad<br /><span style={{ fontWeight: 'normal', fontSize: '0.85rem', color: '#666' }}>1750,00 US$</span></div>
                 <div style={{ flex: 1, fontSize: '0.9rem', color: '#333' }}>
                   <p style={{ margin: '0 0 15px 0' }}>En el momento de la recogida, el conductor principal dejará un depósito de seguridad reembolsable de 1750,00 US$ en su tarjeta de crédito. No se acepta efectivo ni tarjetas de débito. El personal del mostrador confirmará cuánto será.</p>
                   <strong>Tarjetas aceptadas</strong>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px' }}>
-                     <span style={{ border: '1px solid #ccc', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>MasterCard</span>
-                     <span style={{ border: '1px solid #ccc', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold', color: '#1a1f71' }}>VISA</span>
-                     <span style={{ border: '1px solid #ccc', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold', color: '#006fcf' }}>AMEX</span>
+                    <span style={{ border: '1px solid #ccc', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold' }}>MasterCard</span>
+                    <span style={{ border: '1px solid #ccc', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold', color: '#1a1f71' }}>VISA</span>
+                    <span style={{ border: '1px solid #ccc', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold', color: '#006fcf' }}>AMEX</span>
                   </div>
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: '20px', marginBottom: '30px', borderTop: '1px solid #e7e7e7', paddingTop: '20px' }}>
-                <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>🚗 Franquicia por daños<br/><span style={{ fontWeight: 'normal', fontSize: '0.85rem', color: '#666' }}>2000,00 US$</span></div>
+                <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>🚗 Franquicia por daños<br /><span style={{ fontWeight: 'normal', fontSize: '0.85rem', color: '#666' }}>2000,00 US$</span></div>
                 <div style={{ flex: 1, fontSize: '0.9rem', color: '#333' }}>
                   Si se daña la carrocería del coche, lo máximo que pagarás por las reparaciones cubiertas por la cobertura parcial por colisión es la franquicia por daños (2000,00 US$). La cobertura solo será válida si se cumplen las condiciones del contrato de alquiler.
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: '20px', marginBottom: '30px', borderTop: '1px solid #e7e7e7', paddingTop: '20px' }}>
-                <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>🛣️ Kilometraje<br/><span style={{ fontWeight: 'normal', fontSize: '0.85rem', color: '#666' }}>Ilimitado</span></div>
+                <div style={{ width: '150px', fontWeight: 'bold', fontSize: '0.95rem' }}>🛣️ Kilometraje<br /><span style={{ fontWeight: 'normal', fontSize: '0.85rem', color: '#666' }}>Ilimitado</span></div>
                 <div style={{ flex: 1, fontSize: '0.9rem', color: '#333' }}>
                   El alquiler incluye kilómetro sin límites gratis.
                 </div>
@@ -955,12 +955,12 @@ export function AutoDetail() {
                   Esta compañía de alquiler no permite los viajes transfronterizos.
                 </div>
               </div>
-              
+
               <div style={{ borderTop: '1px solid #e7e7e7', paddingTop: '20px', fontSize: '0.85rem', color: '#666', lineHeight: '1.5' }}>
                 Aquí abajo puedes consultar los términos y condiciones completos del Proveedor de servicios, que incluyen el nombre completo y el domicilio social del Proveedor de servicios, así como información y cargos de los productos y servicios extra que se pueden adquirir en el mostrador o derivados del uso que hagas del alquiler, como el cruce de fronteras y, si los hubiera, los periodos de gracia de recogida y devolución.
               </div>
             </div>
-            
+
             <div style={{ borderTop: '1px solid #e7e7e7', padding: '20px 30px', background: '#f9f9f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontWeight: 'bold' }}>
               <span>Términos completos del alquiler</span>
               <span style={{ fontSize: '1.2rem' }}>⌄</span>
@@ -968,12 +968,12 @@ export function AutoDetail() {
           </div>
         </div>
       )}
-      <ReportModal 
-        isOpen={showReportModal} 
-        onClose={() => setShowReportModal(false)} 
-        entityName={`${make} ${model} (${supplierInfo.label})`} 
-        pnrOrId={auto?.id || 'AUTO'} 
-        type="Auto" 
+      <ReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        entityName={`${make} ${model} (${supplierInfo.label})`}
+        pnrOrId={auto?.id || 'AUTO'}
+        type="Auto"
       />
       <AutoVoucherModal
         isOpen={showVoucherModal}

@@ -63,14 +63,14 @@ export class AtraccionesService implements OnModuleInit {
   async onModuleInit() {
     try {
       await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN turno_id DROP NOT NULL`);
-    } catch (_) {}
+    } catch (_) { }
     try {
       await this.dataSource.query(`ALTER TABLE schema_atracciones.atracciones_reservas ALTER COLUMN cliente_id DROP NOT NULL`);
-    } catch (_) {}
+    } catch (_) { }
 
     // Sincronización inicial en segundo plano para poblar fotos de socios al arrancar
     setTimeout(() => {
-      this.syncAllCatalogs(true).catch(() => {});
+      this.syncAllCatalogs(true).catch(() => { });
     }, 2000);
   }
 
@@ -527,7 +527,7 @@ export class AtraccionesService implements OnModuleInit {
               if (detailRes.data?.photos && Array.isArray(detailRes.data.photos) && detailRes.data.photos.length > 0) {
                 item.photos = detailRes.data.photos;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
           await this.upsertPartnerAttraction(item, 'NODE_ATR_MOLINA');
         }),
@@ -644,7 +644,7 @@ export class AtraccionesService implements OnModuleInit {
             this.logger.log(`[Cross-Platform Ariel] Cliente ya existía en Ariel por cédula: ${JSON.stringify(checkRes.data)}`);
             return checkRes.data;
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // 2. Consultar por email si no se encontró por identificación
@@ -663,7 +663,7 @@ export class AtraccionesService implements OnModuleInit {
             this.logger.log(`[Cross-Platform Ariel] Cliente ya existía en Ariel por email: ${JSON.stringify(checkEmailRes.data)}`);
             return checkEmailRes.data;
           }
-        } catch (_) {}
+        } catch (_) { }
       }
     } catch (e: any) {
       this.logger.debug(`[Cross-Platform Ariel] Error consultando cliente previo: ${e.message}`);
@@ -717,7 +717,7 @@ export class AtraccionesService implements OnModuleInit {
           this.logger.log(`[Cross-Platform Dilan] Turista ya registrado en Descubre EC: ${JSON.stringify(checkRes.data)}`);
           return checkRes.data;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Si no existe, crearlo en Dilan
@@ -768,7 +768,7 @@ export class AtraccionesService implements OnModuleInit {
           this.logger.log(`[Cross-Platform Michael] Cliente ya registrado en TourGirls: ${JSON.stringify(checkRes.data)}`);
           return checkRes.data;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Si no existe, crearlo en Michael
@@ -819,7 +819,7 @@ export class AtraccionesService implements OnModuleInit {
           this.logger.log(`[Cross-Platform Alisson] Cliente ya registrado en Alisson: ${JSON.stringify(checkRes.data)}`);
           return checkRes.data;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Si no existe, crearlo en Alisson
@@ -876,7 +876,7 @@ export class AtraccionesService implements OnModuleInit {
                 data.client_id || data.id || `GLORIA-${customer.identificacion}`,
                 JSON.stringify({ alias_email: data.email || customer.email, identificacion: customer.identificacion, origen: 'GLORIA_EXISTENTE' }),
               ],
-            ).catch(() => {});
+            ).catch(() => { });
           }
           return {
             nombre: data.nombre || customer.nombre,
@@ -886,7 +886,7 @@ export class AtraccionesService implements OnModuleInit {
             client_id: data.client_id || data.id,
           };
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Si no se encontró por identificación, buscar por email
@@ -905,7 +905,7 @@ export class AtraccionesService implements OnModuleInit {
             client_id: data.client_id || data.id,
           };
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 3. Si no existe ni por identificación ni por email, crearlo en Gloria
@@ -1066,7 +1066,7 @@ export class AtraccionesService implements OnModuleInit {
             if (!rawItem.id) rawItem.id = id;
             await this.upsertPartnerAttraction(rawItem, partner.code);
           }
-        } catch (_) {}
+        } catch (_) { }
       });
 
       await Promise.allSettled(probePromises);
@@ -1079,7 +1079,7 @@ export class AtraccionesService implements OnModuleInit {
         'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=800&auto=format&fit=crop',
         'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop',
       ];
-      this.atraccionRepo.update(item.id, { fotosUrls: item.fotosUrls }).catch(() => {});
+      this.atraccionRepo.update(item.id, { fotosUrls: item.fotosUrls }).catch(() => { });
     }
 
     if (!item) {
@@ -1107,7 +1107,7 @@ export class AtraccionesService implements OnModuleInit {
             ratings: { score: 9.8, number_of_reviews: 142 },
           };
         }
-      } catch (e) {}
+      } catch (e) { }
       throw new HttpException('Atracción no encontrada', HttpStatus.NOT_FOUND);
     }
 
@@ -1140,7 +1140,7 @@ export class AtraccionesService implements OnModuleInit {
 
     let item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
     if (!item) {
-      await this.findOne(id).catch(() => {});
+      await this.findOne(id).catch(() => { });
       item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
     }
 
@@ -1572,7 +1572,7 @@ export class AtraccionesService implements OnModuleInit {
               if (inserted && inserted.length > 0) {
                 turnoId = inserted[0].id;
               }
-            } catch (_) {}
+            } catch (_) { }
 
             mappedSlots.push({
               id: turnoId,
@@ -1993,7 +1993,7 @@ export class AtraccionesService implements OnModuleInit {
           [id, dateStr, timeFormatted, totalTickets],
         );
         if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
-      } catch (_) {}
+      } catch (_) { }
 
       const voucherQr = michaelRes?.voucher_qr_payload || `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><rect width="220" height="220" fill="%23ffffff"/><text x="20" y="35" font-family="sans-serif" font-size="12" fill="%23003580" font-weight="bold">TOURGIRLS VOUCHER</text><text x="20" y="70" font-family="sans-serif" font-size="16" font-weight="bold" fill="%23000000">${reservationCode}</text><text x="20" y="105" font-family="sans-serif" font-size="12" fill="%23333333">Titular: ${clientName}</text><text x="20" y="130" font-family="sans-serif" font-size="12" fill="%23555555">Fecha: ${dateStr} | ${timeFormatted}</text><text x="20" y="155" font-family="sans-serif" font-size="12" fill="%23555555">Tickets: ${totalTickets} personas</text><text x="20" y="190" font-family="sans-serif" font-size="14" font-weight="bold" fill="%2328a745">✔ VOUCHER VALIDO</text></svg>`;
 
@@ -2175,19 +2175,19 @@ export class AtraccionesService implements OnModuleInit {
           [id, dateStr, timeFormatted, totalTickets],
         );
         if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
-      } catch (_) {}
+      } catch (_) { }
 
       if (!localTurnoId) {
         try {
           const anyTurno = await this.dataSource.query(`SELECT id FROM schema_atracciones.atracciones_turnos_aforo WHERE atraccion_id = $1 LIMIT 1`, [id]);
           if (anyTurno && anyTurno.length > 0) localTurnoId = anyTurno[0].id;
-        } catch (_) {}
+        } catch (_) { }
       }
       if (!localTurnoId) {
         try {
           const anyGlobalTurno = await this.dataSource.query(`SELECT id FROM schema_atracciones.atracciones_turnos_aforo LIMIT 1`);
           if (anyGlobalTurno && anyGlobalTurno.length > 0) localTurnoId = anyGlobalTurno[0].id;
-        } catch (_) {}
+        } catch (_) { }
       }
 
       const voucherQr = `${alissonRes?.voucher_qr_payload || ''} ${alissonRes?.reservation_id || ''} ${reservationCode}`;
@@ -2461,7 +2461,7 @@ export class AtraccionesService implements OnModuleInit {
           [id, dateStr, timeClean, totalTickets],
         );
         if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
-      } catch (_) {}
+      } catch (_) { }
 
       const voucherQr = `DESCUBRE-EC-${reservationCode}-${id}-${dateStr}`;
 
@@ -2597,7 +2597,7 @@ export class AtraccionesService implements OnModuleInit {
           [id, dateStr, timeFormatted, totalTickets],
         );
         if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
-      } catch (_) {}
+      } catch (_) { }
 
       const voucherQr = dilanRes?.voucher_qr_payload || `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><rect width="220" height="220" fill="%23ffffff"/><text x="20" y="35" font-family="sans-serif" font-size="12" fill="%23003580" font-weight="bold">DESCUBRE EC VOUCHER</text><text x="20" y="70" font-family="sans-serif" font-size="16" font-weight="bold" fill="%23000000">${reservationCode}</text><text x="20" y="105" font-family="sans-serif" font-size="12" fill="%23333333">Titular: ${clientName}</text><text x="20" y="130" font-family="sans-serif" font-size="12" fill="%23555555">Fecha: ${dateStr} | ${timeFormatted}</text><text x="20" y="155" font-family="sans-serif" font-size="12" fill="%23555555">Tickets: ${totalTickets} personas</text><text x="20" y="190" font-family="sans-serif" font-size="14" font-weight="bold" fill="%2328a745">✔ VOUCHER VALIDO</text></svg>`;
 
@@ -2639,7 +2639,7 @@ export class AtraccionesService implements OnModuleInit {
         partner_response: dilanRes,
       };
     }
-    
+
     if (isArielAttr) {
       const dateStr = dto.date || dto.fecha || new Date().toISOString().split('T')[0];
       const timeRaw = (dto.time || dto.hora || '09:00').trim();
@@ -2744,7 +2744,7 @@ export class AtraccionesService implements OnModuleInit {
           [id, dateStr, time24, totalTickets],
         );
         if (tRows && tRows.length > 0) localTurnoId = tRows[0].id;
-      } catch (_) {}
+      } catch (_) { }
 
       const voucherQr = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><rect width="220" height="220" fill="%23ffffff"/><text x="20" y="35" font-family="sans-serif" font-size="12" fill="%23003580" font-weight="bold">BOOKING ATRACCIONES QR</text><text x="20" y="70" font-family="sans-serif" font-size="16" font-weight="bold" fill="%23000000">${reservationCode}</text><text x="20" y="105" font-family="sans-serif" font-size="12" fill="%23333333">Titular: ${dto.customer_name}</text><text x="20" y="130" font-family="sans-serif" font-size="12" fill="%23555555">Fecha: ${dateStr} | ${time24}</text><text x="20" y="155" font-family="sans-serif" font-size="12" fill="%23555555">Tickets: ${totalTickets} personas</text><text x="20" y="190" font-family="sans-serif" font-size="14" font-weight="bold" fill="%2328a745">✔ VOUCHER VALIDO</text></svg>`;
 
@@ -3108,7 +3108,7 @@ export class AtraccionesService implements OnModuleInit {
           [apiKey],
         );
         if (found && found.length > 0) isAuthorized = true;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     if (!isAuthorized) {
@@ -3133,8 +3133,8 @@ export class AtraccionesService implements OnModuleInit {
 
     if (!reserva) {
       const all = await this.reservaRepo.find();
-      reserva = all.find((r) => 
-        r.id === reservationId || 
+      reserva = all.find((r) =>
+        r.id === reservationId ||
         r.id.startsWith(reservationId) ||
         r.idempotencyKey === reservationId ||
         (reservationId.length === 10 && r.documentId === reservationId) ||
@@ -3191,7 +3191,7 @@ export class AtraccionesService implements OnModuleInit {
         aggregateId: reserva.id,
         payload: { reserva_id: reserva.id, documento: dto.documento_identidad, guia, checkin_at: checkinTime },
       });
-    } catch (e) {}
+    } catch (e) { }
 
     this.winstonLogger.logAudit('CHECKIN_ATRACCION_VALIDADO', {
       reserva_id: reservationId,
@@ -3230,8 +3230,8 @@ export class AtraccionesService implements OnModuleInit {
     let reserva = await this.reservaRepo.findOne({ where: { id: reservationId } });
     if (!reserva) {
       const all = await this.reservaRepo.find();
-      reserva = all.find((r) => 
-        r.id === reservationId || 
+      reserva = all.find((r) =>
+        r.id === reservationId ||
         r.id.startsWith(reservationId) ||
         r.idempotencyKey === reservationId ||
         r.cancelCode === reservationId ||
@@ -3344,7 +3344,7 @@ export class AtraccionesService implements OnModuleInit {
              WHERE atraccion_id = $2 AND fecha = $3 AND (hora_inicio = $4 OR hora_inicio LIKE $5)`,
             [reserva.ticketCount, reserva.atraccionId, reserva.date, rawTime, `${rawTime.split(' ')[0]}%`],
           );
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // Evento Outbox
@@ -3354,7 +3354,7 @@ export class AtraccionesService implements OnModuleInit {
           aggregateId: reserva.id,
           payload: { reserva_id: reserva.id, cancel_code: cancelCode, refund_amount: refundAmount },
         });
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Compensación Saga: Identificación unívoca del socio y notificación externa para liberar stock
@@ -3434,8 +3434,8 @@ export class AtraccionesService implements OnModuleInit {
           'Content-Type': 'application/json',
         };
         const qrMatch = (reserva?.voucherQrPayload || '').match(/ECT-[A-Z0-9]+/);
-        const targetArielId = (reservationId && reservationId.startsWith('ECT-')) 
-          ? reservationId 
+        const targetArielId = (reservationId && reservationId.startsWith('ECT-'))
+          ? reservationId
           : (reserva?.id && reserva.id.startsWith('ECT-') ? reserva.id : (partnerCancelId && partnerCancelId.startsWith('ECT-') ? partnerCancelId : (qrMatch ? qrMatch[0] : null)));
         if (targetArielId) {
           try {
@@ -3570,7 +3570,7 @@ export class AtraccionesService implements OnModuleInit {
               this.logger.log(`[Michael Cancel Fallback /reservas] Cancelada exitosamente en TourGirls (/reservas): ${mTarget}`);
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
     }
 
@@ -3772,9 +3772,9 @@ export class AtraccionesService implements OnModuleInit {
     // Se ejecuta en PARALELO para las reservas recientes (< 48h) pendientes de check-in
     // con timeout de 5000ms para soportar latencia real de Azure
     const now = Date.now();
-    const pendientesSync = reservas.filter(r => 
-      r.status !== 'CONFIRMADO_ASISTIDO' && 
-      r.status !== 'CHECKED_IN' && 
+    const pendientesSync = reservas.filter(r =>
+      r.status !== 'CONFIRMADO_ASISTIDO' &&
+      r.status !== 'CHECKED_IN' &&
       r.status !== 'CANCELLED' &&
       r.createdAt && (now - new Date(r.createdAt).getTime()) < 48 * 3600 * 1000
     ).slice(0, 4);
@@ -3808,7 +3808,7 @@ export class AtraccionesService implements OnModuleInit {
                 this.logger.log(`[Michael Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
                 return;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
 
           // 2. Atracciones Ecuador (Alisson - NODE_ATR_ALISSON)
@@ -3831,7 +3831,7 @@ export class AtraccionesService implements OnModuleInit {
                 this.logger.log(`[Alisson Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
                 return;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
 
           // 2. Descubre EC (Dilan)
@@ -3854,7 +3854,7 @@ export class AtraccionesService implements OnModuleInit {
                 this.logger.log(`[Dilan Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
                 return;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
 
           // 3. EcuaTravel (Ariel)
@@ -3873,9 +3873,9 @@ export class AtraccionesService implements OnModuleInit {
                 await this.reservaRepo.save(r);
                 this.logger.log(`[Ariel Live Sync] Reserva ${r.id} sincronizada a CONFIRMADO_ASISTIDO`);
               }
-            } catch (_) {}
+            } catch (_) { }
           }
-        } catch (_) {}
+        } catch (_) { }
       });
 
       await Promise.allSettled(syncPromises);
@@ -3890,7 +3890,7 @@ export class AtraccionesService implements OnModuleInit {
           const f = (a.fotosUrls && a.fotosUrls.length > 0) ? a.fotosUrls[0] : undefined;
           atraccionMap.set(a.id, { nombre: a.nombre, foto: f });
         });
-      } catch (_) {}
+      } catch (_) { }
     }
 
     return reservas.map((r) => {
@@ -3903,8 +3903,8 @@ export class AtraccionesService implements OnModuleInit {
     let reserva = await this.reservaRepo.findOne({ where: { id: reservationId } });
     if (!reserva) {
       const all = await this.reservaRepo.find();
-      reserva = all.find((r) => 
-        r.id === reservationId || 
+      reserva = all.find((r) =>
+        r.id === reservationId ||
         r.id.startsWith(reservationId) ||
         r.idempotencyKey === reservationId ||
         (r.voucherQrPayload && r.voucherQrPayload.includes(reservationId))
@@ -3919,7 +3919,7 @@ export class AtraccionesService implements OnModuleInit {
         atraccionNombre = at.nombre;
         atraccionFoto = (at.fotosUrls && at.fotosUrls.length > 0) ? at.fotosUrls[0] : '';
       }
-    } catch (_) {}
+    } catch (_) { }
     return this.formatReservaResponse(reserva, atraccionNombre, atraccionFoto);
   }
 
