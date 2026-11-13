@@ -416,13 +416,13 @@ export class ReservasService {
               `INSERT INTO schema_autos.autos_reservas 
                  (id, pnr, external_order_id, auto_id, fecha_recogida, fecha_devolucion, dias_renta, total, estado, idempotency_key, nombre_conductor, licencia_conducir, checkin_at, checkin_admin, created_at)
                VALUES 
-                 ($1, $1, $1, 'auto-flota-socio', NOW(), NOW() + INTERVAL '3 days', 3, 120.00, 'CONFIRMADO_ASISTIDO', 'CHK-' || $1, 'Conductor Principal', 'LIC-EC-1700000000', NOW(), $2, NOW())
+                 ($1, $1, $1, 'auto-flota-socio', NOW(), NOW() + INTERVAL '3 days', 3, 120.00, 'CONFIRMADO_ASISTIDO', 'CHK-' || $1, 'Conductor Principal', COALESCE($3, '1720375003'), NOW(), $2, NOW())
                ON CONFLICT (id) DO UPDATE SET 
                  estado = 'CONFIRMADO_ASISTIDO', 
                  checkin_at = NOW(), 
                  checkin_admin = COALESCE($2, schema_autos.autos_reservas.checkin_admin)
                RETURNING *`,
-              [targetId, adminId],
+              [targetId, adminId, docId || '1720375003'],
             );
             autFilas = extraerFilasUpdate(insRes);
           } catch (insErr: any) {
