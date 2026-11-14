@@ -687,8 +687,8 @@ export function MisReservasPage() {
         const respuestaAlojamientos = alojamientosRes.value;
         const listaAlojamientos = Array.isArray(respuestaAlojamientos) ? respuestaAlojamientos : (respuestaAlojamientos?.data || []);
         alojamientosApiItems = listaAlojamientos.map((al) => {
-          const checkinStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
-          const checkoutStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
+          const checkinStr = al.checkin ? safeFormatearFecha(al.checkin) : 'Por definir';
+          const checkoutStr = al.checkout ? safeFormatearFecha(al.checkout) : 'Por definir';
           const huespedesNum = Number(al.huespedes || al.personas || (al.adultos ? al.adultos + (al.ninos || 0) : null) || (al.number_of_adults ? al.number_of_adults + (al.number_of_children || 0) : null) || al.raw?.passengers?.length || 1);
           const habNum = Number(al.habitaciones_count || al.habitaciones || al.number_of_rooms || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
@@ -744,8 +744,8 @@ export function MisReservasPage() {
       const alojamientosLocales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]')
         .filter((al) => !correoSesion || (al.email || '').trim().toLowerCase() === correoSesion);
       const alojamientosLocalesFormatted = alojamientosLocales.map((al) => {
-        const checkinLocalStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
-        const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
+        const checkinLocalStr = al.checkin ? safeFormatearFecha(al.checkin) : 'Por definir';
+        const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : 'Por definir';
         const huespedesLocalNum = Number(al.huespedes || (al.adultos ? al.adultos + (al.ninos || 0) : null) || (al.number_of_adults ? al.number_of_adults + (al.number_of_children || 0) : null) || 1);
         const habLocalNum = Number(al.habitaciones || al.habitaciones_count || al.number_of_rooms || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());

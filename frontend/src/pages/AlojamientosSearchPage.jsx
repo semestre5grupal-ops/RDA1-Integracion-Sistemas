@@ -640,7 +640,7 @@ export function AlojamientosSearchPage() {
   ]);
 
   if (loading && properties.length === 0) {
-    return <AlojamientosLoadingView />;
+    return <AlojamientosLoadingView destino={destination} />;
   }
 
   return (

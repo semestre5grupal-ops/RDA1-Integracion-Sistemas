@@ -162,7 +162,7 @@ export function AtraccionesSearchPage() {
   const displayedItems = sortedItems.slice((page - 1) * limit, page * limit);
 
   if (loading && atracciones.length === 0) {
-    return <AtraccionesLoadingView titulo={`Buscando ofertas y experiencias en ${busqueda || 'Ecuador'}...`} />;
+    return <AtraccionesLoadingView titulo={busqueda ? `Buscando ofertas y experiencias en ${busqueda}...` : 'Buscando las mejores ofertas y experiencias...'} />;
   }
 
   return (

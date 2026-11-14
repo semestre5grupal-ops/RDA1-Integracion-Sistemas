@@ -37,7 +37,6 @@ import {
   TrainIcon,
   TravelProudIcon,
   GeniusGiftIcon,
-  SurveyAvatarIcon,
   CloseIcon,
   StarFilledIcon,
   StarIcon,
@@ -217,7 +216,6 @@ export function AlojamientoDetail() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
-  const [surveyResponse, setSurveyResponse] = useState('');
 
   // Booking Form State
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
@@ -427,27 +425,6 @@ export function AlojamientoDetail() {
   const facilitiesRef = useRef(null);
   const rulesRef = useRef(null);
   const surroundingsRef = useRef(null);
-  const reviewsRef = useRef(null);
-
-  // Reviews State
-  const [resenas, setResenas] = useState([]);
-  const [resenasScores, setResenasScores] = useState(null);
-  const [resenasLoading, setResenasLoading] = useState(false);
-
-
-  // Load Resenas
-  useEffect(() => {
-    if (!id) return;
-    setResenasLoading(true);
-    fetch(`${API_BASE}/alojamientos/${id}/resenas`)
-      .then((r) => r.json())
-      .then((data) => {
-        setResenas(data.resenas || []);
-        setResenasScores(data.scores || null);
-      })
-      .catch(() => {})
-      .finally(() => setResenasLoading(false));
-  }, [id]);
 
   // Load Alojamiento & Related Attractions
   useEffect(() => {
@@ -550,7 +527,6 @@ export function AlojamientoDetail() {
   const scoreNum = Number(alojamiento.ratings?.score);
   const tieneScore = Number.isFinite(scoreNum) && scoreNum > 0;
   const score = tieneScore ? scoreNum.toFixed(1) : null;
-  const reviewsCount = resenas.length || Number(alojamiento.ratings?.number_of_reviews) || 0;
 
   const availableRoomsCount = typeof cotizacion?.libres === 'number'
     ? cotizacion.libres
@@ -828,13 +804,6 @@ export function AlojamientoDetail() {
           >
             Ubicación y mapa
           </button>
-          <button
-            type="button"
-            className={`dt-nav-tab ${activeTab === 'reviews' ? 'active' : ''}`}
-            onClick={() => scrollToSection(reviewsRef, 'reviews')}
-          >
-            Comentarios ({resenas.length || reviewsCount})
-          </button>
         </nav>
       </div>
 
@@ -1003,7 +972,7 @@ export function AlojamientoDetail() {
                     {!tieneScore ? 'Nuevo' : scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Muy bueno' : 'Bueno'}
                   </span>
                   <span style={{ fontSize: '0.78rem', color: '#595959' }}>
-                    {reviewsCount > 0 ? `${reviewsCount} comentario${reviewsCount === 1 ? '' : 's'}` : 'Sin comentarios aún'}
+                    Puntuación del alojamiento
                   </span>
                 </div>
                 {tieneScore && <div className="dt-score-badge">{score}</div>}
@@ -1409,46 +1378,6 @@ export function AlojamientoDetail() {
         </section>
 
         {/* ======================================================================
-            SURVEY CARD ("¿Qué te parece nuestra página?")
-            ====================================================================== */}
-        <section className="dt-survey-box">
-          <div className="dt-survey-header">
-            <h3>¿Qué te parece nuestra página?</h3>
-            <button
-              type="button"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              onClick={(e) => e.currentTarget.parentElement.parentElement.remove()}
-              aria-label="Cerrar encuesta"
-            >
-              <CloseIcon size={16} color="#595959" />
-            </button>
-          </div>
-          <div className="dt-survey-body">
-            <SurveyAvatarIcon size={52} />
-            <div>
-              <div style={{ fontSize: '0.8rem', color: '#595959', marginBottom: '4px' }}>1 de 2</div>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '8px' }}>
-                Me resulta fácil seleccionar el tipo de alojamiento que necesito
-              </div>
-              <div className="dt-survey-options">
-                {['Totalmente de acuerdo', 'De acuerdo', 'Neutral', 'En desacuerdo', 'Totalmente en desacuerdo'].map((opt) => (
-                  <label key={opt} className="dt-survey-option-label">
-                    <input
-                      type="radio"
-                      name="survey"
-                      value={opt}
-                      checked={surveyResponse === opt}
-                      onChange={(e) => setSurveyResponse(e.target.value)}
-                    />
-                    <span>{opt}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ======================================================================
             HOUSE RULES SECTION
             ====================================================================== */}
         <section className="dt-rules-section" ref={rulesRef} id="rules">
@@ -1716,87 +1645,6 @@ export function AlojamientoDetail() {
           </div>
         </section>
       </div>
-
-      {/* ======================================================================
-          REVIEWS / COMENTARIOS SECTION
-          ====================================================================== */}
-      <section className="dt-reviews-section" ref={reviewsRef} id="reviews">
-        <div className="dt-reviews-header">
-          <div>
-            <h2>Comentarios de los huespedes</h2>
-            <div style={{ fontSize: '0.85rem', color: '#595959' }}>
-              {reviewsCount > 0 ? `${reviewsCount} comentario${reviewsCount === 1 ? '' : 's'} de huéspedes` : 'Este alojamiento todavía no tiene comentarios'}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="dt-reserve-btn-primary"
-            onClick={() => scrollToSection(availabilityRef, 'price')}
-          >
-            Ver disponibilidad
-          </button>
-        </div>
-
-        {/* Score Summary */}
-        {resenasScores && (
-          <div className="dt-reviews-summary">
-            <div className="dt-reviews-score-big">
-              <div className="dt-score-badge" style={{ fontSize: '2.2rem', width: '80px', height: '80px', borderRadius: '8px 8px 8px 0' }}>
-                {resenasScores.general}
-              </div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>
-                  {resenasScores.general >= 9 ? 'Excelente' : resenasScores.general >= 8 ? 'Muy bueno' : 'Bueno'}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#595959' }}>{resenas.length} comentarios</div>
-              </div>
-            </div>
-            <div className="dt-reviews-bars">
-              {[
-                { label: 'Limpieza', val: resenasScores.limpieza },
-                { label: 'Servicio', val: resenasScores.servicio },
-                { label: 'Calidad-precio', val: resenasScores.calidad },
-              ].map(({ label, val }) => (
-                <div key={label} className="dt-review-bar-row">
-                  <span className="dt-review-bar-label">{label}</span>
-                  <div className="dt-review-bar-track">
-                    <div className="dt-review-bar-fill" style={{ width: `${(val / 10) * 100}%` }} />
-                  </div>
-                  <span className="dt-review-bar-val">{val}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Individual Reviews */}
-        {resenasLoading ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: '#595959' }}>Cargando comentarios...</div>
-        ) : (
-          <div className="dt-reviews-list">
-            {resenas.map((r) => (
-              <div key={r.id} className="dt-review-card">
-                <div className="dt-review-avatar">
-                  {(r.usuarioNombre || 'A').charAt(0).toUpperCase()}
-                </div>
-                <div className="dt-review-body">
-                  <div className="dt-review-meta">
-                    <div>
-                      <strong style={{ fontSize: '0.95rem' }}>{r.usuarioNombre || 'Huesped anonimo'}</strong>
-                      <span style={{ fontSize: '0.78rem', color: '#595959', marginLeft: '6px' }}>{r.usuarioPais}</span>
-                    </div>
-                    <div className="dt-review-score-pill">{Number(r.puntuacion).toFixed(1)}</div>
-                  </div>
-                  <p className="dt-review-comment">{r.comentario}</p>
-                  <div style={{ fontSize: '0.75rem', color: '#595959' }}>
-                    {r.createdAt ? new Date(r.createdAt).toLocaleDateString('es-ES', { year: 'numeric', month: 'long' }) : ''}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
 
       {/* ======================================================================
           LIGHTBOX FULLSCREEN MODAL
