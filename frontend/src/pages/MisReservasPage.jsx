@@ -693,8 +693,8 @@ export function MisReservasPage() {
           const habNum = Number(al.habitaciones_count || al.habitaciones || al.number_of_rooms || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
           const bedTxt = al.tipo_habitacion?.descripcion_camas || (al.tipo_habitacion?.camas ? `${al.tipo_habitacion.camas} cama${al.tipo_habitacion.camas > 1 ? 's' : ''}` : '');
-          const esReembolsable = al.es_reembolsable ?? al.reembolsable ?? true;
-          const cancelTexto = al.politica_cancelacion || (esReembolsable ? 'Cancelación gratuita hasta 48 horas antes de la llegada' : 'No reembolsable');
+          const esReembolsable = true;
+          const cancelTexto = 'Cancelación gratuita hasta 48 horas antes de la llegada';
           const isAlojCancelled = cancelledStorage.has(al.reservation_id) || cancelledStorage.has(al.id) || cancelledStorage.has(al.codigo_reserva) || cancelledStorage.has(al.pnr);
           const rawAlojStatus = (al.status || al.estado || '').toUpperCase();
           const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (rawAlojStatus || 'CONFIRMED');
@@ -750,8 +750,8 @@ export function MisReservasPage() {
         const habLocalNum = Number(al.habitaciones || al.habitaciones_count || al.number_of_rooms || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
         const bedLocalTxt = al.descripcionCamas || (al.camas ? `${al.camas} cama${al.camas > 1 ? 's' : ''}` : '');
-        const esReemLoc = al.esReembolsable ?? al.es_reembolsable ?? true;
-        const cancelTextoLoc = al.politicaCancelacion || al.politica_cancelacion || (esReemLoc ? 'Cancelación gratuita hasta 48 horas antes de la llegada' : 'No reembolsable');
+        const esReemLoc = true;
+        const cancelTextoLoc = 'Cancelación gratuita hasta 48 horas antes de la llegada';
         const alojIdLocal = al.reservationId || al.id;
         const alojPnrLocal = al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL';
         const isAlojLocalAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO'].includes((al.status || al.estado || '').toUpperCase()) ||
@@ -2196,7 +2196,7 @@ export function MisReservasPage() {
                       );
                     }
 
-                    // Regla de Negocio Oficial: Cancelación y reembolso únicamente con al menos 24h de anticipación
+                    // Regla de Negocio Oficial: Cancelación y reembolso únicamente con al menos 48h de anticipación para todos los servicios
                     const calcularHorasRestantes = (reserva) => {
                       if (!reserva) return Infinity;
                       try {
@@ -2242,14 +2242,19 @@ export function MisReservasPage() {
                     };
 
                     const horasRestantes = calcularHorasRestantes(selectedReserva);
-                    const esFueraDePlazo24h = selectedReserva.tipo === 'atraccion' ? horasRestantes < 0 : horasRestantes < 24;
+                    // Alojamientos: cancelación y reembolso del 100% garantizado hasta 48h antes del check-in
+                    const esFueraDePlazo = selectedReserva.tipo === 'alojamiento'
+                      ? horasRestantes < 48
+                      : (selectedReserva.tipo === 'atraccion' ? horasRestantes < 0 : horasRestantes < 24);
 
-                    if (esFueraDePlazo24h) {
+                    if (esFueraDePlazo) {
+                      const limiteTexto = selectedReserva.tipo === 'alojamiento' ? '48h antes del check-in' : '24h antes del horario reservado';
+                      const detalleLimite = selectedReserva.tipo === 'alojamiento' ? '48 horas antes del check-in' : '24 horas antes del horario reservado';
                       return (
                         <div style={{ marginTop: '8px', padding: '12px 14px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '6px', color: '#8d6e63', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '1.3rem' }}>⏳</span>
                           <div>
-                            <strong>Cancelación no disponible (menos de 24h antes del check-in/retiro).</strong> La política de cancelación gratuita y reembolso del 100% solo aplica hasta 24 horas antes del horario reservado.
+                            <strong>Cancelación no disponible (menos de {limiteTexto}).</strong> La política de cancelación gratuita y reembolso del 100% aplica hasta {detalleLimite}.
                           </div>
                         </div>
                       );
@@ -2474,7 +2479,7 @@ export function MisReservasPage() {
                       <div style={{ background: '#fff3cd', border: '1px solid #ffeeba', borderRadius: '6px', padding: '12px 14px', fontSize: '0.86rem', color: '#856404' }}>
                         Estás cancelando: <strong>{selectedReserva.titulo}</strong> (PNR: <strong>{selectedReserva.pnr}</strong>).
                         <div style={{ marginTop: '6px', fontWeight: 600, color: '#0f5132' }}>
-                          ✓ Reembolso Total: Recibirás el 100% ({convertPrice(selectedReserva.totalRaw)}) acreditado a tu cuenta.
+                          ✓ Reembolso Total: Recibirás el 100% ({convertPrice(selectedReserva.totalRaw)}) acreditado a tu cuenta (cancelación con más de 48h de anticipación).
                         </div>
                       </div>
 

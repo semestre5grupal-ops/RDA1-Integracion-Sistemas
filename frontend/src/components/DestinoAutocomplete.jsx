@@ -37,6 +37,7 @@ export function DestinoAutocomplete({
   invalid = false,
   errorId,
   catalogo,
+  required = false,
 }) {
   const generatedId = useId();
   const inputId = id || `destino-${generatedId}`;
@@ -98,6 +99,7 @@ export function DestinoAutocomplete({
         className={className}
         placeholder={placeholder}
         value={value}
+        required={required}
         onChange={handleChange}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}

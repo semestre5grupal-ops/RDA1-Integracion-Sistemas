@@ -311,7 +311,6 @@ export function AlojamientosPage() {
   const [rooms, setRooms] = useState(1);
   const [showDatesPopover, setShowDatesPopover] = useState(false);
   const [showOccupancyPopover, setShowOccupancyPopover] = useState(false);
-  const [workTravel, setWorkTravel] = useState(false);
 
   // Estado pestaña planificador
   const [activePlannerTab, setActivePlannerTab] = useState('tranquil');
@@ -507,7 +506,7 @@ export function AlojamientosPage() {
         <form className="bk-searchbox-form" onSubmit={handleSearchSubmit} role="search" aria-label="Búsqueda de alojamientos">
           <div className="bk-searchbox-fields">
             {/* Destino */}
-            <div className="bk-search-field">
+            <div className={`bk-search-field ${destinationError ? 'has-error' : ''}`}>
               <span style={{ color: '#474747', display: 'flex' }} aria-hidden="true">
                 <BedIcon size={22} color="#474747" />
               </span>
@@ -519,6 +518,7 @@ export function AlojamientosPage() {
                   id="bk-destination-input"
                   className="bk-field-input"
                   value={destination}
+                  required
                   onChange={(val) => {
                     setDestination(val);
                     if (val.trim()) setDestinationError('');
@@ -849,20 +849,6 @@ export function AlojamientosPage() {
             >
               Buscar
             </button>
-          </div>
-
-          <div className="bk-work-travel-checkbox">
-            <input
-              type="checkbox"
-              id="work-check"
-              checked={workTravel}
-              onChange={(e) => setWorkTravel(e.target.checked)}
-              style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#006ce4' }}
-              aria-label="Viajo por trabajo"
-            />
-            <label htmlFor="work-check" style={{ cursor: 'pointer', fontSize: '14px', color: '#1a1a1a', fontWeight: 500 }}>
-              Viajo por trabajo
-            </label>
           </div>
         </form>
       </div>

@@ -71,6 +71,10 @@
   outline: 2px solid var(--bui-blue-primary);
 }
 
+.sr-search-field.has-error {
+  outline: 2px solid #d4111e !important;
+}
+
 .sr-search-icon {
   flex-shrink: 0;
   display: flex;
