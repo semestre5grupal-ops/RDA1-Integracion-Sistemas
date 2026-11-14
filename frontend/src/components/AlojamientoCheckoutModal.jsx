@@ -530,8 +530,7 @@ export function AlojamientoCheckoutModal({
       const errorMsgRaw = String(err.response?.data?.detail || err.response?.data?.message || err.message || '');
       const esEnProceso = err.response?.status === 409 && (
         /ya se est[aá] procesando/i.test(errorMsgRaw) ||
-        err.response?.data?.code === 'BOOKING_NOT_CONFIRMED' ||
-        /idempotency/i.test(errorMsgRaw)
+        /idempotency.*in[_\s]progress/i.test(errorMsgRaw)
       );
 
       if (esEnProceso) {
@@ -542,25 +541,6 @@ export function AlojamientoCheckoutModal({
           finalizarConReserva(resReintento);
           return;
         } catch (errReintento) {
-          // Si el reintento falló, verificar si la reserva realmente se alcanzó a crear hace instantes
-          try {
-            const misReservas = await getReservasAlojamientos().catch(() => []);
-            const encontrada = (misReservas || []).find((r) => {
-              const rAlojId = r.alojamiento_id || r.alojamientoId || r.hotel_id;
-              const rEmail = (r.customer_email || r.email || '').toLowerCase().trim();
-              const fechaCreacion = new Date(r.created_at || r.createdAt || 0).getTime();
-              const esReciente = Date.now() - fechaCreacion < 90000; // Creada estrictamente en los últimos 90 segundos
-              const mismasFechas = (!payload.checkin || r.checkin === payload.checkin) && (!payload.checkout || r.checkout === payload.checkout);
-              return (rAlojId === alojamiento.id || r.id === alojamiento.id) &&
-                     (!payload.customer_email || rEmail === payload.customer_email.toLowerCase().trim()) &&
-                     mismasFechas &&
-                     esReciente;
-            });
-            if (encontrada) {
-              finalizarConReserva(encontrada);
-              return;
-            }
-          } catch (_) {}
           err = errReintento;
         }
       }
