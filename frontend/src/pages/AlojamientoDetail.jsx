@@ -17,6 +17,7 @@ import {
   UserIcon,
   PinIcon,
   CheckmarkIcon,
+  AmenityIcon,
   WifiIcon,
   PoolIcon,
   ParkingIcon,
@@ -916,7 +917,7 @@ export function AlojamientoDetail() {
           <div className="dt-pills-bar">
             {alojamiento.amenidades.map((a, i) => (
               <span key={i} className="dt-pill-item">
-                <CheckmarkIcon size={16} /> {a}
+                <AmenityIcon name={a} size={16} color="#003580" /> {a}
               </span>
             ))}
           </div>
@@ -953,8 +954,8 @@ export function AlojamientoDetail() {
                 <h3 className="dt-popular-facilities-title">Servicios más populares</h3>
                 <div className="dt-popular-facilities-grid">
                   {alojamiento.amenidades.map((a, i) => (
-                    <span key={i} className="dt-popular-facility-item green">
-                      <CheckmarkIcon size={16} color="#008009" /> {a}
+                    <span key={i} className="dt-popular-facility-item green" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                      <AmenityIcon name={a} size={18} color="#008009" /> {a}
                     </span>
                   ))}
                 </div>
