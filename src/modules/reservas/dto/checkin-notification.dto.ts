@@ -174,4 +174,100 @@ export class CheckinNotificationDto {
   @IsString()
   @IsOptional()
   id?: string;
+
+  @ApiPropertyOptional({ description: 'Localizador emitido por Booking o el socio' })
+  @IsString()
+  @IsOptional()
+  locator?: string;
+
+  @ApiPropertyOptional({ description: 'Fecha de llegada / check-in' })
+  @IsString()
+  @IsOptional()
+  checkin?: string;
+
+  @ApiPropertyOptional({ description: 'Fecha de salida / check-out' })
+  @IsString()
+  @IsOptional()
+  checkout?: string;
+
+  @ApiPropertyOptional({ description: 'Número de noches' })
+  @IsOptional()
+  noches?: number | string;
+
+  @ApiPropertyOptional({ description: 'Número de adultos' })
+  @IsOptional()
+  number_of_adults?: number | string;
+
+  @ApiPropertyOptional({ description: 'Número de habitaciones' })
+  @IsOptional()
+  number_of_rooms?: number | string;
+
+  @ApiPropertyOptional({ description: 'Precio total' })
+  @IsOptional()
+  total_price?: number | string;
+
+  @ApiPropertyOptional({ description: 'Moneda' })
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @ApiPropertyOptional({ description: 'Observaciones de check-in del socio' })
+  @IsString()
+  @IsOptional()
+  checkin_observaciones?: string;
+
+  @ApiPropertyOptional({ description: 'Motivo de cancelación si aplica' })
+  @IsOptional()
+  motivo_cancelacion?: string | null;
+
+  @ApiPropertyOptional({ description: 'Solicitado por cancelación si aplica' })
+  @IsOptional()
+  solicitado_por_cancelacion?: string | null;
+
+  @ApiPropertyOptional({ description: 'Fecha de cancelación si aplica' })
+  @IsOptional()
+  cancelled_at?: string | null;
+
+  @ApiPropertyOptional({ description: 'Fecha de creación' })
+  @IsOptional()
+  creation_date?: string;
+
+  @ApiPropertyOptional({ description: 'ID del alojamiento' })
+  @IsOptional()
+  alojamiento_id?: string | number;
+
+  @ApiPropertyOptional({ description: 'Título del alojamiento' })
+  @IsString()
+  @IsOptional()
+  alojamiento_titulo?: string;
+
+  @ApiPropertyOptional({ description: 'ID del producto' })
+  @IsString()
+  @IsOptional()
+  producto_id?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre de la habitación' })
+  @IsString()
+  @IsOptional()
+  habitacion_nombre?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre del huésped' })
+  @IsString()
+  @IsOptional()
+  huesped_nombre?: string;
+
+  @ApiPropertyOptional({ description: 'Correo del huésped' })
+  @IsString()
+  @IsOptional()
+  huesped_correo?: string;
+
+  @ApiPropertyOptional({ description: 'Identificación del huésped' })
+  @IsString()
+  @IsOptional()
+  huesped_identificacion?: string;
+
+  @ApiPropertyOptional({ description: 'Teléfono del huésped' })
+  @IsString()
+  @IsOptional()
+  huesped_telefono?: string;
 }

@@ -640,7 +640,7 @@ export class AlojamientosSociosReservasService implements OnModuleInit {
     ));
     trazaAlojamientos.registrar({
       correlacion: `checkin-${fila.codigo_reserva}`, paso: 'checkin', resultado: 'ok',
-      detalle: `Check-in confirmado por ${nodo.nombreProveedor} (Flujo 2)`,
+      detalle: `Check-in confirmado por ${nodo?.nombreProveedor || fila.codigo_nodo} (Flujo 2)`,
       nodo: fila.codigo_nodo, cliente: fila.cliente_email || 'invitado',
     });
     return act;

@@ -32,8 +32,16 @@ export const ICONOS_VERTICALES = [
   { icon: ShieldCheckIcon, label: 'Reserva segura' },
 ];
 
-export function AlojamientosLoadingView({ frases = FRASES_LOADING, subtitulo = SUBTITULO_LOADING }) {
-  const listaFrases = Array.isArray(frases) && frases.length > 0 ? frases : FRASES_LOADING;
+export function AlojamientosLoadingView({ destino, titulo, frases = FRASES_LOADING, subtitulo = SUBTITULO_LOADING }) {
+  const listaFrases = Array.isArray(frases) && frases.length > 0
+    ? frases
+    : (titulo ? [titulo] : (destino && typeof destino === 'string' && destino.trim() ? [
+        `Estamos buscando las mejores opciones en ${destino.trim()}...`,
+        'Verificando disponibilidad y tarifas en tiempo real...',
+        'Comparando opciones para darte la mejor experiencia...',
+        'Estamos personalizando tus resultados...',
+        'Casi listo, organizando las mejores ofertas...',
+      ] : FRASES_LOADING));
   const [fraseIndex, setFraseIndex] = useState(0);
   const [activoIcono, setActivoIcono] = useState(0);
 

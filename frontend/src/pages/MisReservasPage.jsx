@@ -687,8 +687,8 @@ export function MisReservasPage() {
         const respuestaAlojamientos = alojamientosRes.value;
         const listaAlojamientos = Array.isArray(respuestaAlojamientos) ? respuestaAlojamientos : (respuestaAlojamientos?.data || []);
         alojamientosApiItems = listaAlojamientos.map((al) => {
-          const checkinStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
-          const checkoutStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
+          const checkinStr = al.checkin ? safeFormatearFecha(al.checkin) : 'Por definir';
+          const checkoutStr = al.checkout ? safeFormatearFecha(al.checkout) : 'Por definir';
           const huespedesNum = Number(al.huespedes || al.personas || (al.adultos ? al.adultos + (al.ninos || 0) : null) || (al.number_of_adults ? al.number_of_adults + (al.number_of_children || 0) : null) || al.raw?.passengers?.length || 1);
           const habNum = Number(al.habitaciones_count || al.habitaciones || al.number_of_rooms || 1);
           const fReservaAloj = (al.created_at || al.createdAt) ? safeFormatearFecha(al.created_at || al.createdAt) : safeFormatearFecha(new Date().toISOString());
@@ -744,17 +744,24 @@ export function MisReservasPage() {
       const alojamientosLocales = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]')
         .filter((al) => !correoSesion || (al.email || '').trim().toLowerCase() === correoSesion);
       const alojamientosLocalesFormatted = alojamientosLocales.map((al) => {
-        const checkinLocalStr = al.checkin ? safeFormatearFecha(al.checkin) : '10 nov.';
-        const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : '16 nov.';
+        const checkinLocalStr = al.checkin ? safeFormatearFecha(al.checkin) : 'Por definir';
+        const checkoutLocalStr = al.checkout ? safeFormatearFecha(al.checkout) : 'Por definir';
         const huespedesLocalNum = Number(al.huespedes || (al.adultos ? al.adultos + (al.ninos || 0) : null) || (al.number_of_adults ? al.number_of_adults + (al.number_of_children || 0) : null) || 1);
         const habLocalNum = Number(al.habitaciones || al.habitaciones_count || al.number_of_rooms || 1);
         const fReservaLocalAloj = al.createdAt ? safeFormatearFecha(al.createdAt) : safeFormatearFecha(new Date().toISOString());
         const bedLocalTxt = al.descripcionCamas || (al.camas ? `${al.camas} cama${al.camas > 1 ? 's' : ''}` : '');
         const esReemLoc = al.esReembolsable ?? al.es_reembolsable ?? true;
         const cancelTextoLoc = al.politicaCancelacion || al.politica_cancelacion || (esReemLoc ? 'Cancelación gratuita hasta 48 horas antes de la llegada' : 'No reembolsable');
+        const alojIdLocal = al.reservationId || al.id;
+        const alojPnrLocal = al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL';
+        const isAlojLocalAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO'].includes((al.status || al.estado || '').toUpperCase()) ||
+          checkedInStorage.has(alojIdLocal) || checkedInStorage.has(alojPnrLocal) || checkedInStorage.has(al.id) || checkedInStorage.has(al.reservationId);
+        const finalLocalStatus = (cancelledStorage.has(alojIdLocal) || cancelledStorage.has(alojPnrLocal) || al.status === 'CANCELLED' || al.status === 'CANCELADO')
+          ? 'CANCELLED'
+          : (isAlojLocalAssisted ? 'CONFIRMADO_ASISTIDO' : (al.status || 'CONFIRMED'));
         return {
-          id: al.reservationId || al.id,
-          pnr: al.codigoReserva || al.codigo_reserva || al.pnr || al.reservationId || al.id || 'HOTEL',
+          id: alojIdLocal,
+          pnr: alojPnrLocal,
           tipo: 'alojamiento',
           servicioTexto: 'Alojamiento',
           destino: al.destino || 'Quito',
@@ -771,7 +778,7 @@ export function MisReservasPage() {
           cantidad: huespedesLocalNum,
           cantidadTexto: `${huespedesLocalNum} Huésped${huespedesLocalNum > 1 ? 'es' : ''}${habLocalNum > 1 ? ` · ${habLocalNum} Habitaciones` : ' · 1 Habitación'}${bedLocalTxt ? ` · ${bedLocalTxt}` : ''}`,
           rawDate: al.createdAt ? new Date(al.createdAt).getTime() : (al.checkin ? new Date(al.checkin).getTime() : new Date().getTime()),
-          status: al.status || 'CONFIRMED',
+          status: finalLocalStatus,
           totalRaw: al.totalPrice || al.total || 0,
           imagen: al.photoUrl || DEFAULT_IMAGES.alojamiento,
           link: al.alojamientoId ? `/alojamientos/${al.alojamientoId}` : '/',
@@ -864,6 +871,13 @@ export function MisReservasPage() {
                   return m ? { ...la, status: 'CONFIRMADO_ASISTIDO' } : la;
                 });
                 localStorage.setItem('reservas_autos', JSON.stringify(upd));
+
+                const localAlo = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
+                const updAlo = localAlo.map((la) => {
+                  const m = la.id === idVal || la.reservationId === idVal || (pnrVal && (la.pnr === pnrVal || la.codigoReserva === pnrVal || la.codigo_reserva === pnrVal));
+                  return m ? { ...la, status: 'CONFIRMADO_ASISTIDO', estado: 'CONFIRMADO_ASISTIDO' } : la;
+                });
+                localStorage.setItem('reservas_alojamientos', JSON.stringify(updAlo));
               } catch (_) {}
             }
             if (item.placa && !existente.placa) {
@@ -951,6 +965,34 @@ export function MisReservasPage() {
                 });
                 localStorage.setItem('reservas_autos', JSON.stringify(upd));
                 setReservas((prev) => prev.map((r) => ((r.id === auto.id || r.pnr === auto.pnr) ? { ...r, status: 'CONFIRMADO_ASISTIDO', placa: res.data.placa || r.placa } : r)));
+              }
+            } catch (_) {}
+          })
+        );
+      }
+
+      // Consulta reactiva de estado en tiempo real para alojamientos pendientes de confirmación (Hábitat James, Kawsay, Posada EC, Cozy)
+      const alojParaVerificar = listaFinal.filter(
+        (it) => it.tipo === 'alojamiento' && it.status !== 'CANCELLED' && !estadosAsistidos.includes(it.status) && it.pnr && it.pnr !== 'HOTEL'
+      );
+      if (alojParaVerificar.length > 0) {
+        Promise.allSettled(
+          alojParaVerificar.map(async (aloj) => {
+            try {
+              const res = await api.get(`/reservas/${aloj.pnr}/estado`);
+              if (res?.data && (estadosAsistidos.includes(res.data.estado) || estadosAsistidos.includes(res.data.status))) {
+                aloj.status = 'CONFIRMADO_ASISTIDO';
+                const savedChk = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+                if (aloj.id) savedChk.add(aloj.id);
+                if (aloj.pnr) savedChk.add(aloj.pnr);
+                localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(savedChk)));
+                const localAlo = JSON.parse(localStorage.getItem('reservas_alojamientos') || '[]');
+                const updAlo = localAlo.map((la) => {
+                  const m = la.id === aloj.id || la.reservationId === aloj.id || la.pnr === aloj.pnr || la.codigoReserva === aloj.pnr || la.codigo_reserva === aloj.pnr;
+                  return m ? { ...la, status: 'CONFIRMADO_ASISTIDO', estado: 'CONFIRMADO_ASISTIDO' } : la;
+                });
+                localStorage.setItem('reservas_alojamientos', JSON.stringify(updAlo));
+                setReservas((prev) => prev.map((r) => ((r.id === aloj.id || r.pnr === aloj.pnr) ? { ...r, status: 'CONFIRMADO_ASISTIDO' } : r)));
               }
             } catch (_) {}
           })

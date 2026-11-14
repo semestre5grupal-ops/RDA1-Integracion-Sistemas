@@ -73,8 +73,31 @@ export class ReservasController {
       (dto as any)?.api_key ||
       (dto as any)?.apiKey;
     const safeCorrId = correlationId || req?.headers?.['x-correlation-id'];
-    const targetId = dto.reserva_id || dto.pnr || dto.codigo_reserva || dto.localizador || (dto as any).id || 'UNKNOWN';
+    const targetId =
+      dto.external_order_id ||
+      dto.order_id ||
+      dto.locator ||
+      dto.localizador ||
+      dto.codigo_reserva ||
+      dto.pnr ||
+      dto.reserva_id ||
+      dto.reservation_id ||
+      dto.id ||
+      'UNKNOWN';
     return this.reservasService.confirmarCheckin(targetId, dto, rawApiKey, safeCorrId);
+  }
+
+  @Post('checkin')
+  @Version(['1', '2', '3'])
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Notificar confirmación de asistencia presencial (Check-in directo sin ID en URL)' })
+  async notificarCheckinDirecto(
+    @Body() dto: CheckinNotificationDto,
+    @Headers('x-api-key') apiKey?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+    @Req() req?: any,
+  ) {
+    return this.notificarCheckinAlias(dto, apiKey, correlationId, req);
   }
 
   /**
