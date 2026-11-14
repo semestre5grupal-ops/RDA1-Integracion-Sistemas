@@ -38,7 +38,6 @@ const POPULAR_FILTER_LABELS = {
   spa: 'Spa y bienestar',
   parking: 'Estacionamiento',
   holiday: 'Casas vacacionales',
-  verygood: 'Muy bien: 8+',
   elevator: 'Acceso en ascensor',
 };
 
@@ -143,6 +142,7 @@ export function AlojamientosSearchPage() {
   const [showMapModal, setShowMapModal] = useState(false);
   const [selectedMapProperty, setSelectedMapProperty] = useState(null);
   const isFetchingRef = useRef(false);
+  const fetchIdRef = useRef(0);
 
   // Destinos reales del catálogo para el autocompletado aprovechando los resultados cargados.
   useEffect(() => {
@@ -199,7 +199,10 @@ export function AlojamientosSearchPage() {
 
   // Fetch properties from backend API
   const fetchResults = async (params, isSilent = false) => {
-    if (isFetchingRef.current) return;
+    // Si es un refresco silencioso en segundo plano y ya hay una petición en curso, omitir
+    if (isSilent && isFetchingRef.current) return;
+
+    const currentFetchId = ++fetchIdRef.current;
     isFetchingRef.current = true;
     if (!isSilent) {
       setLoading(true);
@@ -213,7 +216,7 @@ export function AlojamientosSearchPage() {
       const ch = params?.ninos ?? children;
       const rm = params?.habitaciones ?? rooms;
 
-      const opts = isSilent ? { timeout: 12000 } : {};
+      const opts = isSilent ? { timeout: 15000 } : { timeout: 30000 };
       const res = await searchAlojamientos({
         destino: destQuery,
         adultos: ad,
@@ -223,29 +226,11 @@ export function AlojamientosSearchPage() {
         rows: 25,
       }, opts);
 
+      if (currentFetchId !== fetchIdRef.current) return;
+
       const items = res.data || res;
       const list = Array.isArray(items) ? items : [];
-      setProperties((prev) => {
-        if (prev && prev.length === list.length) {
-          let hasDiff = false;
-          for (let i = 0; i < list.length; i++) {
-            const p = prev[i];
-            const n = list[i];
-            const pId = p.id || p.alojamiento_id || p._id;
-            const nId = n.id || n.alojamiento_id || n._id;
-            const pPrice = typeof p.precio_por_noche === 'object' ? p.precio_por_noche?.total : (p.precio_por_noche || p.precio_noche || p.price);
-            const nPrice = typeof n.precio_por_noche === 'object' ? n.precio_por_noche?.total : (n.precio_por_noche || n.precio_noche || n.price);
-            const pStock = p.habitaciones_disponibles || p.cupos || p.disponibilidad;
-            const nStock = n.habitaciones_disponibles || n.cupos || n.disponibilidad;
-            if (pId !== nId || pPrice !== nPrice || pStock !== nStock || (p.nombre || p.name) !== (n.nombre || n.name)) {
-              hasDiff = true;
-              break;
-            }
-          }
-          if (!hasDiff) return prev;
-        }
-        return list;
-      });
+      setProperties(list);
       setLastSyncTime(new Date());
       setSyncPulse(true);
       setTimeout(() => {
@@ -253,23 +238,27 @@ export function AlojamientosSearchPage() {
       }, 800);
       if (isSilent) setError(null);
     } catch (err) {
+      if (currentFetchId !== fetchIdRef.current) return;
       // Fallback to general list
       try {
         const destQuery = params?.destino || (typeof params === 'string' ? params : destination);
-        const fallback = await getAlojamientos({ limit: 25, destino: destQuery, timeout: 12000 });
+        const fallback = await getAlojamientos({ limit: 25, destino: destQuery, timeout: 15000 });
+        if (currentFetchId !== fetchIdRef.current) return;
         const items = fallback.data || fallback;
         const list = Array.isArray(items) ? items : [];
         setProperties(list);
       } catch (e) {
-        console.warn('[AlojamientosSearchPage] Error transitorio en refresco silencioso:', err?.message || err);
+        console.warn('[AlojamientosSearchPage] Error al obtener alojamientos:', err?.message || err);
         if (!isSilent) {
           setError('Error al conectar con el servidor.');
         }
       }
     } finally {
-      isFetchingRef.current = false;
-      if (!isSilent) {
-        setLoading(false);
+      if (currentFetchId === fetchIdRef.current) {
+        isFetchingRef.current = false;
+        if (!isSilent) {
+          setLoading(false);
+        }
       }
     }
   };
@@ -292,7 +281,6 @@ export function AlojamientosSearchPage() {
     if (typeParam) {
       setSelectedTypes([typeParam]);
     }
-    setProperties([]);
 
     const currentQuery = {
       destino: dest,
@@ -355,6 +343,16 @@ export function AlojamientosSearchPage() {
       group_children: children,
       no_rooms: rooms,
     });
+
+    // Ejecuta la búsqueda de forma explícita e inmediata
+    fetchResults({
+      destino: dest,
+      checkin,
+      checkout,
+      adultos: adults,
+      ninos: children,
+      habitaciones: rooms,
+    }, false);
   };
 
   // Toggle wishlist heart
@@ -430,7 +428,6 @@ export function AlojamientosSearchPage() {
       if (ams.some((a) => a.includes('spa') || a.includes('bienestar'))) counts.popular.spa = (counts.popular.spa || 0) + 1;
       if (p.tieneParqueadero || ams.some((a) => /parqueadero|estacionamiento|parking/i.test(a))) counts.popular.parking = (counts.popular.parking || 0) + 1;
       if (type.includes('casa') || name.includes('casa') || type.includes('villa') || type.includes('lodge')) counts.popular.holiday = (counts.popular.holiday || 0) + 1;
-      if (score >= 8.0) counts.popular.verygood = (counts.popular.verygood || 0) + 1;
       if (ams.some((a) => a.includes('ascensor') || a.includes('elevador'))) counts.popular.elevator = (counts.popular.elevator || 0) + 1;
 
       // Types
@@ -1107,29 +1104,6 @@ export function AlojamientosSearchPage() {
               ))}
             </div>
 
-            {/* Review score */}
-            <div className="sr-filter-group">
-              <div className="sr-filter-title">Puntuación de los comentarios</div>
-              {[
-                { score: 9.0, label: 'Excelente: 9 o más' },
-                { score: 8.0, label: 'Muy bien: 8 o más' },
-                { score: 7.0, label: 'Bien: 7 o más' },
-                { score: 6.0, label: 'Agradable: 6 o más' },
-              ].map((item) => (
-                <label key={item.score} className="sr-checkbox-item">
-                  <span className="sr-checkbox-label-left">
-                    <input
-                      type="checkbox"
-                      checked={minReviewScore === item.score}
-                      onChange={() => setMinReviewScore(minReviewScore === item.score ? null : item.score)}
-                    />
-                    <span>{item.label}</span>
-                  </span>
-                  <span className="sr-checkbox-count">{filterCounts.reviews[item.score] || 0}</span>
-                </label>
-              ))}
-            </div>
-
             {/* Neighbourhood */}
             <div className="sr-filter-group">
               <div className="sr-filter-title">Zonas y barrios</div>
@@ -1644,7 +1618,7 @@ export function AlojamientosSearchPage() {
                     </div>
                   </div>
 
-                  {/* Right Column: Score & Pricing Block */}
+                  {/* Right Column: Pricing Block */}
                   <div className="sr-card-price-col">
                     <div>
                       <div className="sr-rating-header">
@@ -1652,11 +1626,8 @@ export function AlojamientosSearchPage() {
                           <span className="sr-rating-label">
                             {Number(score) >= 9.0 ? 'Excelente' : 'Fantástico'}
                           </span>
-                          <span className="sr-rating-reviews">{reviewsCount} comentarios</span>
                         </div>
-                        <div className="sr-rating-badge">{score}</div>
                       </div>
-                      <div className="sr-comfort-subscore">Confort {comfort}</div>
                     </div>
 
                     <div className="sr-pricing-block">

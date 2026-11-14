@@ -804,7 +804,7 @@ export function AlojamientoCheckoutModal({
               <p className="bkg-hotel-address">{hotelAddress}</p>
               {alojamiento.ratings?.ubicacion ? (
                 <div className="bkg-hotel-location-score">
-                  {Number(alojamiento.ratings.ubicacion) >= 9 ? 'Excelente ubicación' : 'Muy buena ubicación'} — {alojamiento.ratings.ubicacion}
+                  Excelente ubicación
                 </div>
               ) : alojamiento.ubicacion ? (
                 <div className="bkg-hotel-location-score">
@@ -815,15 +815,12 @@ export function AlojamientoCheckoutModal({
               {(() => {
                 const scoreNum = Number(alojamiento.ratings?.score ?? alojamiento.calificacion);
                 const tieneScore = Number.isFinite(scoreNum) && scoreNum > 0;
-                const reviews = Number(alojamiento.ratings?.number_of_reviews ?? 0);
                 if (!tieneScore) return null;
                 const scoreLabel = scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Fabuloso' : scoreNum >= 7 ? 'Muy bien' : 'Aceptable';
                 return (
                   <div className="bkg-score-badge-row">
-                    <span className="bkg-score-badge">{scoreNum.toFixed(1)}</span>
                     <span className="bkg-score-text">
-                      <strong>{scoreLabel}</strong>
-                      {reviews > 0 ? ` · ${reviews} ${reviews === 1 ? 'comentario' : 'comentarios'}` : ''}
+                      <strong style={{ color: '#008009' }}>{scoreLabel}</strong>
                     </span>
                   </div>
                 );

@@ -968,14 +968,13 @@ export function AlojamientoDetail() {
             <div className="dt-rating-card">
               <div className="dt-score-row">
                 <div className="dt-score-text">
-                  <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                    {!tieneScore ? 'Nuevo' : scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Muy bueno' : 'Bueno'}
+                  <span style={{ fontWeight: 700, fontSize: '1.05rem', color: '#008009' }}>
+                    {!tieneScore ? 'Alojamiento verificado' : scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Muy bueno' : 'Bueno'}
                   </span>
                   <span style={{ fontSize: '0.78rem', color: '#595959' }}>
-                    Puntuación del alojamiento
+                    Alojamiento verificado
                   </span>
                 </div>
-                {tieneScore && <div className="dt-score-badge">{score}</div>}
               </div>
               {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
                 <div style={{ fontSize: '0.8rem', color: '#374151', borderTop: '1px solid #f0f0f0', paddingTop: '10px' }}>
@@ -1590,8 +1589,7 @@ export function AlojamientoDetail() {
                     <div className="dt-activity-title">{act.name}</div>
                     <div className="dt-activity-rating" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <StarFilledIcon size={13} color="#f59e0b" />
-                      <span style={{ fontWeight: 600 }}>{ratingScore}</span>
-                      <span style={{ color: '#595959', fontSize: '0.75rem' }}>({reviews} comentarios)</span>
+                      <span style={{ color: '#008009', fontWeight: 600, fontSize: '0.8rem' }}>Recomendado</span>
                     </div>
                     <div>
                       <div style={{ fontSize: '0.72rem', color: '#595959' }}>Entradas desde</div>
@@ -1613,7 +1611,7 @@ export function AlojamientoDetail() {
             <div>
               <h2>Instalaciones y servicios de {alojamiento.nombre}</h2>
               <div style={{ fontSize: '0.85rem', color: '#595959' }}>
-                {tieneScore ? `Puntuación de servicios: ${score}` : 'Servicios que ofrece el alojamiento'}
+                Servicios que ofrece el alojamiento
               </div>
             </div>
             <button

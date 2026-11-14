@@ -155,28 +155,9 @@ export function AlojamientoCard({ alojamiento, nights = 2, showDealBadge = true,
 
           {/* Rating Block */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '4px 0' }}>
-            <div
-              style={{
-                background: '#003580',
-                color: '#ffffff',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                padding: '3px 6px',
-                borderRadius: '4px 4px 4px 0',
-                minWidth: '28px',
-                textAlign: 'center',
-              }}
-            >
-              {rawScore}
-            </div>
-            <div>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1a1a1a', marginRight: '6px' }}>
-                {getScoreLabel(rawScore)}
-              </span>
-              <span style={{ fontSize: '0.78rem', color: '#595959' }}>
-                {reviewCount} comentarios
-              </span>
-            </div>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#008009' }}>
+              {getScoreLabel(rawScore)}
+            </span>
           </div>
 
           {/* Late Escape Deal badge */}
