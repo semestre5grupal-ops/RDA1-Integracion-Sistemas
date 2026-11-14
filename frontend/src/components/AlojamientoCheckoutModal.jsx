@@ -23,6 +23,7 @@ import { formatearFecha } from '../services/formato';
 import { formatearRegimen } from '../utils/regimenFormato';
 import { OfflineReservaModal } from './OfflineReservaModal';
 import { ModalReservaExistente, reservasQueSeSolapan, esAvisoDuplicado } from './ModalReservaExistente';
+import { ModalReservaSinCupo } from './ModalReservaSinCupo';
 import {
   CheckmarkIcon,
   CloseIcon,
@@ -200,6 +201,10 @@ export function AlojamientoCheckoutModal({
   const [showModalExistente, setShowModalExistente] = useState(false);
   const [reservasSolapadas, setReservasSolapadas] = useState([]);
   const [mensajeDuplicado, setMensajeDuplicado] = useState('');
+
+  // Aviso de habitación sin cupo / agotada en el hotel
+  const [showModalSinCupo, setShowModalSinCupo] = useState(false);
+  const [mensajeSinCupo, setMensajeSinCupo] = useState('');
   // Ref y no estado: el reintento tras confirmar se lanza en el mismo ciclo.
   const confirmadoDuplicadoRef = useRef(false);
   // Clave de idempotencia ESTABLE por intento de reserva: se reutiliza en los reintentos
@@ -530,8 +535,7 @@ export function AlojamientoCheckoutModal({
       const errorMsgRaw = String(err.response?.data?.detail || err.response?.data?.message || err.message || '');
       const esEnProceso = err.response?.status === 409 && (
         /ya se est[aá] procesando/i.test(errorMsgRaw) ||
-        err.response?.data?.code === 'BOOKING_NOT_CONFIRMED' ||
-        /idempotency/i.test(errorMsgRaw)
+        /idempotency.*in[_\s]progress/i.test(errorMsgRaw)
       );
 
       if (esEnProceso) {
@@ -542,22 +546,25 @@ export function AlojamientoCheckoutModal({
           finalizarConReserva(resReintento);
           return;
         } catch (errReintento) {
-          // Si el reintento falló, verificar si ya se asentó en las reservas del usuario
-          try {
-            const misReservas = await getReservasAlojamientos().catch(() => []);
-            const encontrada = (misReservas || []).find((r) => {
-              const rAlojId = r.alojamiento_id || r.alojamientoId || r.hotel_id;
-              const rEmail = (r.customer_email || r.email || '').toLowerCase().trim();
-              return (rAlojId === alojamiento.id || r.id === alojamiento.id) &&
-                     (!payload.customer_email || rEmail === payload.customer_email.toLowerCase().trim());
-            });
-            if (encontrada) {
-              finalizarConReserva(encontrada);
-              return;
-            }
-          } catch (_) {}
           err = errReintento;
         }
+      }
+
+      const errorCode = String(err.response?.data?.code || err.response?.data?.title || '');
+      const errorType = String(err.response?.data?.type || '');
+
+      // Detección de falta de cupo / habitaciones agotadas en el hotel
+      const esSinCupo = err.response?.status === 409 && (
+        /no tiene suficientes habitaciones|no tiene esa habitaci|ya no est[aá] a la venta|sin cupo|no hay disponibilidad|room.*no.*longer.*available|out_of_stock/i.test(errorMsgRaw) ||
+        errorCode === 'ROOM_NO_LONGER_AVAILABLE' ||
+        errorType.includes('room-no-longer-available')
+      );
+
+      if (esSinCupo) {
+        idempotencyKeyRef.current = null;
+        setMensajeSinCupo(err.response?.data?.detail || 'El hotel ya no cuenta con habitaciones disponibles para las fechas seleccionadas.');
+        setShowModalSinCupo(true);
+        return;
       }
 
       if (esAvisoDuplicado(err) && !confirmadoDuplicadoRef.current) {
@@ -1557,6 +1564,27 @@ export function AlojamientoCheckoutModal({
           }}
         />
       )}
+
+      {/* Modal cuando el hotel agotó las habitaciones para las fechas */}
+      <ModalReservaSinCupo
+        abierto={showModalSinCupo}
+        nombreAlojamiento={alojamiento?.nombre}
+        destino={alojamiento?.destino || 'Quito'}
+        checkin={checkin}
+        checkout={checkout}
+        mensajeServidor={mensajeSinCupo}
+        onVerDisponibles={() => {
+          setShowModalSinCupo(false);
+          if (onClose) onClose();
+          const dest = alojamiento?.destino || 'Quito';
+          navigate(
+            `/alojamientos/search?ss=${encodeURIComponent(dest)}&checkin=${checkin || ''}&checkout=${checkout || ''}&group_adults=${adults || 2}&group_children=${children || 0}&no_rooms=${rooms || 1}`
+          );
+        }}
+        onCambiarFechas={() => {
+          setShowModalSinCupo(false);
+        }}
+      />
     </div>
   );
 }
