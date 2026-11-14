@@ -17,6 +17,7 @@ import {
   UserIcon,
   PinIcon,
   CheckmarkIcon,
+  AmenityIcon,
   WifiIcon,
   PoolIcon,
   ParkingIcon,
@@ -916,7 +917,7 @@ export function AlojamientoDetail() {
           <div className="dt-pills-bar">
             {alojamiento.amenidades.map((a, i) => (
               <span key={i} className="dt-pill-item">
-                <CheckmarkIcon size={16} /> {a}
+                <AmenityIcon name={a} size={16} color="#003580" /> {a}
               </span>
             ))}
           </div>
@@ -953,8 +954,8 @@ export function AlojamientoDetail() {
                 <h3 className="dt-popular-facilities-title">Servicios más populares</h3>
                 <div className="dt-popular-facilities-grid">
                   {alojamiento.amenidades.map((a, i) => (
-                    <span key={i} className="dt-popular-facility-item green">
-                      <CheckmarkIcon size={16} color="#008009" /> {a}
+                    <span key={i} className="dt-popular-facility-item green" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                      <AmenityIcon name={a} size={18} color="#008009" /> {a}
                     </span>
                   ))}
                 </div>
@@ -962,31 +963,8 @@ export function AlojamientoDetail() {
             )}
           </div>
 
-          {/* Right Column (Highlights Card & Score) */}
+          {/* Right Column (Side Map & Reserve CTA) */}
           <aside className="dt-overview-right">
-            {/* Rating card */}
-            <div className="dt-rating-card">
-              <div className="dt-score-row">
-                <div className="dt-score-text">
-                  <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>
-                    {!tieneScore ? 'Nuevo' : scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Muy bueno' : 'Bueno'}
-                  </span>
-                  <span style={{ fontSize: '0.78rem', color: '#595959' }}>
-                    Puntuación del alojamiento
-                  </span>
-                </div>
-                {tieneScore && <div className="dt-score-badge">{score}</div>}
-              </div>
-              {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
-                <div style={{ fontSize: '0.8rem', color: '#374151', borderTop: '1px solid #f0f0f0', paddingTop: '10px' }}>
-                  <strong>Servicios del alojamiento:</strong>
-                  <ul style={{ paddingLeft: '16px', margin: '6px 0 0 0' }}>
-                    {alojamiento.amenidades.slice(0, 4).map((a, i) => <li key={i}>{a}</li>)}
-                  </ul>
-                </div>
-              )}
-            </div>
-
             {/* Side Map */}
             <div
               className="dt-side-map-box"
@@ -1004,44 +982,14 @@ export function AlojamientoDetail() {
               </button>
             </div>
 
-            {/* Property Highlights: datos reales del hotel. */}
-            <div className="dt-highlights-card">
-              <h3 className="dt-highlights-title">Puntos fuertes del alojamiento</h3>
-              <div className="dt-stay-badge">¡Ideal para una estancia de {nightsCount} noches!</div>
-
-              {(alojamiento.ubicacion?.address || alojamiento.destino) && (
-                <div className="dt-highlight-point">
-                  <PinIcon size={16} color="#006ce4" />
-                  <div>
-                    <strong>Ubicación:</strong> {alojamiento.ubicacion?.address || alojamiento.destino}
-                  </div>
-                </div>
-              )}
-
-              {Number(alojamiento.estrellas) > 0 && (
-                <div className="dt-highlight-point">
-                  <CheckmarkIcon size={16} color="#006ce4" />
-                  <div><strong>Categoría:</strong> {alojamiento.estrellas} estrellas</div>
-                </div>
-              )}
-
-              {(alojamiento.politicas?.checkin_desde || alojamiento.politicas?.checkout_hasta) && (
-                <div className="dt-highlight-point">
-                  <CheckmarkIcon size={16} color="#006ce4" />
-                  <div>
-                    <strong>Horarios:</strong> check-in {alojamiento.politicas?.checkin_desde || '—'} · check-out {alojamiento.politicas?.checkout_hasta || '—'}
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                className="dt-reserve-btn-full"
-                onClick={() => scrollToSection(availabilityRef, 'price')}
-              >
-                Reservar tu estancia
-              </button>
-            </div>
+            <button
+              type="button"
+              className="dt-reserve-btn-full"
+              style={{ marginTop: '12px' }}
+              onClick={() => scrollToSection(availabilityRef, 'price')}
+            >
+              Reservar tu estancia
+            </button>
           </aside>
         </div>
 
@@ -1590,8 +1538,7 @@ export function AlojamientoDetail() {
                     <div className="dt-activity-title">{act.name}</div>
                     <div className="dt-activity-rating" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <StarFilledIcon size={13} color="#f59e0b" />
-                      <span style={{ fontWeight: 600 }}>{ratingScore}</span>
-                      <span style={{ color: '#595959', fontSize: '0.75rem' }}>({reviews} comentarios)</span>
+                      <span style={{ color: '#008009', fontWeight: 600, fontSize: '0.8rem' }}>Recomendado</span>
                     </div>
                     <div>
                       <div style={{ fontSize: '0.72rem', color: '#595959' }}>Entradas desde</div>
@@ -1613,7 +1560,7 @@ export function AlojamientoDetail() {
             <div>
               <h2>Instalaciones y servicios de {alojamiento.nombre}</h2>
               <div style={{ fontSize: '0.85rem', color: '#595959' }}>
-                {tieneScore ? `Puntuación de servicios: ${score}` : 'Servicios que ofrece el alojamiento'}
+                Servicios que ofrece el alojamiento
               </div>
             </div>
             <button

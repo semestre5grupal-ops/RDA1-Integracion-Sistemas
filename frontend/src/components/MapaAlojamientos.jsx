@@ -122,7 +122,7 @@ export function MapaAlojamientos({
             ${alojamiento.ubicacion?.address || alojamiento.direccion || alojamiento.destino || 'Ecuador'}
           </div>
           <div style="color: #008009; font-weight: 600; font-size: 12px;">
-            ★ ${alojamiento.puntuacion || alojamiento.ratings?.score || 8.8} / 10 · Excelente ubicación
+            ★ Excelente ubicación
           </div>
         </div>
       `;
@@ -170,9 +170,6 @@ export function MapaAlojamientos({
             ${prop.nombre}
           </div>
           <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-            <span style="background: #003580; color: #fff; padding: 2px 5px; border-radius: 4px; font-weight: 700; font-size: 11px;">
-              ${score.toFixed(1)}
-            </span>
             <span style="color: #555; font-size: 11px;">${prop.destino || destination}</span>
           </div>
           <div style="display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid #eee; padding-top: 6px;">

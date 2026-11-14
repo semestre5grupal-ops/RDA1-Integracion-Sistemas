@@ -829,16 +829,21 @@ export function MisReservasPage() {
             // Usuario sin sesión activa: no mostrar ninguna reserva
             return;
           }
-          const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || item.raw?.conductor?.email || item.conductor?.email || item.driver?.email || '').trim().toLowerCase();
-          const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || item.raw?.conductor?.licencia || item.conductor?.licencia || item.raw?.driver?.license_number || '').trim();
-          const userCedula = (user?.user_metadata?.cedula || user?.user_metadata?.cedula_ruc || '').trim();
 
-          const coincideEmail = Boolean(itemEmail && itemEmail === correoSesion);
-          const coincideDoc = Boolean(itemDoc && userCedula && itemDoc === userCedula);
+          // Las reservas de vuelos vienen del backend ya autenticadas y filtradas por el dueño
+          // (no traen correo ni cédula en la respuesta del GDS), por lo que no deben descartarse.
+          if (item.tipo !== 'vuelo') {
+            const itemEmail = (item.email || item.raw?.customer_email || item.raw?.customer?.email || item.raw?.booker?.email || item.raw?.conductor?.email || item.conductor?.email || item.driver?.email || '').trim().toLowerCase();
+            const itemDoc = (item.documentId || item.raw?.customer?.document_id || item.raw?.document_id || item.raw?.documentId || item.raw?.conductor?.licencia || item.conductor?.licencia || item.raw?.driver?.license_number || '').trim();
+            const userCedula = (user?.user_metadata?.cedula || user?.user_metadata?.cedula_ruc || '').trim();
 
-          // Si el elemento no coincide ni por email ni por cédula con el usuario en sesión, descartar
-          if (!coincideEmail && !coincideDoc) {
-            return;
+            const coincideEmail = Boolean(itemEmail && itemEmail === correoSesion);
+            const coincideDoc = Boolean(itemDoc && userCedula && itemDoc === userCedula);
+
+            // Si el elemento no coincide ni por email ni por cédula con el usuario en sesión, descartar
+            if (!coincideEmail && !coincideDoc) {
+              return;
+            }
           }
         }
 

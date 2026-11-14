@@ -763,6 +763,113 @@ export function TicketIcon({ size = 16, color = 'currentColor', className = '' }
   );
 }
 
+export function RestaurantIcon({ size = 18, color = 'currentColor', className = '' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M18 2v20" />
+      <path d="M21 2v6a3 3 0 0 1-3 3M18 2v20" />
+      <path d="M6 2v7a3 3 0 0 0 3 3v10" />
+      <path d="M3 2v5a3 3 0 0 0 3 3" />
+      <path d="M9 2v5a3 3 0 0 1-3 3" />
+    </svg>
+  );
+}
+
+export function SpaIcon({ size = 18, color = 'currentColor', className = '' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 2C8 7 4 10 4 14a8 8 0 0 0 16 0c0-4-4-7-8-12z" />
+      <path d="M12 14a3 3 0 0 0 3-3" />
+    </svg>
+  );
+}
+
+export function AirConditioningIcon({ size = 18, color = 'currentColor', className = '' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="2" y="8" width="20" height="8" rx="2" />
+      <path d="M6 12h12" />
+      <path d="M7 19c1 1 2 2 3 2" />
+      <path d="M14 21c1 0 2-1 3-2" />
+      <path d="M10 5v1" />
+      <path d="M14 5v1" />
+    </svg>
+  );
+}
+
+export function BarIcon({ size = 18, color = 'currentColor', className = '' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M8 22h8" />
+      <path d="M12 15v7" />
+      <path d="M5 3l7 8 7-8z" />
+    </svg>
+  );
+}
+
+/**
+ * Representación vectorial SVG (XML) para amenidades y servicios de alojamiento.
+ */
+export function AmenityIcon({ name = '', size = 16, color = '#008009', className = '' }) {
+  const norm = String(name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  if (/wifi|internet|inalambrico/.test(norm)) {
+    return <WifiIcon size={size} color={color} className={className} />;
+  }
+  if (/desayuno|cafe|coffee|breakfast/.test(norm)) {
+    return <CoffeeIcon size={size} color={color} className={className} />;
+  }
+  if (/piscina|alberca|pool/.test(norm)) {
+    return <PoolIcon size={size} color={color} className={className} />;
+  }
+  if (/estacionamiento|parking|parqueadero|cochera|garaje|garage/.test(norm)) {
+    return <ParkingIcon size={size} color={color} className={className} />;
+  }
+  if (/gimnasio|gym|fitness/.test(norm)) {
+    return <GymIcon size={size} color={color} className={className} />;
+  }
+  if (/spa|sauna|hidromasaje|jacuzzi|bienestar|masaje/.test(norm)) {
+    return <SpaIcon size={size} color={color} className={className} />;
+  }
+  if (/restaurante|comida|restaurant|almuerzo|cena/.test(norm)) {
+    return <RestaurantIcon size={size} color={color} className={className} />;
+  }
+  if (/bar|coctel|bebida|tragos/.test(norm)) {
+    return <BarIcon size={size} color={color} className={className} />;
+  }
+  if (/aire|acondicionado|climatizacion|calefaccion|clima/.test(norm)) {
+    return <AirConditioningIcon size={size} color={color} className={className} />;
+  }
+  if (/tv|television|pantalla/.test(norm)) {
+    return <TvIcon size={size} color={color} className={className} />;
+  }
+  if (/mascota|pet|perro|gato/.test(norm)) {
+    return <PetsIcon size={size} color={color} className={className} />;
+  }
+  if (/cocina|kitchen|kitchenette/.test(norm)) {
+    return <KitchenIcon size={size} color={color} className={className} />;
+  }
+  if (/traslado|aeropuerto|shuttle/.test(norm)) {
+    return <AirportShuttleIcon size={size} color={color} className={className} />;
+  }
+  if (/familiar|familia/.test(norm)) {
+    return <FamilyIcon size={size} color={color} className={className} />;
+  }
+  if (/no fumar|sin humo|antitabaco/.test(norm)) {
+    return <NoSmokingIcon size={size} color={color} className={className} />;
+  }
+  if (/bano|ducha|shower|bath/.test(norm)) {
+    return <ShowerIcon size={size} color={color} className={className} />;
+  }
+  if (/24 horas|24h|recepcion/.test(norm)) {
+    return <ClockIcon size={size} color={color} className={className} />;
+  }
+  if (/seguridad|caja fuerte|safe/.test(norm)) {
+    return <ShieldCheckIcon size={size} color={color} className={className} />;
+  }
+  return <CheckmarkIcon size={size} color={color} className={className} />;
+}
+
 
 
 
