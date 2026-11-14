@@ -76,26 +76,23 @@ export function AtraccionDetail() {
     setCalendarViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
   };
 
+  // Siempre inicializar el selector de boletos en 1 al entrar a cualquier atracción
   useEffect(() => {
     if (id) {
-      const saved = localStorage.getItem(`atraccion_form_${id}`);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (!parsed.date || parsed.date < todayStr) {
-            parsed.date = todayStr;
-          }
-          setForm(parsed);
-        } catch (e) {}
-      }
+      setForm({
+        date: todayStr,
+        time: '09:00 a.m.',
+        adult_count: 1,
+        child_count: 0,
+        senior_count: 0,
+        infant_count: 0,
+        special_requirements: ''
+      });
+      try {
+        localStorage.removeItem(`atraccion_form_${id}`);
+      } catch (_) {}
     }
   }, [id, todayStr]);
-
-  useEffect(() => {
-    if (id) {
-      localStorage.setItem(`atraccion_form_${id}`, JSON.stringify(form));
-    }
-  }, [form, id]);
 
   const [bookingResult, setBookingResult] = useState(null);
 
@@ -347,6 +344,19 @@ export function AtraccionDetail() {
       setBookingResult({ success: true, data: result });
       setConfirmedReservation(atraccionRes);
       setShowSuccessModal(true);
+
+      // Resetear el selector de personas y categorías inmediatamente tras confirmar la compra
+      setForm(prev => ({
+        ...prev,
+        adult_count: 1,
+        child_count: 0,
+        senior_count: 0,
+        infant_count: 0,
+        special_requirements: ''
+      }));
+      try {
+        localStorage.removeItem(`atraccion_form_${id}`);
+      } catch (_) {}
 
       const existing = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
       localStorage.setItem('reservas_atracciones', JSON.stringify([atraccionRes, ...existing]));
