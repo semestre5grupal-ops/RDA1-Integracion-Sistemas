@@ -697,7 +697,17 @@ export function MisReservasPage() {
           const cancelTexto = 'Cancelación gratuita hasta 48 horas antes de la llegada';
           const isAlojCancelled = cancelledStorage.has(al.reservation_id) || cancelledStorage.has(al.id) || cancelledStorage.has(al.codigo_reserva) || cancelledStorage.has(al.pnr);
           const rawAlojStatus = (al.status || al.estado || '').toUpperCase();
-          const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (rawAlojStatus || 'CONFIRMED');
+          const isAlojAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO'].includes(rawAlojStatus) ||
+            Boolean(al.checkin_at) ||
+            Boolean(al.checkin_admin) ||
+            checkedInStorage.has(al.reservation_id) || checkedInStorage.has(al.id) || checkedInStorage.has(al.codigo_reserva) || checkedInStorage.has(al.pnr);
+          if (isAlojAssisted) {
+            if (al.reservation_id) checkedInStorage.add(al.reservation_id);
+            if (al.id) checkedInStorage.add(al.id);
+            if (al.codigo_reserva) checkedInStorage.add(al.codigo_reserva);
+            if (al.pnr) checkedInStorage.add(al.pnr);
+          }
+          const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (isAlojAssisted ? 'CONFIRMADO_ASISTIDO' : (rawAlojStatus || 'CONFIRMED'));
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -1081,15 +1091,28 @@ export function MisReservasPage() {
       if (isCancelled) return;
       await cargarTodasLasReservas(silent);
       if (!isCancelled) {
-        timer = setTimeout(() => runPoll(true), 5000);
+        timer = setTimeout(() => runPoll(true), 2500);
       }
     };
 
     runPoll(false);
 
+    // Detección reactiva instantánea: si el usuario vuelve a la pestaña o ventana, actualizar inmediatamente
+    const handleQuickSync = () => {
+      if (!isCancelled && document.visibilityState === 'visible') {
+        if (timer) clearTimeout(timer);
+        runPoll(true);
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleQuickSync);
+    window.addEventListener('focus', handleQuickSync);
+
     return () => {
       isCancelled = true;
       if (timer) clearTimeout(timer);
+      window.removeEventListener('visibilitychange', handleQuickSync);
+      window.removeEventListener('focus', handleQuickSync);
     };
   }, [cargarTodasLasReservas]);
 
@@ -1138,6 +1161,8 @@ export function MisReservasPage() {
     setCancelling(false);
     setCancelSuccess(null);
     setCancelError('');
+    // Sincronización reactiva inmediata con el backend para tener el estado más fresco
+    cargarTodasLasReservas(true);
   };
 
   const handleCancelBooking = async () => {
