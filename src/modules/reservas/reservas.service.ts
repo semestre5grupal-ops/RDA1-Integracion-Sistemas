@@ -808,6 +808,46 @@ export class ReservasService {
       }
     } catch (_) {}
 
+    // 4. Buscar en alojamientos (socios y locales)
+    try {
+      const aloSocio = await this.dataSource.query(
+        `SELECT id, codigo_reserva, codigo_reserva_socio, order_id_socio, external_order_id, estado, checkin_at, 'ALOJAMIENTOS' AS vertical
+         FROM schema_alojamientos.alojamientos_reservas_socio
+         WHERE id::text = $1 OR codigo_reserva = $1 OR codigo_reserva_socio = $1 OR order_id_socio = $1 OR external_order_id = $1
+         LIMIT 1`,
+        [id],
+      );
+      if (aloSocio && aloSocio.length > 0) {
+        const al = aloSocio[0];
+        return {
+          id,
+          estado: al.estado,
+          status: al.estado,
+          vertical: 'ALOJAMIENTOS',
+          fecha_checkin: al.checkin_at,
+          mensaje: al.estado === 'CONFIRMADO_ASISTIDO' ? 'Check-in presencial confirmado por el hotel.' : 'Reserva activa pendiente de confirmación física.',
+        };
+      }
+      const aloLocal = await this.dataSource.query(
+        `SELECT id, codigo_reserva, estado, checkin_completado_at, 'ALOJAMIENTOS' AS vertical
+         FROM schema_alojamientos.alojamientos_reservas
+         WHERE id::text = $1 OR codigo_reserva = $1
+         LIMIT 1`,
+        [id],
+      );
+      if (aloLocal && aloLocal.length > 0) {
+        const al = aloLocal[0];
+        return {
+          id,
+          estado: al.estado,
+          status: al.estado,
+          vertical: 'ALOJAMIENTOS',
+          fecha_checkin: al.checkin_completado_at,
+          mensaje: al.estado === 'CONFIRMADO_ASISTIDO' ? 'Check-in presencial confirmado.' : 'Reserva activa pendiente de confirmación física.',
+        };
+      }
+    } catch (_) {}
+
     return {
       id,
       estado: 'RESERVADO',
