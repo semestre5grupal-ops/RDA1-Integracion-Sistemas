@@ -1932,10 +1932,10 @@ export class AtraccionesService implements OnModuleInit {
         slot_id: slotIdMichael,
         date: finalDate,
         time: timeFormatted,
-        adult_count: adultCount,
+        adult_count: adultCount + seniorCount + infantCount,
         child_count: childCount,
-        senior_count: seniorCount,
-        infant_count: infantCount,
+        senior_count: 0,
+        infant_count: 0,
         customer: {
           full_name: clientName,
           email: clientEmail,
@@ -1966,17 +1966,47 @@ export class AtraccionesService implements OnModuleInit {
         );
         michaelRes = response.data;
       } catch (err: any) {
-        this.logger.error(`Error reservando en API de Michael: ${JSON.stringify(err.response?.data || err.message)}`);
-        if (err.response?.status === 409 || err.response?.data?.code === 'OUT_OF_STOCK') {
+        // Salvaguarda: si Michael rechaza por desglose etario, reintentar unificando a entradas generales
+        if ((childCount > 0 || seniorCount > 0 || infantCount > 0) && err.response?.status !== 409) {
+          try {
+            this.logger.warn(`[Michael Fallback] Reintentando reserva unificando a entradas generales (${totalTickets} personas)`);
+            const fallbackPayload = {
+              ...michaelPayload,
+              adult_count: totalTickets,
+              child_count: 0,
+              senior_count: 0,
+              infant_count: 0,
+            };
+            const fbRes = await firstValueFrom(
+              this.httpService.post(
+                'https://tourgirls-gateway-mm.azurewebsites.net/api/v3/reservas',
+                fallbackPayload,
+                {
+                  headers: {
+                    'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w',
+                    'Idempotency-Key': crypto.randomUUID(),
+                    'Content-Type': 'application/json',
+                  },
+                  timeout: 30000,
+                },
+              ),
+            );
+            michaelRes = fbRes.data;
+          } catch (_) { }
+        }
+        if (!michaelRes) {
+          this.logger.error(`Error reservando en API de Michael: ${JSON.stringify(err.response?.data || err.message)}`);
+          if (err.response?.status === 409 || err.response?.data?.code === 'OUT_OF_STOCK') {
+            throw new HttpException(
+              err.response.data || { message: 'Sin cupos disponibles en la atracción de TourGirls' },
+              HttpStatus.CONFLICT,
+            );
+          }
           throw new HttpException(
-            err.response.data || { message: 'Sin cupos disponibles en la atracción de TourGirls' },
-            HttpStatus.CONFLICT,
+            `Error en socio de atracciones (Michael - TourGirls): ${err.response?.data?.detail || err.response?.data?.message || err.message}`,
+            HttpStatus.BAD_GATEWAY,
           );
         }
-        throw new HttpException(
-          `Error en socio de atracciones (Michael - TourGirls): ${err.response?.data?.detail || err.response?.data?.message || err.message}`,
-          HttpStatus.BAD_GATEWAY,
-        );
       }
 
       const reservationCode = michaelRes?.reservation_code || michaelRes?.external_order_id || `DEC-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -2102,10 +2132,10 @@ export class AtraccionesService implements OnModuleInit {
         slot_id: slotIdAlisson,
         date: dateStr,
         time: timeFormatted,
-        adult_count: adultCount,
-        child_count: childCount,
-        senior_count: seniorCount,
-        infant_count: infantCount,
+        adult_count: totalTickets,
+        child_count: 0,
+        senior_count: 0,
+        infant_count: 0,
         customer: {
           full_name: safeFullName,
           nombre_completo: safeFullName,
@@ -2537,10 +2567,10 @@ export class AtraccionesService implements OnModuleInit {
         slot_id: slotIdDilan,
         date: dateStr,
         time: timeFormatted,
-        adult_count: adultCount,
-        child_count: childCount,
-        senior_count: seniorCount,
-        infant_count: infantCount,
+        adult_count: totalTickets,
+        child_count: 0,
+        senior_count: 0,
+        infant_count: 0,
         customer: {
           full_name: clientName,
           email: clientEmail,
@@ -2669,10 +2699,10 @@ export class AtraccionesService implements OnModuleInit {
         slot_id: slotIdAriel,
         date: dateStr,
         time: time24,
-        adult_count: adultCount,
-        child_count: childCount,
-        senior_count: seniorCount,
-        infant_count: infantCount,
+        adult_count: totalTickets,
+        child_count: 0,
+        senior_count: 0,
+        infant_count: 0,
         customer: {
           full_name: clientName,
           email: clientEmail,
@@ -3957,10 +3987,22 @@ export class AtraccionesService implements OnModuleInit {
       directions_hint: 'Frente al parque La Carolina, estación Quinde.',
     };
 
+    const provCode = item.proveedorCodigo || (item.id?.startsWith('0bef') ? 'NODE_ATR_ARIEL' : 'NODE_ATR_DILAN');
+    // Determinar soporte etario según el socio integrado:
+    // - Ariel (Ecuatravel): tarifa plana por persona, sin desglose de niños/seniors/infantes.
+    // - Gloria (Vívelo Ecuador): endpoint de reservas opera sobre total 'personas', sin desglose etario.
+    // - Alisson: no admite seniors ni infantes (solo tarifa adulto/general).
+    // - Michael y Dilan: admiten desglose si la atracción define tarifas diferenciadas.
+    const permiteDiferenciado = provCode !== 'NODE_ATR_ARIEL' && provCode !== 'NODE_ATR_GLORIA';
+    const admiteNinos = permiteDiferenciado && provCode !== 'NODE_ATR_ALISSON';
+    const admiteSeniors = permiteDiferenciado && provCode !== 'NODE_ATR_ALISSON';
+    const admiteInfantes = false; // Ningún socio admite aforo formal para infantes (tarifa 0 / sin aforo en tours)
+    const soloPersonas = !admiteNinos && !admiteSeniors && !admiteInfantes;
+
     const priceBreakdown = {
       adulto: adultPrice,
-      nino: Number((adultPrice * 0.5).toFixed(2)),
-      senior: Number((adultPrice * 0.7).toFixed(2)),
+      nino: admiteNinos ? Number((adultPrice * 0.5).toFixed(2)) : adultPrice,
+      senior: admiteSeniors ? Number((adultPrice * 0.7).toFixed(2)) : adultPrice,
       infante: 0,
       estudiante: Number((adultPrice * 0.6).toFixed(2)),
       moneda: currency,
@@ -3968,7 +4010,7 @@ export class AtraccionesService implements OnModuleInit {
       currency: currency,
       total: adultPrice,
       adult: adultPrice,
-      child: Number((adultPrice * 0.5).toFixed(2)),
+      child: admiteNinos ? Number((adultPrice * 0.5).toFixed(2)) : adultPrice,
       infant: 0,
     };
 
@@ -4068,6 +4110,16 @@ export class AtraccionesService implements OnModuleInit {
       },
       permite_paquete: true,
       porcentaje_descuento_paquete: 15.0,
+      admite_ninos: admiteNinos,
+      admite_seniors: admiteSeniors,
+      admite_infantes: admiteInfantes,
+      solo_personas: soloPersonas,
+      politicas_edad: {
+        admite_ninos: admiteNinos,
+        admite_seniors: admiteSeniors,
+        admite_infantes: admiteInfantes,
+        solo_personas: soloPersonas,
+      },
       proveedor: {
         id: item.proveedorCodigo || 'NODE_ATR_DILAN',
         codigo: item.proveedorCodigo || 'NODE_ATR_DILAN',
