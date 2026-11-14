@@ -87,9 +87,10 @@ export function construirFacturaPdf(reserva) {
     cantidadNum = Number(cupos);
     cantidadTexto = `${cupos} ${cupos > 1 ? 'Entradas/Personas' : 'Entrada/Persona'}`;
   } else if (esAlojamiento) {
+    const habs = reserva.raw?.habitaciones_count || reserva.raw?.habitaciones || reserva.raw?.number_of_rooms || 1;
     const huespedes = reserva.cantidad || reserva.raw?.huespedes || 1;
-    cantidadNum = Number(huespedes);
-    cantidadTexto = `${huespedes} ${huespedes > 1 ? 'Huéspedes' : 'Huésped'}`;
+    cantidadNum = Number(habs) || 1;
+    cantidadTexto = `${cantidadNum} ${cantidadNum > 1 ? 'Habitaciones' : 'Habitación'} (${huespedes} ${huespedes > 1 ? 'huéspedes' : 'huésped'})`;
   } else {
     const pasajeros = reserva.raw?.passengers?.length || reserva.cantidad || 1;
     cantidadNum = Number(pasajeros);
@@ -104,9 +105,11 @@ export function construirFacturaPdf(reserva) {
   // El total llega como `number` desde los endpoints, pero desde el totalizador
   // local puede venir como texto con símbolo de moneda: `parseFloat` deja el
   // primer grupo de dígitos y descarta el resto, que es justo lo que se quiere.
-  const total = fac ? Number(fac.total) : parseFloat(String(reserva.totalRaw).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0;
-  const subtotal = fac ? Number(fac.subtotal) : total / 1.15;
-  const iva = fac ? Number(fac.impuestos) : total - subtotal;
+  const totalNum = fac ? Number(fac.total) : parseFloat(String(reserva.totalRaw).replace(/[^\d.,-]/g, '').replace(',', '.')) || 0;
+  const total = Math.round(totalNum * 100) / 100;
+  const subtotal = fac ? Number(fac.subtotal) : Math.round((total / 1.15) * 100) / 100;
+  const iva = fac ? Number(fac.impuestos) : Math.round((total - subtotal) * 100) / 100;
+  const precioUnitario = cantidadNum > 0 ? Math.round((subtotal / cantidadNum) * 100) / 100 : subtotal;
   const etiquetaImpuestos = fac ? `IMPUESTOS Y TASAS ${Number(fac.impuestosPorcentaje).toFixed(2)}%` : 'IVA 15%';
 
   // Número: el de la factura emitida; si no hay (otras verticales), uno de demo
@@ -235,7 +238,7 @@ export function construirFacturaPdf(reserva) {
     const descDetallada = fac?.descripcion || `${reserva.titulo} [${cantidadTexto}]${fechaEntrega ? ` · ${esAuto ? 'Retiro' : 'Fecha'}: ${fechaEntrega}` : ''}${fechaDevolucion ? ` · Dev: ${fechaDevolucion}` : ''}`;
     const descripcion = sanear(descDetallada);
     doc.text(doc.splitTextToSize(descripcion, 60).slice(0, 3), 62, 149);
-    doc.text(subtotal.toFixed(2), 140, 151, { align: 'right' });
+    doc.text(precioUnitario.toFixed(2), 140, 151, { align: 'right' });
     doc.text('0.00', 165, 151, { align: 'right' });
     doc.text(subtotal.toFixed(2), 190, 151, { align: 'right' });
   }

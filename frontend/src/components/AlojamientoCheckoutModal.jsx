@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { jsPDF } from 'jspdf';
-import { reservarAlojamiento } from '../services/alojamientosApi';
+import { reservarAlojamiento, getReservasAlojamientos } from '../services/alojamientosApi';
 
 /** Cédula ecuatoriana: 10 dígitos, provincia 01–24 (o 30) y dígito verificador módulo 10. */
 function cedulaValida(c) {
@@ -525,15 +525,54 @@ export function AlojamientoCheckoutModal({
           err = err2;
         }
       }
+
+      // Si el socio hotelero responde 409 porque la petición anterior aún está en curso (Idempotencia en vuelo)
+      const errorMsgRaw = String(err.response?.data?.detail || err.response?.data?.message || err.message || '');
+      const esEnProceso = err.response?.status === 409 && (
+        /ya se est[aá] procesando/i.test(errorMsgRaw) ||
+        err.response?.data?.code === 'BOOKING_NOT_CONFIRMED' ||
+        /idempotency/i.test(errorMsgRaw)
+      );
+
+      if (esEnProceso) {
+        try {
+          // Esperar 2.5 segundos a que el hotel termine de asentar la reserva y reintentar con la misma idempotency-key
+          await new Promise((r) => setTimeout(r, 2500));
+          const resReintento = await reservarAlojamiento(alojamiento.id, payload, idempotencyKey);
+          finalizarConReserva(resReintento);
+          return;
+        } catch (errReintento) {
+          // Si el reintento falló, verificar si ya se asentó en las reservas del usuario
+          try {
+            const misReservas = await getReservasAlojamientos().catch(() => []);
+            const encontrada = (misReservas || []).find((r) => {
+              const rAlojId = r.alojamiento_id || r.alojamientoId || r.hotel_id;
+              const rEmail = (r.customer_email || r.email || '').toLowerCase().trim();
+              return (rAlojId === alojamiento.id || r.id === alojamiento.id) &&
+                     (!payload.customer_email || rEmail === payload.customer_email.toLowerCase().trim());
+            });
+            if (encontrada) {
+              finalizarConReserva(encontrada);
+              return;
+            }
+          } catch (_) {}
+          err = errReintento;
+        }
+      }
+
       if (esAvisoDuplicado(err) && !confirmadoDuplicadoRef.current) {
         // La reserva previa existe en el servidor (p. ej. hecha desde otro dispositivo).
         setReservasSolapadas([]);
-        setMensajeDuplicado(err.response.data.detail);
+        setMensajeDuplicado(err.response?.data?.detail);
         setShowModalExistente(true);
       } else if (err.response?.status === 409) {
         idempotencyKeyRef.current = null;
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;
-        setErrorMsg(errorDetail || 'Esta reserva ya fue procesada anteriormente.');
+        if (/ya se est[aá] procesando/i.test(errorDetail || '')) {
+          setErrorMsg('Tu reserva se está confirmando con el hotel. Por favor revisa la sección Mis Reservas en unos instantes.');
+        } else {
+          setErrorMsg(errorDetail || 'Esta reserva ya fue procesada anteriormente.');
+        }
       } else {
         idempotencyKeyRef.current = null;
         const errorDetail = err.response?.data?.detail || err.response?.data?.message;

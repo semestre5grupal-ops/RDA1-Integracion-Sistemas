@@ -697,7 +697,17 @@ export function MisReservasPage() {
           const cancelTexto = 'Cancelación gratuita hasta 48 horas antes de la llegada';
           const isAlojCancelled = cancelledStorage.has(al.reservation_id) || cancelledStorage.has(al.id) || cancelledStorage.has(al.codigo_reserva) || cancelledStorage.has(al.pnr);
           const rawAlojStatus = (al.status || al.estado || '').toUpperCase();
-          const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (rawAlojStatus || 'CONFIRMED');
+          const isAlojAssisted = ['CONFIRMADO_ASISTIDO', 'CHECKED_IN', 'ASISTIDO'].includes(rawAlojStatus) ||
+            Boolean(al.checkin_at) ||
+            Boolean(al.checkin_admin) ||
+            checkedInStorage.has(al.reservation_id) || checkedInStorage.has(al.id) || checkedInStorage.has(al.codigo_reserva) || checkedInStorage.has(al.pnr);
+          if (isAlojAssisted) {
+            if (al.reservation_id) checkedInStorage.add(al.reservation_id);
+            if (al.id) checkedInStorage.add(al.id);
+            if (al.codigo_reserva) checkedInStorage.add(al.codigo_reserva);
+            if (al.pnr) checkedInStorage.add(al.pnr);
+          }
+          const alojFinalStatus = isAlojCancelled ? 'CANCELLED' : (isAlojAssisted ? 'CONFIRMADO_ASISTIDO' : (rawAlojStatus || 'CONFIRMED'));
           return {
             id: al.reservation_id || al.id,
             pnr: al.codigo_reserva || al.pnr || al.reservation_id || al.id || 'HOTEL',
@@ -1083,15 +1093,28 @@ export function MisReservasPage() {
       if (isCancelled) return;
       await cargarTodasLasReservas(silent);
       if (!isCancelled) {
-        timer = setTimeout(() => runPoll(true), 5000);
+        timer = setTimeout(() => runPoll(true), 2500);
       }
     };
 
     runPoll(false);
 
+    // Detección reactiva instantánea: si el usuario vuelve a la pestaña o ventana, actualizar inmediatamente
+    const handleQuickSync = () => {
+      if (!isCancelled && document.visibilityState === 'visible') {
+        if (timer) clearTimeout(timer);
+        runPoll(true);
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleQuickSync);
+    window.addEventListener('focus', handleQuickSync);
+
     return () => {
       isCancelled = true;
       if (timer) clearTimeout(timer);
+      window.removeEventListener('visibilitychange', handleQuickSync);
+      window.removeEventListener('focus', handleQuickSync);
     };
   }, [cargarTodasLasReservas]);
 
@@ -1140,6 +1163,8 @@ export function MisReservasPage() {
     setCancelling(false);
     setCancelSuccess(null);
     setCancelError('');
+    // Sincronización reactiva inmediata con el backend para tener el estado más fresco
+    cargarTodasLasReservas(true);
   };
 
   const handleCancelBooking = async () => {
@@ -1149,22 +1174,7 @@ export function MisReservasPage() {
 
     const idToCancel = selectedReserva.id;
     const pnrToCancel = selectedReserva.pnr;
-
-    // Reactividad inmediata (0ms): persistir e impactar en UI de inmediato
-    try {
-      const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
-      if (idToCancel) savedCancelled.add(idToCancel);
-      if (pnrToCancel) savedCancelled.add(pnrToCancel);
-      localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
-    } catch (_) {}
-
-    setSelectedReserva(prev => prev ? ({ ...prev, status: 'CANCELLED' }) : null);
-    setReservas(prev => prev.map(r => {
-      if (r.id === idToCancel || (pnrToCancel && r.pnr === pnrToCancel)) {
-        return { ...r, status: 'CANCELLED' };
-      }
-      return r;
-    }));
+    const previousStatus = selectedReserva.status;
 
     try {
       const motivoFinal = `${cancelReason}${cancelDetails.trim() ? `: ${cancelDetails.trim()}` : ''}`;
@@ -1364,29 +1374,67 @@ export function MisReservasPage() {
       if (estadoFinal === 'CANCELLED') {
         try {
           const cancelledSet = new Set(JSON.parse(localStorage.getItem('cancelled_reservas_ids') || '[]'));
-          if (selectedReserva.id) cancelledSet.add(selectedReserva.id);
-          if (selectedReserva.pnr) cancelledSet.add(selectedReserva.pnr);
-          if (selectedReserva.order_id) cancelledSet.add(selectedReserva.order_id);
+          const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
+          if (idToCancel) { cancelledSet.add(idToCancel); savedCancelled.add(idToCancel); }
+          if (pnrToCancel) { cancelledSet.add(pnrToCancel); savedCancelled.add(pnrToCancel); }
+          if (selectedReserva.order_id) { cancelledSet.add(selectedReserva.order_id); savedCancelled.add(selectedReserva.order_id); }
           localStorage.setItem('cancelled_reservas_ids', JSON.stringify(Array.from(cancelledSet)));
+          localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
         } catch (_) {}
       }
-      setSelectedReserva(prev => ({
+      setSelectedReserva(prev => (prev ? {
         ...prev,
         status: estadoFinal
-      }));
+      } : null));
 
       setReservas(prev => prev.map(r => {
-        if (r.id === selectedReserva.id || r.pnr === selectedReserva.pnr) {
+        if (r.id === idToCancel || (pnrToCancel && r.pnr === pnrToCancel)) {
           return { ...r, status: estadoFinal };
         }
         return r;
       }));
 
-      // Sincronización en segundo plano silenciosa sin alterar el estado cancelado optimista
+      // Sincronización en segundo plano silenciosa
       setTimeout(() => cargarTodasLasReservas(true), 400);
 
     } catch (err) {
+      // Limpiar cualquier residuo de cancelación en caso de rechazo del servidor
+      try {
+        const savedCancelled = new Set(JSON.parse(localStorage.getItem('cancelled_orders') || '[]'));
+        const cancelledSet = new Set(JSON.parse(localStorage.getItem('cancelled_reservas_ids') || '[]'));
+        if (idToCancel) { savedCancelled.delete(idToCancel); cancelledSet.delete(idToCancel); }
+        if (pnrToCancel) { savedCancelled.delete(pnrToCancel); cancelledSet.delete(pnrToCancel); }
+        localStorage.setItem('cancelled_orders', JSON.stringify(Array.from(savedCancelled)));
+        localStorage.setItem('cancelled_reservas_ids', JSON.stringify(Array.from(cancelledSet)));
+      } catch (_) {}
+
+      // Si el error indica que ya se hizo check-in o ya fue asistida
+      const errorMsg = String(err?.message || err?.response?.data?.detail || err?.response?.data?.message || '');
+      const esCheckinConflict = err?.response?.status === 409 || /check-?in|asistid|ya no admite cancelaci/i.test(errorMsg);
+
+      const nuevoStatus = esCheckinConflict ? 'CONFIRMADO_ASISTIDO' : previousStatus;
+
+      if (esCheckinConflict) {
+        try {
+          const checkedSet = new Set(JSON.parse(localStorage.getItem('checked_in_orders') || '[]'));
+          if (idToCancel) checkedSet.add(idToCancel);
+          if (pnrToCancel) checkedSet.add(pnrToCancel);
+          localStorage.setItem('checked_in_orders', JSON.stringify(Array.from(checkedSet)));
+        } catch (_) {}
+      }
+
+      setSelectedReserva(prev => (prev ? { ...prev, status: nuevoStatus } : null));
+      setReservas(prev => prev.map(r => {
+        if (r.id === idToCancel || (pnrToCancel && r.pnr === pnrToCancel)) {
+          return { ...r, status: nuevoStatus };
+        }
+        return r;
+      }));
+
       setCancelError(err.message || 'Error al procesar la cancelación. Intenta de nuevo.');
+
+      // Refrescar inmediatamente con el backend para recuperar el estado real actualizado
+      cargarTodasLasReservas(true);
     } finally {
       setCancelling(false);
     }
