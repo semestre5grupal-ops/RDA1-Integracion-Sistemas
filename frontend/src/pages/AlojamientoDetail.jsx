@@ -962,30 +962,8 @@ export function AlojamientoDetail() {
             )}
           </div>
 
-          {/* Right Column (Highlights Card & Score) */}
+          {/* Right Column (Side Map & Reserve CTA) */}
           <aside className="dt-overview-right">
-            {/* Rating card */}
-            <div className="dt-rating-card">
-              <div className="dt-score-row">
-                <div className="dt-score-text">
-                  <span style={{ fontWeight: 700, fontSize: '1.05rem', color: '#008009' }}>
-                    {!tieneScore ? 'Alojamiento verificado' : scoreNum >= 9 ? 'Excelente' : scoreNum >= 8 ? 'Muy bueno' : 'Bueno'}
-                  </span>
-                  <span style={{ fontSize: '0.78rem', color: '#595959' }}>
-                    Alojamiento verificado
-                  </span>
-                </div>
-              </div>
-              {Array.isArray(alojamiento.amenidades) && alojamiento.amenidades.length > 0 && (
-                <div style={{ fontSize: '0.8rem', color: '#374151', borderTop: '1px solid #f0f0f0', paddingTop: '10px' }}>
-                  <strong>Servicios del alojamiento:</strong>
-                  <ul style={{ paddingLeft: '16px', margin: '6px 0 0 0' }}>
-                    {alojamiento.amenidades.slice(0, 4).map((a, i) => <li key={i}>{a}</li>)}
-                  </ul>
-                </div>
-              )}
-            </div>
-
             {/* Side Map */}
             <div
               className="dt-side-map-box"
@@ -1003,44 +981,14 @@ export function AlojamientoDetail() {
               </button>
             </div>
 
-            {/* Property Highlights: datos reales del hotel. */}
-            <div className="dt-highlights-card">
-              <h3 className="dt-highlights-title">Puntos fuertes del alojamiento</h3>
-              <div className="dt-stay-badge">¡Ideal para una estancia de {nightsCount} noches!</div>
-
-              {(alojamiento.ubicacion?.address || alojamiento.destino) && (
-                <div className="dt-highlight-point">
-                  <PinIcon size={16} color="#006ce4" />
-                  <div>
-                    <strong>Ubicación:</strong> {alojamiento.ubicacion?.address || alojamiento.destino}
-                  </div>
-                </div>
-              )}
-
-              {Number(alojamiento.estrellas) > 0 && (
-                <div className="dt-highlight-point">
-                  <CheckmarkIcon size={16} color="#006ce4" />
-                  <div><strong>Categoría:</strong> {alojamiento.estrellas} estrellas</div>
-                </div>
-              )}
-
-              {(alojamiento.politicas?.checkin_desde || alojamiento.politicas?.checkout_hasta) && (
-                <div className="dt-highlight-point">
-                  <CheckmarkIcon size={16} color="#006ce4" />
-                  <div>
-                    <strong>Horarios:</strong> check-in {alojamiento.politicas?.checkin_desde || '—'} · check-out {alojamiento.politicas?.checkout_hasta || '—'}
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                className="dt-reserve-btn-full"
-                onClick={() => scrollToSection(availabilityRef, 'price')}
-              >
-                Reservar tu estancia
-              </button>
-            </div>
+            <button
+              type="button"
+              className="dt-reserve-btn-full"
+              style={{ marginTop: '12px' }}
+              onClick={() => scrollToSection(availabilityRef, 'price')}
+            >
+              Reservar tu estancia
+            </button>
           </aside>
         </div>
 

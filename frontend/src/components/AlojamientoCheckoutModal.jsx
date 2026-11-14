@@ -1039,33 +1039,6 @@ export function AlojamientoCheckoutModal({
                 <div className="bkg-card" style={{ marginTop: '16px' }}>
                   <h3 className="bkg-card-title">Introduce tus datos</h3>
 
-                  {/* Radio principal o para otra persona */}
-                  <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
-                    ¿Para quién es la reserva?
-                  </div>
-                  <div className="bkg-radio-group">
-                    <label className="bkg-radio-label">
-                      <input
-                        type="radio"
-                        name="paraQuien"
-                        value="principal"
-                        checked={paraQuien === 'principal'}
-                        onChange={(e) => setParaQuien(e.target.value)}
-                      />
-                      <span>Soy el huésped principal</span>
-                    </label>
-                    <label className="bkg-radio-label">
-                      <input
-                        type="radio"
-                        name="paraQuien"
-                        value="otra_persona"
-                        checked={paraQuien === 'otra_persona'}
-                        onChange={(e) => setParaQuien(e.target.value)}
-                      />
-                      <span>La reserva es para otra persona</span>
-                    </label>
-                  </div>
-
                   {/* Radio viaja por trabajo */}
                   <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
                     ¿Viajas por trabajo?
@@ -1335,52 +1308,7 @@ export function AlojamientoCheckoutModal({
                   )}
                 </div>
 
-                {/* CARD 3: ADDONS */}
-                <div className="bkg-card">
-                  <h4 className="bkg-card-title">Añade a tu estancia</h4>
-                  <div className="bkg-addon-item">
-                    <div className="bkg-addon-info">
-                      <h6>Quiero alquilar un coche con un 5% de descuento</h6>
-                      <p>Ahorra en alquiler de autos para moverte con total libertad en tu destino.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={deseaAuto}
-                      onChange={(e) => setDeseaAuto(e.target.checked)}
-                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                    />
-                  </div>
-                  <div className="bkg-addon-item">
-                    <div className="bkg-addon-info">
-                      <h6>Quiero reservar un taxi privado con antelación</h6>
-                      <p>Evita sorpresas y viaja sin estrés desde el aeropuerto hasta el alojamiento.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={deseaTaxi}
-                      onChange={(e) => setDeseaTaxi(e.target.checked)}
-                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                    />
-                  </div>
-                </div>
-
-                {/* CARD 4: SPECIAL REQUESTS */}
-                <div className="bkg-card">
-                  <h4 className="bkg-card-title">Peticiones especiales</h4>
-                  <p style={{ fontSize: '12px', color: '#595959', margin: '0 0 8px 0' }}>
-                    El alojamiento no puede garantizar que se cumplan las peticiones especiales, pero hará todo lo posible por ayudarte.
-                  </p>
-                  <div className="bkg-input-group" style={{ marginBottom: 0 }}>
-                    <textarea
-                      rows={3}
-                      placeholder="Escribe tus peticiones en inglés o español (opcional)..."
-                      value={peticionesEspeciales}
-                      onChange={(e) => setPeticionesEspeciales(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {/* CARD 5: ARRIVAL TIME */}
+                {/* CARD 3: ARRIVAL TIME */}
                 <div className="bkg-card">
                   <h4 className="bkg-card-title">Tu hora de llegada</h4>
                   <p style={{ fontSize: '13px', color: '#1a1a1a', margin: '0 0 4px 0' }}>
