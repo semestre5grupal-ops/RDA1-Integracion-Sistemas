@@ -507,7 +507,7 @@ export function AlojamientosPage() {
         <form className="bk-searchbox-form" onSubmit={handleSearchSubmit} role="search" aria-label="Búsqueda de alojamientos">
           <div className="bk-searchbox-fields">
             {/* Destino */}
-            <div className="bk-search-field">
+            <div className={`bk-search-field ${destinationError ? 'has-error' : ''}`}>
               <span style={{ color: '#474747', display: 'flex' }} aria-hidden="true">
                 <BedIcon size={22} color="#474747" />
               </span>
@@ -519,6 +519,7 @@ export function AlojamientosPage() {
                   id="bk-destination-input"
                   className="bk-field-input"
                   value={destination}
+                  required
                   onChange={(val) => {
                     setDestination(val);
                     if (val.trim()) setDestinationError('');

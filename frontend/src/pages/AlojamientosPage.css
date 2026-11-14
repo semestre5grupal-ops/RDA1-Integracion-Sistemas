@@ -108,6 +108,11 @@
   outline-offset: -1px;
 }
 
+.bk-search-field.has-error {
+  outline: 2px solid #d4111e !important;
+  outline-offset: -1px;
+}
+
 .bk-field-content {
   display: flex;
   flex-direction: column;

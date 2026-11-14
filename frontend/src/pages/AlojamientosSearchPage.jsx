@@ -134,7 +134,6 @@ export function AlojamientosSearchPage() {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState('list');
   const [sortBy, setSortBy] = useState('popularity');
   const [wishlist, setWishlist] = useState(new Set());
   const [lastSyncTime, setLastSyncTime] = useState(new Date());
@@ -490,11 +489,15 @@ export function AlojamientosSearchPage() {
         const name = (p.nombre || p.name || '').toLowerCase();
         return selectedTypes.some((t) => {
           const tLow = t.toLowerCase();
-          if (tLow.includes('hotel') && !tLow.includes('apart')) {
-            return type.includes('hotel') || name.includes('hotel') || (!type.includes('depart') && !type.includes('hostal') && !type.includes('casa'));
+          // Apartahoteles: correspondencia estricta para no confundir con habitaciones tipo "Suite" de hoteles convencionales
+          if (tLow.includes('aparthotel') || tLow.includes('apartahotel') || tLow.includes('apart-hotel')) {
+            return type.includes('aparthotel') || type.includes('apartahotel') || type.includes('apart-hotel') || name.includes('aparthotel') || name.includes('apartahotel') || name.includes('apart-hotel');
           }
-          if (tLow.includes('depart') || tLow.includes('apart')) {
-            return type.includes('depart') || type.includes('apart') || name.includes('suite') || name.includes('apart');
+          if (tLow.includes('depart') || tLow.includes('apartamento')) {
+            return type.includes('depart') || type.includes('apartamento') || name.includes('departamento') || name.includes('apartamento') || (!type.includes('hotel') && type.includes('apart'));
+          }
+          if (tLow.includes('hotel')) {
+            return type.includes('hotel') || name.includes('hotel') || (!type.includes('depart') && !type.includes('apart') && !type.includes('hostal') && !type.includes('casa'));
           }
           if (tLow.includes('hostal')) {
             return type.includes('hostal') || name.includes('hostal') || type.includes('posada') || name.includes('posada');
@@ -649,7 +652,7 @@ export function AlojamientosSearchPage() {
         <div className="sr-searchbox-inner">
           <form className="sr-searchbox-bar" onSubmit={handleSearchSubmit}>
             {/* 1. Destination Field */}
-            <div className="sr-search-field">
+            <div className={`sr-search-field ${destinationError ? 'has-error' : ''}`}>
               <span className="sr-search-icon" aria-hidden="true">
                 <BedIcon size={20} color="#474747" />
               </span>
@@ -659,6 +662,7 @@ export function AlojamientosSearchPage() {
                   id="sr-destination-input"
                   className="sr-field-input"
                   value={destination}
+                  required
                   onChange={(val) => {
                     setDestination(val);
                     if (val.trim()) setDestinationError('');
@@ -1177,25 +1181,7 @@ export function AlojamientosSearchPage() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-              {/* List / Grid Toggle */}
-              <div className="sr-view-toggle">
-                <button
-                  type="button"
-                  className={`sr-view-btn ${viewMode === 'list' ? 'active' : ''}`}
-                  onClick={() => setViewMode('list')}
-                >
-                  Lista
-                </button>
-                <button
-                  type="button"
-                  className={`sr-view-btn ${viewMode === 'grid' ? 'active' : ''}`}
-                  onClick={() => setViewMode('grid')}
-                >
-                  Cuadrícula
-                </button>
-              </div>
-
+            <div>
               {/* Sorter Dropdown */}
               <div className="sr-sorter-bar">
                 <select
