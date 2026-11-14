@@ -253,7 +253,18 @@ export class ReservasService {
     apiKey?: string,
     correlationId?: string,
   ): Promise<any> {
-    const targetId = id || dto.external_order_id || dto.order_id || (dto as any).reserva_id || (dto as any).reservation_code;
+    const rawId = (id && id !== 'checkin' && id !== 'UNKNOWN') ? id : null;
+    const targetId =
+      rawId ||
+      dto.external_order_id ||
+      dto.order_id ||
+      dto.locator ||
+      dto.localizador ||
+      dto.codigo_reserva ||
+      (dto as any).reserva_id ||
+      (dto as any).reservation_code ||
+      dto.id ||
+      'UNKNOWN';
     const safeCorrId = correlationId || `corr-chk-${Date.now()}`;
     const fechaCheckin = dto.fecha_checkin || dto.checked_in_at || (dto as any).hora_checkin || new Date().toISOString();
     const estado = dto.estado || dto.status || 'CONFIRMADO_ASISTIDO';
@@ -274,6 +285,7 @@ export class ReservasService {
       'LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA', // Daniel (Ruta Libre)
       'Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=', // MDU
       'xSQILcF-wlDGZ44NFmLpLbJlsX7rWooq', // Esteban (AutoSpot)
+      'hab_b2b_live_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c', // Hábitat EC (James)
       'booking-secret-key-2026',
       'booking-atracciones-2026',
       'test-api-key',
@@ -288,6 +300,20 @@ export class ReservasService {
           .query(`SELECT codigo_nodo, vertical FROM schema_proveedores.config_proveedor WHERE api_key = $1 LIMIT 1`, [cleanKey])
           .catch(() => [] as any[]);
         if (prov && prov.length > 0) isAuthorizedKey = true;
+      } catch (_) {}
+    }
+
+    if (!isAuthorizedKey && targetId && targetId !== 'UNKNOWN') {
+      try {
+        const checkAlo = await this.dataSource.query(
+          `SELECT id, codigo_nodo FROM schema_alojamientos.alojamientos_reservas_socio
+           WHERE (id::text = $1 OR codigo_reserva = $1 OR order_id_socio = $1 OR external_order_id = $1 OR codigo_reserva_socio = $1)
+           LIMIT 1`,
+          [targetId],
+        );
+        if (checkAlo && checkAlo.length > 0) {
+          isAuthorizedKey = true;
+        }
       } catch (_) {}
     }
 
