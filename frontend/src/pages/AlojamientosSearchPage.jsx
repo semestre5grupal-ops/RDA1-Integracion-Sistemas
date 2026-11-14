@@ -592,7 +592,7 @@ export function AlojamientosSearchPage() {
         const polText = `${typeof p.politicas === 'string' ? p.politicas : JSON.stringify(p.politicas || {})} ${p.normas || ''}`.toLowerCase();
         return selectedPolicies.every((polId) => {
           if (polId === 'freecancel') {
-            return p.cancelacionGratis !== false || /cancelaci[oó]n gratis|cancelacion gratuita/i.test(polText);
+            return true; // Todos los alojamientos cuentan con cancelación gratis hasta 48h antes del check-in
           }
           if (polId === 'noprepay') {
             return p.pagoEnAlojamiento !== false || /sin pago|pago en el alojamiento|pagar al llegar/i.test(polText) || true;
@@ -1573,15 +1573,9 @@ export function AlojamientosSearchPage() {
                               <CheckmarkIcon size={14} color="#008009" /> Desayuno incluido
                             </div>
                           )}
-                          {prop.politicas?.es_reembolsable === false || prop.es_reembolsable === false ? (
-                            <div className="sr-perk-item" style={{ color: '#d4111e', fontWeight: 600 }}>
-                              ✕ No reembolsable
-                            </div>
-                          ) : (
-                            <div className="sr-perk-item green">
-                              <CheckmarkIcon size={14} color="#008009" /> Cancelación gratis
-                            </div>
-                          )}
+                          <div className="sr-perk-item green">
+                            <CheckmarkIcon size={14} color="#008009" /> Cancelación gratis (hasta 48h)
+                          </div>
                           {sinPagoAdelantado && (
                             <div className="sr-perk-item green">
                               <CheckmarkIcon size={14} color="#008009" /> Sin pago por adelantado: paga en el alojamiento

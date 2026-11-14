@@ -1233,9 +1233,9 @@ export function AlojamientoCheckoutModal({
                       </div>
                     </div>
                     <div className="bkg-room-badge-row">
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: tipoHabitacion?.reembolsable === false ? '#d4111e' : '#008009', fontWeight: 600 }}>
-                        {tipoHabitacion?.reembolsable !== false && <CheckmarkIcon size={14} color="#008009" />}
-                        {tipoHabitacion?.cancellation_type || (tipoHabitacion?.reembolsable === false ? 'No reembolsable' : 'Cancelación gratis')}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#008009', fontWeight: 600 }}>
+                        <CheckmarkIcon size={14} color="#008009" />
+                        Cancelación gratis (hasta 48h antes del check-in)
                       </span>
                       {tipoHabitacion?.meal_plan && (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
