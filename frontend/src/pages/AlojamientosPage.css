@@ -192,17 +192,6 @@
   }
 }
 
-.bk-work-travel-checkbox {
-  margin-top: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #1a1a1a;
-  font-weight: 400;
-  cursor: pointer;
-}
-
 /* Responsive Popovers (Mobile Bottom Sheet / Desktop Dropdown) */
 .bk-search-popover {
   position: absolute;

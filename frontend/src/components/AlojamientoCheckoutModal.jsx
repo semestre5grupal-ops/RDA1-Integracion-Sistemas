@@ -144,7 +144,6 @@ export function AlojamientoCheckoutModal({
 
   // Step 1 Form state
   const [paraQuien, setParaQuien] = useState('principal'); // 'principal' | 'otra_persona'
-  const [viajaPorTrabajo, setViajaPorTrabajo] = useState('no'); // 'si' | 'no'
   const [nombre, setNombre] = useState(defaultNombre);
   const [apellidos, setApellidos] = useState(defaultApellido);
   const [email, setEmail] = useState(defaultEmail);
@@ -1038,33 +1037,6 @@ export function AlojamientoCheckoutModal({
                 {/* CARD 1: PERSONAL DETAILS */}
                 <div className="bkg-card" style={{ marginTop: '16px' }}>
                   <h3 className="bkg-card-title">Introduce tus datos</h3>
-
-                  {/* Radio viaja por trabajo */}
-                  <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
-                    ¿Viajas por trabajo?
-                  </div>
-                  <div className="bkg-radio-group">
-                    <label className="bkg-radio-label">
-                      <input
-                        type="radio"
-                        name="trabajo"
-                        value="si"
-                        checked={viajaPorTrabajo === 'si'}
-                        onChange={(e) => setViajaPorTrabajo(e.target.value)}
-                      />
-                      <span>Sí</span>
-                    </label>
-                    <label className="bkg-radio-label">
-                      <input
-                        type="radio"
-                        name="trabajo"
-                        value="no"
-                        checked={viajaPorTrabajo === 'no'}
-                        onChange={(e) => setViajaPorTrabajo(e.target.value)}
-                      />
-                      <span>No</span>
-                    </label>
-                  </div>
 
                   {/* Nombres y Apellidos */}
                   <div className="bkg-form-grid-2">

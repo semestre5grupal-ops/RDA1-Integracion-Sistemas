@@ -311,7 +311,6 @@ export function AlojamientosPage() {
   const [rooms, setRooms] = useState(1);
   const [showDatesPopover, setShowDatesPopover] = useState(false);
   const [showOccupancyPopover, setShowOccupancyPopover] = useState(false);
-  const [workTravel, setWorkTravel] = useState(false);
 
   // Estado pestaña planificador
   const [activePlannerTab, setActivePlannerTab] = useState('tranquil');
@@ -850,20 +849,6 @@ export function AlojamientosPage() {
             >
               Buscar
             </button>
-          </div>
-
-          <div className="bk-work-travel-checkbox">
-            <input
-              type="checkbox"
-              id="work-check"
-              checked={workTravel}
-              onChange={(e) => setWorkTravel(e.target.checked)}
-              style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#006ce4' }}
-              aria-label="Viajo por trabajo"
-            />
-            <label htmlFor="work-check" style={{ cursor: 'pointer', fontSize: '14px', color: '#1a1a1a', fontWeight: 500 }}>
-              Viajo por trabajo
-            </label>
           </div>
         </form>
       </div>
