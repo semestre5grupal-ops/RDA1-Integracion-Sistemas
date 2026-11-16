@@ -31,108 +31,439 @@ El núcleo central proporciona agregación de catálogos en tiempo real, orquest
 
 ---
 
-## 2. Diagrama de la Arquitectura por Capas
+## 2. Diagrama de la Arquitectura por Capas (RDA2 Producción)
 
-El siguiente diagrama ilustra la separación de responsabilidades y el flujo de comunicación este-oeste y norte-sur del sistema:
+El siguiente diagrama formaliza la arquitectura distribuida del ecosistema **Booking Central (RDA2)** bajo el principio de 7 capas desacopladas, persistencia independiente (*Database-per-Service* en 12 esquemas herméticos), Enterprise Service Bus (ESB) centralizado de dos capas, doble broker de eventos (RabbitMQ + Apache Kafka) y observabilidad física rotativa:
 
 ```mermaid
-flowchart TD
-    subgraph CAPA_PRESENTACION["Capa de Presentación (Frontend SPA)"]
-        UI_WEB["React 18 + Vite SPA\n(Catálogos, Detalle, Checkout, Mis Reservas)"]
-        UI_STATE["Gestión de Estado y Optimistic UI\n(Time Slots Dinámicos, Carrito, Moneda)"]
-        UI_WEB --> UI_STATE
+graph LR
+    %% =========================================================================
+    %% CAPA 1: PERSISTENCIA INDEPENDIENTE POSTGRESQL / SUPABASE (12 ESQUEMAS)
+    %% =========================================================================
+    subgraph CAPA1 ["CAPA 1: PERSISTENCIA INDEPENDIENTE POSTGRESQL (12 ESQUEMAS)"]
+        subgraph SCH_CLI ["schema_clientes"]
+            T_CLI[("clientes / identidades")]
+        end
+
+        subgraph SCH_CAR ["schema_carritos"]
+            T_CAR[("carritos")]
+            T_CIT[("carrito_items")]
+        end
+
+        subgraph SCH_FAC ["schema_facturacion"]
+            T_FEN[("facturas_encabezado")]
+            T_FDE[("facturas_detalle")]
+        end
+
+        subgraph SCH_PAG ["schema_pagos"]
+            T_PAG[("transacciones_pago")]
+        end
+
+        subgraph SCH_PKG ["schema_paquetes"]
+            T_PKG[("paquetes")]
+            T_PIT[("paquete_items")]
+            T_CPR[("contrato_promociones")]
+        end
+
+        subgraph SCH_FIN ["schema_finanzas"]
+            T_FIN[("liquidaciones_proveedores")]
+        end
+
+        subgraph SCH_PROV ["schema_proveedores"]
+            T_PROV[("config_proveedor / nodos")]
+        end
+
+        subgraph SCH_ATR ["schema_atracciones"]
+            T_ATR_C[("atracciones_cache")]
+            T_ATR_R[("categorias_recursivas")]
+            T_ATR_O[("reservas_atraccion")]
+            T_ATR_S[("resenas_atraccion")]
+        end
+
+        subgraph SCH_AUT ["schema_autos"]
+            T_AUT_C[("autos_cache")]
+            T_AUT_O[("reservas_auto")]
+            T_AUT_M[("mantenimiento_autos")]
+        end
+
+        subgraph SCH_ALO ["schema_alojamientos"]
+            T_ALO_C[("alojamientos_cache")]
+            T_ALO_H[("tipos_habitacion")]
+            T_ALO_O[("reservas_alojamiento")]
+            T_ALO_U[("huespedes_reserva")]
+        end
+
+        subgraph SCH_VUE ["schema_vuelos"]
+            T_VUE_C[("vuelos_cache")]
+            T_VUE_O[("reservas_vuelo")]
+            T_VUE_A[("asientos_vuelo")]
+            T_VUE_P[("pases_abordar")]
+        end
+
+        subgraph SCH_AUD ["schema_auditoria"]
+            T_AUD_TRX[("auditoria_transacciones")]
+            T_AUD_ADM[("auditoria_administrativa")]
+            T_AUD_SAG[("auditoria_sagas")]
+        end
     end
 
-    subgraph CAPA_BORDE["Capa de Borde y API Gateway (NestJS)"]
-        GW_INGRESS["Reverse Proxy / Ingress Controller (Azure Linux)"]
-        SEC_GUARDS["Guards de Seguridad\n(SupabaseAuthGuard, Roles, ApiKeyGuard)"]
-        TRACE_MW["TraceContextMiddleware\n(X-Correlation-Id, Idempotency-Key)"]
-        VAL_PIPE["Global ValidationPipe\n(class-validator, Sanitización DTOs)"]
-        
-        GW_INGRESS --> TRACE_MW
-        TRACE_MW --> SEC_GUARDS
-        SEC_GUARDS --> VAL_PIPE
+    %% =========================================================================
+    %% CAPA 2: MICROSERVICIOS BÁSICOS (12 REST TYPEORM + 1 gRPC EN PUERTO 50051)
+    %% =========================================================================
+    subgraph CAPA2 ["CAPA 2: MICROSERVICIOS BÁSICOS (12 REST + 1 gRPC 50051)"]
+        MS_CLI["MS Clientes y Auth\n(REST / TypeORM)"]
+        MS_CAR["MS Carrito y Checkout\n(REST / TypeORM)"]
+        MS_FAC["MS Facturación\n(REST / TypeORM / Idempotency)"]
+        MS_PAG["MS Simulación Pagos\n(REST / TypeORM / Idempotency)"]
+        MS_PKG["MS Paquetes Dinámicos\n(REST / TypeORM)"]
+        MS_FIN["MS Finanzas y Liquidaciones\n(REST / TypeORM)"]
+        MS_PROV["MS Proveedores y Salud Nodos\n(REST / TypeORM / Kill-Switches)"]
+        MS_AUD["MS Auditoría Transaccional\n(REST / TypeORM / SQL)"]
+
+        MS_ATR["MS Atracciones\n(REST / TypeORM / Árbol Recursivo)"]
+        MS_AUT["MS Autos y Flota\n(REST / TypeORM / Cooldown 2h)"]
+        MS_ALO["MS Alojamientos\n(REST / TypeORM / Check-in 48h)"]
+        MS_VUE["MS Vuelos\n(REST / TypeORM / PNR y Pases)"]
+        MS_STK["MS Ingesta Stock\n(gRPC Inbound TCP 50051 / Redis)"]
     end
 
-    subgraph CAPA_APLICACION["Capa de Aplicación y Orquestación"]
-        SAGA_ORCH["Saga Orchestrator\n(Reservas Distribuidas y Compensaciones)"]
-        AGGREGATOR["Catalog & Availability Aggregator\n(Time Slots, Cupos Dinámicos)"]
-        OUTBOX_SVC["Transactional Outbox Worker\n(Eventos Asíncronos At-Least-Once)"]
+    %% Enlaces Capa 1 a Capa 2
+    T_CLI -.-> MS_CLI
+    T_CAR -.-> MS_CAR
+    T_CIT -.-> MS_CAR
+    T_FEN -.-> MS_FAC
+    T_FDE -.-> MS_FAC
+    T_PAG -.-> MS_PAG
+    T_PKG -.-> MS_PKG
+    T_PIT -.-> MS_PKG
+    T_CPR -.-> MS_PKG
+    T_FIN -.-> MS_FIN
+    T_PROV -.-> MS_PROV
+
+    T_ATR_C -.-> MS_ATR
+    T_ATR_R -.-> MS_ATR
+    T_ATR_O -.-> MS_ATR
+    T_ATR_S -.-> MS_ATR
+
+    T_AUT_C -.-> MS_AUT
+    T_AUT_O -.-> MS_AUT
+    T_AUT_M -.-> MS_AUT
+
+    T_ALO_C -.-> MS_ALO
+    T_ALO_H -.-> MS_ALO
+    T_ALO_O -.-> MS_ALO
+    T_ALO_U -.-> MS_ALO
+
+    T_VUE_C -.-> MS_VUE
+    T_VUE_O -.-> MS_VUE
+    T_VUE_A -.-> MS_VUE
+    T_VUE_P -.-> MS_VUE
+
+    T_AUD_TRX -.-> MS_AUD
+    T_AUD_ADM -.-> MS_AUD
+    T_AUD_SAG -.-> MS_AUD
+
+    %% =========================================================================
+    %% CAPA 3: ESB CENTRALIZADO DE DOS CAPAS (ENTERPRISE SERVICE BUS)
+    %% =========================================================================
+    subgraph CAPA3 ["CAPA 3: ESB CENTRALIZADO DE DOS CAPAS"]
+        subgraph ESB_INT ["ESB Capa Interna: Servicios Propios"]
+            ESB_ROUTER["Enrutador de Negocio y Sustituto de SQL Joins"]
+            ESB_SAGA["Orquestador Saga Compra y Compensación LIFO"]
+            ESB_POLICIES["Validación de Reglas de Negocio Internas"]
+        end
+
+        subgraph ESB_EXT ["ESB Capa de Integración Externa: Socios B2B"]
+            ESB_ACL["Capa Anti-Corrupción (ACL) y Normalización DTO"]
+            ESB_CB["Circuit Breakers (Timeout 5s / Fallbacks)"]
+            ESB_KILL["Kill-Switches de Aislamiento de Socios"]
+        end
     end
 
-    subgraph CAPA_DOMINIO["Capa de Dominio (Módulos DDD)"]
-        DOM_ATR["AtraccionesModule\n(Turnos, Aforo, Vouchers QR)"]
-        DOM_AUT["AutosModule\n(Flota, Cooldown 2h, Días Dinámicos)"]
-        DOM_ALO["AlojamientosModule\n(Check-in 48h, Tarifas)"]
-        DOM_VUE["VuelosModule\n(Itinerarios, Pases de Abordar)"]
-        DOM_CLI["ClientesModule\n(Sincronización Cross-Platform)"]
-        DOM_PAG["PagosModule\n(Saga Reembolsos, Facturación)"]
+    %% =========================================================================
+    %% SERVICE MESH Y COMUNICACIÓN INTER-SERVICIO (ESTE-OESTE)
+    %% =========================================================================
+    subgraph SERVICE_MESH ["SERVICE MESH (GOBERNANZA ESTE-OESTE)"]
+        SM_INTERCEPTOR["Sidecar Proxy Interceptor\n(sidecar-proxy.interceptor.ts)"]
+        SM_TELEMETRY["Métricas Latencia y Tracing X-Correlation-Id"]
+        SM_RATE_LIMIT["Rate Limiting Interno y Protección de Malla"]
+        SM_INTERCEPTOR --- SM_TELEMETRY
+        SM_TELEMETRY --- SM_RATE_LIMIT
     end
 
-    subgraph CAPA_INTEGRACION["Capa de Integración y Adaptadores ACL (Anti-Corruption Layer)"]
-        CB_DILAN["DilanAtraccionesAdapter\n(Circuit Breaker 5s / DTO Mapper)"]
-        CB_AUTOS["AutosCircuitBreakerAdapter\n(Fallback Offline / Cache)"]
-        CB_ALOJ["AlojamientosCircuitBreakerAdapter\n(Resiliencia / Graceful Degradation)"]
-        HTTP_CLIENT["Axios HttpModule\n(Propagación Headers, Retries, Timeouts)"]
+    %% Enlaces Capa 2 a Capa 3
+    MS_CLI <--> ESB_ROUTER
+    MS_CAR <--> ESB_ROUTER
+    MS_FAC <--> ESB_ROUTER
+    MS_PAG <--> ESB_ROUTER
+    MS_PKG <--> ESB_ROUTER
+    MS_FIN <--> ESB_ROUTER
+    MS_PROV <--> ESB_ROUTER
+    MS_AUD <--> ESB_ROUTER
+
+    MS_ATR <--> ESB_ACL
+    MS_AUT <--> ESB_ACL
+    MS_ALO <--> ESB_ACL
+    MS_VUE <--> ESB_ACL
+    MS_STK -->|Stream de Stock Recibido| ESB_ACL
+
+    ESB_ROUTER <--> ESB_SAGA
+    ESB_ROUTER <--> ESB_ACL
+    ESB_ACL --- ESB_CB
+    ESB_CB --- ESB_KILL
+
+    ESB_ROUTER -.->|Intercepción Tráfico Este-Oeste| SM_INTERCEPTOR
+    ESB_ACL -.->|Telemetría y Tracing| SM_INTERCEPTOR
+
+    %% =========================================================================
+    %% SOCIOS EXTERNOS (COMPAÑEROS B2B)
+    %% =========================================================================
+    subgraph SOCIOS ["SOCIOS EXTERNOS (COMPAÑEROS B2B RDA2)"]
+        EXT_GLORIA["Vívelo Ecuador (Gloria)\n[Azure Container App - ms-catalog]"]
+        EXT_DILAN["Descubre EC (Dilan)\n[Azure Container App - descubre-gateway]"]
+        EXT_MICHAEL["TourGirls (Michael)\n[Azure Web App - tourgirls-gateway]"]
+        EXT_ARIEL["EcuaTravel (Ariel)\n[Azure Web App - ecuatravel-api]"]
+        EXT_ALISSON["Atracciones EC (Alisson)\n[Azure Web App - alisson-api]"]
+        EXT_AUTOS["RutaLibre Autos (Esteban/Mateo)\n[APIs REST Flota]"]
+        EXT_ALOJ["Motores de Alojamiento\n[APIs REST Hoteles]"]
+        EXT_VUELOS["Aerolíneas Aliadas\n[APIs REST Vuelos]"]
+        EXT_GRPC["Push de Stock en Vivo Socios\n(gRPC Client Streaming)"]
     end
 
-    subgraph CAPA_INFRAESTRUCTURA["Capa de Infraestructura y Persistencia"]
-        PG_DB[("Azure Database for PostgreSQL\n(Multi-Schema: atracciones, autos, alojamientos,\nvuelos, clientes, pagos, outbox)")]
-        WINSTON_LOG["Winston Audit Logger\n(logs/audit.log, logs/combined.log)"]
+    ESB_ACL <-->|REST B2B: Disponibilidad / Reserva / Cancelación| EXT_GLORIA
+    ESB_ACL <-->|REST B2B: Slots / Órdenes / Cancelación| EXT_DILAN
+    ESB_ACL <-->|REST B2B: Time Slots / Sincronización Estado| EXT_MICHAEL
+    ESB_ACL <-->|REST B2B: Catálogos y Reservas| EXT_ARIEL
+    ESB_ACL <-->|REST B2B: Integración Atracciones| EXT_ALISSON
+    ESB_ACL <-->|REST B2B: Reserva Vehículos y Cooldown| EXT_AUTOS
+    ESB_ACL <-->|REST B2B: Check-in y Habitaciones| EXT_ALOJ
+    ESB_ACL <-->|REST B2B: Itinerarios y Pases| EXT_VUELOS
+    EXT_GRPC ==>|Inbound TCP Puerto 50051| MS_STK
+
+    %% =========================================================================
+    %% CAPA 4: EVENT BUS Y STREAMING (RABBITMQ + APACHE KAFKA DUAL BROKER)
+    %% =========================================================================
+    subgraph CAPA4 ["CAPA 4: EVENT BUS Y STREAMING DUAL (RABBITMQ + APACHE KAFKA)"]
+        subgraph BROKER_RABBIT ["Broker Transaccional: RabbitMQ (AMQP 0-9-1)"]
+            RB_EX["Exchange: booking.events (Topic)"]
+            Q_SEARCH["Cola: q.busquedas.masivas (Dampening)"]
+            Q_BUY["Cola: q.ordenes.confirmadas (Compras y Facturación)"]
+            Q_SAGA["Cola: q.sagas.compensacion (Rollbacks LIFO)"]
+            Q_STOCK["Cola: q.stock.actualizado (Alta Prioridad RAM)"]
+            Q_DLQ["Cola: q.dead_letter (DLQ tras 3 reintentos)"]
+        end
+
+        subgraph BROKER_KAFKA ["Event Streaming Commit Log: Apache Kafka Cluster"]
+            KF_BRIDGE["Cross-Broker Bridge: Conector RabbitMQ-Kafka"]
+            TOPIC_CAT["Tópico: booking.catalogo.stream (Por Vertical)"]
+            TOPIC_AUD["Tópico: booking.compras.audit (Por Cliente)"]
+            TOPIC_TEL["Tópico: booking.telemetria.nodes (Salud y Latencia)"]
+        end
     end
 
-    subgraph SERVICIOS_EXTERNOS["Servicios Externos y Socios B2B"]
-        SOC_GLORIA["Vívelo Ecuador (Gloria)\n[Azure Container App - ms-catalog]"]
-        SOC_DILAN["Descubre EC (Dilan)\n[Azure Container App - descubre-gateway]"]
-        SOC_MICHAEL["TourGirls (Michael)\n[Azure Web App - tourgirls-gateway-mm]"]
-        SOC_ARIEL["EcuaTravel (Ariel)\n[Azure Web App - ecuatravel-api]"]
-        SOC_ALISSON["Atracciones Ecuador (Alisson)\n[Azure Web App - alisson-api]"]
-        SOC_SUPABASE["Supabase Cloud\n[OAuth2 / Auth JWT]"]
+    ESB_ROUTER -->|Publica eventos negocio| RB_EX
+    ESB_SAGA -->|Emite orden confirmada o fallo| RB_EX
+    MS_STK -->|Emite stock.actualizado directo| RB_EX
+
+    RB_EX --> Q_SEARCH
+    RB_EX --> Q_BUY
+    RB_EX --> Q_SAGA
+    RB_EX --> Q_STOCK
+    RB_EX --> Q_DLQ
+
+    RB_EX -.->|Event Sourcing Replay| KF_BRIDGE
+    KF_BRIDGE --> TOPIC_CAT
+    KF_BRIDGE --> TOPIC_AUD
+    KF_BRIDGE --> TOPIC_TEL
+
+    %% =========================================================================
+    %% CAPA 5: MICROSERVICIOS ORQUESTADOS (LÓGICA COMPUESTA & SEGURIDAD)
+    %% =========================================================================
+    subgraph CAPA5 ["CAPA 5: MICROSERVICIOS ORQUESTADOS"]
+        ORQ_FAC["ORQ_FAC: Facturación Compuesta (Factura + Cliente + Detalle + IVA 15%)"]
+        ORQ_PKG["ORQ_PKG: Motor Paquetes Dinámicos (Validación Combo y Descuentos)"]
+        ORQ_STK["ORQ_STK: Orquestador Stock (Consolidación Stock gRPC + Catálogo)"]
+        ORQ_RES["ORQ_RES: Orquestador Reservas (Checkout Multivertical y Sagas)"]
+        SEC_AUTH["Seguridad Transversal: JWT Guard + RBAC (CLIENTE, ADMIN, MANTENIMIENTO)"]
     end
 
-    %% Relaciones entre capas
-    UI_STATE -->|HTTPS / REST / JSON| GW_INGRESS
-    VAL_PIPE --> SAGA_ORCH
-    VAL_PIPE --> AGGREGATOR
-    
-    SAGA_ORCH --> DOM_ATR
-    SAGA_ORCH --> DOM_AUT
-    SAGA_ORCH --> DOM_ALO
-    SAGA_ORCH --> DOM_VUE
-    SAGA_ORCH --> DOM_CLI
-    SAGA_ORCH --> DOM_PAG
-    
-    AGGREGATOR --> DOM_ATR
-    AGGREGATOR --> DOM_AUT
+    ESB_ROUTER --> ORQ_FAC
+    ESB_ROUTER --> ORQ_PKG
+    ESB_SAGA <--> ORQ_RES
+    Q_STOCK --> ORQ_STK
+    Q_BUY --> ORQ_FAC
+    Q_BUY --> MS_FIN
+    Q_SAGA --> ORQ_RES
 
-    DOM_ATR --> CB_DILAN
-    DOM_ATR --> HTTP_CLIENT
-    DOM_AUT --> CB_AUTOS
-    DOM_ALO --> CB_ALOJ
-    DOM_PAG --> OUTBOX_SVC
+    TOPIC_AUD -.->|Stream Audit Inmutable| MS_AUD
+    TOPIC_TEL -.->|Stream Telemetría| MS_PROV
 
-    CB_DILAN --> HTTP_CLIENT
-    CB_AUTOS --> HTTP_CLIENT
-    CB_ALOJ --> HTTP_CLIENT
+    ORQ_FAC --- SEC_AUTH
+    ORQ_PKG --- SEC_AUTH
+    ORQ_STK --- SEC_AUTH
+    ORQ_RES --- SEC_AUTH
 
-    DOM_ATR -->|TypeORM ORM| PG_DB
-    DOM_AUT -->|TypeORM ORM| PG_DB
-    DOM_ALO -->|TypeORM ORM| PG_DB
-    DOM_VUE -->|TypeORM ORM| PG_DB
-    DOM_CLI -->|TypeORM ORM| PG_DB
-    DOM_PAG -->|TypeORM ORM| PG_DB
-    OUTBOX_SVC -->|TypeORM ORM| PG_DB
-    
-    SAGA_ORCH -->|Auditoría Transaccional| WINSTON_LOG
-    TRACE_MW -->|Registro Trazabilidad| WINSTON_LOG
+    %% =========================================================================
+    %% CAPA 6: API GATEWAY Y BFF UNIFICADO (GRAPHQL / REVERSE PROXY)
+    %% =========================================================================
+    subgraph CAPA6 ["CAPA 6: API GATEWAY Y BFF UNIFICADO (GRAPHQL / REVERSE PROXY)"]
+        GW_SEC["Gateway Security: JWT Guards + Rate Limiter + Depth Limiting"]
+        GQL_SRV["Apollo Server NestJS: Single Entry Point /graphql y /api/v1/*"]
+        GQL_LOAD["DataLoaders: Resolución Batch (Anti-N+1 Problem)"]
+        GQL_WS["Suscripciones WebSocket (ws://) para Alertas en Vivo"]
+        subgraph GQL_OPS ["Operaciones GraphQL Schema"]
+            GQL_Q["Queries: catalogoUnificado, misReservas, facturaCompleta, saludNodos, auditoriaTransacciones"]
+            GQL_M["Mutations: checkoutOrquestado, cancelarReservaSaga, checkInDigital"]
+            GQL_S["Subscriptions: stockActualizado, estadoReservaCambiado"]
+        end
+    end
 
-    HTTP_CLIENT -->|HTTPS / REST B2B| SOC_GLORIA
-    HTTP_CLIENT -->|HTTPS / REST B2B| SOC_DILAN
-    HTTP_CLIENT -->|HTTPS / REST B2B| SOC_MICHAEL
-    HTTP_CLIENT -->|HTTPS / REST B2B| SOC_ARIEL
-    HTTP_CLIENT -->|HTTPS / REST B2B| SOC_ALISSON
-    SEC_GUARDS -->|Verificación Tokens| SOC_SUPABASE
+    ORQ_FAC --> GQL_SRV
+    ORQ_PKG --> GQL_SRV
+    ORQ_STK --> GQL_SRV
+    ORQ_RES --> GQL_SRV
+    MS_AUD --> GQL_SRV
+    GW_SEC --- GQL_SRV
+    GQL_SRV --- GQL_LOAD
+    GQL_SRV --- GQL_WS
+    GQL_SRV --> GQL_OPS
+
+    %% =========================================================================
+    %% CAPA 7: PRESENTACIÓN (MARKETPLACE REACT 18 & 8 PANELES ADMIN & MÓVIL)
+    %% =========================================================================
+    subgraph CAPA7 ["CAPA 7: PRESENTACIÓN (REACT 18 SPA + APP MÓVIL)"]
+        subgraph UI_CLIENT ["Cliente Web Marketplace Turístico & App Móvil"]
+            UI_CAT["Catálogo Unificado y Búsqueda Masiva Multivertical"]
+            UI_CART["Carrito de Compras y Checkout Unificado"]
+            UI_BOOK["Mis Reservas y Check-in Digital (QR / Llave / PNR)"]
+            UI_MOB["App Móvil: Flutter / React Native (Reto 3)"]
+        end
+
+        subgraph UI_ADMIN ["8 Paneles Administrativos Especializados"]
+            ADM_NOD["1. Monitor Nodos y Kill-Switches (Grafo Semáforo 🟢/🔴)"]
+            ADM_AUT["2. Gestión Flota Autos (Cooldown Cronometrado 2h y Taller)"]
+            ADM_ATR["3. Árbol Categorías Atracciones (Comida, Guía, Transporte)"]
+            ADM_FIN["4. Liquidaciones Finanzas (Cálculo 10% Comisión y Pagos)"]
+            ADM_FAC["5. Consola Fiscal Facturación (Desglose IVA 15% y Auditoría)"]
+            ADM_PAG["6. Simulador Transaccional Pagos (Inyección de Fallos SOA)"]
+            ADM_STK["7. Monitor Ingesta Stock gRPC (Throughput msg/seg y Sync)"]
+            ADM_AUD["8. Consola Auditoría Transaccional y Sagas (Quién compró / Quién administró)"]
+        end
+    end
+
+    GQL_SRV ==>|Single Endpoint HTTP POST /graphql & REST /api/v1| UI_CLIENT
+    GQL_WS ==>|Suscripciones WebSockets ws://| UI_CLIENT
+    GQL_SRV -.->|Consultas y Mutaciones Administrativas| UI_ADMIN
+    UI_ADMIN -.->|Comandos Directos de Kill-Switch| ESB_KILL
+
+    %% =========================================================================
+    %% SISTEMA DE ARCHIVOS FÍSICOS WINSTON (LOGS TÉCNICOS ROTATIVOS)
+    %% =========================================================================
+    subgraph LOGS ["TELEMETRÍA Y LOGS TÉCNICOS FÍSICOS (WINSTON - CERO LOGS RED EN BD)"]
+        LOG_COMB[("logs/combined.log: Trazas Generales de Red")]
+        LOG_ERR[("logs/error.log: Excepciones y Circuit Breakers")]
+        LOG_AUD[("logs/audit.log: Trazabilidad Técnica y Handshakes")]
+    end
+
+    CAPA2 -.->|Winston Physical Logger| LOGS
+    CAPA3 -.->|Winston Physical Logger| LOGS
+    CAPA5 -.->|Winston Physical Logger| LOGS
+    CAPA6 -.->|Winston Physical Logger| LOGS
+    SERVICE_MESH -.->|Winston Physical Logger| LOGS
 ```
+
+---
+
+### 2.1. Conectividad y Flujo de Comunicación por Cada Capa
+
+Para defender con solidez técnica la arquitectura ante el evaluador o docente, a continuación se desglosa con exactitud qué se conecta a cada capa, distinguiendo el tráfico **Norte-Sur** (cliente hacia infraestructura) del tráfico **Este-Oeste** (comunicación inter-servicio y socios B2B):
+
+#### Capa 1: Persistencia Independiente (Multi-Esquema en PostgreSQL / Supabase)
+- **Principio Fundamental**: *Database-per-Service*. Cada dominio posee su propio esquema relacional hermético. **No existen Foreign Keys ni SQL `JOINs` entre tablas de distintos esquemas**.
+- **¿Qué se conecta aquí?**: Se conecta **únicamente la Capa 2 (Microservicios Básicos)** a través de conexiones TypeORM aisladas por esquema. Ningún componente externo, ni el API Gateway, ni el ESB tocan las tablas directamente.
+
+#### Capa 2: Microservicios Básicos y gRPC
+- **Conexión Inferior (Sur)**: Lee y persiste entidades atómicas en su respectivo esquema de la Capa 1.
+- **Conexión Superior (Norte)**: Se expone hacia la Capa 3 (ESB) mediante servicios e interfaces locales en memoria/REST.
+- **Punto de Llegada gRPC Inbound (Puerto 50051)**: El microservicio **MS Ingesta Stock** (`InventoryGrpcController`) levanta un servidor binario sobre HTTP/2 en el puerto TCP `50051` (`src/contracts/inventory.proto`). Aquí se conectan los socios externos para hacer push de inventario en tiempo real sin saturar HTTP/1.1.
+
+#### Capa 3: Enterprise Service Bus (ESB Centralizado de Dos Capas)
+El ESB es el núcleo inteligente que sustituye los SQL `JOINs` en memoria de aplicación y gobierna las reglas de negocio distribuidas:
+1. **ESB Capa Interna (`esb-internal-router.service.ts`)**:
+   - Conecta los microservicios propietarios (Clientes, Carrito, Facturación, Pagos, Paquetes).
+   - Ensambla en memoria datos de múltiples esquemas (ej. combina una Factura con los datos del Cliente y el detalle de ítems sin hacer `JOIN` relacional).
+   - Gobierna la máquina de estados de las Sagas (`saga-orchestrator.service.ts`).
+2. **ESB Capa de Integración Externa / ACL (`src/modules/*/acl/`)**:
+   - **¿A dónde llegan y salen los microservicios de los compañeros?**: **Llegan y salen por esta capa.** Las peticiones de sincronización de catálogo, consulta de slots en vivo (`GET /disponibilidad`), creación de reservas (`POST /reservas`) y cancelaciones (`POST /reservas/:id/cancel`) se canalizan a través de los adaptadores ACL (`DilanAtraccionesAdapter`, `AutosCircuitBreakerAdapter`, `AlojamientosCircuitBreakerAdapter`).
+   - Cada adaptador traduce los DTOs heterogéneos de los socios (Gloria, Dilan, Michael, Ariel, Alisson, Autos, Alojamientos) al modelo canónico de Booking Central.
+   - Aplica los **Circuit Breakers** (timeout estricto de 5000 ms, umbral de 3 fallos y tiempo de recuperación de 30s) y conmuta los **Kill-Switches** cuando un socio está en mantenimiento.
+
+#### ¿Dónde se ubica el Service Mesh y qué diferencia tiene con el ESB y el Event Bus?
+- **Ubicación**: El **Service Mesh** opera de manera transversal entre la Capa 3 (ESB) y la Capa 5/6, gobernando el **tráfico Este-Oeste** (comunicación interna inter-servicio).
+- **Componente Físico**: Se implementa en `src/modules/service-mesh/` mediante el interceptor `sidecar-proxy.interceptor.ts`.
+- **Diferenciación Clave para Defensa**:
+  * **ESB (Capa 3 - Nivel de Negocio y Datos)**: Es un orquestador semántico. Entiende qué es una "Factura", qué es una "Reserva", une datos de distintos esquemas y ejecuta compensaciones de negocio (Sagas).
+  * **Service Mesh (Capa 3/Transporte - Nivel de Red y Telemetría)**: Es agnóstico al negocio. No sabe qué es una reserva; solo inspecciona paquetes de red, inyecta y propaga cabeceras de trazabilidad (`X-Correlation-Id`, `X-Trace-Id`), aplica *Rate Limiting* entre servicios y monitorea latencias de red en milisegundos.
+  * **Event Bus (Capa 4 - Nivel Asíncrono)**: Es el broker de mensajería desacoplada para operaciones no bloqueantes, streaming masivo y absorción de picos de carga.
+
+#### Capa 4: Event Bus y Streaming Dual (RabbitMQ + Apache Kafka)
+- **RabbitMQ (AMQP 0-9-1)**: Recibe del ESB eventos transaccionales de alta prioridad (`ordenes.confirmadas`, `sagas.compensacion`, `stock.actualizado`). Usa un Exchange Topic (`booking.events`) y enruta a colas dedicadas y a la Dead Letter Queue (`q.dead_letter`).
+- **Apache Kafka**: Actúa como un commit log inmutable particionado por clave (`booking.catalogo.stream`, `booking.compras.audit`). Almacena el historial analítico para *Event Sourcing*.
+- **Kafka-Rabbit Bridge (`kafka-rabbit-bridge.service.ts`)**: Espejea eventos críticos entre RabbitMQ y Kafka sin perder el Correlation ID.
+
+#### Capa 5: Microservicios Orquestados
+- Consume los eventos de RabbitMQ y los flujos del ESB para generar transacciones compuestas:
+  * **Facturación Compuesta**: Calcula subtotal, IVA 15% ecuatoriano, y emite comprobante.
+  * **Motor de Paquetes Dinámicos**: Valida descuentos por combo multivertical (Hotel + Auto + Tour).
+  * **Orquestador de Reservas**: Coordina la reserva multivertical aplicando el patrón Saga.
+  * **Seguridad Transversal**: Aplica `SupabaseAuthGuard` y `RolesGuard` (RBAC para CLIENTE, ADMIN, MANTENIMIENTO).
+
+#### Capa 6: API Gateway & BFF Unificado (GraphQL & REST)
+- **Punto de Entrada Único Norte-Sur**: Expone `/graphql` y `/api/v1/*` hacia los clientes web y móviles.
+- **Optimizaciones BFF**:
+  * Implementa **DataLoaders** (`reservas.dataloader.ts`) para erradicar el problema N+1 en GraphQL.
+  * Expone suscripciones WebSocket (`ws://`) para actualizaciones de inventario y aforos en tiempo real sin requerir polling constante.
+  * Control de profundidad de consultas (*Depth Limiting*) y sanitización de payloads contra inyección.
+
+#### Capa 7: Presentación (Frontend SPA React 18 + Vite)
+- **Clientes Finales**: Aplicación Web React 18 con catálogo unificado, selector dinámico de turnos/cupos, checkout centralizado y módulo "Mis Reservas" con emisión de vouchers QR y control de cancelación (24h/48h).
+- **8 Paneles de Administración**: Permite auditar en tiempo real el estado de los nodos con semáforo 🟢/🔴, activar kill-switches, supervisar colas de RabbitMQ, consultar liquidaciones financieras y revisar el árbol jerárquico de categorías.
+
+#### Sistema de Logs Físicos Winston (Cero Logs de Red en BD)
+- Siguiendo la regla docente de rendimiento: **ninguna traza de red, ping o error HTTP se guarda en la base de datos PostgreSQL**.
+- Se escriben mediante `WinstonLoggerService` en archivos planos rotativos:
+  * `logs/combined.log`: Registro general de peticiones HTTP con correlation ID.
+  * `logs/error.log`: Excepciones, timeouts y eventos de apertura de Circuit Breakers.
+  * `logs/audit.log`: Trazabilidad técnica inmutable de transacciones y handshakes.
+  * Los eventos de negocio auditables para usuarios y administradores se registran separadamente en `schema_auditoria`.
+
+---
+
+### 2.2. Mapeo Físico de Componentes en el Código Fuente
+
+A continuación se detalla la ubicación exacta de cada componente arquitectónico dentro de la estructura de archivos del proyecto (`src/`):
+
+| Capa Arquitectónica | Componente Lógico | Archivo(s) Físico(s) en el Repositorio |
+| :--- | :--- | :--- |
+| **Capa 2: Ingesta Stock** | Servidor gRPC Inbound (Puerto 50051) | [`src/modules/inventory/inventory-grpc.controller.ts`](file:///src/modules/inventory/inventory-grpc.controller.ts)<br>[`src/modules/inventory/inventory.service.ts`](file:///src/modules/inventory/inventory.service.ts)<br>[`src/contracts/inventory.proto`](file:///src/contracts/inventory.proto) |
+| **Capa 3: ESB Interno** | Enrutador de Negocio y Sustituto de Joins | [`src/modules/esb/interna/esb-internal-router.service.ts`](file:///src/modules/esb/interna/esb-internal-router.service.ts)<br>[`src/modules/esb/esb.controller.ts`](file:///src/modules/esb/esb.controller.ts)<br>[`src/modules/esb/esb.module.ts`](file:///src/modules/esb/esb.module.ts) |
+| **Capa 3: ESB Sagas** | Orquestador de Sagas y Compensaciones | [`src/modules/esb/interna/saga-orchestrator.service.ts`](file:///src/modules/esb/interna/saga-orchestrator.service.ts)<br>[`src/modules/esb/entities/saga-transaccion.entity.ts`](file:///src/modules/esb/entities/saga-transaccion.entity.ts)<br>[`src/modules/esb/entities/saga-paso-journal.entity.ts`](file:///src/modules/esb/entities/saga-paso-journal.entity.ts) |
+| **Capa 3: ESB Externa / ACL** | Adaptador Socios Atracciones (Circuit Breakers) | [`src/modules/atracciones/acl/dilan-atracciones.adapter.ts`](file:///src/modules/atracciones/acl/dilan-atracciones.adapter.ts)<br>[`src/modules/atracciones/atracciones.service.ts`](file:///src/modules/atracciones/atracciones.service.ts) |
+| **Capa 3: ESB Externa / ACL** | Adaptador Socios Autos (Cooldown y Fallbacks) | [`src/modules/autos/acl/autos-circuit-breaker.adapter.ts`](file:///src/modules/autos/acl/autos-circuit-breaker.adapter.ts)<br>[`src/modules/autos/autos.service.ts`](file:///src/modules/autos/autos.service.ts) |
+| **Capa 3: ESB Externa / ACL** | Adaptador Alojamientos y Hoteles | [`src/modules/alojamientos/acl/alojamientos-circuit-breaker.adapter.ts`](file:///src/modules/alojamientos/acl/alojamientos-circuit-breaker.adapter.ts)<br>[`src/modules/alojamientos/alojamientos.service.ts`](file:///src/modules/alojamientos/alojamientos.service.ts) |
+| **Capa 3: ESB Kill-Switches** | Gestión de Nodos, Semáforo y Switches | [`src/modules/nodes/nodes.service.ts`](file:///src/modules/nodes/nodes.service.ts)<br>[`src/modules/nodes/nodes.controller.ts`](file:///src/modules/nodes/nodes.controller.ts)<br>[`src/modules/nodes/entities/config-proveedor.entity.ts`](file:///src/modules/nodes/entities/config-proveedor.entity.ts) |
+| **Transversal: Service Mesh** | Sidecar Proxy Interceptor y Telemetría Este-Oeste | [`src/modules/service-mesh/interceptors/sidecar-proxy.interceptor.ts`](file:///src/modules/service-mesh/interceptors/sidecar-proxy.interceptor.ts)<br>[`src/modules/service-mesh/service-mesh.service.ts`](file:///src/modules/service-mesh/service-mesh.service.ts)<br>[`src/modules/service-mesh/service-mesh.controller.ts`](file:///src/modules/service-mesh/service-mesh.controller.ts) |
+| **Capa 4: Event Bus (RabbitMQ)** | Publicador Transaccional AMQP 0-9-1 | [`src/modules/event-bus/rabbitmq/rabbitmq-event-bus.service.ts`](file:///src/modules/event-bus/rabbitmq/rabbitmq-event-bus.service.ts)<br>[`src/modules/event-bus/consumer/rabbitmq-consumer.service.ts`](file:///src/modules/event-bus/consumer/rabbitmq-consumer.service.ts) |
+| **Capa 4: Event Bus (Kafka)** | Event Streaming Commit Log | [`src/modules/event-bus/kafka/kafka-event-bus.service.ts`](file:///src/modules/event-bus/kafka/kafka-event-bus.service.ts) |
+| **Capa 4: Bridge Dual** | Conector RabbitMQ - Apache Kafka | [`src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts`](file:///src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts) |
+| **Capa 4: Consumidor Idempotente** | Deduplicación de Mensajes y Eventos | [`src/modules/event-bus/consumer/event-consumer-idempotency.service.ts`](file:///src/modules/event-bus/consumer/event-consumer-idempotency.service.ts) |
+| **Capa 6: API Gateway & BFF** | GraphQL Resolver y Esquema Unificado | [`src/modules/graphql/graphql-bff.module.ts`](file:///src/modules/graphql/graphql-bff.module.ts)<br>[`src/modules/graphql/graphql-bff.resolver.ts`](file:///src/modules/graphql/graphql-bff.resolver.ts)<br>[`src/modules/graphql/graphql-bff.service.ts`](file:///src/modules/graphql/graphql-bff.service.ts) |
+| **Capa 6: Anti N+1 GraphQL** | DataLoaders Batch para Consultas Óptimas | [`src/modules/graphql/dataloaders/reservas.dataloader.ts`](file:///src/modules/graphql/dataloaders/reservas.dataloader.ts) |
+| **Transversal: Trazabilidad** | Contexto de Correlación Distribuido | [`src/core/tracing/trace-context.middleware.ts`](file:///src/core/tracing/trace-context.middleware.ts)<br>[`src/core/tracing/trace-context.interceptor.ts`](file:///src/core/tracing/trace-context.interceptor.ts)<br>[`src/core/tracing/trace-context.service.ts`](file:///src/core/tracing/trace-context.service.ts) |
+| **Transversal: Logs Físicos** | Winston Logger Rotativo (Cero Logs en BD) | [`src/core/logger/winston-logger.service.ts`](file:///src/core/logger/winston-logger.service.ts)<br>[`src/core/logger/structured-http-request.middleware.ts`](file:///src/core/logger/structured-http-request.middleware.ts) |
+| **Capa 7: Presentación Web** | Marketplace SPA y Mis Reservas | [`frontend/src/pages/AtraccionDetailPage.jsx`](file:///frontend/src/pages/AtraccionDetailPage.jsx)<br>[`frontend/src/pages/MisReservasPage.jsx`](file:///frontend/src/pages/MisReservasPage.jsx)<br>[`frontend/src/pages/CheckoutPage.jsx`](file:///frontend/src/pages/CheckoutPage.jsx) |
+
+---
 
 ---
 
