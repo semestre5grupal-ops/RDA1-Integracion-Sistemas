@@ -7,7 +7,10 @@
 
 ## Tabla de Contenidos
 1. [Visión General del Sistema](#1-visión-general-del-sistema)
-2. [Diagrama de la Arquitectura por Capas](#2-diagrama-de-la-arquitectura-por-capas)
+2. [Diagrama de la Arquitectura por Capas (RDA2 Producción)](#2-diagrama-de-la-arquitectura-por-capas-rda2-producción)
+   - 2.1. [Conectividad y Flujo de Comunicación por Cada Capa](#21-conectividad-y-flujo-de-comunicación-por-cada-capa)
+   - 2.2. [Clasificación Exhaustiva: Microservicios en ESB, Event Bus, RabbitMQ, Kafka y Service Mesh](#22-clasificación-exhaustiva-qué-microservicios-van-al-esb-event-bus-rabbitmq-kafka-y-service-mesh)
+   - 2.3. [Mapeo Físico Exhaustivo de Archivos de la Arquitectura en `src/`](#23-mapeo-físico-exhaustivo-de-archivos-de-la-arquitectura-en-src)
 3. [Estilos Arquitectónicos](#3-estilos-arquitectónicos)
 4. [Patrones Arquitectónicos de Integración (EIP)](#4-patrones-arquitectónicos-de-integración-eip)
 5. [Componentes Arquitectónicos](#5-componentes-arquitectónicos)
@@ -439,29 +442,151 @@ El ESB es el núcleo inteligente que sustituye los SQL `JOINs` en memoria de apl
 
 ---
 
-### 2.2. Mapeo Físico de Componentes en el Código Fuente
+### 2.2. Clasificación Exhaustiva: ¿Qué Microservicios van al ESB, Event Bus, RabbitMQ, Kafka y Service Mesh?
 
-A continuación se detalla la ubicación exacta de cada componente arquitectónico dentro de la estructura de archivos del proyecto (`src/`):
+Para una comprensión técnica transparente y una defensa impecable del sistema, a continuación se clasifica formalmente a qué componente de integración pertenece y se conecta cada microservicio:
 
-| Capa Arquitectónica | Componente Lógico | Archivo(s) Físico(s) en el Repositorio |
+```
++-------------------------------------------------------------------------------------------------------------+
+|                                    DISTRIBUCIÓN DE MICROSERVICIOS POR CAPA                                  |
++-----------------------------------+------------------------------------+------------------------------------+
+|  ENTERPRISE SERVICE BUS (ESB)     |  EVENT BUS & STREAMING DUAL        |  SERVICE MESH (ESTE-OESTE)         |
+|  (Orquestación Síncrona & Sagas)  |  (Asincronía, Picos & Event Log)   |  (Telemetría, Red & mTLS)          |
++-----------------------------------+------------------------------------+------------------------------------+
+| Capa Interna (Reemplazo Joins):   | Broker RabbitMQ (Topic Exchange):  | Nodos Registrados en Malla:        |
+| - MS_CLI (Clientes y Auth)        | - MS Catálogo (q.busquedas.masivas)| - MS_CORE (BFF / Ingress Point)    |
+| - MS_CAR (Carrito y Checkout)     | - MS_FAC (q.ordenes.confirmadas)   | - MS_ESB (Orquestador Sagas)       |
+| - MS_FAC (Facturación Fiscal)     | - MS_FIN (q.ordenes.confirmadas)   | - MS_PAG (Pagos & Reembolsos)      |
+| - MS_PAG (Simulación de Pagos)    | - MS_PAG (q.pagos.procesados)      | - MS_STK (Inventario gRPC :50051)  |
+| - MS_PKG (Paquetes Dinámicos)     | - Saga Orchestrator (q.sagas)      | - MS_FAC (Facturación Fiscal)      |
+| - MS_FIN (Finanzas/Liquidaciones) | - MS_STK (q.stock.actualizado)     | - MS_CLI (Clientes & Perfiles)     |
+| - MS_PROV (Proveedores y Nodos)   | - Webhooks Inbound (4 verticales)  | - MS_PROV (Conectores Socios)      |
+| - MS_AUD (Auditoría Negocio SQL)  | - DLQ (q.dead_letter - Fallos)     |                                    |
+|                                   |                                    | Capacidades de Malla:              |
+| Capa Externa / ACL (B2B):         | Cluster Apache Kafka:              | - mTLS Zero Trust (TLSv1.3)        |
+| - MS_ATR (Socios Atracciones)     | - MS Catálogo (topic-catalogo-sync)| - Sidecar Proxy Interceptor        |
+| - MS_AUT (Socios Autos)           | - MS_PROV (telemetry.events)       | - Rate Limiting Inter-Servicio     |
+| - MS_ALO (Socios Alojamientos)    | - MS_AUD (compras.audit)           | - Trazabilidad X-Correlation-Id    |
+| - MS_VUE (Socios Vuelos)          | - Kafka-Rabbit Bridge (Espejeo)    |                                    |
++-----------------------------------+------------------------------------+------------------------------------+
+```
+
+---
+
+#### 1. Microservicios que van al ESB (Enterprise Service Bus)
+El ESB opera como el motor síncrono de orquestación y mediación de datos. Se divide en dos capas funcionales:
+
+* **A. ESB Capa Interna (`src/modules/esb/interna/`)**:
+  Gobierna los microservicios propietarios de Booking Central. Su responsabilidad crítica es **sustituir los SQL `JOINs` entre los 12 esquemas herméticos en la memoria de la aplicación**:
+  1. **MS Clientes y Auth (`MS_CLI`)**: Suministra la identidad verificada del comprador (cédula, nombres, teléfono E.164) para asociarla a reservas y facturas sin acoplar tablas de base de datos.
+  2. **MS Carritos y Checkout (`MS_CAR`)**: Centraliza los ítems multiverticales en memoria antes de disparar el proceso transaccional de compra.
+  3. **MS Facturación Fiscal (`MS_FAC`)**: Ensambla el encabezado y detalle fiscal, aplicando el IVA 15% ecuatoriano con estricta validación de idempotencia (`Idempotency-Key`).
+  4. **MS Simulación de Pagos (`MS_PAG`)**: Coordina el cobro síncrono, retención temporal de fondos (*holds*) y emisión de reembolsos inmediatos ante cancelaciones.
+  5. **MS Paquetes Dinámicos (`MS_PKG`)**: Evalúa en memoria reglas de negocio para promociones combinadas (ej. Alojamiento + Auto + Atracción) y valida topes de descuento permitidos según contratos.
+  6. **MS Finanzas y Liquidaciones (`MS_FIN`)**: Calcula de forma automática la comisión del 10% retenida por Booking Central y genera las liquidaciones pendientes para los socios.
+  7. **MS Proveedores y Salud de Nodos (`MS_PROV`)**: Administra la tabla de configuración de proveedores y conmutación de *kill-switches* de aislamiento.
+  8. **MS Auditoría Transaccional (`MS_AUD`)**: Escribe los registros fiscales y transaccionales estructurados en `schema_auditoria` para consulta SQL.
+
+* **B. ESB Capa de Integración Externa / Adaptadores ACL (`src/modules/*/acl/`)**:
+  Gobierna la comunicación síncrona B2B hacia los sistemas externos de los compañeros, aplicando **traducción de modelos de datos (ACL)** y **Circuit Breakers (timeout 5000 ms, umbral de 3 fallos)**:
+  1. **MS Atracciones (`MS_ATR`)**: Conecta con *Vívelo Ecuador* (Gloria), *Descubre EC* (Dilan), *TourGirls* (Michael), *EcuaTravel* (Ariel) y *Atracciones EC* (Alisson) para disponibilidad en tiempo real, reserva de turnos y cancelación coordinada.
+  2. **MS Autos (`MS_AUT`)**: Conecta con las flotas de *RutaLibre Autos* (Esteban / Mateo) para cotización de días dinámicos, arriendo de vehículos y verificación de la regla de *cooldown* de 2 horas.
+  3. **MS Alojamientos (`MS_ALO`)**: Conecta con los motores hoteleros federados para reservas de habitaciones, control de huéspedes y política de cancelación de 48 horas.
+  4. **MS Vuelos (`MS_VUE`)**: Conecta con aerolíneas socias para consulta de itinerarios, selección de asientos y emisión de pases de abordar (PNR).
+
+---
+
+#### 2. Microservicios que van al Event Bus y a RabbitMQ (AMQP 0-9-1)
+El Event Bus con RabbitMQ actúa como el broker transaccional desacoplado. Su función es **absorber picos de carga y descongestionar el ESB** mediante un Topic Exchange (`booking.events`):
+
+1. **MS Catálogo Unificado y BFF**:
+   - Conectado a la cola **`q.busquedas.masivas`** (routing key `search.*`). Absorbe avalanchas de miles de turistas consultando destinos concurrentemente, nivelando la carga (*load dampening*) para que el ESB no se congele.
+2. **MS Facturación (`MS_FAC`), MS Finanzas (`MS_FIN`) y ESB Saga Orchestrator**:
+   - Conectados a la cola **`q.ordenes.confirmadas`** (routing key `order.confirmed`). En cuanto se valida un pago exitoso, este evento dispara asíncronamente:
+     * La emisión del comprobante fiscal electrónico en `MS_FAC`.
+     * La liquidación de la comisión del 10% en `MS_FIN`.
+     * La llamada REST final de confirmación a las tiendas externas de los socios.
+3. **MS Pagos (`MS_PAG`)**:
+   - Conectado a la cola **`q.pagos.procesados`** (routing key `payment.completed`), notificando al orquestador que el cobro fue liquidado para avanzar el siguiente paso de la Saga.
+4. **Saga Orchestrator, MS Pagos y Adaptadores de Socios**:
+   - Conectados a la cola **`q.sagas.compensacion`** (routing keys `saga.compensate`, `payment.refunded`). Si un socio externo responde con error (`HTTP 409 Conflict` o `504 Timeout`), el orquestador emite a esta cola para ejecutar los rollbacks LIFO (reembolso financiero automático al usuario y restitución del cupo local).
+5. **MS Ingesta de Stock (`MS_STK`)**:
+   - Conectado a la cola **`q.stock.actualizado`** (routing key `stock.updated`). En cuanto un socio envía un push gRPC por el puerto 50051, el evento se emite a esta cola de alta prioridad para refrescar la caché en memoria y propagar actualizaciones instantáneas al frontend vía WebSockets.
+6. **Módulos de Integración Externa (Atracciones, Autos, Alojamientos, Vuelos)**:
+   - Conectados a las colas de **Webhooks Inbound** (`booking.webhooks.inbound.{vertical}`) para procesar callbacks y notificaciones asíncronas de los socios.
+7. **Consola Administrativa de Errores y Alertas**:
+   - Conectada a la cola **`q.dead_letter`** (Dead Letter Queue). Almacena mensajes que han fallado tras 3 reintentos para inspección forense y resolución manual.
+
+---
+
+#### 3. Microservicios que van a Apache Kafka (Event Streaming Commit Log)
+Apache Kafka se especializa en streaming distribuido de alto rendimiento, persistencia inmutable particionada y auditoría a largo plazo (*Event Sourcing*):
+
+1. **MS Catálogo y MS Proveedores**:
+   - Conectados al tópico **`booking.catalogo.stream`** (`topic-catalogo-sync`), particionado por vertical turística, para la sincronización masiva de inventario sin bloquear transacciones de compra.
+2. **MS Proveedores (`MS_PROV`) y Service Mesh**:
+   - Conectados al tópico **`booking.telemetria.nodes`** (`booking.telemetry.events`), transmitiendo un flujo continuo de métricas de salud, tasas de error y latencias de red Este-Oeste de cada nodo.
+3. **MS Auditoría (`MS_AUD`)**:
+   - Conectado al tópico **`booking.compras.audit`**, almacenando un historial inmutable de compras particionado por cliente para trazabilidad legal y fiscal.
+4. **Conector Kafka-Rabbit Bridge (`kafka-rabbit-bridge.service.ts`)**:
+   - Microservicio puente que intercepta eventos seleccionados de RabbitMQ y los replica en Kafka garantizando propagación transversal de `X-Correlation-Id` y `trace_id`.
+
+---
+
+#### 4. Microservicios que van al Service Mesh (Tráfico Este-Oeste)
+El Service Mesh gobierna la comunicación interna entre microservicios (tráfico Este-Oeste). Cada nodo interno opera bajo el patrón *Sidecar Proxy* (`sidecar-proxy.interceptor.ts`), aplicando autenticación mutua mTLS (TLSv1.3 Zero Trust), rate limiting de malla y trazabilidad distribuida:
+
+* **Nodos Formalmente Registrados en la Malla (`src/modules/service-mesh/service-mesh.service.ts`)**:
+  1. **`MS_CORE` (Booking Core Backend / BFF)**: Punto de ingreso perimetral, agregador de consultas y proxy inverso hacia el frontend.
+  2. **`MS_ESB` (Enterprise Service Bus)**: Coordinador transaccional y orquestador de Sagas LIFO.
+  3. **`MS_PAG` (Microservicio de Pagos & Conciliación)**: Gestor de transacciones financieras, holds y reembolsos.
+  4. **`MS_STK` (Microservicio de Inventario gRPC)**: Receptor de inventario en tiempo real sobre HTTP/2 (puerto TCP 50051).
+  5. **`MS_FAC` (Microservicio de Facturación Fiscal)**: Emisor de comprobantes electrónicos autorizados SRI con cálculo de IVA 15%.
+  6. **`MS_CLI` (Microservicio de Clientes & Deduplicación)**: Gestor de perfiles de clientes y normalización de documentos de identidad.
+  7. **`MS_PROV` (Conectores a Proveedores Socios)**: Intermediario de despacho hacia las APIs de Atracciones, Autos, Hoteles y Vuelos.
+
+---
+
+### 2.3. Mapeo Físico Exhaustivo de Archivos de la Arquitectura en `src/`
+
+La siguiente tabla relaciona de forma exhaustiva cada componente arquitectónico con su archivo físico exacto en el repositorio, permitiendo una verificación inmediata en el código fuente:
+
+| Subsistema Arquitectónico | Componente / Rol | Ubicación del Archivo Físico en el Código |
 | :--- | :--- | :--- |
-| **Capa 2: Ingesta Stock** | Servidor gRPC Inbound (Puerto 50051) | [`src/modules/inventory/inventory-grpc.controller.ts`](file:///src/modules/inventory/inventory-grpc.controller.ts)<br>[`src/modules/inventory/inventory.service.ts`](file:///src/modules/inventory/inventory.service.ts)<br>[`src/contracts/inventory.proto`](file:///src/contracts/inventory.proto) |
-| **Capa 3: ESB Interno** | Enrutador de Negocio y Sustituto de Joins | [`src/modules/esb/interna/esb-internal-router.service.ts`](file:///src/modules/esb/interna/esb-internal-router.service.ts)<br>[`src/modules/esb/esb.controller.ts`](file:///src/modules/esb/esb.controller.ts)<br>[`src/modules/esb/esb.module.ts`](file:///src/modules/esb/esb.module.ts) |
-| **Capa 3: ESB Sagas** | Orquestador de Sagas y Compensaciones | [`src/modules/esb/interna/saga-orchestrator.service.ts`](file:///src/modules/esb/interna/saga-orchestrator.service.ts)<br>[`src/modules/esb/entities/saga-transaccion.entity.ts`](file:///src/modules/esb/entities/saga-transaccion.entity.ts)<br>[`src/modules/esb/entities/saga-paso-journal.entity.ts`](file:///src/modules/esb/entities/saga-paso-journal.entity.ts) |
-| **Capa 3: ESB Externa / ACL** | Adaptador Socios Atracciones (Circuit Breakers) | [`src/modules/atracciones/acl/dilan-atracciones.adapter.ts`](file:///src/modules/atracciones/acl/dilan-atracciones.adapter.ts)<br>[`src/modules/atracciones/atracciones.service.ts`](file:///src/modules/atracciones/atracciones.service.ts) |
-| **Capa 3: ESB Externa / ACL** | Adaptador Socios Autos (Cooldown y Fallbacks) | [`src/modules/autos/acl/autos-circuit-breaker.adapter.ts`](file:///src/modules/autos/acl/autos-circuit-breaker.adapter.ts)<br>[`src/modules/autos/autos.service.ts`](file:///src/modules/autos/autos.service.ts) |
-| **Capa 3: ESB Externa / ACL** | Adaptador Alojamientos y Hoteles | [`src/modules/alojamientos/acl/alojamientos-circuit-breaker.adapter.ts`](file:///src/modules/alojamientos/acl/alojamientos-circuit-breaker.adapter.ts)<br>[`src/modules/alojamientos/alojamientos.service.ts`](file:///src/modules/alojamientos/alojamientos.service.ts) |
-| **Capa 3: ESB Kill-Switches** | Gestión de Nodos, Semáforo y Switches | [`src/modules/nodes/nodes.service.ts`](file:///src/modules/nodes/nodes.service.ts)<br>[`src/modules/nodes/nodes.controller.ts`](file:///src/modules/nodes/nodes.controller.ts)<br>[`src/modules/nodes/entities/config-proveedor.entity.ts`](file:///src/modules/nodes/entities/config-proveedor.entity.ts) |
-| **Transversal: Service Mesh** | Sidecar Proxy Interceptor y Telemetría Este-Oeste | [`src/modules/service-mesh/interceptors/sidecar-proxy.interceptor.ts`](file:///src/modules/service-mesh/interceptors/sidecar-proxy.interceptor.ts)<br>[`src/modules/service-mesh/service-mesh.service.ts`](file:///src/modules/service-mesh/service-mesh.service.ts)<br>[`src/modules/service-mesh/service-mesh.controller.ts`](file:///src/modules/service-mesh/service-mesh.controller.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Clientes | [`src/core/entities/usuario.entity.ts`](file:///src/core/entities/usuario.entity.ts)<br>[`src/modules/clientes/entities/cliente.entity.ts`](file:///src/modules/clientes/entities/cliente.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Carrito | [`src/core/entities/carrito.entity.ts`](file:///src/core/entities/carrito.entity.ts)<br>[`src/core/entities/carrito-item.entity.ts`](file:///src/core/entities/carrito-item.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Facturación | [`src/core/entities/factura.entity.ts`](file:///src/core/entities/factura.entity.ts)<br>[`src/core/entities/factura-item.entity.ts`](file:///src/core/entities/factura-item.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Atracciones | [`src/modules/atracciones/entities/atraccion.entity.ts`](file:///src/modules/atracciones/entities/atraccion.entity.ts)<br>[`src/modules/atracciones/entities/reserva.entity.ts`](file:///src/modules/atracciones/entities/reserva.entity.ts)<br>[`src/modules/atracciones/entities/resena.entity.ts`](file:///src/modules/atracciones/entities/resena.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Autos | [`src/modules/autos/entities/auto.entity.ts`](file:///src/modules/autos/entities/auto.entity.ts)<br>[`src/modules/autos/entities/order-auto.entity.ts`](file:///src/modules/autos/entities/order-auto.entity.ts)<br>[`src/modules/autos/entities/mantenimiento-auto.entity.ts`](file:///src/modules/autos/entities/mantenimiento-auto.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Alojamientos | [`src/modules/alojamientos/entities/alojamiento.entity.ts`](file:///src/modules/alojamientos/entities/alojamiento.entity.ts)<br>[`src/modules/alojamientos/entities/tipo-habitacion.entity.ts`](file:///src/modules/alojamientos/entities/tipo-habitacion.entity.ts)<br>[`src/modules/alojamientos/entities/reserva.entity.ts`](file:///src/modules/alojamientos/entities/reserva.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Vuelos | [`src/modules/vuelos/entities/vuelo.entity.ts`](file:///src/modules/vuelos/entities/vuelo.entity.ts)<br>[`src/modules/vuelos/entities/reserva.entity.ts`](file:///src/modules/vuelos/entities/reserva.entity.ts)<br>[`src/modules/vuelos/entities/boleto.entity.ts`](file:///src/modules/vuelos/entities/boleto.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Paquetes Dinámicos | [`src/modules/paquetes/entities/paquete.entity.ts`](file:///src/modules/paquetes/entities/paquete.entity.ts)<br>[`src/modules/paquetes/entities/paquete-items.entity.ts`](file:///src/modules/paquetes/entities/paquete-items.entity.ts) |
+| **Capa 1: Persistencia (Multi-Esquema)** | Entidades Nodos & Proveedores | [`src/modules/nodes/entities/config-proveedor.entity.ts`](file:///src/modules/nodes/entities/config-proveedor.entity.ts)<br>[`src/core/entities/estado-servicio.entity.ts`](file:///src/core/entities/estado-servicio.entity.ts) |
+| **Capa 2: Ingesta Stock gRPC** | Servidor RPC Binario (Puerto 50051) | [`src/modules/inventory/inventory-grpc.controller.ts`](file:///src/modules/inventory/inventory-grpc.controller.ts)<br>[`src/modules/inventory/inventory.service.ts`](file:///src/modules/inventory/inventory.service.ts)<br>[`src/contracts/inventory.proto`](file:///src/contracts/inventory.proto) |
+| **Capa 3: ESB Capa Interna** | Enrutador y Sustituto de SQL Joins | [`src/modules/esb/interna/esb-internal-router.service.ts`](file:///src/modules/esb/interna/esb-internal-router.service.ts)<br>[`src/modules/esb/esb.controller.ts`](file:///src/modules/esb/esb.controller.ts)<br>[`src/modules/esb/esb.module.ts`](file:///src/modules/esb/esb.module.ts) |
+| **Capa 3: ESB Sagas y Compensaciones** | Orquestador Saga LIFO y Diario | [`src/modules/esb/interna/saga-orchestrator.service.ts`](file:///src/modules/esb/interna/saga-orchestrator.service.ts)<br>[`src/modules/esb/entities/saga-transaccion.entity.ts`](file:///src/modules/esb/entities/saga-transaccion.entity.ts)<br>[`src/modules/esb/entities/saga-paso-journal.entity.ts`](file:///src/modules/esb/entities/saga-paso-journal.entity.ts) |
+| **Capa 3: ESB Externa / ACL** | Adaptador Atracciones (Circuit Breaker 5s) | [`src/modules/atracciones/acl/dilan-atracciones.adapter.ts`](file:///src/modules/atracciones/acl/dilan-atracciones.adapter.ts)<br>[`src/modules/atracciones/atracciones.service.ts`](file:///src/modules/atracciones/atracciones.service.ts)<br>[`src/modules/atracciones/atracciones.controller.ts`](file:///src/modules/atracciones/atracciones.controller.ts) |
+| **Capa 3: ESB Externa / ACL** | Adaptador Autos (Cooldown 2h & Fallbacks) | [`src/modules/autos/acl/autos-circuit-breaker.adapter.ts`](file:///src/modules/autos/acl/autos-circuit-breaker.adapter.ts)<br>[`src/modules/autos/autos.service.ts`](file:///src/modules/autos/autos.service.ts)<br>[`src/modules/autos/autos.controller.ts`](file:///src/modules/autos/autos.controller.ts) |
+| **Capa 3: ESB Externa / ACL** | Adaptador Alojamientos & Hoteles | [`src/modules/alojamientos/acl/alojamientos-circuit-breaker.adapter.ts`](file:///src/modules/alojamientos/acl/alojamientos-circuit-breaker.adapter.ts)<br>[`src/modules/alojamientos/alojamientos.service.ts`](file:///src/modules/alojamientos/alojamientos.service.ts)<br>[`src/modules/alojamientos/alojamientos.controller.ts`](file:///src/modules/alojamientos/alojamientos.controller.ts) |
+| **Capa 3: ESB Externa / ACL** | Integración Vuelos e Itinerarios | [`src/modules/vuelos/vuelos.service.ts`](file:///src/modules/vuelos/vuelos.service.ts)<br>[`src/modules/vuelos/vuelos.controller.ts`](file:///src/modules/vuelos/vuelos.controller.ts) |
+| **Capa 3: ESB Kill-Switches** | Gestión de Nodos, Semáforo 🟢/🔴 | [`src/modules/nodes/nodes.service.ts`](file:///src/modules/nodes/nodes.service.ts)<br>[`src/modules/nodes/nodes.controller.ts`](file:///src/modules/nodes/nodes.controller.ts) |
 | **Capa 4: Event Bus (RabbitMQ)** | Publicador Transaccional AMQP 0-9-1 | [`src/modules/event-bus/rabbitmq/rabbitmq-event-bus.service.ts`](file:///src/modules/event-bus/rabbitmq/rabbitmq-event-bus.service.ts)<br>[`src/modules/event-bus/consumer/rabbitmq-consumer.service.ts`](file:///src/modules/event-bus/consumer/rabbitmq-consumer.service.ts) |
-| **Capa 4: Event Bus (Kafka)** | Event Streaming Commit Log | [`src/modules/event-bus/kafka/kafka-event-bus.service.ts`](file:///src/modules/event-bus/kafka/kafka-event-bus.service.ts) |
+| **Capa 4: Event Bus (Kafka)** | Commit Log Inmutable de Streaming | [`src/modules/event-bus/kafka/kafka-event-bus.service.ts`](file:///src/modules/event-bus/kafka/kafka-event-bus.service.ts) |
 | **Capa 4: Bridge Dual** | Conector RabbitMQ - Apache Kafka | [`src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts`](file:///src/modules/event-bus/bridge/kafka-rabbit-bridge.service.ts) |
 | **Capa 4: Consumidor Idempotente** | Deduplicación de Mensajes y Eventos | [`src/modules/event-bus/consumer/event-consumer-idempotency.service.ts`](file:///src/modules/event-bus/consumer/event-consumer-idempotency.service.ts) |
+| **Transversal: Service Mesh** | Sidecar Proxy, mTLS y Métricas Este-Oeste | [`src/modules/service-mesh/interceptors/sidecar-proxy.interceptor.ts`](file:///src/modules/service-mesh/interceptors/sidecar-proxy.interceptor.ts)<br>[`src/modules/service-mesh/service-mesh.service.ts`](file:///src/modules/service-mesh/service-mesh.service.ts)<br>[`src/modules/service-mesh/service-mesh.controller.ts`](file:///src/modules/service-mesh/service-mesh.controller.ts)<br>[`src/modules/service-mesh/service-mesh.module.ts`](file:///src/modules/service-mesh/service-mesh.module.ts) |
+| **Capa 5: Orquestación & Facturas** | Facturación Compuesta con IVA 15% | [`src/modules/facturas/facturas.service.ts`](file:///src/modules/facturas/facturas.service.ts)<br>[`src/modules/facturas/facturas.controller.ts`](file:///src/modules/facturas/facturas.controller.ts) |
+| **Capa 5: Orquestación & Finanzas** | Liquidaciones y Comisiones 10% | [`src/modules/finanzas/finanzas.service.ts`](file:///src/modules/finanzas/finanzas.service.ts)<br>[`src/modules/finanzas/finanzas.controller.ts`](file:///src/modules/finanzas/finanzas.controller.ts) |
+| **Capa 5: Orquestación & Pagos** | Simulación SOA y Reembolsos | [`src/modules/pagos/pagos.service.ts`](file:///src/modules/pagos/pagos.service.ts)<br>[`src/modules/pagos/pagos.controller.ts`](file:///src/modules/pagos/pagos.controller.ts) |
 | **Capa 6: API Gateway & BFF** | GraphQL Resolver y Esquema Unificado | [`src/modules/graphql/graphql-bff.module.ts`](file:///src/modules/graphql/graphql-bff.module.ts)<br>[`src/modules/graphql/graphql-bff.resolver.ts`](file:///src/modules/graphql/graphql-bff.resolver.ts)<br>[`src/modules/graphql/graphql-bff.service.ts`](file:///src/modules/graphql/graphql-bff.service.ts) |
-| **Capa 6: Anti N+1 GraphQL** | DataLoaders Batch para Consultas Óptimas | [`src/modules/graphql/dataloaders/reservas.dataloader.ts`](file:///src/modules/graphql/dataloaders/reservas.dataloader.ts) |
-| **Transversal: Trazabilidad** | Contexto de Correlación Distribuido | [`src/core/tracing/trace-context.middleware.ts`](file:///src/core/tracing/trace-context.middleware.ts)<br>[`src/core/tracing/trace-context.interceptor.ts`](file:///src/core/tracing/trace-context.interceptor.ts)<br>[`src/core/tracing/trace-context.service.ts`](file:///src/core/tracing/trace-context.service.ts) |
-| **Transversal: Logs Físicos** | Winston Logger Rotativo (Cero Logs en BD) | [`src/core/logger/winston-logger.service.ts`](file:///src/core/logger/winston-logger.service.ts)<br>[`src/core/logger/structured-http-request.middleware.ts`](file:///src/core/logger/structured-http-request.middleware.ts) |
-| **Capa 7: Presentación Web** | Marketplace SPA y Mis Reservas | [`frontend/src/pages/AtraccionDetailPage.jsx`](file:///frontend/src/pages/AtraccionDetailPage.jsx)<br>[`frontend/src/pages/MisReservasPage.jsx`](file:///frontend/src/pages/MisReservasPage.jsx)<br>[`frontend/src/pages/CheckoutPage.jsx`](file:///frontend/src/pages/CheckoutPage.jsx) |
+| **Capa 6: Anti N+1 GraphQL** | DataLoaders Batch para Consultas | [`src/modules/graphql/dataloaders/reservas.dataloader.ts`](file:///src/modules/graphql/dataloaders/reservas.dataloader.ts) |
+| **Transversal: Trazabilidad** | Middleware y Servicio de Correlación | [`src/core/tracing/trace-context.middleware.ts`](file:///src/core/tracing/trace-context.middleware.ts)<br>[`src/core/tracing/trace-context.interceptor.ts`](file:///src/core/tracing/trace-context.interceptor.ts)<br>[`src/core/tracing/trace-context.service.ts`](file:///src/core/tracing/trace-context.service.ts) |
+| **Transversal: Seguridad & Guards** | Supabase Auth Guard y RBAC | [`src/core/guards/supabase-auth.guard.ts`](file:///src/core/guards/supabase-auth.guard.ts)<br>[`src/core/guards/roles.guard.ts`](file:///src/core/guards/roles.guard.ts)<br>[`src/core/decorators/roles.decorator.ts`](file:///src/core/decorators/roles.decorator.ts) |
+| **Transversal: Logs Físicos** | Winston Physical Logger (Cero Logs BD) | [`src/core/logger/winston-logger.service.ts`](file:///src/core/logger/winston-logger.service.ts)<br>[`src/core/logger/structured-http-request.middleware.ts`](file:///src/core/logger/structured-http-request.middleware.ts) |
+| **Capa 7: Presentación Web SPA** | Catálogo, Detalle y Turnos Interactivos | [`frontend/src/pages/AtraccionDetailPage.jsx`](file:///frontend/src/pages/AtraccionDetailPage.jsx)<br>[`frontend/src/pages/AtraccionesPage.jsx`](file:///frontend/src/pages/AtraccionesPage.jsx) |
+| **Capa 7: Presentación Web SPA** | Carrito, Checkout e Idempotencia | [`frontend/src/pages/CheckoutPage.jsx`](file:///frontend/src/pages/CheckoutPage.jsx)<br>[`frontend/src/pages/CartPage.jsx`](file:///frontend/src/pages/CartPage.jsx) |
+| **Capa 7: Presentación Web SPA** | Mis Reservas, QR y Cancelación (24h/48h) | [`frontend/src/pages/MisReservasPage.jsx`](file:///frontend/src/pages/MisReservasPage.jsx)<br>[`frontend/src/components/BookingCard.jsx`](file:///frontend/src/components/BookingCard.jsx) |
+| **Capa 7: Paneles Administrativos** | Semáforo de Nodos y Kill-Switches | [`frontend/src/pages/AdminNodesPage.jsx`](file:///frontend/src/pages/AdminNodesPage.jsx)<br>[`frontend/src/pages/AdminDashboard.jsx`](file:///frontend/src/pages/AdminDashboard.jsx) |
 
 ---
 
