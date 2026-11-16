@@ -11,6 +11,7 @@
    - 2.1. [Conectividad y Flujo de Comunicación por Cada Capa](#21-conectividad-y-flujo-de-comunicación-por-cada-capa)
    - 2.2. [Clasificación Exhaustiva: Microservicios en ESB, Event Bus, RabbitMQ, Kafka y Service Mesh](#22-clasificación-exhaustiva-qué-microservicios-van-al-esb-event-bus-rabbitmq-kafka-y-service-mesh)
    - 2.3. [Mapeo Físico Exhaustivo de Archivos de la Arquitectura en `src/`](#23-mapeo-físico-exhaustivo-de-archivos-de-la-arquitectura-en-src)
+   - 2.4. [Guía Práctica: Cómo Visualizar y Demostrar el ESB, Event Bus, RabbitMQ y Service Mesh](#24-guía-práctica-cómo-visualizar-y-demostrar-el-esb-event-bus-rabbitmq-y-service-mesh)
 3. [Estilos Arquitectónicos](#3-estilos-arquitectónicos)
 4. [Patrones Arquitectónicos de Integración (EIP)](#4-patrones-arquitectónicos-de-integración-eip)
 5. [Componentes Arquitectónicos](#5-componentes-arquitectónicos)
@@ -590,9 +591,57 @@ La siguiente tabla relaciona de forma exhaustiva cada componente arquitectónico
 
 ---
 
----
+### 2.4. Guía Práctica: Cómo Visualizar y Demostrar el ESB, Event Bus, RabbitMQ y Service Mesh
 
-## 3. Estilos Arquitectónicos
+Para defender y demostrar en vivo ante el docente o evaluador el funcionamiento del **ESB, Event Bus, RabbitMQ, Kafka y Service Mesh**, dispones de las siguientes 4 vías de visualización directa:
+
+#### 1. Panel Visual de Administración del Frontend (En Vivo)
+Al iniciar la aplicación (`npm run dev` en frontend y backend):
+- Navega a la ruta protegida de administración: **`http://localhost:5173/admin`** (o en la barra de navegación: botón **Admin Dashboard**).
+- **Para mostrar el Service Mesh y Tráfico Este-Oeste**:
+  * Haz clic en la pestaña **"🔬 Servicios & Prov."** (o pestaña **"Observabilidad"**).
+  * Observarás el componente [`PanelServiceMesh.jsx`](file:///frontend/src/components/admin/PanelServiceMesh.jsx) que renderiza el **Grafo Interactivo Mermaid** con la frontera entre el Tráfico Norte-Sur (API Gateway) y el Tráfico Este-Oeste (Service Mesh).
+  * Verás la tabla de **Nodos de la Malla** (`MS_CORE`, `MS_ESB`, `MS_PAG`, `MS_STK`, `MS_FAC`, `MS_CLI`, `MS_PROV`) con su estado mTLS TLSv1.3, Sidecar Envoy Proxy, latencia en ms y estado de Circuit Breaker (`CLOSED` 🟢 / `OPEN` 🔴).
+- **Para mostrar el ESB y las Sagas de Transacciones Distribuidas**:
+  * En el mismo dashboard, desplázate a la sección del [`Panel8_AuditoriaSagas.jsx`](file:///frontend/src/components/admin/Panel8_AuditoriaSagas.jsx).
+  * Muestra en tiempo real la lista de **Transacciones Saga** (`COMPLETED`, `IN_PROGRESS`, `COMPENSATING`, `FAILED`).
+  * Al hacer clic sobre cualquier transacción, se expande el **Diario de Pasos (Saga Journal)** mostrando cada microservicio involucrado y la compensación inversa LIFO en caso de error de un socio.
+
+#### 2. Endpoints REST de Telemetría y Diagnóstico (Swagger / Navegador / Postman)
+Puedes consultar directamente desde el navegador o Swagger (`http://localhost:3000/api/docs`) los endpoints que exponen las métricas en tiempo real:
+
+| Componente a Demostrar | Método y Endpoint | Qué muestra al evaluador |
+| :--- | :--- | :--- |
+| **Service Mesh (Salud Nodos)** | `GET /api/v1/service-mesh/health` | Estado de mTLS, huellas digitales criptográficas, estado de los 7 nodos y tasa de éxito general de la malla. |
+| **Service Mesh (Telemetría)** | `GET /api/v1/service-mesh/telemetria` | Métricas de tráfico Este-Oeste: latencia media (ms), peticiones totales, fallos y reintentos por microservicio. |
+| **Service Mesh (Declarativo)** | `GET /api/v1/service-mesh/declarativo/istio` | Manifiesto declarativo en YAML de `VirtualService` y `DestinationRule` (Istio / Envoy) para inyección de proxies. |
+| **ESB (Sagas Activas)** | `GET /api/v1/esb/sagas` | Historial de orquestaciones distribuidas leídas desde `schema_auditoria.saga_transacciones`. |
+| **ESB (Sustituto de SQL Joins)**| `GET /api/v1/esb/aggregate/mis-reservas/:cliente` | Demostración de cómo el ESB ensambla en memoria reservas de autos, hoteles y tours sin hacer SQL JOIN cross-schema. |
+| **Event Bus & Trazas EDA** | `GET /api/v1/observabilidad/trazas/:correlationId` | Trazabilidad distribuida extremo a extremo con el árbol de spans y correlation ID a través de los brokers. |
+
+#### 3. Consola de RabbitMQ (AMQP 0-9-1) y CLI
+Si tienes el contenedor o broker de RabbitMQ levantado localmente o en el cluster:
+- **RabbitMQ Management UI**: Accede a **`http://localhost:15672`** (Credenciales por defecto: `guest` / `guest`).
+- **Ver el Exchange Topic**: Ir a la pestaña **Exchanges** -> seleccionar **`booking.events`**.
+- **Ver las Colas de Negocio**: Pestaña **Queues**:
+  * `q.busquedas.masivas`: Muestra los mensajes de búsqueda nivelados.
+  * `q.ordenes.confirmadas`: Muestra las compras confirmadas disparando facturación y finanzas.
+  * `q.sagas.compensacion`: Muestra los eventos de rollback transaccional.
+  * `q.stock.actualizado`: Muestra las actualizaciones de inventario gRPC empujadas a la cola.
+  * `q.dead_letter`: Muestra mensajes encolados para DLQ tras superar los 3 reintentos.
+- **Vía Terminal (RabbitMQ CLI)**:
+  ```bash
+  rabbitmqctl list_queues name messages consumers
+  ```
+
+#### 4. Archivos Físicos Rotativos de Winston Logger (Inspección en Disco)
+Para comprobar que no se ensucia la base de datos con logs de red conforme a la regla docente:
+- Abre la carpeta [`logs/`](file:///logs/):
+  * [`logs/audit.log`](file:///logs/audit.log): Trazas inmutables de transacciones distribuidas y correlación `X-Correlation-Id`.
+  * [`logs/combined.log`](file:///logs/combined.log): Registro cronológico de todas las llamadas de red y handshakes inter-servicio.
+  * [`logs/error.log`](file:///logs/error.log): Registro detallado de aperturas de Circuit Breakers y excepciones capturadas por el ESB y los adaptadores ACL.
+
+---
 
 El sistema combina de manera armónica tres estilos arquitectónicos reconocidos por la industria para resolver los retos de escalabilidad, acoplamiento y resiliencia:
 
