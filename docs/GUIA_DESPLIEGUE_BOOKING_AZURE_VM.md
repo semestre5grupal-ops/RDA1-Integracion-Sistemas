@@ -182,7 +182,7 @@ El orquestador Booking y los microservicios utilizan RabbitMQ para el bus de eve
    - **Data center:** Selecciona el proveedor `Amazon Web Services (AWS)` y región `US East (N. Virginia)` (cercano a Azure `eastus` y Supabase).
 3. **Copiar URL de Conexión:**
    - Una vez creada, entra a la instancia en el dashboard de CloudAMQP.
-   - En la sección **Details**, copia el valor de **AMQP URL** (tiene el formato: `amqps://usuario:password@lemur.cloudamqp.com/vhost`).
+   - En la sección **Details**, copia el valor de **AMQP URL** (tiene el formato: `amqps://usuario:<contraseña>@lemur.cloudamqp.com/vhost`).
    - Esta URL la pegarás en la variable `RABBITMQ_URL` de tu `.env`.
 
 ---
@@ -211,25 +211,25 @@ GRPC_AUTH_MODE=NONE
 
 # Bus de Eventos CloudAMQP (RabbitMQ Gestionado - Little Lemur)
 EVENT_BUS_MODE=rabbitmq
-RABBITMQ_URL=amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku
+RABBITMQ_URL=amqps://qkvqjvku:<contraseña>@shark.rmq.cloudamqp.com/qkvqjvku
 
 # Base de Datos PostgreSQL Supabase (con pooler activo)
-DATABASE_URL=postgresql://postgres.owseuntgcgvflqpnmwcc:Semestre%402026@aws-0-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true
+DATABASE_URL=postgresql://postgres.owseuntgcgvflqpnmwcc:<contraseña>@aws-0-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true
 SUPABASE_URL=https://owseuntgcgvflqpnmwcc.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw
+SUPABASE_SERVICE_ROLE_KEY=<Supabase → Project Settings → API>
 
 # URLs de Microservicios Socios
 TIENDA_AUTOS_URL=https://rutalibre-autos-api.azurewebsites.net/api/v3
-TIENDA_AUTOS_API_KEY=LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA
+TIENDA_AUTOS_API_KEY=<clave acordada con el socio>
 
 TIENDA_AUTOS_MATEO_URL=https://maneja-de-una-v3-api.onrender.com/api/v3
-TIENDA_AUTOS_MATEO_API_KEY=Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=
+TIENDA_AUTOS_MATEO_API_KEY=<clave acordada con el socio>
 
 TIENDA_ATRACCIONES_URL=https://descubre-gateway.livelymoss-5ea81cc6.chilecentral.azurecontainerapps.io/api/v3
-TIENDA_ATRACCIONES_API_KEY=40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568
+TIENDA_ATRACCIONES_API_KEY=<clave acordada con el socio>
 
 # Llaves gRPC para nodos socios (en formato JSON)
-GRPC_NODE_KEYS={"NODE_AUT_DANIEL":"LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA","NODE_AUT_MATEO":"Irsuf7pF+8E89Lrmo6w2no/uTODQDhm2k5EFXTF0jq0=","NODE_ATR_ALISSON":"API_KEY_ALISSON"}
+GRPC_NODE_KEYS={"NODE_AUT_DANIEL":"<clave>","NODE_AUT_MATEO":"<clave>","NODE_ATR_ALISSON":"<clave>"}
 ```
 *(Guarda con `Ctrl + O`, Enter, y sal con `Ctrl + X`).*
 
@@ -298,7 +298,7 @@ Abre en tu navegador:
 ```bash
 curl -X POST https://booking-puce.brazilsouth.cloudapp.azure.com/api/v3/inventory/stock \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: LULUJlCwLfwSLh3dxfUZNngEGMtnb4rREAvQubkgdHA" \
+  -H "X-API-Key: <TU_API_KEY_REGISTRADA>" \
   -d '{
     "item_id": "auto-daniel-001",
     "available_units": 5,

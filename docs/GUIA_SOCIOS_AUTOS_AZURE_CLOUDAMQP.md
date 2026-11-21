@@ -80,7 +80,7 @@ Sigue estrictamente las lecciones aprendidas y directrices que funcionaron en Bo
    Configura en las variables de entorno de la app:
    - BOOKING_REST_STOCK_URL="https://booking-core-api.azurewebsites.net/api/v3/inventory/stock"
    - BOOKING_BASE_URL="https://booking-core-api.azurewebsites.net/api/v3"
-   - RABBITMQ_URL="amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku"
+   - RABBITMQ_URL="amqps://qkvqjvku:<contraseña: pídela a Booking por privado>@shark.rmq.cloudamqp.com/qkvqjvku"
    - EVENT_BUS_MODE="rabbitmq"
 
 5. EMPAQUETADO Y DESPLIEGUE SEGURO (CRÍTICO EN WINDOWS):
@@ -184,7 +184,7 @@ Cada vez que una reserva sea creada o cancelada en su tienda, deben avisar a Boo
 ```
 
 ### Opción B: Event Bus Asíncrono (CloudAMQP RabbitMQ)
-* **Broker:** `amqps://qkvqjvku:ATBxToI1JvR6YbRBIIAnATa5mnjdIqz_@shark.rmq.cloudamqp.com/qkvqjvku`
+* **Broker:** `amqps://qkvqjvku:<contraseña: pídela a Booking por privado>@shark.rmq.cloudamqp.com/qkvqjvku`
 * **Exchange:** `booking.events` (Topic, Durable)
 * **Routing Key:** `stock.updated`
 * **Payload JSON:**
