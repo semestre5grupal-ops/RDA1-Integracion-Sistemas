@@ -6,6 +6,7 @@ import { resumenDeReserva, VuelosSociosReservasService } from './vuelos-socios-r
 import { ordenDeReserva, precioConRecargo } from './vuelos-facturacion';
 import { montoReembolso, SincronizadorEventosVuelos } from './vuelos-eventos';
 import { PasoVuelo, ResultadoPaso, trazaVuelos } from './vuelos-traza';
+import { asegurarTraceparent, spanVuelos, traceIdDe } from './vuelos-observabilidad';
 import { AsientoRef, limpiarAsientos, minutosBloqueo, VuelosAsientosBloqueo } from './vuelos-asientos-bloqueo';
 import { VuelosService } from '../vuelos.service';
 import { propietarioDesde } from '../vuelos.controller';
@@ -85,6 +86,8 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     const segmentos = m[1].split('/').filter(Boolean);
     const entrantes = req.headers as Record<string, any>;
     const metodo = req.method.toUpperCase();
+    // Este middleware corre antes del de trazas global: sin esto los logs de vuelos salían sin trace_id.
+    asegurarTraceparent(entrantes, (k, v) => res.setHeader(k, v));
 
     // ── Búsqueda ──
     if (metodo === 'POST' && segmentos.length === 1 && segmentos[0] === 'search') {
@@ -153,7 +156,10 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     const params = new URLSearchParams(query);
     const holdMapa = esMapa && params.get('holdId') ? this.bloqueos.actual(String(params.get('holdId'))).holdId : null;
     if (esMapa) params.delete('holdId');
-    const rg = await this.socios.reenviar(nodo, metodo, segmentos, esMapa ? params.toString() : query, req.body, entrantes);
+    const reenviarGenerico = () => this.socios.reenviar(nodo, metodo, segmentos, esMapa ? params.toString() : query, req.body, entrantes);
+    // Solo el hold (apartar una oferta) tiene sentido como paso propio en la traza.
+    const esHold = segmentos[0] === 'offers' && segmentos[1] === 'hold' && metodo === 'POST';
+    const rg = esHold ? await spanVuelos('vuelos.hold', { 'vuelo.aerolinea': nodo }, reenviarGenerico) : await reenviarGenerico();
     if (esMapa && rg.status >= 200 && rg.status < 300 && rg.body && typeof rg.body === 'object') {
       const otros = await this.bloqueos.deOtros(nodo, holdMapa, params.get('segmentId'));
       if (otros.length) rg.body = marcarBloqueados(rg.body, new Set(otros.map((a) => a.seatNumber)));
@@ -206,7 +212,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     const t0 = Date.now();
     let tRecargo = 0;
     const recargo = this.reservas.recargoPct().finally(() => (tRecargo = Date.now() - t0)); // en paralelo con la búsqueda
-    const { offers, sources } = await this.socios.buscar(req.body, entrantes, req.headers.host);
+    const { offers, sources } = await spanVuelos('vuelos.busqueda', { 'vuelo.origen': req.body?.itineraries?.[0]?.origin, 'vuelo.destino': req.body?.itineraries?.[0]?.destination }, () => this.socios.buscar(req.body, entrantes, req.headers.host));
     const tBusqueda = Date.now() - t0;
     const it = req.body?.itineraries?.[0] || {};
     const okN = sources.filter((s) => s.ok).length;
@@ -346,7 +352,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
 
     // 2) Cobro en MS_PAG (idempotente con la misma clave del cliente).
     const tCobro = Date.now();
-    const cobro = await this.reservas.cobrar(precio.total, idem, propietario);
+    const cobro = await spanVuelos('vuelos.cobro', { 'vuelo.aerolinea': nodo, 'pago.monto': precio.total }, () => this.reservas.cobrar(precio.total, idem, propietario));
     this.traza(entrantes, 'cobro', cobro.ok ? 'ok' : 'error',
       cobro.ok
         ? `Pago aprobado ${precio.total.toFixed(2)} (aerolínea ${precio.aerolinea.toFixed(2)} + servicio ${precio.cargo.toFixed(2)}) · ${cobro.paymentReference}`
@@ -380,7 +386,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     // En un reintento (el intento anterior falló y se reembolsó) la aerolínea
     // necesita otra Idempotency-Key: con la misma y otros datos responde 409.
     const cabecerasReserva = cobro.reintento ? { ...entrantes, 'idempotency-key': randomUUID() } : entrantes;
-    const r = await this.socios.reenviar(nodo, 'POST', ['bookings'], '', cuerpo, cabecerasReserva);
+    const r = await spanVuelos('vuelos.reserva_aerolinea', { 'vuelo.aerolinea': nodo }, () => this.socios.reenviar(nodo, 'POST', ['bookings'], '', cuerpo, cabecerasReserva));
     const confirmo = r.status >= 200 && r.status < 300 && !!r.body?.bookingId;
     this.traza(entrantes, 'reserva_aerolinea', confirmo ? 'ok' : 'error',
       confirmo ? `Aerolínea confirmó · PNR ${r.body?.pnr ?? '?'}` : `Aerolínea rechazó (HTTP ${r.status}): ${r.body?.detail || r.body?.title || ''}`,
@@ -390,7 +396,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     if (r.status < 200 || r.status >= 300 || !r.body?.bookingId) {
       let devuelto = 0;
       if (cobro.transaccionId) {
-        devuelto = await this.reservas.reembolsar(cobro.transaccionId, precio.total, `Aerolínea ${nodo} rechazó la reserva (HTTP ${r.status})`);
+        devuelto = await spanVuelos('vuelos.reembolso', { 'vuelo.aerolinea': nodo, 'pago.monto': precio.total }, () => this.reservas.reembolsar(cobro.transaccionId, precio.total, `Aerolínea ${nodo} rechazó la reserva (HTTP ${r.status})`));
         this.traza(entrantes, 'reembolso', devuelto > 0 ? 'ok' : 'error',
           devuelto > 0 ? `SAGA: se devolvieron ${devuelto.toFixed(2)}` : 'SAGA: el reembolso FALLÓ, el cliente quedó cobrado sin reserva', { nodo, monto: precio.total });
       }
@@ -918,7 +924,7 @@ export class VuelosSociosMiddleware implements OnModuleInit, OnModuleDestroy {
     try {
       const huella = String(entrantes['x-device-fingerprint'] || '');
       const cliente = emailDesdeJwt(entrantes['authorization']) || (huella ? `invitado ·${huella.slice(-6)}` : null);
-      trazaVuelos.registrar({ correlacion: String(entrantes['x-correlation-id'] || 'sin-correlacion'), paso, resultado, detalle, cliente, ...extra });
+      trazaVuelos.registrar({ correlacion: String(entrantes['x-correlation-id'] || 'sin-correlacion'), paso, resultado, detalle, cliente, traceId: traceIdDe(entrantes), ...extra });
     } catch {
       /* la traza nunca debe romper una reserva */
     }

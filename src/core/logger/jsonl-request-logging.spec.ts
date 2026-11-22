@@ -77,6 +77,28 @@ describe('JSON Lines request logging', () => {
     );
   });
 
+  it('records the trace_id that a later middleware sets after the request started (vuelos routes)', () => {
+    const logger = new WinstonPhysicalLoggerService();
+    const response = new EventEmitter() as Response & { statusCode: number };
+    response.statusCode = 200;
+    const middleware = new StructuredHttpRequestMiddleware(logger);
+    const request = {
+      method: 'POST',
+      originalUrl: '/api/v2/vuelos/search',
+      headers: { 'x-correlation-id': 'corr-test-late' },
+    } as unknown as Request;
+
+    middleware.use(request, response, jest.fn() as NextFunction);
+    // Un middleware posterior (p. ej. el de vuelos) pone el traceparent cuando la petición ya empezó.
+    (request.headers as Record<string, string>).traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    response.emit('finish');
+
+    const logPath = path.join(temporaryDirectory, 'logs', 'booking-test', `${new Date().toISOString().slice(0, 10)}.jsonl`);
+    const record = JSON.parse(fs.readFileSync(logPath, 'utf8').trim().split('\n')[0]);
+    expect(record.trace_id).toBe('4bf92f3577b34da6a3ce929d0e0e4736');
+    expect(record.span_id).toBe('00f067aa0ba902b7');
+  });
+
   it('never records authorization credentials, tokens, or request bodies', () => {
     const logger = new WinstonPhysicalLoggerService();
     const response = new EventEmitter() as Response & { statusCode: number };

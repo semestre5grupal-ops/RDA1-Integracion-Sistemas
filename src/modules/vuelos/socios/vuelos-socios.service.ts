@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigProveedor } from '../../nodes/entities/config-proveedor.entity';
 import { propietarioDesde } from '../vuelos.controller';
 import { trazaVuelos } from './vuelos-traza';
+import { traceparentSaliente } from './vuelos-observabilidad';
 import { acumular, Comprobacion, esFeedDelContrato, healthStatusDe, respondeComoApi, SaludIntegracion } from './vuelos-salud';
 
 /**
@@ -297,6 +298,9 @@ export class VuelosSociosService {
       // consultar la reserva (400) o no la encuentra (404).
       'X-User-Id': propietarioDesde(entrantes['x-device-fingerprint'], entrantes['authorization']),
     };
+    // Opcional (VUELOS_TRACEPARENT_SALIDA=true): la aerolínea puede unir su tramo a la misma traza.
+    const tp = traceparentSaliente(entrantes);
+    if (tp) h['traceparent'] = tp;
     for (const nombre of ['idempotency-key', 'accept-language', 'if-match']) {
       if (entrantes[nombre]) h[nombre.replace(/(^|-)([a-z])/g, (m) => m.toUpperCase())] = String(entrantes[nombre]);
     }
