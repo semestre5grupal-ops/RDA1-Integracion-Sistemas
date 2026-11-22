@@ -321,6 +321,34 @@ describe('VuelosSociosService (agregador de aerolíneas)', () => {
       expect(enviado.headers['x-correlation-id']).toBe(corr);
     });
 
+    it('trace_id: cada paso guarda el mismo trace_id, la respuesta lo devuelve y la aerolínea lo recibe solo si se activa', async () => {
+      trazaVuelos.reiniciar();
+      const corr = 'corr-vuelo-trace-1';
+      const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+      const entrante = `00-${traceId}-00f067aa0ba902b7-01`;
+      const r = await fetch(`${base}/api/v2/vuelos/bookings`, {
+        method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-trace', 'X-Correlation-Id': corr, traceparent: entrante }),
+        body: JSON.stringify({ holdId: 'NODE_VUE_KEY~HOLD-key', passengers: [] }),
+      });
+      expect(r.headers.get('traceparent')).toContain(traceId);
+      const delaCompra = trazaVuelos.desde(0).eventos.filter((e) => e.correlacion === corr);
+      expect(delaCompra.length).toBeGreaterThan(3);
+      expect(delaCompra.every((e) => e.traceId === traceId)).toBe(true);
+      // Apagado por defecto: el contrato con la aerolínea no cambia.
+      const enviado = llamadas.find((c) => c.url === '/api/v2/vuelos/bookings' && c.method === 'POST' && c.headers['x-correlation-id'] === corr)!;
+      expect(enviado.headers['traceparent']).toBeUndefined();
+    });
+
+    it('trace_id: sin traceparent en la petición se genera uno y queda en la traza', async () => {
+      trazaVuelos.reiniciar();
+      const corr = 'corr-vuelo-trace-2';
+      const r = await fetch(`${base}/api/v2/vuelos/search`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Correlation-Id': corr }, body: JSON.stringify({ itineraries: [] }) });
+      const generado = /^00-([0-9a-f]{32})-[0-9a-f]{16}-01$/.exec(r.headers.get('traceparent') || '');
+      expect(generado).not.toBeNull();
+      const ev = trazaVuelos.desde(0).eventos.find((e) => e.correlacion === corr && e.paso === 'busqueda');
+      expect(ev?.traceId).toBe(generado![1]);
+    });
+
     it('reserva: si la aerolínea rechaza, Booking reembolsa (SAGA)', async () => {
       const r = await fetch(`${base}/api/v2/vuelos/bookings`, {
         method: 'POST', headers: conDueno(DUENO, { 'Idempotency-Key': 'idem-falla' }),

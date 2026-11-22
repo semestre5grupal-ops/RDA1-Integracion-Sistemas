@@ -13,13 +13,15 @@ export class StructuredHttpRequestMiddleware implements NestMiddleware {
 
   use(request: RequestWithNode, response: Response, next: NextFunction): void {
     const startedAt = Date.now();
-    const traceparent = headerValue(request.headers.traceparent);
-    const trace = traceparent?.match(/^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/i);
     const correlationId =
       headerValue(request.headers['x-correlation-id']) || 'correlation-id-missing';
     const httpPath = (request.originalUrl || request.url || '/').split('?')[0];
 
     response.on('finish', () => {
+      // Se lee al terminar: los middlewares posteriores (trazas, vuelos) pueden
+      // haber puesto el traceparent después de que empezó la petición.
+      const traceparent = headerValue(request.headers.traceparent);
+      const trace = traceparent?.match(/^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/i);
       const statusCode = response.statusCode;
       const failed = statusCode >= 400;
       const message = `${request.method} ${httpPath}`;

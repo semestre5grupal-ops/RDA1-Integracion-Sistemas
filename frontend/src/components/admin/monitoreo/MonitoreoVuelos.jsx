@@ -4,6 +4,8 @@ import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { ActualizadoHace } from '../panelUtils';
 import { ProcesoEnVivo } from '../ProcesoEnVivo';
 import { saludDeTramos } from '../ArquitecturaVuelos';
+import { GanttCompra } from './GanttCompra';
+import { ObjetivosSlo } from './ObjetivosSlo';
 import { armarCasos, BARRA_COMPRA, COLUMNAS_AEROLINEA, esPrueba, PASOS, porAerolinea, resumen } from './modeloVuelos';
 
 const T = {
@@ -71,14 +73,14 @@ export function MonitoreoVuelos({ aerolineas = [] }) {
     <section style={{ display: 'grid', gap: 14 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <div role="tablist" style={{ display: 'flex', gap: 4, background: '#eef1f5', padding: 4, borderRadius: 10, flexWrap: 'wrap' }}>
-          {[['resumen', '📊 Resumen'], ['operaciones', '🧾 Operaciones'], ['aerolineas', '✈️ Aerolíneas'], ['diagrama', '🔴 Diagrama en vivo']].map(([id, t]) => (
+          {[['resumen', '📊 Resumen'], ['operaciones', '🧾 Operaciones'], ['aerolineas', '✈️ Aerolíneas'], ['objetivos', '🎯 Objetivos (SLO)'], ['diagrama', '🔴 Diagrama en vivo']].map(([id, t]) => (
             <button key={id} type="button" role="tab" aria-selected={vista === id} onClick={() => setVista(id)}
               style={{ border: 0, borderRadius: 8, padding: '7px 12px', cursor: 'pointer', fontWeight: 700, fontSize: '0.83rem', background: vista === id ? T.surface : 'transparent', color: vista === id ? T.azul : T.text2, boxShadow: vista === id ? '0 1px 3px rgba(0,0,0,.12)' : 'none' }}>
               {t}{id === 'resumen' && res.alertas.length ? <span style={{ marginLeft: 6, background: res.alertas.some((a) => a.nivel === 'critico') ? T.bad : T.warn, color: '#fff', borderRadius: 999, padding: '0 6px', fontSize: '0.72rem' }}>{res.alertas.length}</span> : null}
             </button>
           ))}
         </div>
-        {vista !== 'diagrama' && (
+        {vista !== 'diagrama' && vista !== 'objetivos' && (
           <>
             <select value={horas} onChange={(e) => setHoras(Number(e.target.value))} aria-label="Período"
               style={{ border: `1px solid ${T.border}`, borderRadius: 8, padding: '7px 10px', fontSize: '0.83rem', background: T.surface }}>
@@ -94,12 +96,13 @@ export function MonitoreoVuelos({ aerolineas = [] }) {
       </div>
 
       {error && <div role="alert" style={{ background: T.badBg, color: T.bad, padding: '10px 12px', borderRadius: 8, fontSize: '0.85rem' }}>{error}</div>}
-      {!datos && !error && vista !== 'diagrama' && <div style={{ color: T.muted, fontSize: '0.9rem', padding: 20 }}>Cargando monitoreo…</div>}
+      {!datos && !error && vista !== 'diagrama' && vista !== 'objetivos' && <div style={{ color: T.muted, fontSize: '0.9rem', padding: 20 }}>Cargando monitoreo…</div>}
       {datos?.truncado && vista !== 'diagrama' && <div style={{ fontSize: '0.78rem', color: T.warn }}>Hay más eventos de los que se muestran en este período: se ven los más recientes.</div>}
 
       {datos && vista === 'resumen' && <Resumen res={res} irA={irA} horas={horas} />}
       {datos && vista === 'operaciones' && <Operaciones casos={casos} nombre={nombre} aerolineas={aerolineas} abrir={abrir} setAbrir={setAbrir} verRecorrido={verRecorrido} />}
       {datos && vista === 'aerolineas' && <Aerolineas filas={porAerolinea(eventos.filter((e) => !ocultarPruebas || !/^corr-e2e/.test(e.correlacion) && !/example\.com/.test(e.cliente || '')), aerolineas)} />}
+      {vista === 'objetivos' && <ObjetivosSlo nombre={nombre} />}
       {vista === 'diagrama' && <ProcesoEnVivo aerolineas={aerolineas} reproducirExterno={reproducir} salud={salud} />}
     </section>
   );
@@ -313,6 +316,7 @@ function LineaDeTiempo({ caso, nombre, verRecorrido }) {
           );
         })}
       </ol>
+      <GanttCompra eventos={[...caso.eventos, ...caso.posventa]} nombre={nombre} traceId={[...caso.eventos].reverse().find((e) => e.traceId)?.traceId} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <button type="button" onClick={() => verRecorrido(caso)} style={{ border: 0, background: T.azul, color: '#fff', borderRadius: 8, padding: '7px 12px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}>▶ Ver recorrido en el diagrama</button>
         <span style={{ fontSize: '0.72rem', color: T.muted, fontFamily: 'ui-monospace,Menlo,monospace', overflowWrap: 'anywhere' }}>{caso.correlacion}</span>

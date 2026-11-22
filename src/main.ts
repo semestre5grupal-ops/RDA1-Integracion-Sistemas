@@ -1,3 +1,5 @@
+// OpenTelemetry debe cargarse ANTES que cualquier otro módulo (apagado salvo OTEL_ENABLED=true).
+import './tracing';
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   require('dotenv').config();

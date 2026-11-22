@@ -49,6 +49,8 @@ export interface EventoVuelo {
   monto?: number | null;
   /** Quién hizo el paso: correo del cliente (token) o "invitado ·abc123" (huella del dispositivo). */
   cliente?: string | null;
+  /** trace_id W3C de la petición: une este paso con los logs y con Jaeger. */
+  traceId?: string | null;
 }
 
 const MAX_EVENTOS = 500;
@@ -59,6 +61,10 @@ export interface AlmacenTraza {
   consultar(desde: number, limite: number): Promise<{ ultimoSeq: number; contadores: Record<string, { ok: number; error: number; aviso: number }>; eventos: EventoVuelo[] }>;
   /** Eventos de las últimas `horas` (para el monitoreo: resumen, compras, aerolíneas). */
   ventana?(horas: number, limite: number): Promise<{ eventos: EventoVuelo[]; truncado: boolean }>;
+  /** Pasos de una compra por correlación o por trace_id (para la vista Gantt). */
+  porId?(id: string): Promise<EventoVuelo[]>;
+  /** SLI/SLO y percentiles exactos calculados en la base. */
+  informeSlo?(horas: number): Promise<any>;
 }
 
 class TrazaVuelos {
@@ -124,6 +130,30 @@ class TrazaVuelos {
       contadores: this.contadores,
       eventos: nuevos,
     };
+  }
+
+  /** Pasos de una compra (por X-Correlation-Id o trace_id), en orden. */
+  async porId(id: string): Promise<EventoVuelo[]> {
+    const limpio = String(id || '').trim().slice(0, 128);
+    if (!limpio) return [];
+    if (this.almacen?.porId) {
+      try {
+        return await this.almacen.porId(limpio);
+      } catch {
+        /* sin base: memoria */
+      }
+    }
+    return this.eventos.filter((e) => e.correlacion === limpio || e.traceId === limpio.toLowerCase());
+  }
+
+  /** Informe de SLO (solo si hay base compartida; con memoria no hay historia suficiente). */
+  async informeSlo(horas = 24): Promise<any | null> {
+    if (!this.almacen?.informeSlo) return null;
+    try {
+      return await this.almacen.informeSlo(horas);
+    } catch {
+      return null;
+    }
   }
 
   /** Solo para pruebas. */

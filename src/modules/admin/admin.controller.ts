@@ -153,6 +153,20 @@ export class AdminController {
     return { generadoEn: new Date().toISOString(), horas: Number(horas) || 24, ...(await trazaVuelos.ventana(Number(horas) || 24)) };
   }
 
+  @Get('procesos/vuelos/slo')
+  @ApiOperation({ summary: 'Objetivos de servicio de vuelos (SLO): cumplimiento, presupuesto de error, burn rate y percentiles p50/p95/p99 exactos' })
+  @ApiQuery({ name: 'horas', required: false, example: 24, description: 'Ventana de los percentiles (1-168 h)' })
+  async sloVuelos(@Query('horas') horas?: string) {
+    const informe = await trazaVuelos.informeSlo(Number(horas) || 24);
+    return informe ?? { disponible: false, motivo: 'La traza compartida (Postgres) no está disponible: sin ella no hay historia suficiente para medir los SLO.' };
+  }
+
+  @Get('procesos/vuelos/traza/:id')
+  @ApiOperation({ summary: 'Todos los pasos de una compra de vuelos, por X-Correlation-Id o por trace_id (para la vista Gantt)' })
+  async trazaVuelosPorId(@Param('id') id: string) {
+    return { id, eventos: await trazaVuelos.porId(id) };
+  }
+
   // ── Usuarios ──────────────────────────────────────────────────────────────
   @Get('users')
   @ApiOperation({ summary: 'Lista de usuarios registrados (auth.users)' })
