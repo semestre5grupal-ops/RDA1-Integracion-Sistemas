@@ -52,13 +52,12 @@ class Alojamiento {
     return Alojamiento(
       id: json['id']?.toString() ?? '',
       nombre: json['nombre'] ?? json['name'] ?? 'Hotel',
-      descripcion: json['descripcion'] ?? json['description'] ?? '',
-      ciudad: json['ciudad'] ?? json['city'] ?? 'Ecuador',
-      precioPorNoche: (json['precio_por_noche'] ?? json['precio_minimo'] ?? json['precio'] ?? 60.0).toDouble(),
-      imagenUrl: json['imagen_url'] ?? json['image_url'] ?? json['foto'],
+      descripcion: json['descripcion'] ?? json['descripcion_camas'] ?? 'Hospedaje Turístico',
+      ciudad: json['destino'] ?? json['ciudad'] ?? json['city'] ?? 'Ecuador',
+      precioPorNoche: (json['precioPorNoche'] ?? json['precio_por_noche'] ?? json['precio_minimo'] ?? 60.0).toDouble(),
+      imagenUrl: json['foto_url'] ?? json['imagen_url'] ?? json['image_url'] ?? 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800',
       rating: (json['rating'] ?? json['estrellas'] ?? 4.7).toDouble(),
       habitaciones: rooms,
     );
   }
 }
-

@@ -26,16 +26,26 @@ class Auto {
   });
 
   factory Auto.fromJson(Map<String, dynamic> json) {
+    // Proveedor
+    String prov = 'RutaLibre Autos';
+    if (json['proveedor'] is Map && json['proveedor']['nombre'] != null) {
+      prov = json['proveedor']['nombre'].toString();
+    } else if (json['proveedor_codigo'] != null) {
+      prov = json['proveedor_codigo'].toString();
+    } else if (json['proveedor'] is String) {
+      prov = json['proveedor'].toString();
+    }
+
     return Auto(
-      id: json['id']?.toString() ?? '',
+      id: json['vehicle_id']?.toString() ?? json['id']?.toString() ?? '',
       modelo: json['modelo'] ?? json['name'] ?? 'Vehículo',
-      marca: json['marca'] ?? 'Flota General',
+      marca: json['marca'] ?? 'Flota',
       categoria: json['categoria'] ?? 'Sedán',
-      precioPorDia: (json['precio_por_dia'] ?? json['precio'] ?? json['daily_rate'] ?? 35.0).toDouble(),
+      precioPorDia: (json['precio_diario'] ?? json['precio_por_dia'] ?? json['precio'] ?? 35.0).toDouble(),
       transmision: json['transmision'] ?? 'Automática',
-      capacidadPasajeros: json['capacidad_pasajeros'] ?? json['pasajeros'] ?? 5,
-      imagenUrl: json['imagen_url'] ?? json['image_url'] ?? json['foto'],
-      proveedor: json['proveedor'] ?? json['proveedor_codigo'] ?? 'RutaLibre Autos',
+      capacidadPasajeros: json['asientos'] ?? json['capacidad_pasajeros'] ?? 5,
+      imagenUrl: json['foto_url'] ?? json['imagen_url'] ?? (json['images'] is List && (json['images'] as List).isNotEmpty ? json['images'][0] : null),
+      proveedor: prov,
       estado: json['estado'] ?? 'DISPONIBLE',
       cooldownSegundosRestantes: json['segundos_restantes_cooldown'] ?? 0,
     );
@@ -43,4 +53,3 @@ class Auto {
 
   bool get enCooldown => cooldownSegundosRestantes > 0 || estado == 'EN_LIMPIEZA';
 }
-
