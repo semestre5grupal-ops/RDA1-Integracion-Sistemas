@@ -19,6 +19,12 @@
 7. [Atributos de Calidad y Requerimientos No Funcionales (RNF)](#7-atributos-de-calidad-y-requerimientos-no-funcionales-rnf)
 8. [Registro de Decisiones de Arquitectura (ADRs)](#8-registro-de-decisiones-de-arquitectura-adrs)
 9. [Guía de Despliegue y Ejecución Local](#9-guía-de-despliegue-y-ejecución-local)
+10. [Arquitectura Híbrida RDA3 y Marketplace Móvil Flutter](#10-arquitectura-híbrida-rda3-y-marketplace-móvil-flutter)
+    - 10.1. [Segregación Arquitectónica: Web Administrativa vs Marketplace Móvil](#101-segregación-arquitectónica-web-administrativa-vs-marketplace-móvil)
+    - 10.2. [Estructura del Proyecto Flutter (`booking_flutter/`)](#102-estructura-del-proyecto-flutter-booking_flutter)
+    - 10.3. [Cobertura de las 4 Verticales y Reglas de Negocio en Móvil](#103-cobertura-de-las-4-verticales-y-reglas-de-negocio-en-móvil)
+    - 10.4. [Guía de Compilación y Generación de APK Móvil](#104-guía-de-compilación-y-generación-de-apk-móvil)
+    - 10.5. [Gobernanza de Socios B2B y Guía de Migración Multi-Framework](#105-gobernanza-de-socios-b2b-y-guía-de-migración-multi-framework)
 
 ---
 
@@ -862,6 +868,15 @@ graph LR
 - **Decisión**: Ocultar el botón de cancelación en frontend a menos de 24h, validar en backend con `HTTP 409` y exigir confirmación exitosa del socio antes de mutar la base de datos local.
 - **Consecuencia**: Sincronización perfecta entre Booking Central y los paneles de los socios comerciales.
 
+### ADR-007: Adopción de Arquitectura Híbrida Segregada para RDA3 (Web Admin en React + Marketplace Móvil en Flutter)
+- **Estado**: Aceptado.
+- **Contexto**: El Reto 3 (RDA3) exige la incorporación de tecnología cliente móvil (Flutter, React Native o .NET MAUI) preservando al mismo tiempo la consola de observabilidad, el control del Service Mesh y la liquidación a socios sin alterar las APIs de producción en Azure.
+- **Decisión**:
+  1. Mantener la consola administrativa y de observabilidad en la aplicación Web React (`frontend/`), desplegada de forma continua en Render.
+  2. Implementar el Marketplace para el usuario final (turista) en un cliente móvil nativo desarrollado en Flutter (`booking_flutter/`), organizado en monorepo aislado.
+  3. Congelar estrictamente los contratos B2B en OpenAPI v3 (sin saltar a v4), consumiendo los mismos endpoints REST idempotentes tanto desde la Web como desde el Móvil.
+- **Consecuencia**: Cero riesgo de regresión en backend y frontend web, separación limpia de perfiles de usuario (Operador/Admin en Web vs Turista en Móvil) y cumplimiento riguroso de la rúbrica de evaluación académica RDA3.
+
 ---
 
 ## 9. Guía de Despliegue y Ejecución Local
@@ -900,3 +915,134 @@ npm run deploy:azure
 ```
 - **URL de Producción**: `https://booking-core-api.azurewebsites.net`
 - **Ambiente de Base de Datos**: Azure Database for PostgreSQL Flexible Server en `booking-db.postgres.database.azure.com`.
+
+---
+
+## 10. Arquitectura Híbrida RDA3 y Marketplace Móvil Flutter
+
+### 10.1. Segregación Arquitectónica: Web Administrativa vs Marketplace Móvil
+
+Para dar cumplimiento a los requerimientos del Reto 3 (**RDA3**) garantizando una estabilidad absoluta y cero interrupción de los servicios en producción, se implementó una estrategia de **Segregación Funcional por Dispositivo**:
+
+```
+                              ┌──────────────────────────────────────────────┐
+                              │           BACKEND CENTRAL (AZURE)            │
+                              │        NestJS REST / gRPC 50051 / DB         │
+                              └──────────────────────┬───────────────────────┘
+                                                     │
+                          ┌──────────────────────────┴──────────────────────────┐
+                          ▼                                                     ▼
+        ┌───────────────────────────────────┐                 ┌───────────────────────────────────┐
+        │       CONSOLA WEB OPERATIVA       │                 │     MARKETPLACE MÓVIL CLIENTE     │
+        │      (frontend/ - React 18)       │                 │   (booking_flutter/ - Flutter)    │
+        ├───────────────────────────────────┤                 ├───────────────────────────────────┤
+        │ • Rol: Administrador y Operador   │                 │ • Rol: Turista / Viajero Final    │
+        │ • Service Mesh y Nodos Activos    │                 │ • Catálogo de 4 Verticales        │
+        │ • Auditoría de Sagas Distribuidas │                 │ • Carrito Multi-Vertical Reactivo │
+        │ • Liquidación Financiera B2B      │                 │ • Vouchers con Código QR Offline  │
+        │ • Despliegue: Render Continuo     │                 │ • Compilación: APK Android / Web  │
+        └───────────────────────────────────┘                 └───────────────────────────────────┘
+```
+
+### 10.2. Estructura del Proyecto Flutter (`booking_flutter/`)
+
+La aplicación móvil se encuentra totalmente autocontenida en la carpeta `booking_flutter/`, respetando una arquitectura limpia y modular:
+
+```text
+booking_flutter/
+├── pubspec.yaml               # Dependencias (provider, http, qr_flutter, intl, uuid)
+├── .gitignore                 # Reglas de exclusión para artefactos de compilación móvil
+├── README.md                  # Documentación específica de desarrollo y empaquetado móvil
+└── lib/
+    ├── main.dart              # Entry-point, ThemeData Booking (#003580), MultiProvider
+    ├── config/
+    │   └── api_config.dart    # Resolución dinámica de host (Azure Prod vs Localhost/10.0.2.2)
+    ├── models/                # Modelos de datos inmutables y mapeo JSON
+    │   ├── atraccion.dart     # Atracción y TimeSlot con aforo disponible
+    │   ├── auto.dart          # Vehículos, seguros y estado de Cooldown 2h
+    │   ├── alojamiento.dart   # Hoteles, amenidades y Tipos de Habitación
+    │   ├── vuelo.dart         # Vuelos, escalas, cabina y pases
+    │   ├── reserva.dart       # Entidad de reserva y política de cancelación 24h/48h
+    │   └── cart_item.dart     # Elemento de carrito con cálculo tributario 15% IVA
+    ├── services/
+    │   ├── api_client.dart    # Cliente HTTP con X-Correlation-Id e Idempotency-Key
+    │   └── booking_services.dart # Consumo de endpoints B2B, disponibilidad y Sagas
+    ├── providers/
+    │   ├── cart_provider.dart # Estado global del carrito y cálculo de totales
+    │   └── auth_provider.dart # Sesión del viajero y persistencia SharedPreferences
+    └── screens/
+        ├── main_shell.dart    # Barra de navegación inferior (Explorar, Mis Reservas, Perfil)
+        ├── catalogo/
+        │   └── home_screen.dart # Pestañas de categorías (Atracciones, Autos, Hoteles, Vuelos)
+        ├── detalle/
+        │   ├── atraccion_detail_screen.dart # Selección de turnos con aforo interactivo
+        │   ├── auto_detail_screen.dart      # Rango de fechas y control de cooldown
+        │   ├── alojamiento_detail_screen.dart # Selección de fechas y tipo de habitación
+        │   └── vuelo_detail_screen.dart     # Selección de asientos y pasajeros
+        ├── checkout/
+        │   ├── cart_screen.dart             # Resumen de compra y desglose tributario
+        │   └── checkout_screen.dart         # Formulario de pago y despacho de la Saga
+        ├── reservas/
+        │   ├── mis_reservas_screen.dart     # Historial y cancelación protegida (24h/48h)
+        │   └── voucher_qr_screen.dart       # Generación de código QR para check-in
+        ├── vuelos/
+        │   └── estado_vuelo_screen.dart     # Rastreador de vuelos en tiempo real
+        ├── perfil/
+        │   ├── perfil_screen.dart           # Perfil de usuario, términos y soporte
+        │   └── facturas_screen.dart         # Facturación electrónica SRI con clave 49 dígitos
+        └── auth/
+            └── login_screen.dart            # Inicio de sesión y acceso como invitado
+```
+
+### 10.3. Cobertura de las 4 Verticales y Reglas de Negocio en Móvil
+
+| Vertical / Módulo | Implementación Móvil en Flutter | Regla de Negocio Protegida |
+| :--- | :--- | :--- |
+| **Atracciones** | `AtraccionDetailScreen` con selector interactivo de fechas y chips dinámicos de turnos horarios. | Capacidad máxima por turno respetada en tiempo real; cancelación bloqueada a < 48 horas. |
+| **Autos** | `AutoDetailScreen` con cálculo de días y selección de seguros. | Validación visual del estado de Cooldown de 2 horas entre alquileres. |
+| **Alojamientos** | `AlojamientoDetailScreen` con selector de fechas de entrada/salida y tipos de habitación. | Cálculo automático de noches de estancia y aforo por tipo de habitación. |
+| **Vuelos** | `VueloDetailScreen` y `EstadoVueloScreen` con selector de asientos y rastreador en vivo. | Validación de asientos disponibles y emisión de datos para el pase de abordar. |
+| **Checkout & Sagas** | `CartScreen` y `CheckoutScreen` con dispatch unificado. | Desglose fiscal de 15% IVA (Ecuador), cabecera `Idempotency-Key` y orquestación Saga. |
+| **Check-in Offline** | `VoucherQrScreen` con renderizado vectorial nativo (`qr_flutter`). | Portabilidad de comprobantes de reserva con firma digital de acceso sin conexión. |
+
+### 10.4. Guía de Compilación y Generación de APK Móvil
+
+La aplicación Flutter se compila de manera independiente desde la carpeta `booking_flutter`:
+
+```bash
+# 1. Navegar a la carpeta móvil
+cd booking_flutter
+
+# 2. Descargar paquetes y dependencias de Flutter
+flutter pub get
+
+# 3. Probar la aplicación en el navegador (Web)
+flutter run -d chrome
+
+# 4. Compilar la aplicación en emulador o dispositivo Android conectado
+flutter run
+
+# 5. Generar el paquete APK para distribución y entrega
+flutter build apk --release
+```
+*El archivo `.apk` resultante se ubica en*: `booking_flutter/build/app/outputs/flutter-apk/app-release.apk`
+
+### 10.5. Gobernanza de Socios B2B y Guías de Migración Multi-Framework
+
+Para garantizar que todos los equipos de la asignatura (Atracciones, Autos, Alojamientos, Vuelos) cumplan con la migración a sus respectivos entornos móviles sin causar incompatibilidades ni tocar sus servidores, se dividieron las directrices en guías específicas y autocontenidas:
+
+- 🧭 **[Índice Maestro de Migración Móvil](RDA3/Indicaciones/GUIA_MIGRACION_MOVIL_SOCIOS_RDA3.md)**
+- 📱 **[Guía Específica para FLUTTER](RDA3/Indicaciones/GUIA_MIGRACION_FLUTTER_SOCIOS_RDA3.md)** (Dart, `pubspec.yaml`, `provider`, `qr_flutter`)
+- ⚛️ **[Guía Específica para REACT NATIVE](RDA3/Indicaciones/GUIA_MIGRACION_REACT_NATIVE_SOCIOS_RDA3.md)** (Expo, TypeScript, Axios, `react-native-qrcode-svg`)
+- 🔷 **[Guía Específica para .NET MAUI](RDA3/Indicaciones/GUIA_MIGRACION_MAUI_SOCIOS_RDA3.md)** (C#, XAML, MVVM, `CommunityToolkit.Mvvm`, `QRCoder`)
+
+#### Regla de Oro para Todos los Socios:
+> **LOS BACKENDS Y CONTRATOS REST NO SE MODIFICAN.**
+> Las APIs de producción en Azure Container Apps y Azure App Service se mantienen congeladas en sus contratos OpenAPI v3 actuales. La migración de RDA3 es **100% de capa de presentación cliente**.
+
+Cada guía contiene:
+- Directrices técnicas completas del framework asignado.
+- Manejo transversal de cabeceras HTTP (`X-Correlation-Id`, `Idempotency-Key`).
+- Implementación de reglas de negocio en móvil (cooldown de 2h en autos, ventanas de cancelación 24h/48h, aforos en atracciones).
+- Comandos exactos para probar y compilar el APK Android.
+- Un prompt listo para copiar y pegar directamente en el agente de IA del compañero (*Cascade, Cursor, Copilot, ChatGPT, etc.*).

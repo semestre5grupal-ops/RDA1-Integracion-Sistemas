@@ -1,0 +1,41 @@
+# Archivos de build y dependencias de Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+
+# Archivos de Android / Gradle
+.gradle/
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/captures/
+**/android/**/build/
+*.apk
+*.aab
+
+# Archivos de iOS / macOS / CocoaPods
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+**/ios/**/build/
+*.mode1v3
+*.mode2v3
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+Podfile.lock
+
+# IDEs y editores
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Excepciones
+!.gitignore
+

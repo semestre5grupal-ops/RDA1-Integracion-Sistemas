@@ -312,3 +312,4 @@ Ante una pregunta del docente sobre cómo se usa este stack para resolver un inc
 2. **Paso 2 (Traza):** Abrir Jaeger (`:16686`), filtrar por la ventana horaria y seleccionar el trace con mayor duración. Señalar al docente que el span manual `invocacion_socio_b2b` concentra el 92% de la barra temporal.
 3. **Paso 3 (Log):** Copiar el `trace_id` de Jaeger y buscarlo en `logs/audit.log` o Kibana. Mostrar el mensaje exacto de timeout o error emitido por la API externa.
 4. **Conclusión Técnica:** Demostrar con evidencia cuantitativa que la plataforma Booking Central gestionó el fallo con resiliencia, aisló el socio con Circuit Breaker y ejecutó la Saga compensatoria sin pérdida de datos.
+
