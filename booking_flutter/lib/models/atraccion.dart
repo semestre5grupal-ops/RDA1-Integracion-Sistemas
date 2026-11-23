@@ -59,18 +59,47 @@ class Atraccion {
       slots = rawSlots.map((s) => TimeSlot.fromJson(s as Map<String, dynamic>)).toList();
     }
 
+    // Resolucion resiliente de precio (puede ser number o Map en Azure)
+    double precioParsed = 0.0;
+    if (json['precio_unitario_adulto'] != null) {
+      precioParsed = (json['precio_unitario_adulto'] as num).toDouble();
+    } else if (json['precio'] is num) {
+      precioParsed = (json['precio'] as num).toDouble();
+    } else if (json['precio'] is Map && json['precio']['total'] != null) {
+      precioParsed = (json['precio']['total'] as num).toDouble();
+    } else if (json['price'] is Map && json['price']['total'] != null) {
+      precioParsed = (json['price']['total'] as num).toDouble();
+    } else if (json['price'] is num) {
+      precioParsed = (json['price'] as num).toDouble();
+    }
+
+    // Resolucion de imagen
+    String? img = json['foto_url'] ?? json['photoUrl'] ?? json['imagen'] ?? json['imagen_url'] ?? json['foto'];
+    if (img == null && json['fotos_urls'] is List && (json['fotos_urls'] as List).isNotEmpty) {
+      img = json['fotos_urls'][0].toString();
+    }
+
+    // Proveedor
+    String prov = 'Socio B2B';
+    if (json['proveedor'] is Map && json['proveedor']['nombre_comercial'] != null) {
+      prov = json['proveedor']['nombre_comercial'].toString();
+    } else if (json['proveedor_codigo'] != null) {
+      prov = json['proveedor_codigo'].toString();
+    } else if (json['proveedor'] is String) {
+      prov = json['proveedor'].toString();
+    }
+
     return Atraccion(
       id: json['id']?.toString() ?? '',
       nombre: json['nombre'] ?? json['name'] ?? 'Atracción Turística',
-      descripcion: json['descripcion'] ?? json['short_description'] ?? json['description'] ?? '',
+      descripcion: json['descripcion_corta'] ?? json['short_description'] ?? json['descripcion'] ?? json['description'] ?? '',
       ciudad: json['ciudad'] ?? json['city'] ?? json['ubicacion'] ?? 'Ecuador',
-      precio: (json['precio'] ?? json['price'] ?? 0.0).toDouble(),
-      imagenUrl: json['imagen_url'] ?? json['image_url'] ?? json['foto'],
-      proveedor: json['proveedor'] ?? json['proveedor_codigo'] ?? 'Socio B2B',
-      rating: (json['rating'] ?? json['calificacion'] ?? 4.8).toDouble(),
+      precio: precioParsed > 0 ? precioParsed : 15.0,
+      imagenUrl: img,
+      proveedor: prov,
+      rating: (json['rating'] is Map ? (json['rating']['score'] ?? 4.8) : (json['rating'] ?? 4.8)).toDouble(),
       categorias: (json['categorias'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
       turnos: slots,
     );
   }
 }
-
