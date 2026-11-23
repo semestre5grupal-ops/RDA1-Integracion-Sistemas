@@ -9,6 +9,9 @@ class Vuelo {
   final String horaLlegada;
   final double precio;
   final String estado;
+  final String? puertaEmbarque;
+
+  String get fecha => fechaSalida;
 
   Vuelo({
     required this.id,
@@ -21,6 +24,7 @@ class Vuelo {
     required this.horaLlegada,
     required this.precio,
     this.estado = 'A TIEMPO',
+    this.puertaEmbarque,
   });
 
   factory Vuelo.fromJson(Map<String, dynamic> json) {
@@ -35,7 +39,7 @@ class Vuelo {
       horaLlegada: json['hora_llegada'] ?? json['arrival_time'] ?? '09:00',
       precio: (json['precio'] ?? json['price'] ?? 89.0).toDouble(),
       estado: json['estado'] ?? json['status'] ?? 'A TIEMPO',
+      puertaEmbarque: json['puerta_embarque'] ?? json['gate'] ?? 'A2',
     );
   }
 }
-
