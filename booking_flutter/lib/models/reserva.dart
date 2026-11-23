@@ -12,6 +12,10 @@ class Reserva {
   final DateTime fechaCreacion;
   final DateTime fechaServicio;
 
+  // Getters de conveniencia
+  String get itemNombre => servicioNombre;
+  String get tipo => vertical;
+
   Reserva({
     required this.id,
     required this.vertical,
@@ -55,4 +59,3 @@ class Reserva {
     return horasRestantes >= horasLimite;
   }
 }
-
