@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/atraccion.dart';
 import '../../services/booking_services.dart';
@@ -31,35 +32,40 @@ class _AtraccionesSearchScreenState extends State<AtraccionesSearchScreen> {
   bool _filtroTransporte = false;
   bool _filtroGuia = false;
   String _criterioOrden = 'favoritos'; // 'favoritos' | 'precio_bajo' | 'mejores_comentarios'
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _searchCtrl = TextEditingController(text: widget.initialQuery);
     _fetchData();
+    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) => _fetchData(silent: true));
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchData() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _fetchData({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final list = await BookingServices.getAtracciones(page: 1, limit: 100);
       if (mounted) {
         setState(() {
           _atracciones = list;
-          _loading = false;
+          if (!silent) _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _error = 'Error al cargar atracciones.';
           _loading = false;

@@ -88,3 +88,4 @@ class PrivacidadScreen extends StatelessWidget {
     );
   }
 }
+

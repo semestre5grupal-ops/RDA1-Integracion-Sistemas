@@ -67,3 +67,4 @@ class CurrencyProvider extends ChangeNotifier {
     return '${opt.symbol} ${forceDecimals ? val.toStringAsFixed(2) : val.toStringAsFixed(0)}';
   }
 }
+
