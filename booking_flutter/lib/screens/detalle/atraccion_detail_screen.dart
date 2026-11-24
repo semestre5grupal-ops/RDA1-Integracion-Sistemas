@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -39,6 +40,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
   int _ninos = 0;
   int _seniors = 0;
   int _infantes = 0;
+  Timer? _pollTimer;
 
   @override
   void initState() {
@@ -46,6 +48,13 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
     _atr = widget.atraccion;
     _selectedDate = widget.initialDate ?? DateTime.now().add(const Duration(days: 2));
     _loadData();
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchSlots(silent: true));
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -62,25 +71,29 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
     }
   }
 
-  Future<void> _fetchSlots() async {
-    setState(() {
-      _loadingSlots = true;
-      _selectedSlot = null;
-    });
+  Future<void> _fetchSlots({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loadingSlots = true;
+        _selectedSlot = null;
+      });
+    }
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final slots = await BookingServices.getDisponibilidadAtraccion(widget.atraccion.id, dateStr);
     if (mounted) {
-      TimeSlot? firstAvail;
-      for (final s in slots) {
-        if (!s.estaAgotado) {
-          firstAvail = s;
-          break;
+      TimeSlot? firstAvail = _selectedSlot;
+      if (firstAvail == null || firstAvail.estaAgotado) {
+        for (final s in slots) {
+          if (!s.estaAgotado) {
+            firstAvail = s;
+            break;
+          }
         }
       }
       setState(() {
         _slots = slots;
         _selectedSlot = firstAvail;
-        _loadingSlots = false;
+        if (!silent) _loadingSlots = false;
         _clampTicketsToCupos();
       });
     }
