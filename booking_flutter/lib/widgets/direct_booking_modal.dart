@@ -183,7 +183,7 @@ class DirectBookingModal {
                             children: [
                               Text('Nombre:', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                               Text(
-                                user?.nombreCompleto ?? 'Turista Booking',
+                                user?.displayName ?? 'Turista Booking',
                                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                               ),
                             ],
