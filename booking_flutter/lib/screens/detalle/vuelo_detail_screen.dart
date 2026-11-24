@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/vuelo.dart';
-import '../../models/cart_item.dart';
-import '../../providers/cart_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/auth_guard_dialog.dart';
+import '../../widgets/direct_booking_modal.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../theme/booking_colors.dart';
 
@@ -149,36 +149,28 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                     if (!proceed) return;
                   }
 
-                  final item = CartItem(
-                    id: 'vuelo-${DateTime.now().millisecondsSinceEpoch}',
+                  if (!context.mounted) return;
+
+                  await DirectBookingModal.show(
+                    context,
                     vertical: 'vuelos',
                     titulo: 'Vuelo ${v.origen} ➔ ${v.destino}',
-                    subtitulo: '${v.aerolinea} (${v.numeroVuelo}) · Asiento: $_asiento',
-                    precioUnitario: v.precio,
-                    cantidad: _pasajeros,
+                    subtitulo: '${v.aerolinea} (${v.numeroVuelo}) · Asiento: $_asiento · Pasajeros: $_pasajeros',
+                    proveedor: v.aerolinea,
                     fecha: v.fechaSalida,
+                    hora: v.horaSalida,
+                    subtotal: total,
+                    pnr: 'PNR-${v.numeroVuelo.replaceAll(' ', '')}-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}',
                     metadata: {
                       'numero_vuelo': v.numeroVuelo,
                       'asiento': _asiento,
-                      'origen': v.origen,
-                      'destino': v.destino,
+                      'pasajeros': _pasajeros,
                     },
                   );
-
-                  if (context.mounted) {
-                    context.read<CartProvider>().addItem(item);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Vuelo agregado al carrito exitosamente.'),
-                        backgroundColor: BookingColors.successGreen,
-                      ),
-                    );
-                    Navigator.pop(context);
-                  }
                 },
-                icon: const Icon(Icons.add_shopping_cart),
+                icon: const Icon(Icons.flash_on),
                 label: Text(
-                  'RESERVAR POR US\$ ${total.toStringAsFixed(2)}',
+                  'EMITIR BOLETO · US\$ ${total.toStringAsFixed(2)}',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),

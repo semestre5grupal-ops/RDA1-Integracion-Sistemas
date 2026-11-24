@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../models/auto.dart';
-import '../../models/cart_item.dart';
-import '../../providers/cart_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/auth_guard_dialog.dart';
+import '../../widgets/direct_booking_modal.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../theme/booking_colors.dart';
 
@@ -182,36 +182,27 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                           if (!proceed) return;
                         }
 
-                        final item = CartItem(
-                          id: 'auto-${DateTime.now().millisecondsSinceEpoch}',
+                        if (!context.mounted) return;
+
+                        await DirectBookingModal.show(
+                          context,
                           vertical: 'autos',
                           titulo: 'Renta: ${auto.marca} ${auto.modelo}',
                           subtitulo: '$_diasRenta días (${DateFormat('dd/MM').format(_fechaRecogida)} a ${DateFormat('dd/MM').format(_fechaDevolucion)}) · Cobertura $_cobertura',
-                          precioUnitario: _precioTotal,
-                          cantidad: 1,
+                          proveedor: auto.proveedor,
                           fecha: DateFormat('yyyy-MM-dd').format(_fechaRecogida),
+                          subtotal: _precioTotal,
+                          voucherQr: 'QR-AUT-${auto.marca.toUpperCase()}-${DateTime.now().millisecondsSinceEpoch}',
                           metadata: {
                             'auto_id': auto.id,
                             'dias': _diasRenta,
                             'cobertura': _cobertura,
-                            'proveedor': auto.proveedor,
                           },
                         );
-
-                        if (context.mounted) {
-                          context.read<CartProvider>().addItem(item);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Auto agregado al carrito exitosamente.'),
-                              backgroundColor: BookingColors.successGreen,
-                            ),
-                          );
-                          Navigator.pop(context);
-                        }
                       },
-                      icon: const Icon(Icons.add_shopping_cart),
+                      icon: const Icon(Icons.flash_on),
                       label: Text(
-                        'RESERVAR POR US\$ ${_precioTotal.toStringAsFixed(2)}',
+                        'ALQUILAR VEHÍCULO · US\$ ${_precioTotal.toStringAsFixed(2)}',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                     ),

@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../models/atraccion.dart';
-import '../../models/cart_item.dart';
 import '../../services/booking_services.dart';
-import '../../providers/cart_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/auth_guard_dialog.dart';
+import '../../widgets/direct_booking_modal.dart';
 import '../../widgets/booking_rating_badge.dart';
 import '../../theme/booking_colors.dart';
 
@@ -229,35 +228,29 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                                 if (!proceed) return;
                               }
 
-                              final item = CartItem(
-                                id: 'item-${DateTime.now().millisecondsSinceEpoch}',
+                              if (!context.mounted) return;
+
+                              final subtotal = a.precio * _cantidad;
+                              await DirectBookingModal.show(
+                                context,
                                 vertical: 'atracciones',
                                 titulo: a.nombre,
-                                subtitulo: '${DateFormat('dd/MM/yyyy').format(_fechaSeleccionada)} · ${_slotSeleccionado!.horaInicio}',
-                                precioUnitario: a.precio,
-                                cantidad: _cantidad,
+                                subtitulo: '${DateFormat('dd/MM/yyyy').format(_fechaSeleccionada)} · ${_slotSeleccionado!.horaInicio} · $_cantidad entrada(s)',
+                                proveedor: a.proveedor,
                                 fecha: DateFormat('yyyy-MM-dd').format(_fechaSeleccionada),
-                                slotId: _slotSeleccionado!.slotId,
+                                hora: _slotSeleccionado!.horaInicio,
+                                subtotal: subtotal,
+                                voucherQr: 'QR-TOUR-${a.id}-${DateTime.now().millisecondsSinceEpoch}',
                                 metadata: {
-                                  'proveedor': a.proveedor,
                                   'atraccion_id': a.id,
+                                  'slot_id': _slotSeleccionado!.slotId,
+                                  'cantidad': _cantidad,
                                 },
                               );
-
-                              if (context.mounted) {
-                                context.read<CartProvider>().addItem(item);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('${a.nombre} agregado al carrito exitosamente.'),
-                                    backgroundColor: BookingColors.successGreen,
-                                  ),
-                                );
-                                Navigator.pop(context);
-                              }
                             },
-                      icon: const Icon(Icons.add_shopping_cart),
+                      icon: const Icon(Icons.flash_on),
                       label: Text(
-                        'RESERVAR POR US\$ ${(a.precio * _cantidad).toStringAsFixed(2)}',
+                        'RESERVAR ACTIVIDAD · US\$ ${(a.precio * _cantidad).toStringAsFixed(2)}',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                     ),

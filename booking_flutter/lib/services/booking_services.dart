@@ -242,16 +242,23 @@ class BookingServices {
   }
 
   // --- RESERVAS & CHECKOUT ---
+  static final List<Reserva> _reservasEnMemoria = [];
+
+  static void agregarReservaDirecta(Reserva r) {
+    _reservasEnMemoria.insert(0, r);
+  }
+
   static Future<List<Reserva>> getMisReservas({String? token}) async {
+    List<Reserva> remotas = [];
     try {
       final res = await ApiClient.get('/reservas', token: token);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final list = (data is List) ? data : (data['data'] ?? []);
-        return (list as List).map<Reserva>((json) => Reserva.fromJson(json as Map<String, dynamic>)).toList();
+        remotas = (list as List).map<Reserva>((json) => Reserva.fromJson(json as Map<String, dynamic>)).toList();
       }
     } catch (_) {}
-    return [];
+    return [..._reservasEnMemoria, ...remotas];
   }
 
   static Future<bool> cancelarReserva(String id, String vertical, {String? token}) async {
