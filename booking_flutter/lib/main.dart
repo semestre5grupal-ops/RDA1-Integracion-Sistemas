@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'providers/cart_provider.dart';
 import 'providers/auth_provider.dart';
 import 'screens/main_shell.dart';
-import 'screens/checkout/cart_screen.dart';
+import 'screens/auth/login_screen.dart';
+import 'screens/auth/register_screen.dart';
 import 'screens/reservas/mis_reservas_screen.dart';
 import 'screens/vuelos/estado_vuelo_screen.dart';
 import 'theme/booking_theme.dart';
@@ -20,7 +20,6 @@ class BookingApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()..initAuth()),
       ],
       child: MaterialApp(
@@ -30,7 +29,8 @@ class BookingApp extends StatelessWidget {
         initialRoute: '/',
         routes: {
           '/': (context) => const MainShell(),
-          '/cart': (context) => const CartScreen(),
+          '/login': (context) => const LoginScreen(),
+          '/register': (context) => const RegisterScreen(),
           '/reservas': (context) => const MisReservasScreen(),
           '/estado-vuelo': (context) => const EstadoVueloScreen(),
         },

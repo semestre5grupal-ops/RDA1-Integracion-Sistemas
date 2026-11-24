@@ -1,25 +1,31 @@
 import 'package:flutter/material.dart';
 import 'catalogo/home_screen.dart';
-import 'checkout/cart_screen.dart';
 import 'reservas/mis_reservas_screen.dart';
 import 'perfil/perfil_screen.dart';
+import '../theme/booking_colors.dart';
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  final int initialIndex;
+  const MainShell({super.key, this.initialIndex = 0});
 
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
-  int _currentIndex = 0;
+  late int _currentIndex;
 
   final List<Widget> _screens = const [
     HomeScreen(),
-    CartScreen(),
     MisReservasScreen(),
     PerfilScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,18 +38,17 @@ class _MainShellState extends State<MainShell> {
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF003580), // Azul Booking
-        unselectedItemColor: Colors.grey,
+        backgroundColor: Colors.white,
+        selectedItemColor: BookingColors.primaryBlue,
+        unselectedItemColor: BookingColors.textMuted,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 12),
+        elevation: 10,
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.explore_outlined),
             activeIcon: Icon(Icons.explore),
             label: 'Explorar',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.shopping_cart_outlined),
-            activeIcon: Icon(Icons.shopping_cart),
-            label: 'Carrito',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.confirmation_number_outlined),
@@ -53,11 +58,10 @@ class _MainShellState extends State<MainShell> {
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outline),
             activeIcon: Icon(Icons.person),
-            label: 'Perfil',
+            label: 'Mi Cuenta',
           ),
         ],
       ),
     );
   }
 }
-
