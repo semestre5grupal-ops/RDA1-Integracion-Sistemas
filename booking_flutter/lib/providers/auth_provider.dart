@@ -24,6 +24,8 @@ class AuthUser {
       ? ('$nombre $apellido').trim()
       : (email.split('@').first);
 
+  String get nombreCompleto => displayName;
+
   Map<String, dynamic> toJson() => {
         'nombre': nombre,
         'apellido': apellido,
