@@ -4,6 +4,7 @@ import '../../providers/auth_provider.dart';
 import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
 import '../auth/register_screen.dart';
+import '../info/quiero_ser_proveedor_screen.dart';
 import '../reservas/mis_reservas_screen.dart';
 import '../vuelos/estado_vuelo_screen.dart';
 import 'facturas_screen.dart';
@@ -19,71 +20,107 @@ class PerfilScreen extends StatelessWidget {
     final apellidoCtrl = TextEditingController(text: user.apellido);
     final telCtrl = TextEditingController(text: user.telefono);
     final emailCtrl = TextEditingController(text: user.email);
+    final currentPassCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    String? errMsg;
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 18,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Editar datos de perfil', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nombreCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: apellidoCtrl,
-                decoration: const InputDecoration(labelText: 'Apellido', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'Correo electrónico', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: telCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Teléfono', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    if (nombreCtrl.text.trim().isEmpty || !emailCtrl.text.contains('@')) return;
-                    await auth.updateProfile(
-                      nombre: nombreCtrl.text,
-                      apellido: apellidoCtrl.text,
-                      telefono: telCtrl.text,
-                      email: emailCtrl.text,
-                    );
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Perfil actualizado correctamente.'), backgroundColor: BookingColors.successGreen),
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
-                  child: const Text('Guardar cambios', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModal) => Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 18,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Editar datos de perfil', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
+                const SizedBox(height: 12),
+                if (errMsg != null)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: const Color(0xFFFEE2E2), borderRadius: BorderRadius.circular(8)),
+                    child: Text(errMsg!, style: const TextStyle(color: BookingColors.errorRed, fontSize: 12)),
+                  ),
+                TextField(
+                  controller: nombreCtrl,
+                  decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
                 ),
-              ),
-            ],
+                const SizedBox(height: 10),
+                TextField(
+                  controller: apellidoCtrl,
+                  decoration: const InputDecoration(labelText: 'Apellido', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'Correo electrónico', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: telCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Teléfono', border: OutlineInputBorder()),
+                ),
+                const Divider(height: 22),
+                const Text('Cambiar contraseña (opcional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: currentPassCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Contraseña actual', border: OutlineInputBorder(), isDense: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: newPassCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Nueva contraseña', border: OutlineInputBorder(), isDense: true),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (nombreCtrl.text.trim().isEmpty || !emailCtrl.text.contains('@')) {
+                        setModal(() => errMsg = 'Nombre y correo válido requeridos.');
+                        return;
+                      }
+                      final err = await auth.updateProfile(
+                        nombre: nombreCtrl.text,
+                        apellido: apellidoCtrl.text,
+                        telefono: telCtrl.text,
+                        email: emailCtrl.text,
+                        currentPassword: currentPassCtrl.text,
+                        newPassword: newPassCtrl.text,
+                      );
+                      if (err != null) {
+                        setModal(() => errMsg = err);
+                        return;
+                      }
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Perfil actualizado correctamente.'), backgroundColor: BookingColors.successGreen),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
+                    child: const Text('Guardar cambios', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -250,6 +287,14 @@ class PerfilScreen extends StatelessWidget {
                     subtitle: const Text('Consulta puerta de embarque y horarios'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EstadoVueloScreen())),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.storefront_outlined, color: BookingColors.actionBlue),
+                    title: const Text('Registra tu propiedad o negocio', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('Postula como hotel, aerolínea, rentadora o tour'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const QuieroSerProveedorScreen())),
                   ),
                 ],
               ),

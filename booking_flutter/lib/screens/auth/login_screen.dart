@@ -105,8 +105,11 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Icono / Logo
             Center(
@@ -249,6 +252,8 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
           ],
+            ),
+          ),
         ),
       ),
     );

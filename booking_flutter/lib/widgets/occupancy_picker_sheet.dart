@@ -13,6 +13,7 @@ class OccupancySelection {
   });
 
   int get ninos => edadesNinos.length;
+  int get totalHuespedes => adultos + ninos;
 
   String get resumenTexto {
     final a = adultos == 1 ? '1 adulto' : '$adultos adultos';

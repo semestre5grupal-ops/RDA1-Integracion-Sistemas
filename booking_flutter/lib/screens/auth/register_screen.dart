@@ -192,8 +192,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        child: Form(
-          key: _formKey,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Form(
+              key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -330,6 +333,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   TextField(
                     controller: _passwordCtrl,
                     obscureText: _obscurePassword,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       hintText: 'Mínimo 8 caracteres',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
@@ -340,6 +344,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      _passRulePill('8+ caracteres', _passwordCtrl.text.length >= 8),
+                      _passRulePill('Mayúscula', RegExp(r'[A-Z]').hasMatch(_passwordCtrl.text)),
+                      _passRulePill('Minúscula', RegExp(r'[a-z]').hasMatch(_passwordCtrl.text)),
+                      _passRulePill('Número', RegExp(r'[0-9]').hasMatch(_passwordCtrl.text)),
+                      _passRulePill('Símbolo', RegExp(r'[^A-Za-z0-9]').hasMatch(_passwordCtrl.text)),
+                    ],
                   ),
                 ],
               ),
@@ -388,6 +404,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ],
           ),
         ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _passRulePill(String text, bool ok) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: ok ? const Color(0xFFF2FBEE) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ok ? BookingColors.successGreen : Colors.grey.shade300),
+      ),
+      child: Text(
+        '${ok ? "✓" : "•"} $text',
+        style: TextStyle(fontSize: 11, color: ok ? BookingColors.successGreen : BookingColors.textMuted, fontWeight: ok ? FontWeight.bold : FontWeight.normal),
       ),
     );
   }

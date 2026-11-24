@@ -145,80 +145,85 @@ class _AtraccionesSearchScreenState extends State<AtraccionesSearchScreen> {
             )
           : _error != null
               ? Center(child: Text(_error!))
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Tabs de ordenamiento y filtros de inclusión RDA2
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                _sortTab('favoritos', 'Nuestros favoritos'),
-                                const SizedBox(width: 8),
-                                _sortTab('precio_bajo', 'Precio más bajo'),
-                                const SizedBox(width: 8),
-                                _sortTab('mejores_comentarios', 'Mejores comentarios'),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Inclusiones del Servicio:',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1140),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Tabs de ordenamiento y filtros de inclusión RDA2
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              FilterChip(
-                                label: const Text('🍴 Alimentos / Degustación', style: TextStyle(fontSize: 12)),
-                                selected: _filtroComida,
-                                selectedColor: const Color(0xFFD1FAE5),
-                                onSelected: (v) => setState(() => _filtroComida = v),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    _sortTab('favoritos', 'Nuestros favoritos'),
+                                    const SizedBox(width: 8),
+                                    _sortTab('precio_bajo', 'Precio más bajo'),
+                                    const SizedBox(width: 8),
+                                    _sortTab('mejores_comentarios', 'Mejores comentarios'),
+                                  ],
+                                ),
                               ),
-                              FilterChip(
-                                label: const Text('🚌 Transporte / Recogida', style: TextStyle(fontSize: 12)),
-                                selected: _filtroTransporte,
-                                selectedColor: const Color(0xFFD1FAE5),
-                                onSelected: (v) => setState(() => _filtroTransporte = v),
+                              const SizedBox(height: 10),
+                              const Text(
+                                'Inclusiones del Servicio:',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF047857)),
                               ),
-                              FilterChip(
-                                label: const Text('🧭 Guía Oficial', style: TextStyle(fontSize: 12)),
-                                selected: _filtroGuia,
-                                selectedColor: const Color(0xFFD1FAE5),
-                                onSelected: (v) => setState(() => _filtroGuia = v),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  FilterChip(
+                                    label: const Text('🍴 Alimentos / Degustación', style: TextStyle(fontSize: 12)),
+                                    selected: _filtroComida,
+                                    selectedColor: const Color(0xFFD1FAE5),
+                                    onSelected: (v) => setState(() => _filtroComida = v),
+                                  ),
+                                  FilterChip(
+                                    label: const Text('🚌 Transporte / Recogida', style: TextStyle(fontSize: 12)),
+                                    selected: _filtroTransporte,
+                                    selectedColor: const Color(0xFFD1FAE5),
+                                    onSelected: (v) => setState(() => _filtroTransporte = v),
+                                  ),
+                                  FilterChip(
+                                    label: const Text('🧭 Guía Oficial', style: TextStyle(fontSize: 12)),
+                                    selected: _filtroGuia,
+                                    selectedColor: const Color(0xFFD1FAE5),
+                                    onSelected: (v) => setState(() => _filtroGuia = v),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                          child: Text(
+                            'Atracciones (${items.length} disponibles)',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          ),
+                        ),
+                        Expanded(
+                          child: items.isEmpty
+                              ? const Center(
+                                  child: Text('No se encontraron atracciones para tu búsqueda.', style: TextStyle(color: BookingColors.textMuted)),
+                                )
+                              : ListView.builder(
+                                  padding: const EdgeInsets.all(14),
+                                  itemCount: items.length,
+                                  itemBuilder: (context, idx) => _buildResultCard(items[idx]),
+                                ),
+                        ),
+                      ],
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                      child: Text(
-                        'Atracciones (${items.length} disponibles)',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                      ),
-                    ),
-                    Expanded(
-                      child: items.isEmpty
-                          ? const Center(
-                              child: Text('No se encontraron atracciones para tu búsqueda.', style: TextStyle(color: BookingColors.textMuted)),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(14),
-                              itemCount: items.length,
-                              itemBuilder: (context, idx) => _buildResultCard(items[idx]),
-                            ),
-                    ),
-                  ],
+                  ),
                 ),
     );
   }

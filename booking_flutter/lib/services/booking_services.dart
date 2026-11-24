@@ -729,4 +729,148 @@ class BookingServices {
     } catch (_) {}
     return false;
   }
+
+  // =========================================================================
+  // 6. DETALLE RESERVA VUELO + TICKETS + EQUIPAJE + BOARDING PASS
+  // =========================================================================
+
+  static Future<Map<String, dynamic>?> getVueloBookingDetalle(String bookingId, {String? token}) async {
+    try {
+      final res = await ApiClient.get(
+        '/vuelos/bookings/${Uri.encodeComponent(bookingId)}',
+        token: token,
+        includeFingerprint: true,
+      );
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        if (d is Map<String, dynamic>) return d;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<List<Map<String, dynamic>>> listarTicketsVuelo(String bookingId, {String? token}) async {
+    try {
+      final res = await ApiClient.get(
+        '/vuelos/bookings/${Uri.encodeComponent(bookingId)}/tickets',
+        token: token,
+        includeFingerprint: true,
+      );
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final list = d is Map ? (d['tickets'] ?? d['data'] ?? []) : d;
+        if (list is List) {
+          return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<List<Map<String, dynamic>>> listarPasesAbordar(String bookingId, {String? token}) async {
+    try {
+      final res = await ApiClient.get(
+        '/vuelos/bookings/${Uri.encodeComponent(bookingId)}/boarding-passes',
+        token: token,
+        includeFingerprint: true,
+      );
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final list = d is Map ? (d['boardingPasses'] ?? d['data'] ?? []) : d;
+        if (list is List) {
+          return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> emitirTicketsVuelo(String bookingId, {String? token}) async {
+    final res = await ApiClient.post(
+      '/vuelos/bookings/${Uri.encodeComponent(bookingId)}/tickets',
+      body: {},
+      token: token,
+      includeFingerprint: true,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final d = jsonDecode(res.body);
+      return d is Map<String, dynamic> ? d : {'data': d};
+    }
+    throw ApiClient.parseError(res);
+  }
+
+  // =========================================================================
+  // 7. CHATBOT, PROVEEDORES Y ENVÍO DE FACTURAS
+  // =========================================================================
+
+  static Future<bool> chatbotEstado() async {
+    try {
+      final res = await ApiClient.get('/chatbot/estado');
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        if (d is Map) return d['disponible'] == true;
+      }
+    } catch (_) {}
+    return true;
+  }
+
+  static Future<Map<String, dynamic>> chatbotEnviarMensaje({
+    required String mensaje,
+    required String sessionId,
+    String idioma = 'es',
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      '/chatbot/mensaje',
+      body: {
+        'mensaje': mensaje,
+        'sessionId': sessionId,
+        'idioma': idioma,
+      },
+      token: token,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final d = jsonDecode(res.body);
+      return d is Map<String, dynamic> ? d : {'respuesta': d.toString()};
+    }
+    throw ApiClient.parseError(res);
+  }
+
+  static Future<Map<String, dynamic>> enviarSolicitudProveedor(Map<String, dynamic> payload) async {
+    final res = await ApiClient.post(
+      '/proveedores/solicitudes',
+      body: payload,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final d = jsonDecode(res.body);
+      return d is Map<String, dynamic> ? d : {'data': d};
+    }
+    throw ApiClient.parseError(res);
+  }
+
+  static Future<Map<String, dynamic>> enviarFacturaPorCorreo({
+    required String pnr,
+    required String concepto,
+    String pdfBase64 = '',
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      '/facturas/enviar',
+      body: {
+        'pdfBase64': pdfBase64,
+        'pnr': pnr,
+        'concepto': concepto,
+      },
+      token: token,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final d = jsonDecode(res.body);
+      return d is Map<String, dynamic> ? d : {'data': d};
+    }
+    throw ApiClient.parseError(res);
+  }
 }

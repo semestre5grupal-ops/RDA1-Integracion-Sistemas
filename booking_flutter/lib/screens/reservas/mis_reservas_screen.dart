@@ -6,6 +6,7 @@ import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
+import 'detalle_reserva_vuelo_screen.dart';
 import 'voucher_qr_screen.dart';
 
 class MisReservasScreen extends StatefulWidget {
@@ -339,6 +340,14 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                 Wrap(
                   spacing: 6,
                   children: [
+                    if (isVuelo)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleReservaVueloScreen(reserva: r)));
+                        },
+                        icon: const Icon(Icons.airplane_ticket_outlined, size: 16),
+                        label: const Text('Boletos / Pase', style: TextStyle(fontSize: 12)),
+                      ),
                     OutlinedButton.icon(
                       onPressed: () {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: r)));
