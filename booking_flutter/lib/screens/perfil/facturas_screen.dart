@@ -165,17 +165,36 @@ class _FacturasScreenState extends State<FacturasScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
+                    final auth = Provider.of<AuthProvider>(context, listen: false);
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('RIDE PDF enviado al correo electrónico registrado.'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
+                    try {
+                      await BookingServices.enviarFacturaPorCorreo(
+                        pnr: reserva.pnr ?? reserva.id,
+                        concepto: reserva.itemNombre,
+                        token: auth.token,
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Comprobante RIDE enviado al correo electrónico registrado.'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Comprobante preparado. Inicia sesión con JWT activo para envío automático por correo.'),
+                            backgroundColor: Color(0xFF003580),
+                          ),
+                        );
+                      }
+                    }
                   },
-                  icon: const Icon(Icons.download),
-                  label: const Text('Descargar Comprobante RIDE (PDF)'),
+                  icon: const Icon(Icons.mark_email_read_outlined),
+                  label: const Text('Enviar Comprobante RIDE por Correo'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF003580),
                     foregroundColor: Colors.white,

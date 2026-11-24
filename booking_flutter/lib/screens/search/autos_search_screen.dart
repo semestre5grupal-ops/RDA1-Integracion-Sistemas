@@ -578,6 +578,7 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredAutos;
+    final isWide = MediaQuery.of(context).size.width >= 900;
 
     return Scaffold(
       backgroundColor: BookingColors.backgroundLight,
@@ -646,160 +647,237 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
                     ),
                   ),
                 )
-              : Column(
-                  children: [
-                    // Chips de categoría + transmisión
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Row(
-                          children: [
-                            ...['ALL', ..._categoryOptions].map((cat) {
-                              final label = cat == 'ALL' ? 'Todos' : cat;
-                              final selected = _activeCategoryChip == cat;
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: ChoiceChip(
-                                  label: Text(label, style: TextStyle(fontSize: 12, color: selected ? Colors.white : BookingColors.textDark)),
-                                  selected: selected,
-                                  selectedColor: BookingColors.actionBlue,
-                                  onSelected: (_) => setState(() => _activeCategoryChip = cat),
-                                ),
-                              );
-                            }),
-                            const VerticalDivider(width: 12),
-                            ...['ALL', 'Automático', 'Manual'].map((tr) {
-                              final label = tr == 'ALL' ? 'Transmisión: Todas' : tr;
-                              final selected = _transmissionFilter == tr;
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: ChoiceChip(
-                                  label: Text(label, style: TextStyle(fontSize: 12, color: selected ? Colors.white : BookingColors.textDark)),
-                                  selected: selected,
-                                  selectedColor: BookingColors.primaryBlue,
-                                  onSelected: (_) => setState(() => _transmissionFilter = tr),
-                                ),
-                              );
-                            }),
-                          ],
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1140),
+                    child: Column(
+                      children: [
+                        // Chips de categoría + transmisión
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Row(
+                              children: [
+                                ...['ALL', ..._categoryOptions].map((cat) {
+                                  final label = cat == 'ALL' ? 'Todos' : cat;
+                                  final selected = _activeCategoryChip == cat;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: ChoiceChip(
+                                      label: Text(label, style: TextStyle(fontSize: 12, color: selected ? Colors.white : BookingColors.textDark)),
+                                      selected: selected,
+                                      selectedColor: BookingColors.actionBlue,
+                                      onSelected: (_) => setState(() => _activeCategoryChip = cat),
+                                    ),
+                                  );
+                                }),
+                                const VerticalDivider(width: 12),
+                                ...['ALL', 'Automático', 'Manual'].map((tr) {
+                                  final label = tr == 'ALL' ? 'Transmisión: Todas' : tr;
+                                  final selected = _transmissionFilter == tr;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: ChoiceChip(
+                                      label: Text(label, style: TextStyle(fontSize: 12, color: selected ? Colors.white : BookingColors.textDark)),
+                                      selected: selected,
+                                      selectedColor: BookingColors.primaryBlue,
+                                      onSelected: (_) => setState(() => _transmissionFilter = tr),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                    // Sort + Filtros
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _sortBy,
-                                isExpanded: true,
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: BookingColors.textDark),
-                                items: const [
-                                  DropdownMenuItem(value: 'recommended', child: Text('Ordenar: Recomendados')),
-                                  DropdownMenuItem(value: 'price_asc', child: Text('Precio: menor a mayor')),
-                                  DropdownMenuItem(value: 'price_desc', child: Text('Precio: mayor a menor')),
-                                  DropdownMenuItem(value: 'rating_desc', child: Text('Mejor puntuación proveedor')),
-                                ],
-                                onChanged: (v) {
-                                  if (v != null) setState(() => _sortBy = v);
-                                },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          OutlinedButton.icon(
-                            onPressed: _openFiltersSheet,
-                            icon: Icon(Icons.tune, size: 16, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
-                            label: Text(
-                              _hasActiveFilters ? 'Filtros activos' : 'Filtrar',
-                              style: TextStyle(fontSize: 12, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor: _hasActiveFilters ? BookingColors.actionBlue : Colors.white,
-                              side: const BorderSide(color: BookingColors.actionBlue),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Alerta Conductor Joven (<25 años) o Cooldown
-                    if (_driverAge < 25 || _meta.surchargeApplied)
-                      Container(
-                        width: double.infinity,
-                        color: const Color(0xFFFFF3E0),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Conductor menor de 25 años: aplica recargo de +US\$ ${_meta.surchargeAmount.toStringAsFixed(2)}/día en el alquiler.',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF7A4100)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Container(
-                      width: double.infinity,
-                      color: const Color(0xFFF0F4F8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${filtered.length} ${filtered.length == 1 ? "vehículo disponible" : "vehículos disponibles"} ($_rentalDays ${_rentalDays == 1 ? "día" : "días"})',
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: BookingColors.textDark),
-                          ),
-                          const Row(
+                        // Sort + Filtros
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          child: Row(
                             children: [
-                              Icon(Icons.shield_outlined, size: 14, color: BookingColors.successGreen),
-                              SizedBox(width: 4),
-                              Text('Cooldown 2h verificado', style: TextStyle(fontSize: 11, color: BookingColors.successGreen, fontWeight: FontWeight.w600)),
+                              Expanded(
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: _sortBy,
+                                    isExpanded: true,
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: BookingColors.textDark),
+                                    items: const [
+                                      DropdownMenuItem(value: 'recommended', child: Text('Ordenar: Recomendados')),
+                                      DropdownMenuItem(value: 'price_asc', child: Text('Precio: menor a mayor')),
+                                      DropdownMenuItem(value: 'price_desc', child: Text('Precio: mayor a menor')),
+                                      DropdownMenuItem(value: 'rating_desc', child: Text('Mejor puntuación proveedor')),
+                                    ],
+                                    onChanged: (v) {
+                                      if (v != null) setState(() => _sortBy = v);
+                                    },
+                                  ),
+                                ),
+                              ),
+                              if (!isWide) ...[
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  onPressed: _openFiltersSheet,
+                                  icon: Icon(Icons.tune, size: 16, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
+                                  label: Text(
+                                    _hasActiveFilters ? 'Filtros activos' : 'Filtrar',
+                                    style: TextStyle(fontSize: 12, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor: _hasActiveFilters ? BookingColors.actionBlue : Colors.white,
+                                    side: const BorderSide(color: BookingColors.actionBlue),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.directions_car_outlined, size: 54, color: BookingColors.textMuted),
-                                    const SizedBox(height: 12),
-                                    const Text(
-                                      'No hay autos que coincidan con tus filtros.',
-                                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    if (_hasActiveFilters)
-                                      ElevatedButton(
-                                        onPressed: _resetAllFilters,
-                                        child: const Text('Limpiar filtros'),
-                                      ),
-                                  ],
+                        ),
+                        // Alerta Conductor Joven (<25 años) o Cooldown
+                        if (_driverAge < 25 || _meta.surchargeApplied)
+                          Container(
+                            width: double.infinity,
+                            color: const Color(0xFFFFF3E0),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Conductor menor de 25 años: aplica recargo de +US\$ ${_meta.surchargeAmount.toStringAsFixed(2)}/día en el alquiler.',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF7A4100)),
+                                  ),
                                 ),
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(14),
-                              itemCount: filtered.length,
-                              itemBuilder: (_, i) => _buildAutoCard(filtered[i]),
+                              ],
                             ),
+                          ),
+                        Container(
+                          width: double.infinity,
+                          color: const Color(0xFFF0F4F8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '${filtered.length} ${filtered.length == 1 ? "vehículo disponible" : "vehículos disponibles"} ($_rentalDays ${_rentalDays == 1 ? "día" : "días"})',
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: BookingColors.textDark),
+                              ),
+                              const Row(
+                                children: [
+                                  Icon(Icons.shield_outlined, size: 14, color: BookingColors.successGreen),
+                                  SizedBox(width: 4),
+                                  Text('Cooldown 2h verificado', style: TextStyle(fontSize: 11, color: BookingColors.successGreen, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (isWide)
+                                Container(
+                                  width: 268,
+                                  margin: const EdgeInsets.fromLTRB(14, 14, 0, 14),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text('Filtrar vehículos', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                            if (_hasActiveFilters)
+                                              TextButton(onPressed: _resetAllFilters, child: const Text('Limpiar', style: TextStyle(fontSize: 12))),
+                                          ],
+                                        ),
+                                        const Divider(),
+                                        const Text('Proveedor / Arrendadora', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ..._companyOptions.map((c) {
+                                          final count = _autos.where((a) => a.matchesCompany(c)).length;
+                                          return CheckboxListTile(
+                                            dense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            value: _selectedCompanies.contains(c),
+                                            title: Text('$c ($count)', style: const TextStyle(fontSize: 12.5)),
+                                            onChanged: (v) => setState(() => v == true ? _selectedCompanies.add(c) : _selectedCompanies.remove(c)),
+                                          );
+                                        }),
+                                        const Divider(),
+                                        const Text('Categoría', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ..._categoryOptions.map((cat) {
+                                          final count = _autos.where((a) => a.matchesVehicleCategory(cat)).length;
+                                          return CheckboxListTile(
+                                            dense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            value: _selectedCategories.contains(cat),
+                                            title: Text('$cat ($count)', style: const TextStyle(fontSize: 12.5)),
+                                            onChanged: (v) => setState(() => v == true ? _selectedCategories.add(cat) : _selectedCategories.remove(cat)),
+                                          );
+                                        }),
+                                        const Divider(),
+                                        const Text('Asientos', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ...[
+                                          {'key': '4', 'label': '4 asientos'},
+                                          {'key': '5', 'label': '5 asientos'},
+                                          {'key': '7+', 'label': '6+ asientos'},
+                                        ].map((s) => CheckboxListTile(
+                                              dense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              value: _selectedSeats.contains(s['key']),
+                                              title: Text(s['label']!, style: const TextStyle(fontSize: 12.5)),
+                                              onChanged: (v) => setState(() => v == true ? _selectedSeats.add(s['key']!) : _selectedSeats.remove(s['key']!)),
+                                            )),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              Expanded(
+                                child: filtered.isEmpty
+                                    ? Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(24),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.directions_car_outlined, size: 54, color: BookingColors.textMuted),
+                                              const SizedBox(height: 12),
+                                              const Text(
+                                                'No hay autos que coincidan con tus filtros.',
+                                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                                textAlign: TextAlign.center,
+                                              ),
+                                              const SizedBox(height: 10),
+                                              if (_hasActiveFilters)
+                                                ElevatedButton(
+                                                  onPressed: _resetAllFilters,
+                                                  child: const Text('Limpiar filtros'),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                    : ListView.builder(
+                                        padding: const EdgeInsets.all(14),
+                                        itemCount: filtered.length,
+                                        itemBuilder: (_, i) => _buildAutoCard(filtered[i]),
+                                      ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
     );
   }

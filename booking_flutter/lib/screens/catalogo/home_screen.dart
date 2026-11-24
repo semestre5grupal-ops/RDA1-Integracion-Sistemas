@@ -6,9 +6,11 @@ import '../../models/atraccion.dart';
 import '../../models/auto.dart';
 import '../../models/vuelo.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/currency_provider.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../../utils/destinos_catalog.dart';
+import '../../widgets/booking_footer.dart';
 import '../../widgets/booking_nav_header.dart';
 import '../../widgets/booking_rating_badge.dart';
 import '../../widgets/occupancy_picker_sheet.dart';
@@ -44,7 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showAlojSuggestions = false;
   DateTime _alojCheckIn = DateTime.now().add(const Duration(days: 3));
   DateTime _alojCheckOut = DateTime.now().add(const Duration(days: 5));
-  OccupancySelection _occupancy = const OccupancySelection(adultos: 2, ninos: 0, habitaciones: 1);
+  OccupancySelection _occupancy = const OccupancySelection(adultos: 2, habitaciones: 1);
   String _tripPlannerTab = 'Playa';
 
   // --- Estado búsqueda Vuelos ---
@@ -209,17 +211,33 @@ class _HomeScreenState extends State<HomeScreen> {
                 onCategoryChanged: (cat) => setState(() => _currentCategory = cat),
               ),
               Transform.translate(
-                offset: const Offset(0, -14),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: _buildYellowSearchBox(),
+                offset: const Offset(0, -24),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1140),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: _buildYellowSearchBox(),
+                    ),
+                  ),
                 ),
               ),
-              if (_currentCategory == MarketplaceCategory.alojamientos) _buildAlojamientosLanding(),
-              if (_currentCategory == MarketplaceCategory.vuelos) _buildVuelosLanding(),
-              if (_currentCategory == MarketplaceCategory.autos) _buildAutosLanding(),
-              if (_currentCategory == MarketplaceCategory.atracciones) _buildAtraccionesLanding(),
-              const SizedBox(height: 36),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1140),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_currentCategory == MarketplaceCategory.alojamientos) _buildAlojamientosLanding(),
+                      if (_currentCategory == MarketplaceCategory.vuelos) _buildVuelosLanding(),
+                      if (_currentCategory == MarketplaceCategory.autos) _buildAutosLanding(),
+                      if (_currentCategory == MarketplaceCategory.atracciones) _buildAtraccionesLanding(),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+              const BookingFooter(),
             ],
           ),
         ),
@@ -228,9 +246,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ===========================================================================
-  // BUSCADOR AMARILLO OFICIAL BOOKING (4 VERTICALES)
+  // BUSCADOR AMARILLO OFICIAL BOOKING (4 VERTICALES — RESPONSIVO DESKTOP + MÓVIL)
   // ===========================================================================
   Widget _buildYellowSearchBox() {
+    final isWide = MediaQuery.of(context).size.width >= 900;
+
     return Container(
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(
@@ -238,13 +258,13 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 10,
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 12,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Column(
+      child: isWide ? _buildDesktopSearchRow() : Column(
         children: [
           if (_currentCategory == MarketplaceCategory.alojamientos) ..._buildAlojSearchFields(),
           if (_currentCategory == MarketplaceCategory.vuelos) ..._buildVueloSearchFields(),
@@ -252,6 +272,374 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_currentCategory == MarketplaceCategory.atracciones) ..._buildAtrSearchFields(),
         ],
       ),
+    );
+  }
+
+  Widget _buildDesktopSearchRow() {
+    if (_currentCategory == MarketplaceCategory.alojamientos) {
+      final cityExtras = _alojamientos.map((e) => e.ciudad).toList();
+      final suggestions = DestinosCatalog.buscarDestinosAlojamientos(_alojDestinoCtrl.text, extraCatalogo: cityExtras);
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: _whiteFieldBox(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.bed_outlined, color: BookingColors.textMuted, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _alojDestinoCtrl,
+                          onTap: () => setState(() => _showAlojSuggestions = true),
+                          onChanged: (_) => setState(() => _showAlojSuggestions = true),
+                          decoration: const InputDecoration(
+                            hintText: '¿Adónde vas? Ej. Quito, Galápagos, Cuenca',
+                            border: InputBorder.none,
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: _whiteTapBox(
+                  icon: Icons.calendar_today_outlined,
+                  text: '${DateFormat('dd MMM').format(_alojCheckIn)} - ${DateFormat('dd MMM').format(_alojCheckOut)}',
+                  onTap: () async {
+                    final cin = await showDatePicker(
+                      context: context,
+                      initialDate: _alojCheckIn,
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (cin != null) {
+                      setState(() {
+                        _alojCheckIn = cin;
+                        if (!_alojCheckOut.isAfter(_alojCheckIn)) {
+                          _alojCheckOut = _alojCheckIn.add(const Duration(days: 2));
+                        }
+                      });
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 3,
+                child: _whiteTapBox(
+                  icon: Icons.people_outline,
+                  text: _occupancy.resumenTexto,
+                  trailing: const Icon(Icons.keyboard_arrow_down, color: BookingColors.textMuted),
+                  onTap: () async {
+                    final res = await OccupancyPickerSheet.show(context, initial: _occupancy);
+                    if (res != null) setState(() => _occupancy = res);
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 140,
+                child: _searchButton('Buscar', () => _launchAlojamientosSearch()),
+              ),
+            ],
+          ),
+          if (_showAlojSuggestions && suggestions.isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  ...suggestions.map((d) => ActionChip(
+                        avatar: const Icon(Icons.location_on, size: 14, color: BookingColors.actionBlue),
+                        label: Text('${d.nombre} (${d.region})', style: const TextStyle(fontSize: 11)),
+                        onPressed: () => setState(() {
+                          _alojDestinoCtrl.text = d.nombre;
+                          _showAlojSuggestions = false;
+                        }),
+                      )),
+                  ActionChip(
+                    label: const Text('Cerrar', style: TextStyle(fontSize: 11)),
+                    onPressed: () => setState(() => _showAlojSuggestions = false),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    }
+
+    if (_currentCategory == MarketplaceCategory.vuelos) {
+      final airports = DestinosCatalog.todosAeropuertos;
+      return Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: Text('Ida y vuelta', style: TextStyle(fontSize: 12, color: _isRoundTrip ? Colors.white : BookingColors.textDark)),
+                  selected: _isRoundTrip,
+                  selectedColor: BookingColors.actionBlue,
+                  onSelected: (_) => setState(() => _isRoundTrip = true),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: Text('Solo ida', style: TextStyle(fontSize: 12, color: !_isRoundTrip ? Colors.white : BookingColors.textDark)),
+                  selected: !_isRoundTrip,
+                  selectedColor: BookingColors.actionBlue,
+                  onSelected: (_) => setState(() => _isRoundTrip = false),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    final tmp = _vueloOrigin;
+                    _vueloOrigin = _vueloDest;
+                    _vueloDest = tmp;
+                  }),
+                  icon: const Icon(Icons.swap_horiz, size: 18),
+                  label: const Text('Invertir ruta', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: _whiteFieldBox(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _vueloOrigin,
+                      isExpanded: true,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: BookingColors.textDark),
+                      items: airports.map((a) => DropdownMenuItem(value: a.codigo, child: Text('De: ${a.nombre}', overflow: TextOverflow.ellipsis))).toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _vueloOrigin = v);
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: _whiteFieldBox(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _vueloDest,
+                      isExpanded: true,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: BookingColors.textDark),
+                      items: airports.map((a) => DropdownMenuItem(value: a.codigo, child: Text('A: ${a.nombre}', overflow: TextOverflow.ellipsis))).toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _vueloDest = v);
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: _whiteTapBox(
+                  icon: Icons.flight_takeoff,
+                  text: _isRoundTrip
+                      ? '${DateFormat('dd MMM').format(_vueloDepDate)} - ${DateFormat('dd MMM').format(_vueloRetDate)}'
+                      : 'Ida: ${DateFormat('dd MMM').format(_vueloDepDate)}',
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _vueloDepDate,
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _vueloDepDate = picked;
+                        if (!_vueloRetDate.isAfter(_vueloDepDate)) _vueloRetDate = _vueloDepDate.add(const Duration(days: 4));
+                      });
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: _whiteTapBox(
+                  icon: Icons.people_outline,
+                  text: _vueloPassengers.resumenTexto,
+                  onTap: () async {
+                    final res = await VueloPassengersSheet.show(context, initial: _vueloPassengers);
+                    if (res != null) setState(() => _vueloPassengers = res);
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(width: 140, child: _searchButton('Buscar', () => _launchVuelosSearch())),
+            ],
+          ),
+        ],
+      );
+    }
+
+    if (_currentCategory == MarketplaceCategory.autos) {
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: _whiteFieldBox(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.directions_car_outlined, color: BookingColors.textMuted, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _autoLocCtrl,
+                          decoration: const InputDecoration(hintText: 'Lugar de recogida (Quito, UIO, GYE...)', border: InputBorder.none, isDense: true),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: _whiteTapBox(
+                  icon: Icons.calendar_today,
+                  text: '${DateFormat('dd MMM').format(_autoPickupDate)} ($_autoPickupTime)',
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _autoPickupDate,
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _autoPickupDate = picked;
+                        if (!_autoDropoffDate.isAfter(_autoPickupDate)) _autoDropoffDate = _autoPickupDate.add(const Duration(days: 2));
+                      });
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                flex: 2,
+                child: _whiteTapBox(
+                  icon: Icons.event,
+                  text: '${DateFormat('dd MMM').format(_autoDropoffDate)} ($_autoDropoffTime)',
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _autoDropoffDate,
+                      firstDate: _autoPickupDate.add(const Duration(days: 1)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) setState(() => _autoDropoffDate = picked);
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(width: 140, child: _searchButton('Buscar', () => _launchAutosSearch())),
+            ],
+          ),
+          Container(
+            margin: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: _driverAge30to65,
+                  onChanged: (v) => setState(() {
+                    _driverAge30to65 = v ?? true;
+                    if (_driverAge30to65) _autoDriverAge = 30;
+                  }),
+                ),
+                const Text('Conductor entre 30 y 65 años', style: TextStyle(fontSize: 12)),
+                if (!_driverAge30to65) ...[
+                  const SizedBox(width: 10),
+                  IconButton(icon: const Icon(Icons.remove_circle_outline, size: 18), onPressed: _autoDriverAge > 18 ? () => setState(() => _autoDriverAge--) : null),
+                  Text('$_autoDriverAge años', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  IconButton(icon: const Icon(Icons.add_circle_outline, size: 18), onPressed: _autoDriverAge < 99 ? () => setState(() => _autoDriverAge++) : null),
+                ],
+                const Spacer(),
+                ...DestinosCatalog.sugerenciasAutos.take(5).map((loc) => Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: ActionChip(
+                        label: Text(loc, style: const TextStyle(fontSize: 11)),
+                        onPressed: () => setState(() => _autoLocCtrl.text = loc),
+                      ),
+                    )),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Atracciones desktop horizontal bar
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: _whiteFieldBox(
+            child: Row(
+              children: [
+                const Icon(Icons.attractions_outlined, color: BookingColors.textMuted, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _atrQueryCtrl,
+                    maxLength: 60,
+                    decoration: const InputDecoration(
+                      hintText: '¿Adónde vas? Tours, museos, aventura...',
+                      counterText: '',
+                      border: InputBorder.none,
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          flex: 3,
+          child: _whiteTapBox(
+            icon: Icons.calendar_today_outlined,
+            text: 'Fecha: ${DateFormat('EEE, dd MMM yyyy').format(_atrDate)}',
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _atrDate,
+                firstDate: DateTime.now(),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+              );
+              if (picked != null) setState(() => _atrDate = picked);
+            },
+          ),
+        ),
+        const SizedBox(width: 4),
+        SizedBox(width: 140, child: _searchButton('Buscar', () => _launchAtraccionesSearch())),
+      ],
     );
   }
 
@@ -959,6 +1347,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildAlojamientoHomeCard(Alojamiento prop) {
+    final cur = Provider.of<CurrencyProvider>(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 1.5,
@@ -1023,7 +1412,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'US\$ ${prop.precioPorNoche.toStringAsFixed(0)} / noche',
+                          '${cur.formatPrice(prop.precioPorNoche, forceDecimals: false)} / noche',
                           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: BookingColors.textDark),
                         ),
                         const Text('Ver disponibilidad >', style: TextStyle(fontSize: 11, color: BookingColors.actionBlue, fontWeight: FontWeight.bold)),
@@ -1160,6 +1549,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // LANDING: AUTOS
   // ===========================================================================
   Widget _buildAutosLanding() {
+    final cur = Provider.of<CurrencyProvider>(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       child: Column(
@@ -1221,7 +1611,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: const TextStyle(fontSize: 12),
                     ),
                     trailing: Text(
-                      'US\$ ${auto.precioPorDia.toStringAsFixed(0)}/d',
+                      '${cur.formatPrice(auto.precioPorDia, forceDecimals: false)}/d',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: BookingColors.actionBlue),
                     ),
                     onTap: () {

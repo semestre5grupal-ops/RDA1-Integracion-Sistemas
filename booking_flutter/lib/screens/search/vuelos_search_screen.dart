@@ -4,8 +4,8 @@ import '../../models/vuelo.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../../utils/destinos_catalog.dart';
-import '../../widgets/booking_search_loading_view.dart';
 import '../../widgets/vuelo_passengers_sheet.dart';
+import '../../widgets/vuelos_loading_view.dart';
 import '../detalle/vuelo_detail_screen.dart';
 
 class _FlightGroup {
@@ -469,15 +469,7 @@ class _VuelosSearchScreenState extends State<VuelosSearchScreen> {
         ),
       ),
       body: _loading
-          ? BookingSearchLoadingView(
-              destino: '$_origin ➔ $_destination',
-              frases: const [
-                'Consultando tarifas en vivo con las 5 aerolíneas socias...',
-                'Comparando clases Económica, Premium y Ejecutiva...',
-                'Verificando equipaje incluido y políticas de cambio...',
-                'Organizando las mejores combinaciones de vuelo...',
-              ],
-            )
+          ? const VuelosLoadingView()
           : _error != null
               ? Center(
                   child: Padding(
@@ -494,132 +486,137 @@ class _VuelosSearchScreenState extends State<VuelosSearchScreen> {
                     ),
                   ),
                 )
-              : Column(
-                  children: [
-                    // Filtros rápidos Escalas + Aerolínea + Sort
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-                      child: Column(
-                        children: [
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: [
-                                ...[
-                                  {'key': 'all', 'label': 'Todas las escalas'},
-                                  {'key': 'direct', 'label': 'Directo'},
-                                  {'key': 'stops', 'label': 'Con escalas'},
-                                ].map((f) {
-                                  final sel = _stopsFilter == f['key'];
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: 6),
-                                    child: ChoiceChip(
-                                      label: Text(f['label']!, style: TextStyle(fontSize: 12, color: sel ? Colors.white : BookingColors.textDark)),
-                                      selected: sel,
-                                      selectedColor: BookingColors.actionBlue,
-                                      onSelected: (_) => setState(() => _stopsFilter = f['key']!),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1140),
+                    child: Column(
+                      children: [
+                        // Filtros rápidos Escalas + Aerolínea + Sort
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                          child: Column(
                             children: [
-                              Expanded(
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<String>(
-                                    value: _sortBy,
-                                    isExpanded: true,
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: BookingColors.textDark),
-                                    items: const [
-                                      DropdownMenuItem(value: 'price', child: Text('Ordenar: Más barato')),
-                                      DropdownMenuItem(value: 'duration', child: Text('Más rápido (duración)')),
-                                      DropdownMenuItem(value: 'departure', child: Text('Salida más temprana')),
-                                    ],
-                                    onChanged: (v) {
-                                      if (v != null) setState(() => _sortBy = v);
-                                    },
-                                  ),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    ...[
+                                      {'key': 'all', 'label': 'Todas las escalas'},
+                                      {'key': 'direct', 'label': 'Directo'},
+                                      {'key': 'stops', 'label': 'Con escalas'},
+                                    ].map((f) {
+                                      final sel = _stopsFilter == f['key'];
+                                      return Padding(
+                                        padding: const EdgeInsets.only(right: 6),
+                                        child: ChoiceChip(
+                                          label: Text(f['label']!, style: TextStyle(fontSize: 12, color: sel ? Colors.white : BookingColors.textDark)),
+                                          selected: sel,
+                                          selectedColor: BookingColors.actionBlue,
+                                          onSelected: (_) => setState(() => _stopsFilter = f['key']!),
+                                        ),
+                                      );
+                                    }),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: _airlineFilter,
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: BookingColors.actionBlue),
-                                  items: [
-                                    const DropdownMenuItem(value: 'ALL', child: Text('Todas aerolíneas')),
-                                    ..._availableAirlines.map((a) => DropdownMenuItem(value: a, child: Text(a))),
-                                  ],
-                                  onChanged: (v) {
-                                    if (v != null) setState(() => _airlineFilter = v);
-                                  },
-                                ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: DropdownButtonHideUnderline(
+                                      child: DropdownButton<String>(
+                                        value: _sortBy,
+                                        isExpanded: true,
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: BookingColors.textDark),
+                                        items: const [
+                                          DropdownMenuItem(value: 'price', child: Text('Ordenar: Más barato')),
+                                          DropdownMenuItem(value: 'duration', child: Text('Más rápido (duración)')),
+                                          DropdownMenuItem(value: 'departure', child: Text('Salida más temprana')),
+                                        ],
+                                        onChanged: (v) {
+                                          if (v != null) setState(() => _sortBy = v);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: _airlineFilter,
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: BookingColors.actionBlue),
+                                      items: [
+                                        const DropdownMenuItem(value: 'ALL', child: Text('Todas aerolíneas')),
+                                        ..._availableAirlines.map((a) => DropdownMenuItem(value: a, child: Text(a))),
+                                      ],
+                                      onChanged: (v) {
+                                        if (v != null) setState(() => _airlineFilter = v);
+                                      },
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ),
-                    // Resumen fuentes conectadas
-                    Container(
-                      width: double.infinity,
-                      color: const Color(0xFFF0F4F8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${groups.length} ${groups.length == 1 ? "vuelo encontrado" : "vuelos encontrados"}',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: BookingColors.textDark),
-                          ),
-                          if (_sources.isNotEmpty)
-                            Text(
-                              '$okSources/${_sources.length} aerolíneas activas${_bookingFeePct > 0 ? " · Fee ${_bookingFeePct.toStringAsFixed(0)}%" : ""}',
-                              style: const TextStyle(fontSize: 11, color: BookingColors.successGreen, fontWeight: FontWeight.w600),
-                            ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: groups.isEmpty
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.airplanemode_inactive, size: 54, color: BookingColors.textMuted),
-                                    const SizedBox(height: 12),
-                                    const Text(
-                                      'No encontramos vuelos para esta ruta/filtros.',
-                                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 10),
-                                    ElevatedButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _stopsFilter = 'all';
-                                          _airlineFilter = 'ALL';
-                                        });
-                                      },
-                                      child: const Text('Limpiar filtros'),
-                                    ),
-                                  ],
-                                ),
+                        ),
+                        // Resumen fuentes conectadas
+                        Container(
+                          width: double.infinity,
+                          color: const Color(0xFFF0F4F8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '${groups.length} ${groups.length == 1 ? "vuelo encontrado" : "vuelos encontrados"}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: BookingColors.textDark),
                               ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(14),
-                              itemCount: groups.length,
-                              itemBuilder: (_, i) => _buildGroupCard(groups[i]),
-                            ),
+                              if (_sources.isNotEmpty)
+                                Text(
+                                  '$okSources/${_sources.length} aerolíneas activas${_bookingFeePct > 0 ? " · Fee ${_bookingFeePct.toStringAsFixed(0)}%" : ""}',
+                                  style: const TextStyle(fontSize: 11, color: BookingColors.successGreen, fontWeight: FontWeight.w600),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: groups.isEmpty
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.airplanemode_inactive, size: 54, color: BookingColors.textMuted),
+                                        const SizedBox(height: 12),
+                                        const Text(
+                                          'No encontramos vuelos para esta ruta/filtros.',
+                                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        ElevatedButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              _stopsFilter = 'all';
+                                              _airlineFilter = 'ALL';
+                                            });
+                                          },
+                                          child: const Text('Limpiar filtros'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : ListView.builder(
+                                  padding: const EdgeInsets.all(14),
+                                  itemCount: groups.length,
+                                  itemBuilder: (_, i) => _buildGroupCard(groups[i]),
+                                ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
     );
   }

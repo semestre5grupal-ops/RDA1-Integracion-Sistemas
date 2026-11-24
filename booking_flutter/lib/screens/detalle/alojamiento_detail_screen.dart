@@ -56,7 +56,7 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
     _checkOut = widget.initialCheckOut != null && widget.initialCheckOut!.isAfter(_checkIn)
         ? widget.initialCheckOut!
         : _checkIn.add(const Duration(days: 2));
-    _occupancy = widget.initialOccupancy ?? const OccupancySelection(adultos: 2, ninos: 0, habitaciones: 1);
+    _occupancy = widget.initialOccupancy ?? const OccupancySelection(adultos: 2, habitaciones: 1);
     _loadInitialData();
   }
 

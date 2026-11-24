@@ -193,24 +193,78 @@ class AuthProvider extends ChangeNotifier {
     return true;
   }
 
-  // --- ACTUALIZAR PERFIL ---
-  Future<bool> updateProfile({
+  // --- ACTUALIZAR PERFIL (y contraseña opcional, parity con Navbar.jsx) ---
+  Future<String?> updateProfile({
     required String nombre,
     required String apellido,
     required String telefono,
     required String email,
+    String? currentPassword,
+    String? newPassword,
   }) async {
+    const supaUrl = 'https://owseuntgcgvflqpnmwcc.supabase.co';
+    const supaKey =
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw';
+
+    final cleanEmail = email.trim().toLowerCase();
+    final isRealJwt = _token != null && !_token!.startsWith('jwt-session');
+
+    if (newPassword != null && newPassword.isNotEmpty) {
+      if (currentPassword == null || currentPassword.isEmpty) {
+        return 'Debes ingresar tu contraseña actual para cambiarla.';
+      }
+      if (isRealJwt && _user != null) {
+        try {
+          final verifyRes = await http.post(
+            Uri.parse('$supaUrl/auth/v1/token?grant_type=password'),
+            headers: {'apikey': supaKey, 'Content-Type': 'application/json'},
+            body: jsonEncode({'email': _user!.email, 'password': currentPassword}),
+          );
+          if (verifyRes.statusCode != 200) {
+            return 'La contraseña actual es incorrecta.';
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (isRealJwt) {
+      try {
+        final bodyMap = <String, dynamic>{
+          'data': {
+            'nombre': nombre.trim(),
+            'apellido': apellido.trim(),
+            'telefono': telefono.trim(),
+          },
+        };
+        if (cleanEmail.isNotEmpty && cleanEmail != _user?.email) {
+          bodyMap['email'] = cleanEmail;
+        }
+        if (newPassword != null && newPassword.isNotEmpty) {
+          bodyMap['password'] = newPassword;
+        }
+        await http.put(
+          Uri.parse('$supaUrl/auth/v1/user'),
+          headers: {
+            'apikey': supaKey,
+            'Authorization': 'Bearer $_token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(bodyMap),
+        );
+      } catch (_) {}
+    }
+
     _user = AuthUser(
       nombre: nombre.trim(),
       apellido: apellido.trim(),
-      email: email.trim().toLowerCase(),
+      email: cleanEmail,
       cedula: _user?.cedula ?? '',
       tipoDocumento: _user?.tipoDocumento ?? 'CEDULA',
       telefono: telefono.trim(),
     );
     await _persistSession();
     notifyListeners();
-    return true;
+    return null;
   }
 
   Future<void> _persistSession() async {

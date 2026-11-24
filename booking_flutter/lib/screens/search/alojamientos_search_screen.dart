@@ -532,6 +532,7 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredProperties;
+    final isWide = MediaQuery.of(context).size.width >= 900;
 
     return Scaffold(
       backgroundColor: BookingColors.backgroundLight,
@@ -592,91 +593,188 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
                     ),
                   ),
                 )
-              : Column(
-                  children: [
-                    // Barra de acciones: Ordenar & Filtrar (Estilo Booking)
-                    Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _sortBy,
-                                isExpanded: true,
-                                icon: const Icon(Icons.sort, size: 18, color: BookingColors.actionBlue),
-                                style: const TextStyle(fontSize: 13, color: BookingColors.textDark, fontWeight: FontWeight.w600),
-                                items: const [
-                                  DropdownMenuItem(value: 'popularity', child: Text('Ordenar: Nuestros favoritos')),
-                                  DropdownMenuItem(value: 'price_asc', child: Text('Precio (más bajo primero)')),
-                                  DropdownMenuItem(value: 'price_desc', child: Text('Precio (más alto primero)')),
-                                  DropdownMenuItem(value: 'rating', child: Text('Mejor puntuados')),
-                                  DropdownMenuItem(value: 'reviews', child: Text('Más comentarios')),
-                                ],
-                                onChanged: (val) {
-                                  if (val != null) setState(() => _sortBy = val);
-                                },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          OutlinedButton.icon(
-                            onPressed: _openFiltersSheet,
-                            icon: Icon(Icons.tune, size: 16, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
-                            label: Text(
-                              _hasActiveFilters ? 'Filtros activos' : 'Filtrar',
-                              style: TextStyle(fontSize: 13, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor: _hasActiveFilters ? BookingColors.actionBlue : Colors.white,
-                              side: const BorderSide(color: BookingColors.actionBlue),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      color: const Color(0xFFF0F4F8),
-                      child: Text(
-                        '${_destinoCtrl.text.isNotEmpty ? _destinoCtrl.text : "Ecuador"}: ${filtered.length} ${filtered.length == 1 ? "alojamiento encontrado" : "alojamientos encontrados"}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: BookingColors.textDark),
-                      ),
-                    ),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.hotel_outlined, size: 54, color: BookingColors.textMuted),
-                                    const SizedBox(height: 12),
-                                    const Text(
-                                      'No se encontraron alojamientos con tus filtros',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    if (_hasActiveFilters)
-                                      ElevatedButton(
-                                        onPressed: _resetAllFilters,
-                                        child: const Text('Restablecer todos los filtros'),
-                                      ),
-                                  ],
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1140),
+                    child: Column(
+                      children: [
+                        // Barra de acciones: Ordenar & Filtrar (Estilo Booking)
+                        Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: _sortBy,
+                                    isExpanded: true,
+                                    icon: const Icon(Icons.sort, size: 18, color: BookingColors.actionBlue),
+                                    style: const TextStyle(fontSize: 13, color: BookingColors.textDark, fontWeight: FontWeight.w600),
+                                    items: const [
+                                      DropdownMenuItem(value: 'popularity', child: Text('Ordenar: Nuestros favoritos')),
+                                      DropdownMenuItem(value: 'price_asc', child: Text('Precio (más bajo primero)')),
+                                      DropdownMenuItem(value: 'price_desc', child: Text('Precio (más alto primero)')),
+                                      DropdownMenuItem(value: 'rating', child: Text('Mejor puntuados')),
+                                      DropdownMenuItem(value: 'reviews', child: Text('Más comentarios')),
+                                    ],
+                                    onChanged: (val) {
+                                      if (val != null) setState(() => _sortBy = val);
+                                    },
+                                  ),
                                 ),
                               ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(14),
-                              itemCount: filtered.length,
-                              itemBuilder: (context, i) => _buildSearchCard(filtered[i]),
-                            ),
+                              if (!isWide) ...[
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  onPressed: _openFiltersSheet,
+                                  icon: Icon(Icons.tune, size: 16, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
+                                  label: Text(
+                                    _hasActiveFilters ? 'Filtros activos' : 'Filtrar',
+                                    style: TextStyle(fontSize: 13, color: _hasActiveFilters ? Colors.white : BookingColors.actionBlue),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor: _hasActiveFilters ? BookingColors.actionBlue : Colors.white,
+                                    side: const BorderSide(color: BookingColors.actionBlue),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          color: const Color(0xFFF0F4F8),
+                          child: Text(
+                            '${_destinoCtrl.text.isNotEmpty ? _destinoCtrl.text : "Ecuador"}: ${filtered.length} ${filtered.length == 1 ? "alojamiento encontrado" : "alojamientos encontrados"}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: BookingColors.textDark),
+                          ),
+                        ),
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (isWide)
+                                Container(
+                                  width: 268,
+                                  margin: const EdgeInsets.fromLTRB(14, 14, 0, 14),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text('Filtrar por:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                            if (_hasActiveFilters)
+                                              TextButton(onPressed: _resetAllFilters, child: const Text('Limpiar', style: TextStyle(fontSize: 12))),
+                                          ],
+                                        ),
+                                        const Divider(),
+                                        const Text('Presupuesto/noche', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        Text(
+                                          _maxBudget >= _sinLimitePresupuesto ? 'Sin límite (\$250+)' : 'Hasta US\$ ${_maxBudget.round()}',
+                                          style: const TextStyle(fontSize: 12, color: BookingColors.actionBlue),
+                                        ),
+                                        Slider(
+                                          value: _maxBudget,
+                                          min: 20,
+                                          max: _sinLimitePresupuesto,
+                                          divisions: 23,
+                                          onChanged: (v) => setState(() => _maxBudget = v),
+                                        ),
+                                        const Divider(),
+                                        const Text('Tipo de alojamiento', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ...['Hoteles', 'Apartamentos', 'Hostales', 'Casas y Villas'].map((t) => CheckboxListTile(
+                                              dense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              value: _selectedTypes.contains(t),
+                                              title: Text(t, style: const TextStyle(fontSize: 12.5)),
+                                              onChanged: (v) => setState(() => v == true ? _selectedTypes.add(t) : _selectedTypes.remove(t)),
+                                            )),
+                                        const Divider(),
+                                        const Text('Categoría (estrellas)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        Wrap(
+                                          spacing: 4,
+                                          children: [5, 4, 3].map((st) {
+                                            final sel = _selectedStars.contains(st);
+                                            return FilterChip(
+                                              label: Text('$st ★', style: TextStyle(fontSize: 11, color: sel ? Colors.white : BookingColors.textDark)),
+                                              selected: sel,
+                                              selectedColor: BookingColors.actionBlue,
+                                              onSelected: (_) => setState(() => sel ? _selectedStars.remove(st) : _selectedStars.add(st)),
+                                            );
+                                          }).toList(),
+                                        ),
+                                        const Divider(),
+                                        const Text('Servicios y políticas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        ...[
+                                          {'k': 'pool', 'l': 'Piscina'},
+                                          {'k': 'parking', 'l': 'Parqueadero'},
+                                          {'k': 'wifi', 'l': 'Wi-Fi gratis'},
+                                          {'k': 'kitchen', 'l': 'Cocina'},
+                                        ].map((f) => CheckboxListTile(
+                                              dense: true,
+                                              contentPadding: EdgeInsets.zero,
+                                              value: _selectedFacilities.contains(f['k']),
+                                              title: Text(f['l']!, style: const TextStyle(fontSize: 12.5)),
+                                              onChanged: (v) => setState(() => v == true ? _selectedFacilities.add(f['k']!) : _selectedFacilities.remove(f['k']!)),
+                                            )),
+                                        CheckboxListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          value: _selectedPolicies.contains('freecancel'),
+                                          title: const Text('Cancelación gratis (48h)', style: TextStyle(fontSize: 12.5)),
+                                          onChanged: (v) => setState(() => v == true ? _selectedPolicies.add('freecancel') : _selectedPolicies.remove('freecancel')),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              Expanded(
+                                child: filtered.isEmpty
+                                    ? Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(24),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.hotel_outlined, size: 54, color: BookingColors.textMuted),
+                                              const SizedBox(height: 12),
+                                              const Text(
+                                                'No se encontraron alojamientos con tus filtros',
+                                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                                textAlign: TextAlign.center,
+                                              ),
+                                              const SizedBox(height: 8),
+                                              if (_hasActiveFilters)
+                                                ElevatedButton(
+                                                  onPressed: _resetAllFilters,
+                                                  child: const Text('Restablecer todos los filtros'),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      )
+                                    : ListView.builder(
+                                        padding: const EdgeInsets.all(14),
+                                        itemCount: filtered.length,
+                                        itemBuilder: (context, i) => _buildSearchCard(filtered[i]),
+                                      ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
     );
   }
