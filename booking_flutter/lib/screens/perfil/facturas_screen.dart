@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/booking_services.dart';
 import '../../models/reserva.dart';
 
@@ -28,12 +30,18 @@ class _FacturasScreenState extends State<FacturasScreen> {
     });
 
     try {
-      final list = await BookingServices.getMisReservas();
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final list = await BookingServices.getMisReservas(
+        token: auth.token,
+        email: auth.user?.email,
+      );
       // Facturables son aquellas confirmadas o completadas
-      setState(() {
-        _reservasFacturadas = list.where((r) => r.estado.toLowerCase() != 'cancelada').toList();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _reservasFacturadas = list.where((r) => !r.esCancelada).toList();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       setState(() {
         _errorMessage = 'No se pudieron recuperar las facturas electrónicas.';

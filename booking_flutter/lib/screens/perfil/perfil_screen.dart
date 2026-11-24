@@ -1,54 +1,91 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
-import 'facturas_screen.dart';
+import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
+import '../auth/register_screen.dart';
+import '../reservas/mis_reservas_screen.dart';
+import '../vuelos/estado_vuelo_screen.dart';
+import 'facturas_screen.dart';
 
 class PerfilScreen extends StatelessWidget {
   const PerfilScreen({super.key});
 
-  void _showTermsDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Términos y Condiciones'),
-        content: const SingleChildScrollView(
-          child: Text(
-            '1. Plataforma de Intermediación: Booking Ecuador actúa como orquestador de reservas entre el usuario y los socios comerciales (Atracciones, Autos, Alojamientos, Vuelos).\n\n'
-            '2. Política de Cancelación: Cancelaciones con reembolso total aplican hasta 24 horas antes para autos/hoteles/vuelos y 48 horas antes para atracciones turísticas reguladas.\n\n'
-            '3. Tarifas e Impuestos: Todas las transacciones en territorio ecuatoriano incluyen el 15% de Impuesto al Valor Agregado (IVA) conforme a la Ley Orgánica para Enfrentar el Conflicto Armado Interno (2024).\n\n'
-            '4. Protección de Datos: Sus datos se procesan con fines exclusivos de confirmación de reserva y emisión de comprobantes electrónicos autorizados por el SRI.',
-            style: TextStyle(fontSize: 13, height: 1.4),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Entendido'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<void> _openEditProfileModal(BuildContext context, AuthProvider auth) async {
+    final user = auth.user;
+    if (user == null) return;
 
-  void _showPrivacyDialog(BuildContext context) {
-    showDialog(
+    final nombreCtrl = TextEditingController(text: user.nombre);
+    final apellidoCtrl = TextEditingController(text: user.apellido);
+    final telCtrl = TextEditingController(text: user.telefono);
+    final emailCtrl = TextEditingController(text: user.email);
+
+    await showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Política de Privacidad'),
-        content: const SingleChildScrollView(
-          child: Text(
-            'Booking Ecuador garantiza la confidencialidad de la información personal de sus usuarios conforme a la Ley Orgánica de Protección de Datos Personales del Ecuador.\n\n'
-            'No comercializamos información a terceros ni compartimos identificadores fuera de los socios estrictamente vinculados a las reservas confirmadas.',
-            style: TextStyle(fontSize: 13, height: 1.4),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 18,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Editar datos de perfil', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nombreCtrl,
+                decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: apellidoCtrl,
+                decoration: const InputDecoration(labelText: 'Apellido', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Correo electrónico', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: telCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Teléfono', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    if (nombreCtrl.text.trim().isEmpty || !emailCtrl.text.contains('@')) return;
+                    await auth.updateProfile(
+                      nombre: nombreCtrl.text,
+                      apellido: apellidoCtrl.text,
+                      telefono: telCtrl.text,
+                      email: emailCtrl.text,
+                    );
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Perfil actualizado correctamente.'), backgroundColor: BookingColors.successGreen),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
+                  child: const Text('Guardar cambios', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-        ],
       ),
     );
   }
@@ -56,201 +93,201 @@ class PerfilScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context);
+    final user = auth.user;
 
     return Scaffold(
+      backgroundColor: BookingColors.backgroundLight,
       appBar: AppBar(
-        title: const Text('Mi Cuenta'),
-        backgroundColor: const Color(0xFF003580),
-        foregroundColor: Colors.white,
+        backgroundColor: BookingColors.primaryBlue,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('Mi Cuenta Booking', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        children: [
-          // Header del usuario
-          Container(
-            padding: const EdgeInsets.all(20),
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF003580), Color(0xFF0056B3)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!auth.isAuthenticated || user == null) ...[
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: BookingColors.primaryBlue,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-              ],
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 32,
-                  backgroundColor: Colors.white,
-                  child: Text(
-                    auth.isAuthenticated
-                        ? (auth.user?.nombre.isNotEmpty == true ? auth.user!.nombre[0].toUpperCase() : 'U')
-                        : '?',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF003580),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        auth.isAuthenticated ? (auth.user?.nombre ?? 'Usuario') : 'Invitado',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: BookingColors.accentYellow,
+                          child: Icon(Icons.person_outline, color: BookingColors.primaryBlue),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        auth.isAuthenticated ? (auth.user?.email ?? '') : 'Inicie sesión para guardar sus reservas',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontSize: 13,
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Inicia sesión o crea tu cuenta',
+                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Accede a tus reservas de alojamientos, boletos aéreos, rentas de autos, vouchers QR y comprobantes SRI en un solo lugar.',
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
+                            style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
+                            child: const Text('Iniciar sesión', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen())),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white),
+                            ),
+                            child: const Text('Crear cuenta', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            ] else ...[
+              // Tarjeta de usuario autenticado + Genius
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [BookingColors.primaryBlue, Color(0xFF0057C2)]),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 26,
+                          backgroundColor: BookingColors.accentYellow,
+                          child: Text(
+                            user.nombre.isNotEmpty ? user.nombre[0].toUpperCase() : 'B',
+                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(user.nombreCompleto, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                              Text(user.email, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(color: BookingColors.accentYellow, borderRadius: BorderRadius.circular(4)),
+                                child: const Text('Genius Nivel 1', style: TextStyle(color: BookingColors.primaryBlue, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Editar perfil',
+                          onPressed: () => _openEditProfileModal(context, auth),
+                          icon: const Icon(Icons.edit, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    const Divider(color: Colors.white24, height: 22),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${user.tipoDocumento}: ${user.cedula.isNotEmpty ? user.cedula : "Sin registrar"}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                        Text('Tel: ${user.telefono.isNotEmpty ? user.telefono : "Sin registrar"}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 20),
 
-          const SizedBox(height: 24),
+            const Text('Gestión de Viajes y Documentos', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
+            const SizedBox(height: 8),
 
-          // Sección de gestión
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Text(
-              'SERVICIOS Y DOCUMENTOS',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-                letterSpacing: 1.1,
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.confirmation_number_outlined, color: BookingColors.actionBlue),
+                    title: const Text('Mis Reservas y Vouchers QR', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('Alojamientos, vuelos, autos y atracciones'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MisReservasScreen())),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.receipt_long_outlined, color: BookingColors.actionBlue),
+                    title: const Text('Comprobantes Electrónicos SRI', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('Facturas con clave de acceso e IVA 15%'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FacturasScreen())),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.radar, color: BookingColors.actionBlue),
+                    title: const Text('Estado de Vuelo en Tiempo Real', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('Consulta puerta de embarque y horarios'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EstadoVueloScreen())),
+                  ),
+                ],
               ),
             ),
-          ),
 
-          ListTile(
-            leading: const Icon(Icons.receipt_long, color: Color(0xFF003580)),
-            title: const Text('Facturación Electrónica SRI'),
-            subtitle: const Text('Comprobantes de pago con 15% IVA'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const FacturasScreen()),
-              );
-            },
-          ),
-
-          ListTile(
-            leading: const Icon(Icons.notifications_outlined, color: Color(0xFF003580)),
-            title: const Text('Notificaciones de Viaje'),
-            subtitle: const Text('Alertas de vuelos, confirmaciones y cooldown'),
-            trailing: Switch(
-              value: true,
-              activeColor: const Color(0xFF003580),
-              onChanged: (val) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(val ? 'Notificaciones activadas.' : 'Notificaciones pausadas.'),
-                    duration: const Duration(seconds: 1),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          const Divider(height: 32),
-
-          // Sección Legal
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Text(
-              'LEGAL Y TRANSPARENCIA',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-                letterSpacing: 1.1,
+            if (auth.isAuthenticated) ...[
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Cerrar sesión'),
+                        content: const Text('¿Deseas salir de tu cuenta en este dispositivo?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            style: ElevatedButton.styleFrom(backgroundColor: BookingColors.errorRed),
+                            child: const Text('Salir', style: TextStyle(color: Colors.white)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) await auth.logout();
+                  },
+                  icon: const Icon(Icons.logout, color: BookingColors.errorRed),
+                  label: const Text('Cerrar sesión', style: TextStyle(color: BookingColors.errorRed, fontWeight: FontWeight.bold)),
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: BookingColors.errorRed)),
+                ),
               ),
-            ),
-          ),
-
-          ListTile(
-            leading: const Icon(Icons.description_outlined, color: Color(0xFF003580)),
-            title: const Text('Términos y Condiciones'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showTermsDialog(context),
-          ),
-
-          ListTile(
-            leading: const Icon(Icons.security, color: Color(0xFF003580)),
-            title: const Text('Política de Privacidad'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showPrivacyDialog(context),
-          ),
-
-          ListTile(
-            leading: const Icon(Icons.info_outline, color: Color(0xFF003580)),
-            title: const Text('Versión de la Aplicación'),
-            subtitle: const Text('v1.0.0 (RDA3 Flutter Mobile Marketplace)'),
-          ),
-
-          const Divider(height: 32),
-
-          // Botón de autenticación
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: auth.isAuthenticated
-                ? OutlinedButton.icon(
-                    onPressed: () {
-                      auth.logout();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Sesión cerrada exitosamente.')),
-                      );
-                    },
-                    icon: const Icon(Icons.logout, color: Colors.red),
-                    label: const Text('Cerrar Sesión', style: TextStyle(color: Colors.red)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.red),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  )
-                : ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const LoginScreen()),
-                      );
-                    },
-                    icon: const Icon(Icons.login),
-                    label: const Text('Iniciar Sesión'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF003580),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  ),
-          ),
-        ],
+            ],
+          ],
+        ),
       ),
     );
   }
 }
-
