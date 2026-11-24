@@ -1,3 +1,15 @@
+double _atrParseDouble(dynamic val, [double fallback = 0.0]) {
+  if (val is num) return val.toDouble();
+  if (val is String) return double.tryParse(val) ?? fallback;
+  return fallback;
+}
+
+int _atrParseInt(dynamic val, [int fallback = 0]) {
+  if (val is num) return val.toInt();
+  if (val is String) return int.tryParse(val) ?? fallback;
+  return fallback;
+}
+
 class TimeSlot {
   final String slotId;
   final String horaInicio;
@@ -9,20 +21,31 @@ class TimeSlot {
   TimeSlot({
     required this.slotId,
     required this.horaInicio,
-    required this.horaFin,
+    this.horaFin = '',
     required this.cuposDisponibles,
-    required this.capacidadTotal,
+    this.capacidadTotal = 20,
     required this.estado,
   });
 
+  bool get estaAgotado => estado.toUpperCase() == 'AGOTADO' || cuposDisponibles <= 0;
+
   factory TimeSlot.fromJson(Map<String, dynamic> json) {
+    final cupos = _atrParseInt(
+      json['cupos_disponibles'] ?? json['cupos'] ?? json['available_spots'] ?? json['capacity'],
+      0,
+    );
+    final rawEstado = json['estado']?.toString() ?? json['status']?.toString();
+    final estadoCalc = rawEstado != null && rawEstado.isNotEmpty
+        ? rawEstado.toUpperCase()
+        : (cupos <= 0 ? 'AGOTADO' : (cupos <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'));
+
     return TimeSlot(
       slotId: json['slot_id']?.toString() ?? json['id']?.toString() ?? 'slot-default',
-      horaInicio: json['hora_inicio'] ?? json['time'] ?? json['hora'] ?? '09:00',
-      horaFin: json['hora_fin'] ?? '11:00',
-      cuposDisponibles: json['cupos_disponibles'] ?? json['cupos'] ?? json['capacity'] ?? 0,
-      capacidadTotal: json['capacidad_total'] ?? 20,
-      estado: json['estado'] ?? (json['cupos_disponibles'] != null && json['cupos_disponibles'] > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+      horaInicio: json['time']?.toString() ?? json['hora_inicio']?.toString() ?? json['horaInicio']?.toString() ?? json['hora']?.toString() ?? '09:00 a.m.',
+      horaFin: json['hora_fin']?.toString() ?? '',
+      cuposDisponibles: cupos,
+      capacidadTotal: _atrParseInt(json['capacidad_total'], cupos > 20 ? cupos : 20),
+      estado: estadoCalc,
     );
   }
 }
@@ -31,75 +54,230 @@ class Atraccion {
   final String id;
   final String nombre;
   final String descripcion;
+  final String longDescription;
   final String ciudad;
-  final double precio;
+  final double precioAdulto;
+  final double? precioNino;
+  final double? precioSenior;
+  final double precioInfante;
+  final bool admiteNinos;
+  final bool admiteSeniors;
+  final bool admiteInfantes;
+  final String duracion;
+  final bool freeCancellation;
+  final List<String> includes;
+  final List<String> idiomas;
   final String? imagenUrl;
+  final List<String> fotosUrls;
   final String proveedor;
+  final String? proveedorCodigo;
   final double rating;
+  final int reviewsCount;
   final List<String> categorias;
   final List<TimeSlot> turnos;
+  final String? puntoEncuentro;
+
+  double get precio => precioAdulto;
+  bool get soloPersonas => !admiteNinos && !admiteSeniors && !admiteInfantes;
 
   Atraccion({
     required this.id,
     required this.nombre,
     required this.descripcion,
+    required this.longDescription,
     required this.ciudad,
-    required this.precio,
+    required this.precioAdulto,
+    this.precioNino,
+    this.precioSenior,
+    this.precioInfante = 0.0,
+    this.admiteNinos = false,
+    this.admiteSeniors = false,
+    this.admiteInfantes = false,
+    this.duracion = '2 horas - 3 horas',
+    this.freeCancellation = true,
+    this.includes = const [],
+    this.idiomas = const ['Español', 'Inglés'],
     this.imagenUrl,
+    this.fotosUrls = const [],
     required this.proveedor,
-    this.rating = 4.8,
+    this.proveedorCodigo,
+    this.rating = 9.2,
+    this.reviewsCount = 120,
     this.categorias = const [],
     this.turnos = const [],
+    this.puntoEncuentro,
   });
 
+  static const _fallbackEcuadorImages = [
+    'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1598971861713-54ad16a7e72e?w=800&auto=format&fit=crop',
+    'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&auto=format&fit=crop',
+  ];
+
+  static String _resolveCuratedImage(String text, int seed) {
+    final t = text.toLowerCase();
+    if (t.contains('mitad del mundo') || t.contains('equinoccial')) {
+      return 'https://images.unsplash.com/photo-1598971861713-54ad16a7e72e?w=800&auto=format&fit=crop';
+    }
+    if (t.contains('galápagos') || t.contains('galapagos') || t.contains('santa cruz') || t.contains('isabela')) {
+      return 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop';
+    }
+    if (t.contains('baños') || t.contains('banos') || t.contains('pailón') || t.contains('cascada')) {
+      return 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop';
+    }
+    if (t.contains('cotopaxi') || t.contains('quilotoa') || t.contains('volcán')) {
+      return 'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop';
+    }
+    if (t.contains('cuenca') || t.contains('cajas')) {
+      return 'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?w=800&auto=format&fit=crop';
+    }
+    if (t.contains('guayaquil') || t.contains('peñas') || t.contains('puerto lópez') || t.contains('machalilla')) {
+      return 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&auto=format&fit=crop';
+    }
+    if (t.contains('mindo') || t.contains('bosque')) {
+      return 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&auto=format&fit=crop';
+    }
+    return _fallbackEcuadorImages[seed.abs() % _fallbackEcuadorImages.length];
+  }
+
   factory Atraccion.fromJson(Map<String, dynamic> json) {
-    var rawSlots = json['time_slots'] ?? json['turnos'] ?? json['horarios'];
-    List<TimeSlot> slots = [];
-    if (rawSlots is List) {
-      slots = rawSlots.map((s) => TimeSlot.fromJson(s as Map<String, dynamic>)).toList();
+    final rawSlots = json['time_slots'] ?? json['turnos'] ?? json['horarios'];
+    final slots = rawSlots is List
+        ? rawSlots.whereType<Map>().map((s) => TimeSlot.fromJson(Map<String, dynamic>.from(s))).toList()
+        : <TimeSlot>[];
+
+    // Mapas de precios (pueden venir en `json['precio']` o `json['price']`)
+    final pMap = json['precio'] is Map
+        ? Map<String, dynamic>.from(json['precio'])
+        : (json['price'] is Map ? Map<String, dynamic>.from(json['price']) : <String, dynamic>{});
+
+    double adulto = _atrParseDouble(
+      json['precio_unitario_adulto'] ?? json['precio_unitario'] ?? json['precioTicket'],
+      0,
+    );
+    if (adulto <= 0) {
+      adulto = _atrParseDouble(pMap['total'] ?? pMap['adult'] ?? pMap['adulto'] ?? pMap['amount'] ?? json['precio'] ?? json['price'], 55.0);
+    }
+    if (adulto <= 0) adulto = 15.0;
+
+    final rawChild = pMap['child'] ?? pMap['nino'];
+    final childVal = rawChild != null ? _atrParseDouble(rawChild, -1) : -1.0;
+
+    final rawSenior = pMap['senior'];
+    final seniorVal = rawSenior != null ? _atrParseDouble(rawSenior, -1) : -1.0;
+
+    final rawInfant = pMap['infant'] ?? pMap['infante'];
+    final infantVal = rawInfant != null ? _atrParseDouble(rawInfant, -1) : -1.0;
+
+    final provCode = json['proveedor_codigo']?.toString() ??
+        json['proveedorCodigo']?.toString() ??
+        (json['proveedor'] is Map ? json['proveedor']['codigo']?.toString() ?? json['proveedor']['id']?.toString() : null);
+
+    final isSingleRateProvider = provCode == 'NODE_ATR_ARIEL' || provCode == 'NODE_ATR_GLORIA' || provCode == 'NODE_ATR_ALISSON';
+
+    final admiteNinosFlag = json['admite_ninos'] != null
+        ? (json['admite_ninos'] == true)
+        : (!isSingleRateProvider && childVal > 0 && childVal != adulto);
+
+    final admiteSeniorsFlag = json['admite_seniors'] != null
+        ? (json['admite_seniors'] == true)
+        : (!isSingleRateProvider && seniorVal > 0);
+
+    final admiteInfantesFlag = json['admite_infantes'] != null
+        ? (json['admite_infantes'] == true)
+        : (infantVal > 0);
+
+    // Fotos
+    final fotos = <String>[];
+    if (json['photos'] is List) {
+      for (final p in json['photos'] as List) {
+        final u = p is Map ? p['url']?.toString() : p?.toString();
+        if (u != null && u.startsWith('http') && !u.contains('example.com')) fotos.add(u);
+      }
+    }
+    if (json['fotos_urls'] is List) {
+      for (final p in json['fotos_urls'] as List) {
+        final u = p?.toString();
+        if (u != null && u.startsWith('http') && !u.contains('example.com')) fotos.add(u);
+      }
+    }
+    final singleImg = json['foto_url']?.toString() ?? json['photoUrl']?.toString() ?? json['imagen_url']?.toString() ?? json['imagen']?.toString();
+    if (singleImg != null && singleImg.startsWith('http') && !singleImg.contains('example.com') && !fotos.contains(singleImg)) {
+      fotos.insert(0, singleImg);
     }
 
-    // Resolucion resiliente de precio (puede ser number o Map en Azure)
-    double precioParsed = 0.0;
-    if (json['precio_unitario_adulto'] != null) {
-      precioParsed = (json['precio_unitario_adulto'] as num).toDouble();
-    } else if (json['precio'] is num) {
-      precioParsed = (json['precio'] as num).toDouble();
-    } else if (json['precio'] is Map && json['precio']['total'] != null) {
-      precioParsed = (json['precio']['total'] as num).toDouble();
-    } else if (json['price'] is Map && json['price']['total'] != null) {
-      precioParsed = (json['price']['total'] as num).toDouble();
-    } else if (json['price'] is num) {
-      precioParsed = (json['price'] as num).toDouble();
+    final nom = json['nombre']?.toString() ?? json['name']?.toString() ?? json['title']?.toString() ?? 'Atracción Turística';
+    final ciu = json['ciudad']?.toString() ?? json['city']?.toString() ?? json['ubicacion']?.toString() ?? 'Quito';
+    final descCorta = json['descripcion_corta']?.toString() ?? json['short_description']?.toString() ?? json['descripcion']?.toString() ?? '';
+    final descLarga = json['long_description']?.toString() ?? json['descripcion_larga']?.toString() ?? (descCorta.isNotEmpty ? descCorta : 'Descubre esta increíble experiencia turística en Ecuador.');
+
+    if (fotos.isEmpty) {
+      fotos.add(_resolveCuratedImage('$nom $ciu $descCorta', nom.hashCode));
     }
 
-    // Resolucion de imagen
-    String? img = json['foto_url'] ?? json['photoUrl'] ?? json['imagen'] ?? json['imagen_url'] ?? json['foto'];
-    if (img == null && json['fotos_urls'] is List && (json['fotos_urls'] as List).isNotEmpty) {
-      img = json['fotos_urls'][0].toString();
-    }
-
-    // Proveedor
-    String prov = 'Socio B2B';
+    String prov = 'Socio Operador Certificado';
     if (json['proveedor'] is Map && json['proveedor']['nombre_comercial'] != null) {
       prov = json['proveedor']['nombre_comercial'].toString();
-    } else if (json['proveedor_codigo'] != null) {
-      prov = json['proveedor_codigo'].toString();
+    } else if (json['proveedor'] is Map && json['proveedor']['nombre'] != null) {
+      prov = json['proveedor']['nombre'].toString();
+    } else if (provCode != null && provCode.isNotEmpty) {
+      prov = provCode;
     } else if (json['proveedor'] is String) {
       prov = json['proveedor'].toString();
     }
 
+    final rawIncludes = json['includes'] ?? json['inclusiones'];
+    final includesList = rawIncludes is List ? rawIncludes.map((e) => e.toString()).toList() : <String>[];
+
+    final rawLangs = json['supported_languages'] ?? json['idiomas'];
+    final langsList = rawLangs is List && rawLangs.isNotEmpty
+        ? rawLangs.map((e) => e.toString()).toList()
+        : <String>['Español', 'Inglés'];
+
+    final ratingsMap = json['ratings'] is Map
+        ? Map<String, dynamic>.from(json['ratings'])
+        : (json['rating'] is Map ? Map<String, dynamic>.from(json['rating']) : <String, dynamic>{});
+
+    final score = _atrParseDouble(ratingsMap['score'] ?? ratingsMap['rating'] ?? json['rating_general'] ?? json['rating'], 9.0);
+    final revs = _atrParseInt(ratingsMap['number_of_reviews'] ?? json['reviews_count'], 120);
+
+    String? punto;
+    if (json['locations'] is List && (json['locations'] as List).isNotEmpty) {
+      final firstLoc = (json['locations'] as List).first;
+      if (firstLoc is Map) punto = firstLoc['address']?.toString();
+    }
+
     return Atraccion(
-      id: json['id']?.toString() ?? '',
-      nombre: json['nombre'] ?? json['name'] ?? 'Atracción Turística',
-      descripcion: json['descripcion_corta'] ?? json['short_description'] ?? json['descripcion'] ?? json['description'] ?? '',
-      ciudad: json['ciudad'] ?? json['city'] ?? json['ubicacion'] ?? 'Ecuador',
-      precio: precioParsed > 0 ? precioParsed : 15.0,
-      imagenUrl: img,
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? json['atraccion_id']?.toString() ?? '',
+      nombre: nom,
+      descripcion: descCorta.isNotEmpty ? descCorta : descLarga,
+      longDescription: descLarga,
+      ciudad: ciu,
+      precioAdulto: adulto,
+      precioNino: childVal > 0 ? childVal : (admiteNinosFlag ? double.parse((adulto * 0.5).toStringAsFixed(2)) : null),
+      precioSenior: seniorVal > 0 ? seniorVal : (admiteSeniorsFlag ? double.parse((adulto * 0.7).toStringAsFixed(2)) : null),
+      precioInfante: infantVal >= 0 ? infantVal : 0.0,
+      admiteNinos: admiteNinosFlag,
+      admiteSeniors: admiteSeniorsFlag,
+      admiteInfantes: admiteInfantesFlag,
+      duracion: json['duration']?.toString() ?? json['duracion']?.toString() ?? json['duracion_estimada']?.toString() ?? '2 horas - 3 horas',
+      freeCancellation: json['free_cancellation'] ?? json['cancelacion_gratis'] ?? true,
+      includes: includesList,
+      idiomas: langsList,
+      imagenUrl: fotos.first,
+      fotosUrls: fotos,
       proveedor: prov,
-      rating: (json['rating'] is Map ? (json['rating']['score'] ?? 4.8) : (json['rating'] ?? 4.8)).toDouble(),
-      categorias: (json['categorias'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      proveedorCodigo: provCode,
+      rating: score > 0 ? score : 9.0,
+      reviewsCount: revs,
+      categorias: (json['categorias'] is List) ? (json['categorias'] as List).map((e) => e.toString()).toList() : [],
       turnos: slots,
+      puntoEncuentro: punto,
     );
   }
 }
