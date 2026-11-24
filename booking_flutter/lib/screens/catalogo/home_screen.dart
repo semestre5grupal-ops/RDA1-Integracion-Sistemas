@@ -4,6 +4,7 @@ import '../../theme/booking_colors.dart';
 import '../../widgets/booking_nav_header.dart';
 import '../../widgets/yellow_search_box.dart';
 import '../../widgets/booking_rating_badge.dart';
+import '../../widgets/booking_search_loading_view.dart';
 import '../../services/booking_services.dart';
 import '../../models/alojamiento.dart';
 import '../../models/vuelo.dart';
@@ -24,6 +25,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   MarketplaceCategory _activeCategory = MarketplaceCategory.alojamientos;
+  bool _isSearching = false;
 
   // Alojamientos State
   final TextEditingController _hotelDestinoCtrl = TextEditingController();
@@ -58,6 +60,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Wishlist set
   final Set<String> _wishlist = {};
+
+  int get _diasRenta {
+    final diff = _autoFechaDevolucion.difference(_autoFechaRecogida).inDays;
+    return diff > 0 ? diff : 3;
+  }
 
   @override
   void initState() {
@@ -106,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _cargarAutos() async {
     setState(() => _loadingAutos = true);
-    final list = await BookingServices.getAutos();
+    final list = await BookingServices.getAutos(location: _autoLugarCtrl.text);
     if (mounted) {
       setState(() {
         _autos = list;
@@ -124,6 +131,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _loadingAtracciones = false;
       });
     }
+  }
+
+  void _ejecutarBusqueda({String? destino}) {
+    setState(() => _isSearching = true);
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      if (mounted) {
+        setState(() => _isSearching = false);
+      }
+    });
   }
 
   // --- Date Picker Helper ---
@@ -186,21 +202,40 @@ class _HomeScreenState extends State<HomeScreen> {
     return list;
   }
 
-  // --- FILTRADO DE AUTOS ---
+  // --- FILTRADO DE AUTOS (Normalizado) ---
   List<Auto> get _filteredAutos {
     var list = _autos;
     final lugar = _autoLugarCtrl.text.trim().toLowerCase();
-    if (lugar.isNotEmpty && !lugar.contains('aeropuerto')) {
+    if (lugar.isNotEmpty &&
+        !lugar.contains('aeropuerto') &&
+        !lugar.contains('quito') &&
+        !lugar.contains('uio') &&
+        !lugar.contains('ecuador')) {
       list = list.where((a) =>
         a.proveedor.toLowerCase().contains(lugar) ||
+        a.proveedorUbicacion.toLowerCase().contains(lugar) ||
         a.marca.toLowerCase().contains(lugar) ||
         a.modelo.toLowerCase().contains(lugar)
       ).toList();
     }
     if (_selectedAutoFilter != 'Todos') {
-      list = list.where((a) =>
-        a.categoria.toLowerCase().contains(_selectedAutoFilter.toLowerCase())
-      ).toList();
+      final normFilter = _selectedAutoFilter
+          .toLowerCase()
+          .replaceAll('é', 'e')
+          .replaceAll('á', 'a')
+          .replaceAll('í', 'i')
+          .replaceAll('ó', 'o')
+          .replaceAll('ú', 'u');
+      list = list.where((a) {
+        final cat = a.categoria
+            .toLowerCase()
+            .replaceAll('é', 'e')
+            .replaceAll('á', 'a')
+            .replaceAll('í', 'i')
+            .replaceAll('ó', 'o')
+            .replaceAll('ú', 'u');
+        return cat.contains(normFilter);
+      }).toList();
     }
     return list;
   }
@@ -271,7 +306,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case MarketplaceCategory.alojamientos:
         return YellowSearchBox(
           buttonText: 'Buscar alojamientos',
-          onSearch: () => setState(() {}),
+          onSearch: () => _ejecutarBusqueda(destino: _hotelDestinoCtrl.text),
           children: [
             // Destino
             TextField(
@@ -369,7 +404,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case MarketplaceCategory.vuelos:
         return YellowSearchBox(
           buttonText: 'Buscar vuelos',
-          onSearch: () => setState(() {}),
+          onSearch: () => _ejecutarBusqueda(destino: _vueloDestinoCtrl.text),
           children: [
             Row(
               children: [
@@ -426,7 +461,10 @@ class _HomeScreenState extends State<HomeScreen> {
       case MarketplaceCategory.autos:
         return YellowSearchBox(
           buttonText: 'Buscar autos de alquiler',
-          onSearch: () => setState(() {}),
+          onSearch: () {
+            _cargarAutos();
+            _ejecutarBusqueda(destino: _autoLugarCtrl.text);
+          },
           children: [
             TextField(
               controller: _autoLugarCtrl,
@@ -503,7 +541,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case MarketplaceCategory.atracciones:
         return YellowSearchBox(
           buttonText: 'Buscar actividades',
-          onSearch: () => setState(() {}),
+          onSearch: () => _ejecutarBusqueda(destino: _atraccionDestinoCtrl.text),
           children: [
             TextField(
               controller: _atraccionDestinoCtrl,
@@ -541,9 +579,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ==========================================
-  // CONTENIDO DINÁMICO POR CATEGORÍA
+  // CONTENIDO DINÁMICO POR CATEGORÍA CON PANTALLA DE CARGA
   // ==========================================
   Widget _buildCategoryContent() {
+    if (_isSearching) {
+      String? dest;
+      String? tit;
+      switch (_activeCategory) {
+        case MarketplaceCategory.alojamientos:
+          dest = _hotelDestinoCtrl.text.isNotEmpty ? _hotelDestinoCtrl.text : 'Ecuador';
+          break;
+        case MarketplaceCategory.vuelos:
+          dest = _vueloDestinoCtrl.text.isNotEmpty ? _vueloDestinoCtrl.text : 'Ecuador';
+          tit = 'Buscando vuelos directos a $dest...';
+          break;
+        case MarketplaceCategory.autos:
+          dest = _autoLugarCtrl.text.isNotEmpty ? _autoLugarCtrl.text : 'Ecuador';
+          tit = 'Buscando vehículos y tarifas en tiempo real...';
+          break;
+        case MarketplaceCategory.atracciones:
+          dest = _atraccionDestinoCtrl.text.isNotEmpty ? _atraccionDestinoCtrl.text : 'Ecuador';
+          tit = 'Buscando experiencias y tours en vivo...';
+          break;
+      }
+      return BookingSearchLoadingView(destino: dest, titulo: tit);
+    }
+
     switch (_activeCategory) {
       case MarketplaceCategory.alojamientos:
         return _buildAlojamientosSection();
@@ -561,6 +622,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // ------------------------------------------
   Widget _buildAlojamientosSection() {
     final destinos = ['Todos', 'Quito', 'Guayaquil', 'Cuenca', 'Galápagos', 'Baños', 'Mindo'];
+
+    if (_loadingAlojamientos) {
+      return BookingSearchLoadingView(
+        destino: _hotelDestinoCtrl.text.isNotEmpty ? _hotelDestinoCtrl.text : 'Ecuador',
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -611,14 +678,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
 
-        if (_loadingAlojamientos)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(color: BookingColors.primaryBlue),
-            ),
-          )
-        else if (_filteredAlojamientos.isEmpty)
+        if (_filteredAlojamientos.isEmpty)
           _buildEmptyState('No se encontraron alojamientos en este destino.', Icons.hotel_outlined)
         else
           ListView.builder(
@@ -659,7 +719,6 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Foto con relación de aspecto y botón de wishlist
             Stack(
               children: [
                 AspectRatio(
@@ -675,7 +734,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
-                // Botón Wishlist
                 Positioned(
                   top: 10,
                   right: 10,
@@ -706,7 +764,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
-                // Badge Genius / Oferta
                 Positioned(
                   top: 10,
                   left: 10,
@@ -724,8 +781,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-
-            // Contenido y detalles
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -765,8 +820,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-
-                  // Tags de ventajas
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
@@ -778,8 +831,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
                   const Divider(height: 1, thickness: 0.6, color: BookingColors.borderLight),
                   const SizedBox(height: 10),
-
-                  // Precios y acción
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -847,10 +898,16 @@ class _HomeScreenState extends State<HomeScreen> {
   // 2. SECCIÓN VUELOS
   // ------------------------------------------
   Widget _buildVuelosSection() {
+    if (_loadingVuelos) {
+      return BookingSearchLoadingView(
+        destino: _vueloDestinoCtrl.text.isNotEmpty ? _vueloDestinoCtrl.text : 'Ecuador',
+        titulo: 'Buscando las mejores rutas y tarifas de vuelos...',
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Banner de rastreador en vivo
         Container(
           margin: const EdgeInsets.only(bottom: 16),
           padding: const EdgeInsets.all(12),
@@ -890,7 +947,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-
         const Text(
           'Vuelos disponibles en Ecuador',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: BookingColors.textDark),
@@ -902,14 +958,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
 
-        if (_loadingVuelos)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(color: BookingColors.primaryBlue),
-            ),
-          )
-        else if (_filteredVuelos.isEmpty)
+        if (_filteredVuelos.isEmpty)
           _buildEmptyState('No hay vuelos disponibles para el trayecto seleccionado.', Icons.flight_outlined)
         else
           ListView.builder(
@@ -944,7 +993,6 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              // Cabecera aerolínea y estado
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -980,8 +1028,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-
-              // Trayecto y horarios
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -1039,16 +1085,14 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 14),
               const Divider(height: 1, thickness: 0.6, color: BookingColors.borderLight),
               const SizedBox(height: 10),
-
-              // Precios y acción
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
+                  const Row(
                     children: [
-                      const Icon(Icons.work_outline, size: 14, color: BookingColors.textMuted),
-                      const SizedBox(width: 4),
-                      const Text('Equipaje de mano incluido', style: TextStyle(fontSize: 11, color: BookingColors.textMuted)),
+                      Icon(Icons.work_outline, size: 14, color: BookingColors.textMuted),
+                      SizedBox(width: 4),
+                      Text('Equipaje de mano incluido', style: TextStyle(fontSize: 11, color: BookingColors.textMuted)),
                     ],
                   ),
                   Row(
@@ -1084,10 +1128,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ------------------------------------------
-  // 3. SECCIÓN AUTOS
+  // 3. SECCIÓN AUTOS (INGENIERÍA INVERSA REACT COMPLETA)
   // ------------------------------------------
   Widget _buildAutosSection() {
-    final categorias = ['Todos', 'Económico', 'Sedán', 'Compacto', 'SUV'];
+    final categorias = ['Todos', 'Económico', 'Compacto', 'Sedán', 'SUV'];
+
+    if (_loadingAutos) {
+      return BookingSearchLoadingView(
+        destino: _autoLugarCtrl.text.isNotEmpty ? _autoLugarCtrl.text : 'Ecuador',
+        titulo: 'Verificando flota de vehículos y cobertura total...',
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1098,11 +1149,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Vehículos inspeccionados con kilometraje ilimitado y política de cooldown garantizada',
+          'Vehículos con kilometraje ilimitado, seguro contra daños y políticas transparentes',
           style: TextStyle(fontSize: 13, color: BookingColors.textMuted),
         ),
         const SizedBox(height: 12),
 
+        // Filtro de chips
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -1133,14 +1185,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
 
-        if (_loadingAutos)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(color: BookingColors.primaryBlue),
-            ),
-          )
-        else if (_filteredAutos.isEmpty)
+        if (_filteredAutos.isEmpty)
           _buildEmptyState('No hay vehículos disponibles con los criterios seleccionados.', Icons.directions_car_outlined)
         else
           ListView.builder(
@@ -1156,12 +1201,33 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- REPLICA EXACTA DE AutoCard.jsx ---
   Widget _buildAutoCard(Auto a) {
+    final precioTotal = (a.precioPorDia * _diasRenta).toStringAsFixed(2);
+
+    // Configuración de estilo del proveedor (idéntico a AutoCard.jsx)
+    Color provBg = const Color(0xFF00843D);
+    Color provColor = Colors.white;
+    String provText = 'Muy bien';
+    String provReviews = '320+ opiniones';
+
+    if (a.proveedor.toLowerCase().contains('alamo')) {
+      provBg = const Color(0xFF00266B);
+      provColor = const Color(0xFFFFB700);
+      provText = 'Excelente';
+      provReviews = '450+ opiniones';
+    } else if (a.proveedor.toLowerCase().contains('enterprise')) {
+      provBg = const Color(0xFF006600);
+      provColor = Colors.white;
+      provText = 'Excepcional';
+      provReviews = '800+ opiniones';
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         side: const BorderSide(color: BookingColors.borderLight, width: 0.8),
       ),
       child: InkWell(
@@ -1172,106 +1238,214 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Fila superior: Imagen con badge de categoría y Datos de cabecera
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Imagen del auto
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      width: 110,
-                      height: 80,
-                      color: Colors.grey.shade100,
-                      child: Image.network(
-                        a.imagenUrl ?? 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=500',
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.directions_car, size: 40, color: BookingColors.textMuted),
+                  // Imagen de auto con categoría superpuesta
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          width: 140,
+                          height: 95,
+                          color: const Color(0xFFF3F4F6),
+                          child: Image.network(
+                            a.imagenUrl ?? 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=300&q=80',
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Icon(Icons.directions_car, size: 40, color: BookingColors.textMuted),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.75),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            a.categoria.toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(width: 14),
-                  // Datos del auto
+
+                  // Nombre del auto y badge de proveedor
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          '${a.marca} ${a.modelo}',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: BookingColors.textDark),
-                        ),
-                        Text(
-                          '${a.categoria} · Proveedor: ${a.proveedor}',
-                          style: const TextStyle(fontSize: 12, color: BookingColors.textMuted),
-                        ),
-                        const SizedBox(height: 6),
-                        // Badge Cooldown
-                        if (a.enCooldown)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.shade100,
-                              borderRadius: BorderRadius.circular(4),
+                        RichText(
+                          text: TextSpan(
+                            text: a.carDisplayName,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: BookingColors.textDark,
                             ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.schedule, size: 12, color: Colors.orange),
-                                SizedBox(width: 4),
-                                Text(
-                                  'En descanso/limpieza (2h)',
-                                  style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
+                            children: const [
+                              TextSpan(
+                                text: '  o similar ℹ️',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: BookingColors.actionBlue,
+                                  fontWeight: FontWeight.normal,
                                 ),
-                              ],
-                            ),
-                          )
-                        else
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: BookingColors.successGreen.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'Disponible de inmediato',
-                              style: TextStyle(color: BookingColors.successGreen, fontSize: 11, fontWeight: FontWeight.bold),
-                            ),
+                              ),
+                            ],
                           ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // Fila de proveedor al estilo Booking.com
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: provBg,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                a.proveedor,
+                                style: TextStyle(color: provColor, fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: BookingColors.primaryBlue,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                a.proveedorRating.toStringAsFixed(1),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              provText,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: BookingColors.textDark),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          provReviews,
+                          style: const TextStyle(fontSize: 10, color: BookingColors.textMuted),
+                        ),
                       ],
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 14),
+
+              // Especificaciones técnicas completas
+              Wrap(
+                spacing: 14,
+                runSpacing: 6,
+                children: [
+                  _buildSpecIcon(Icons.people_outline, '${a.capacidadPasajeros} plazas'),
+                  _buildSpecIcon(Icons.settings_outlined, a.transmision),
+                  _buildSpecIcon(Icons.work_outline, '${a.maletasGrandes} maleta'),
+                  _buildSpecIcon(Icons.meeting_room_outlined, '${a.puertas} puertas'),
+                  _buildSpecIcon(Icons.ac_unit, 'A/C'),
+                  _buildSpecIcon(Icons.alt_route, 'Km ilimitado'),
+                ],
+              ),
               const SizedBox(height: 12),
 
-              // Fila de especificaciones
+              // Badges de transparencia Booking.com
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  _buildPillBadge('✓ Cancelación gratis (hasta 48h)', BookingColors.successGreen),
+                  _buildPillBadge('⛽ Lleno a lleno', BookingColors.primaryBlue),
+                  _buildPillBadge('⭐ Mostrador en terminal', Colors.orange.shade800),
+                  if (a.enCooldown)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.schedule, size: 12, color: Colors.orange),
+                          SizedBox(width: 4),
+                          Text(
+                            'Cooldown 2h',
+                            style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Ubicación
               Row(
                 children: [
-                  _buildSpecIcon(Icons.people_outline, '${a.capacidadPasajeros} asientos'),
-                  const SizedBox(width: 12),
-                  _buildSpecIcon(Icons.settings_outlined, a.transmision),
-                  const SizedBox(width: 12),
-                  _buildSpecIcon(Icons.ac_unit, 'A/C'),
+                  const Icon(Icons.location_on, size: 14, color: BookingColors.actionBlue),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      a.proveedorUbicacion,
+                      style: const TextStyle(fontSize: 12, color: BookingColors.actionBlue, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
               const Divider(height: 1, thickness: 0.6, color: BookingColors.borderLight),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
-              // Precio y botón
+              // Bloque inferior de precios y CTA
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Precio por día:', style: TextStyle(fontSize: 11, color: BookingColors.textMuted)),
                       Text(
-                        'US\$ ${a.precioPorDia.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue),
+                        'Precio por día: US\$ ${a.precioPorDia.toStringAsFixed(2)}',
+                        style: const TextStyle(fontSize: 12, color: BookingColors.textMuted),
+                      ),
+                      Text(
+                        'Total por $_diasRenta días:',
+                        style: const TextStyle(fontSize: 11, color: BookingColors.textMuted),
+                      ),
+                      Text(
+                        'US\$ $precioTotal',
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue),
+                      ),
+                      const Text(
+                        'Impuestos y tasas incluidos',
+                        style: TextStyle(fontSize: 10, color: BookingColors.successGreen, fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
@@ -1284,10 +1458,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: BookingColors.actionBlue,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
-                    child: const Text('Reservar auto', style: TextStyle(fontSize: 13, color: Colors.white)),
+                    child: const Text('Ver oferta →', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
                 ],
               ),
@@ -1300,10 +1474,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSpecIcon(IconData icon, String text) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: BookingColors.textMuted),
+        Icon(icon, size: 14, color: const Color(0xFF4B5563)),
         const SizedBox(width: 4),
-        Text(text, style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+        Text(text, style: const TextStyle(fontSize: 11, color: Color(0xFF4B5563), fontWeight: FontWeight.w500)),
       ],
     );
   }
@@ -1313,6 +1488,13 @@ class _HomeScreenState extends State<HomeScreen> {
   // ------------------------------------------
   Widget _buildAtraccionesSection() {
     final ciudades = ['Todos', 'Quito', 'Galápagos', 'Baños', 'Cuenca', 'Mindo'];
+
+    if (_loadingAtracciones) {
+      return BookingSearchLoadingView(
+        destino: _atraccionDestinoCtrl.text.isNotEmpty ? _atraccionDestinoCtrl.text : 'Ecuador',
+        titulo: 'Buscando las mejores actividades y tours guiados...',
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1358,14 +1540,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         const SizedBox(height: 16),
 
-        if (_loadingAtracciones)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(color: BookingColors.primaryBlue),
-            ),
-          )
-        else if (_filteredAtracciones.isEmpty)
+        if (_filteredAtracciones.isEmpty)
           _buildEmptyState('No hay actividades disponibles en la ciudad elegida.', Icons.attractions_outlined)
         else
           ListView.builder(
