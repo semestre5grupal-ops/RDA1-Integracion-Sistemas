@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/booking_colors.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/auth/register_screen.dart';
 
 class AuthGuardDialog {
   static Future<bool> ensureAuthenticated(BuildContext context, {required bool isAuthenticated}) async {
@@ -21,13 +22,27 @@ class AuthGuardDialog {
           ],
         ),
         content: const Text(
-          'Para confirmar tu reserva, garantizar tus cupos y emitir tu voucher y factura electrónica autorizada por el SRI, debes acceder a tu cuenta de Booking Central.',
+          'Para confirmar tu reserva, garantizar tus cupos y emitir tu voucher y factura electrónica autorizada por el SRI, debes acceder con tu cuenta de Booking Central.',
           style: TextStyle(fontSize: 14, color: BookingColors.textDark, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar', style: TextStyle(color: BookingColors.textMuted)),
+          ),
+          OutlinedButton(
+            onPressed: () async {
+              Navigator.pop(ctx, true);
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const RegisterScreen()),
+              );
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: BookingColors.primaryBlue,
+              side: const BorderSide(color: BookingColors.primaryBlue),
+            ),
+            child: const Text('Crear Cuenta'),
           ),
           ElevatedButton(
             onPressed: () async {

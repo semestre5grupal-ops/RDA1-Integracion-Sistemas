@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../theme/booking_colors.dart';
 import '../providers/auth_provider.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/auth/register_screen.dart';
+import '../screens/perfil/perfil_screen.dart';
 
 enum MarketplaceCategory {
   alojamientos,
@@ -99,7 +101,7 @@ class BookingNavHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Barra de utilidad superior
+          // 1. Barra superior corporativa
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Row(
@@ -136,38 +138,82 @@ class BookingNavHeader extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () {
-                        if (!auth.isAuthenticated) {
+                    const SizedBox(width: 10),
+                    if (auth.isAuthenticated)
+                      InkWell(
+                        onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const LoginScreen()),
+                            MaterialPageRoute(builder: (_) => const PerfilScreen()),
                           );
-                        }
-                      },
-                      child: CircleAvatar(
-                        radius: 16,
-                        backgroundColor: Colors.white,
-                        child: Text(
-                          auth.isAuthenticated
-                              ? (auth.user?.nombre.isNotEmpty == true ? auth.user!.nombre[0].toUpperCase() : 'U')
-                              : '?',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: BookingColors.primaryBlue,
-                          ),
+                        },
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 16,
+                              backgroundColor: Colors.white,
+                              child: Text(
+                                auth.user?.nombre.isNotEmpty == true ? auth.user!.nombre[0].toUpperCase() : 'U',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: BookingColors.primaryBlue,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              auth.user?.nombre ?? 'Mi Cuenta',
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ],
                         ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          OutlinedButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              visualDensity: VisualDensity.compact,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            ),
+                            child: const Text('Regístrate', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 6),
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const LoginScreen()),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: BookingColors.primaryBlue,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              visualDensity: VisualDensity.compact,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            ),
+                            child: const Text('Iniciar sesión', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
                       ),
-                    ),
                   ],
                 ),
               ],
             ),
           ),
 
-          // 2. Barra de píldoras de categorías (Booking Navigation Pills)
+          // 2. Barra de píldoras de categorías
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
