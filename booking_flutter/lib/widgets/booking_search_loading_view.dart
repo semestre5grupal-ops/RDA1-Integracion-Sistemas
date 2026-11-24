@@ -273,3 +273,4 @@ class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView>
     );
   }
 }
+
