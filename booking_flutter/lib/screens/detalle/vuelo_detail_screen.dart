@@ -3,6 +3,9 @@ import 'package:provider/provider.dart';
 import '../../models/vuelo.dart';
 import '../../models/cart_item.dart';
 import '../../providers/cart_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../widgets/auth_guard_dialog.dart';
+import '../../theme/booking_colors.dart';
 
 class VueloDetailScreen extends StatefulWidget {
   final Vuelo vuelo;
@@ -22,9 +25,10 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
     final total = v.precio * _pasajeros;
 
     return Scaffold(
+      backgroundColor: BookingColors.backgroundLight,
       appBar: AppBar(
-        title: Text('Vuelo ${v.numeroVuelo}', style: const TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFF003580),
+        title: Text('Vuelo ${v.numeroVuelo}', style: const TextStyle(color: Colors.white, fontSize: 18)),
+        backgroundColor: BookingColors.primaryBlue,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: SingleChildScrollView(
@@ -33,6 +37,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Card(
+              elevation: 2,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -41,21 +46,41 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(v.origen, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                        const Icon(Icons.flight_takeoff, color: Color(0xFF003580), size: 28),
-                        Text(v.destino, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(v.origen, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
+                            Text('Salida: ${v.horaSalida}', style: const TextStyle(color: BookingColors.textMuted, fontSize: 13)),
+                          ],
+                        ),
+                        const Icon(Icons.flight_takeoff, color: BookingColors.primaryBlue, size: 32),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(v.destino, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
+                            Text('Llegada: ${v.horaLlegada}', style: const TextStyle(color: BookingColors.textMuted, fontSize: 13)),
+                          ],
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const Divider(height: 24, color: BookingColors.borderLight),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Salida: ${v.horaSalida}'),
-                        Text('Llegada: ${v.horaLlegada}'),
+                        Text('${v.aerolinea} · Vuelo ${v.numeroVuelo}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: BookingColors.successGreen.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            v.estado,
+                            style: const TextStyle(color: BookingColors.successGreen, fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                        ),
                       ],
                     ),
-                    const Divider(height: 24),
-                    Text('${v.aerolinea} · Vuelo ${v.numeroVuelo}'),
                   ],
                 ),
               ),
@@ -63,13 +88,25 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
             const SizedBox(height: 16),
 
             const Text('Selección de Asiento:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            DropdownButton<String>(
-              value: _asiento,
-              isExpanded: true,
-              items: ['12A (Ventana)', '12B (Medio)', '12C (Pasillo)', '14A (Ventana)']
-                  .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                  .toList(),
-              onChanged: (v) => setState(() => _asiento = v!),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: BookingColors.borderLight),
+              ),
+              child: DropdownButton<String>(
+                value: _asiento,
+                isExpanded: true,
+                underline: const SizedBox(),
+                items: ['12A (Ventana)', '12B (Medio)', '12C (Pasillo)', '14A (Ventana)']
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => _asiento = val);
+                },
+              ),
             ),
 
             const SizedBox(height: 16),
@@ -80,12 +117,12 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                 Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.remove_circle_outline),
+                      icon: const Icon(Icons.remove_circle_outline, color: BookingColors.primaryBlue),
                       onPressed: _pasajeros > 1 ? () => setState(() => _pasajeros--) : null,
                     ),
-                    Text('$_pasajeros', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text('$_pasajeros', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                     IconButton(
-                      icon: const Icon(Icons.add_circle_outline),
+                      icon: const Icon(Icons.add_circle_outline, color: BookingColors.primaryBlue),
                       onPressed: () => setState(() => _pasajeros++),
                     ),
                   ],
@@ -95,16 +132,23 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
 
             const SizedBox(height: 24),
 
+            // Botón Agregar con Auth Guard
             SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF003580),
+                  backgroundColor: BookingColors.actionBlue,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
-                onPressed: () {
+                onPressed: () async {
+                  final auth = context.read<AuthProvider>();
+                  if (!auth.isAuthenticated) {
+                    final proceed = await AuthGuardDialog.ensureAuthenticated(context, isAuthenticated: false);
+                    if (!proceed) return;
+                  }
+
                   final item = CartItem(
                     id: 'vuelo-${DateTime.now().millisecondsSinceEpoch}',
                     vertical: 'vuelos',
@@ -116,17 +160,27 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                     metadata: {
                       'numero_vuelo': v.numeroVuelo,
                       'asiento': _asiento,
+                      'origen': v.origen,
+                      'destino': v.destino,
                     },
                   );
 
-                  context.read<CartProvider>().addItem(item);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Vuelo agregado al carrito.'), backgroundColor: Colors.green),
-                  );
-                  Navigator.pop(context);
+                  if (context.mounted) {
+                    context.read<CartProvider>().addItem(item);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Vuelo agregado al carrito exitosamente.'),
+                        backgroundColor: BookingColors.successGreen,
+                      ),
+                    );
+                    Navigator.pop(context);
+                  }
                 },
                 icon: const Icon(Icons.add_shopping_cart),
-                label: Text('AGREGAR POR \$${total.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                label: Text(
+                  'RESERVAR POR US\$ ${total.toStringAsFixed(2)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
               ),
             ),
           ],
@@ -135,4 +189,3 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
     );
   }
 }
-
