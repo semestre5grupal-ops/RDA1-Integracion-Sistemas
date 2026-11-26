@@ -8,6 +8,7 @@ import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
 import 'detalle_reserva_vuelo_screen.dart';
 import 'voucher_qr_screen.dart';
+import '../../widgets/booking_footer.dart';
 
 class MisReservasScreen extends StatefulWidget {
   const MisReservasScreen({super.key});
@@ -251,12 +252,22 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: BookingColors.textMuted),
                                 ),
                               ),
+                              SizedBox(height: 80),
+                              BookingFooter(),
                             ],
                           )
                         : ListView.builder(
                             padding: const EdgeInsets.all(14),
-                            itemCount: list.length,
-                            itemBuilder: (_, i) => _buildReservaCard(list[i]),
+                            itemCount: list.length + 1,
+                            itemBuilder: (_, i) {
+                              if (i == list.length) {
+                                return const Padding(
+                                  padding: EdgeInsets.only(top: 20),
+                                  child: BookingFooter(),
+                                );
+                              }
+                              return _buildReservaCard(list[i]);
+                            },
                           ),
                   ),
           ),

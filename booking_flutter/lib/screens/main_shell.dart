@@ -4,8 +4,6 @@ import '../theme/booking_colors.dart';
 import '../widgets/booking_footer.dart';
 import '../widgets/chatbot_flotante.dart';
 import 'catalogo/home_screen.dart';
-import 'perfil/perfil_screen.dart';
-import 'reservas/mis_reservas_screen.dart';
 
 class MainShell extends StatefulWidget {
   final int initialIndex;
@@ -16,19 +14,11 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
-  late int _currentIndex;
   bool _showCookieBanner = false;
-
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    MisReservasScreen(),
-    PerfilScreen(),
-  ];
 
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialIndex;
     _checkCookies();
   }
 
@@ -52,21 +42,19 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width >= 900;
-
     return Scaffold(
       body: Stack(
         children: [
-          IndexedStack(
-            index: isWide ? 0 : _currentIndex,
-            children: _screens,
-          ),
+          // Vista principal responsiva 1:1 con App.jsx de React
+          const HomeScreen(),
+
           // Chatbot flotante (esquina inferior derecha, parity con ChatbotFlotante.jsx)
           Positioned(
             right: 16,
             bottom: _showCookieBanner ? 96 : 18,
             child: const ChatbotFlotante(),
           ),
+
           // Banner de consentimiento de cookies (primera visita, parity con BannerCookies.jsx)
           if (_showCookieBanner)
             Positioned(
@@ -134,36 +122,6 @@ class _MainShellState extends State<MainShell> {
             ),
         ],
       ),
-      bottomNavigationBar: isWide
-          ? null
-          : BottomNavigationBar(
-              currentIndex: _currentIndex,
-              onTap: (index) => setState(() => _currentIndex = index),
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: Colors.white,
-              selectedItemColor: BookingColors.primaryBlue,
-              unselectedItemColor: BookingColors.textMuted,
-              selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 12),
-              elevation: 10,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.explore_outlined),
-                  activeIcon: Icon(Icons.explore),
-                  label: 'Explorar',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.confirmation_number_outlined),
-                  activeIcon: Icon(Icons.confirmation_number),
-                  label: 'Mis Reservas',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.person_outline),
-                  activeIcon: Icon(Icons.person),
-                  label: 'Mi Cuenta',
-                ),
-              ],
-            ),
     );
   }
 }

@@ -50,77 +50,6 @@ class BookingNavHeader extends StatelessWidget {
     }
   }
 
-  void _showUserDropdown(BuildContext context, AuthProvider auth) {
-    final user = auth.user;
-    if (user == null) return;
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Cabecera: Nombre y correo (parity con Navbar.jsx)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: BookingColors.actionBlue,
-                      child: Text(
-                        (user.nombre.isNotEmpty ? user.nombre : 'U').substring(0, 1).toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            user.nombreCompleto.isNotEmpty ? user.nombreCompleto : user.nombre,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.textDark),
-                          ),
-                          Text(
-                            user.email,
-                            style: const TextStyle(fontSize: 12.5, color: BookingColors.textMuted),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.person_outline, color: BookingColors.actionBlue),
-                title: const Text('👤 Editar Perfil', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PerfilScreen()));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout, color: BookingColors.errorRed),
-                title: const Text('🚪 Cerrar sesión', style: TextStyle(color: BookingColors.errorRed, fontWeight: FontWeight.w600, fontSize: 14)),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await auth.logout();
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCategoryPill(
     BuildContext context, {
     required MarketplaceCategory category,
@@ -167,6 +96,7 @@ class BookingNavHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context);
+    final user = auth.user;
     final isWide = MediaQuery.of(context).size.width >= 860;
 
     return Container(
@@ -201,7 +131,7 @@ class BookingNavHeader extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (auth.isAuthenticated) ...[
+                        if (auth.isAuthenticated && user != null) ...[
                           // Botón outline "Mis reservas" (Navbar.jsx parity)
                           OutlinedButton(
                             onPressed: () => Navigator.push(
@@ -221,37 +151,95 @@ class BookingNavHeader extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          // Píldora de usuario con avatar, nombre y flecha ▼
-                          InkWell(
-                            onTap: () => _showUserDropdown(context, auth),
-                            borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(20),
+                          // Píldora de usuario con menú desplegable anclado flotante (Navbar.jsx dropdown parity)
+                          Theme(
+                            data: Theme.of(context).copyWith(
+                              cardColor: Colors.white,
+                              popupMenuTheme: PopupMenuThemeData(
+                                color: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                elevation: 8,
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  CircleAvatar(
-                                    radius: 13,
-                                    backgroundColor: BookingColors.actionBlue,
-                                    child: Text(
-                                      (auth.user?.nombre.isNotEmpty == true ? auth.user!.nombre : 'U')
-                                          .substring(0, 1)
-                                          .toUpperCase(),
-                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            child: PopupMenuButton<String>(
+                              offset: const Offset(0, 36),
+                              tooltip: 'Menú de usuario',
+                              onSelected: (val) async {
+                                if (val == 'perfil') {
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PerfilScreen()));
+                                } else if (val == 'logout') {
+                                  await auth.logout();
+                                }
+                              },
+                              itemBuilder: (ctx) => [
+                                // Cabecera con Nombre y Email
+                                PopupMenuItem<String>(
+                                  enabled: false,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        user.nombreCompleto.isNotEmpty ? user.nombreCompleto : user.nombre,
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF333333)),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        user.email,
+                                        style: const TextStyle(fontSize: 12, color: Color(0xFF666666)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                // 👤 Editar Perfil
+                                const PopupMenuItem<String>(
+                                  value: 'perfil',
+                                  child: Row(
+                                    children: [
+                                      Text('👤 ', style: TextStyle(fontSize: 14)),
+                                      Text('Editar Perfil', style: TextStyle(color: Color(0xFF333333), fontSize: 13, fontWeight: FontWeight.w500)),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                // 🚪 Cerrar sesión
+                                const PopupMenuItem<String>(
+                                  value: 'logout',
+                                  child: Row(
+                                    children: [
+                                      Text('🚪 ', style: TextStyle(fontSize: 14)),
+                                      Text('Cerrar sesión', style: TextStyle(color: Color(0xFFD32F2F), fontSize: 13, fontWeight: FontWeight.w500)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 13,
+                                      backgroundColor: BookingColors.actionBlue,
+                                      child: Text(
+                                        (user.nombre.isNotEmpty ? user.nombre : 'U').substring(0, 1).toUpperCase(),
+                                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 7),
-                                  Text(
-                                    auth.user?.nombre.isNotEmpty == true ? auth.user!.nombre : 'Usuario',
-                                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
-                                ],
+                                    const SizedBox(width: 7),
+                                    Text(
+                                      user.nombre.isNotEmpty ? user.nombre : 'Usuario',
+                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
