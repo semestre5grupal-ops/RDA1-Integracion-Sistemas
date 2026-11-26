@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/booking_colors.dart';
 import 'login_screen.dart';
+import '../../utils/cedula_ecuador.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -46,28 +47,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // --- Algoritmo Oficial de Verificación de Cédula Ecuatoriana ---
-  bool _validarCedulaEcuatoriana(String ced) {
-    if (ced.length != 10) return false;
-    final int? region = int.tryParse(ced.substring(0, 2));
-    if (region == null || region < 1 || region > 24) return false;
-
-    final int? tercerDigito = int.tryParse(ced.substring(2, 3));
-    if (tercerDigito == null || tercerDigito >= 6) return false;
-
-    final List<int> coeficientes = [2, 1, 2, 1, 2, 1, 2, 1, 2];
-    final int? verificador = int.tryParse(ced.substring(9, 10));
-    if (verificador == null) return false;
-
-    int suma = 0;
-    for (int i = 0; i < 9; i++) {
-      int val = int.parse(ced[i]) * coeficientes[i];
-      if (val >= 10) val -= 9;
-      suma += val;
-    }
-
-    final int digitoCalculado = ((suma + 9) ~/ 10 * 10) - suma;
-    return digitoCalculado == verificador;
-  }
+  /// Módulo 10 compartido (utils/cedula_ecuador.dart).
+  bool _validarCedulaEcuatoriana(String c) => cedulaValida(c);
 
   // --- Validación del Formulario ---
   bool _validarFormulario() {

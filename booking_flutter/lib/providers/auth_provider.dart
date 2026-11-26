@@ -20,9 +20,7 @@ class AuthUser {
     required this.telefono,
   });
 
-  String get displayName => ('$nombre $apellido').trim().isNotEmpty
-      ? ('$nombre $apellido').trim()
-      : (email.split('@').first);
+  String get displayName => ('$nombre $apellido').trim().isNotEmpty ? ('$nombre $apellido').trim() : (email.split('@').first);
 
   String get nombreCompleto => displayName;
 
@@ -75,7 +73,7 @@ class AuthProvider extends ChangeNotifier {
         nombre: name,
         apellido: '',
         email: email,
-        cedula: '1724567890',
+        cedula: '',
         telefono: '0987654321',
       );
     }
@@ -90,7 +88,8 @@ class AuthProvider extends ChangeNotifier {
       final res = await http.post(
         url,
         headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw',
+          'apikey':
+              'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
@@ -109,7 +108,7 @@ class AuthProvider extends ChangeNotifier {
           nombre: meta['nombre']?.toString() ?? (email.split('@').first),
           apellido: meta['apellido']?.toString() ?? '',
           email: email.trim().toLowerCase(),
-          cedula: meta['cedula']?.toString() ?? '1724567890',
+          cedula: meta['cedula']?.toString() ?? '', // sin cédula inventada: la pide el formulario
           tipoDocumento: meta['tipo_documento']?.toString() ?? 'CEDULA',
           telefono: meta['telefono']?.toString() ?? '0987654321',
         );
@@ -126,7 +125,7 @@ class AuthProvider extends ChangeNotifier {
       nombre: email.split('@').first,
       apellido: '',
       email: email.trim().toLowerCase(),
-      cedula: '1724567890',
+      cedula: '',
       telefono: '0987654321',
     );
 
@@ -153,7 +152,8 @@ class AuthProvider extends ChangeNotifier {
       final res = await http.post(
         url,
         headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw',
+          'apikey':
+              'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
