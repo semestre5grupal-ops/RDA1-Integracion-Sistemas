@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><linearGradient id="fondo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#006CE4"/><stop offset="1" stop-color="#003B95"/></linearGradient></defs>
+<rect width="1024" height="1024" fill="url(#fondo)"/>
+<!-- Pin de destino con una flecha de vuelo: viajes + reservas. Diseño original. -->
+<path d="M512 232c-132 0-238 104-238 236 0 170 190 330 238 372 48-42 238-202 238-372 0-132-106-236-238-236z" fill="#FFFFFF"/>
+<circle cx="512" cy="468" r="124" fill="#003B95"/>
+<path d="M446 522 L570 398 M494 392 L576 392 L576 474" fill="none" stroke="#FEBB02" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+<g fill="#006CE4"><circle cx="440" cy="656" r="15"/><circle cx="476" cy="618" r="15"/><circle cx="512" cy="580" r="15"/></g>
+</svg>

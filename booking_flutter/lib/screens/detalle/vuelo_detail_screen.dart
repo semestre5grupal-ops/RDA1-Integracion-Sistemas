@@ -7,6 +7,7 @@ import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../../offline/cola_reservas.dart';
+import '../../services/telemetria.dart';
 import '../../utils/clave_compra.dart';
 import '../../utils/destinos_catalog.dart';
 import '../../widgets/auth_guard_dialog.dart';
@@ -168,6 +169,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
     if (!ok || !mounted) return;
     if (!Provider.of<AuthProvider>(context, listen: false).isAuthenticated) return;
 
+    Telemetria.registrar('checkout_started', 'vuelos');
     // ModalBloqueoCupo.jsx: cabina + mapa referencial + hold con Idempotency-Key
     // generada al abrir (un doble clic ya no crea dos holds). Si el usuario cierra
     // sin bloquear, no se avanza.
@@ -248,6 +250,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       return;
     }
 
+    Telemetria.registrar('payment_started', 'vuelos');
     setState(() {
       _submittingBooking = true;
       _errorMsg = null;
@@ -321,6 +324,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       _claveCompra.reiniciar();
 
       _bookingCompleted = true;
+      Telemetria.registrar('payment_succeeded', 'vuelos');
+      Telemetria.registrar('booking_confirmed', 'vuelos');
 
       final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
       final resId = dataObj['bookingId']?.toString() ?? dataObj['id']?.toString() ?? 'VUE-${DateTime.now().millisecondsSinceEpoch}';
@@ -349,6 +354,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
         MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: nuevaReserva)),
       );
     } catch (e) {
+      Telemetria.registrar('payment_failed', 'vuelos', {'error': e is ApiException ? '${e.statusCode} ${e.userMessage}' : 'error de conexión'});
       if (mounted) {
         setState(() {
           _submittingBooking = false;

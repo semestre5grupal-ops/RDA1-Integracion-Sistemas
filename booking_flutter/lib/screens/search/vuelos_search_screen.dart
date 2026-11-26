@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../models/vuelo.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
+import '../../services/telemetria.dart';
 import '../../utils/destinos_catalog.dart';
 import '../../widgets/vuelo_passengers_sheet.dart';
 import '../../widgets/vuelos_loading_view.dart';
@@ -89,6 +90,7 @@ class _VuelosSearchScreenState extends State<VuelosSearchScreen> {
   }
 
   Future<void> _fetchFlights() async {
+    Telemetria.registrar('search_submitted', 'vuelos', {'origen': _origin, 'destino': _destination, 'esIdaVuelta': _isRoundTrip});
     setState(() {
       _loading = true;
       _error = null;
