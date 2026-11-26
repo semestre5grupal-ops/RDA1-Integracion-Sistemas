@@ -250,9 +250,8 @@ class BookingServices {
       final searchRes = await ApiClient.post('/autos/search', body: searchBody);
       if (searchRes.statusCode == 200 || searchRes.statusCode == 201) {
         final data = jsonDecode(searchRes.body);
-        final meta = (data is Map && data['metadata'] is Map)
-            ? AutosSearchMetadata.fromJson(Map<String, dynamic>.from(data['metadata']))
-            : AutosSearchMetadata();
+        final meta =
+            (data is Map && data['metadata'] is Map) ? AutosSearchMetadata.fromJson(Map<String, dynamic>.from(data['metadata'])) : AutosSearchMetadata();
         return AutosSearchResponse(autos: _parseEach(data, Auto.fromJson, const ['vehiculos', 'autos']), metadata: meta);
       }
       lastError = ApiClient.parseError(searchRes);
@@ -312,6 +311,30 @@ class BookingServices {
     throw ApiClient.parseError(res);
   }
 
+  /// Check-in digital anticipado: `POST /autos/reservas/:id/checkin`
+  /// (`CheckinAutoDto`: documento_identidad 5-20 caracteres, numero_licencia opcional).
+  static Future<Map<String, dynamic>> checkinAuto(
+    String reservaIdOPnr, {
+    required String documentoIdentidad,
+    String? numeroLicencia,
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      '/autos/reservas/${Uri.encodeComponent(reservaIdOPnr)}/checkin',
+      body: {
+        'documento_identidad': documentoIdentidad.trim(),
+        if (numeroLicencia != null && numeroLicencia.trim().isNotEmpty) 'numero_licencia': numeroLicencia.trim(),
+      },
+      token: token,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      final d = jsonDecode(res.body);
+      return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
+    }
+    throw ApiClient.parseError(res);
+  }
+
   // =========================================================================
   // 4. VUELOS (Contrato v1.5.0.0 — 5 aerolíneas socias + Hold + Seatmap)
   // =========================================================================
@@ -336,20 +359,12 @@ class BookingServices {
         final pct = double.tryParse(feeMap['percentage']?.toString() ?? '0') ?? 0.0;
 
         final rawOffers = data['offers'];
-        final offers = rawOffers is List
-            ? rawOffers
-                .whereType<Map>()
-                .map((o) => Vuelo.fromJson(Map<String, dynamic>.from(o), recargoPct: pct))
-                .toList()
-            : <Vuelo>[];
+        final offers =
+            rawOffers is List ? rawOffers.whereType<Map>().map((o) => Vuelo.fromJson(Map<String, dynamic>.from(o), recargoPct: pct)).toList() : <Vuelo>[];
 
         final rawSources = data['sources'];
-        final sources = rawSources is List
-            ? rawSources
-                .whereType<Map>()
-                .map((s) => VueloSource.fromJson(Map<String, dynamic>.from(s)))
-                .toList()
-            : <VueloSource>[];
+        final sources =
+            rawSources is List ? rawSources.whereType<Map>().map((s) => VueloSource.fromJson(Map<String, dynamic>.from(s))).toList() : <VueloSource>[];
 
         return VueloSearchResult(
           totalOffers: (data['totalOffers'] as num?)?.toInt() ?? offers.length,
@@ -493,9 +508,11 @@ class BookingServices {
     throw ApiClient.parseError(res);
   }
 
+  /// `POST /vuelos/bookings/:id/check-in` (con guion, como `hacerCheckIn` de
+  /// vuelosApi.ts y el controlador). La ruta anterior `/checkin` devolvía 404.
   static Future<Map<String, dynamic>> checkinVuelo(String bookingId, {String? token}) async {
     final res = await ApiClient.post(
-      '/vuelos/bookings/${Uri.encodeComponent(bookingId)}/checkin',
+      '/vuelos/bookings/${Uri.encodeComponent(bookingId)}/check-in',
       body: {},
       token: token,
       includeFingerprint: true,
@@ -723,6 +740,129 @@ class BookingServices {
       return d is Map<String, dynamic> ? d : {'data': d};
     }
     throw ApiClient.parseError(res);
+  }
+
+  // =========================================================================
+  // 6b. POSTVENTA DE VUELOS (ModalPostventa.jsx / ModalCambioFecha.jsx)
+  // Todas llevan X-Device-Fingerprint: el backend identifica al propietario
+  // de la reserva por la huella del dispositivo (cabecerasPropietario()).
+  // =========================================================================
+
+  static String _bookingPath(String bookingId, String sufijo) => '/vuelos/bookings/${Uri.encodeComponent(bookingId)}$sufijo';
+
+  static dynamic _decodeOrThrow(dynamic res, {List<int> ok = const [200, 201]}) {
+    if (ok.contains(res.statusCode)) {
+      return res.body.isEmpty ? <String, dynamic>{} : jsonDecode(res.body);
+    }
+    throw ApiClient.parseError(res);
+  }
+
+  /// `GET /bookings/:id/cancellation-quote`. Crea una cotización nueva en cada
+  /// llamada (caduca a 15 min), por eso se pide al abrir el modal, no al confirmar.
+  static Future<Map<String, dynamic>> cotizarCancelacionVuelo(String bookingId, {String? token}) async {
+    final res = await ApiClient.get(_bookingPath(bookingId, '/cancellation-quote'), token: token, includeFingerprint: true);
+    final d = _decodeOrThrow(res);
+    return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
+  }
+
+  /// `POST /bookings/:id/cancel` con `{ quoteId, reason? }` e `Idempotency-Key`.
+  static Future<Map<String, dynamic>> cancelarReservaVuelo(
+    String bookingId, {
+    required String quoteId,
+    String? reason,
+    required String idempotencyKey,
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      _bookingPath(bookingId, '/cancel'),
+      body: {
+        'quoteId': quoteId,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+      token: token,
+      idempotencyKey: idempotencyKey,
+      includeFingerprint: true,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    final d = _decodeOrThrow(res);
+    return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
+  }
+
+  /// `GET /bookings/:id/baggage-options`: una opción por pasajero y trayecto.
+  static Future<List<Map<String, dynamic>>> listarOpcionesEquipaje(String bookingId, {String? token}) async {
+    final res = await ApiClient.get(_bookingPath(bookingId, '/baggage-options'), token: token, includeFingerprint: true);
+    return extractList(_decodeOrThrow(res), const ['options', 'baggageOptions']);
+  }
+
+  /// `POST /bookings/:id/baggage` con `{ passengerId, itineraryId, quantity, payment }`.
+  static Future<Map<String, dynamic>> agregarEquipajeVuelo(
+    String bookingId, {
+    required String passengerId,
+    required String itineraryId,
+    required int quantity,
+    required String paymentReference,
+    required String idempotencyKey,
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      _bookingPath(bookingId, '/baggage'),
+      body: {
+        'passengerId': passengerId,
+        'itineraryId': itineraryId,
+        'quantity': quantity,
+        'payment': {'paymentReference': paymentReference},
+      },
+      token: token,
+      idempotencyKey: idempotencyKey,
+      includeFingerprint: true,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    final d = _decodeOrThrow(res);
+    return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
+  }
+
+  /// `POST /bookings/:id/date-change/search` con `{ changes: [{ itineraryId, newDepartureDate }] }`.
+  static Future<List<Map<String, dynamic>>> buscarCambioFechaVuelo(
+    String bookingId, {
+    required String itineraryId,
+    required String newDepartureDate,
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      _bookingPath(bookingId, '/date-change/search'),
+      body: {
+        'changes': [
+          {'itineraryId': itineraryId, 'newDepartureDate': newDepartureDate},
+        ],
+      },
+      token: token,
+      includeFingerprint: true,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    return extractList(_decodeOrThrow(res), const ['offers']);
+  }
+
+  /// `POST /bookings/:id/date-change` con `{ changeOfferId, payment? }` e `Idempotency-Key`.
+  static Future<Map<String, dynamic>> confirmarCambioFechaVuelo(
+    String bookingId, {
+    required String changeOfferId,
+    String? paymentReference,
+    required String idempotencyKey,
+    String? token,
+  }) async {
+    final res = await ApiClient.post(
+      _bookingPath(bookingId, '/date-change'),
+      body: {
+        'changeOfferId': changeOfferId,
+        if (paymentReference != null) 'payment': {'paymentReference': paymentReference},
+      },
+      token: token,
+      idempotencyKey: idempotencyKey,
+      includeFingerprint: true,
+      timeout: ApiConfig.sagaTimeout,
+    );
+    final d = _decodeOrThrow(res);
+    return d is Map ? Map<String, dynamic>.from(d) : <String, dynamic>{};
   }
 
   // =========================================================================

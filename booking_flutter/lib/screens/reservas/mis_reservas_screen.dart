@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/reserva.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
 import 'detalle_reserva_vuelo_screen.dart';
 import 'voucher_qr_screen.dart';
 import '../../widgets/booking_footer.dart';
+import '../../widgets/modal_cambio_fecha.dart';
+import '../../widgets/modal_postventa.dart';
 
 class MisReservasScreen extends StatefulWidget {
   const MisReservasScreen({super.key});
@@ -50,43 +51,36 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
     }
   }
 
-  Future<void> _hacerCheckin(Reserva r) async {
+  void _avisar(String mensaje, {bool ok = true}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(mensaje), backgroundColor: ok ? BookingColors.successGreen : BookingColors.errorRed),
+    );
+  }
+
+  /// Postventa de vuelos (ModalPostventa.jsx): check-in, equipaje o cancelación
+  /// con cotización. Tras el éxito se recarga la lista, igual que React recarga
+  /// la reserva en vez de parchear el estado a mano.
+  Future<void> _postventaVuelo(Reserva r, TipoPostventa tipo) async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    try {
-      final res = await BookingServices.checkinVuelo(r.id, token: auth.token);
-      if (!mounted) return;
-      final bp = res['boardingPass'] ?? res['data']?['boardingPass'];
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.flight_takeoff, color: BookingColors.successGreen),
-              SizedBox(width: 8),
-              Text('Check-in completado'),
-            ],
-          ),
-          content: Text(
-            bp != null
-                ? 'Tu pase de abordar digital fue generado correctamente.\nPNR: ${r.pnr ?? r.id}\nDetalle: $bp'
-                : 'Check-in confirmado para ${r.servicioNombre} (PNR: ${r.pnr ?? r.id}).',
-          ),
-          actions: [
-            ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Aceptar')),
-          ],
-        ),
-      );
-      _loadReservas();
-    } catch (e) {
-      if (!mounted) return;
-      final msg = e is ApiException ? e.userMessage : 'No se pudo completar el check-in: $e';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: BookingColors.errorRed),
-      );
-    }
+    final res = await ModalPostventa.show(context, tipo: tipo, bookingId: r.id, pnr: r.pnr ?? r.id, token: auth.token);
+    if (res == null || !mounted) return;
+    _avisar(res.mensaje);
+    _loadReservas();
+  }
+
+  Future<void> _cambiarFechaVuelo(Reserva r) async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final res = await ModalCambioFecha.show(context, bookingId: r.id, pnr: r.pnr ?? r.id, token: auth.token);
+    if (res == null || !mounted) return;
+    _avisar(res.mensaje);
+    _loadReservas();
   }
 
   Future<void> _confirmarCancelacion(Reserva r) async {
+    // Vuelos: el backend exige el quoteId de /cancellation-quote (CancelBookingRequestDto).
+    if (r.vertical.toLowerCase().contains('vuelo')) {
+      return _postventaVuelo(r, TipoPostventa.cancelar);
+    }
     final reasonCtrl = TextEditingController(text: 'Cambio de planes de viaje');
     final confirm = await showDialog<bool>(
       context: context,
@@ -342,31 +336,48 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                     ),
                   ],
                 ),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    if (isVuelo)
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (isVuelo)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleReservaVueloScreen(reserva: r)));
+                          },
+                          icon: const Icon(Icons.airplane_ticket_outlined, size: 16),
+                          label: const Text('Boletos / Pase', style: TextStyle(fontSize: 12)),
+                        ),
                       OutlinedButton.icon(
                         onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => DetalleReservaVueloScreen(reserva: r)));
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: r)));
                         },
-                        icon: const Icon(Icons.airplane_ticket_outlined, size: 16),
-                        label: const Text('Boletos / Pase', style: TextStyle(fontSize: 12)),
+                        icon: const Icon(Icons.qr_code_2, size: 16),
+                        label: const Text('Voucher QR', style: TextStyle(fontSize: 12)),
                       ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: r)));
-                      },
-                      icon: const Icon(Icons.qr_code_2, size: 16),
-                      label: const Text('Voucher QR', style: TextStyle(fontSize: 12)),
-                    ),
-                    if (canCheckIn)
-                      ElevatedButton(
-                        onPressed: () => _hacerCheckin(r),
-                        style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
-                        child: const Text('Check-in', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      ),
-                  ],
+                      if (isVuelo && !r.esCancelada) ...[
+                        OutlinedButton.icon(
+                          onPressed: () => _cambiarFechaVuelo(r),
+                          icon: const Icon(Icons.event_repeat, size: 16),
+                          label: const Text('Cambiar fecha', style: TextStyle(fontSize: 12)),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _postventaVuelo(r, TipoPostventa.equipaje),
+                          icon: const Icon(Icons.luggage_outlined, size: 16),
+                          label: const Text('Añadir equipaje', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                      if (canCheckIn)
+                        ElevatedButton(
+                          onPressed: () => _postventaVuelo(r, TipoPostventa.checkin),
+                          style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
+                          child: const Text('Check-in', style: TextStyle(color: Colors.white, fontSize: 12)),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),
