@@ -10,7 +10,8 @@ import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
-import '../reservas/voucher_qr_screen.dart';
+import '../../utils/cedula_ecuador.dart';
+import '../../widgets/auto_voucher_modal.dart';
 
 class AutoDetailScreen extends StatefulWidget {
   final Auto auto;
@@ -357,6 +358,11 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                                   setModal(() => errorMsg = 'Completa datos del conductor y número de licencia.');
                                   return;
                                 }
+                                final docError = validarCedulaOPasaporte(docCtrl.text);
+                                if (docError != null) {
+                                  setModal(() => errorMsg = docError);
+                                  return;
+                                }
                                 setModal(() {
                                   submitting = true;
                                   errorMsg = null;
@@ -418,9 +424,29 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                                   if (!ctx.mounted) return;
                                   Navigator.pop(ctx);
                                   if (!mounted) return;
-                                  Navigator.pushReplacement(
+                                  // AutoDetail.jsx: el voucher se abre sobre la ficha (AutoVoucherModal).
+                                  final vehiculo = dataObj['vehiculo'] is Map ? Map<String, dynamic>.from(dataObj['vehiculo']) : <String, dynamic>{};
+                                  await AutoVoucherModal.show(
                                     context,
-                                    MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: nuevaReserva)),
+                                    token: token,
+                                    data: AutoVoucherData(
+                                      pnr: pnr,
+                                      marca: vehiculo['marca']?.toString() ?? _auto.marca,
+                                      modelo: vehiculo['modelo']?.toString() ?? _auto.modelo,
+                                      categoria: vehiculo['categoria']?.toString() ?? _auto.categoria,
+                                      transmision: vehiculo['transmision']?.toString() ?? _auto.transmision,
+                                      total: nuevaReserva.total,
+                                      cobertura: dataObj['tipo_cobertura']?.toString() ?? (_coberturaTotal ? 'TOTAL' : 'BASICA'),
+                                      qrData: dataObj['voucher_qr_data']?.toString() ?? nuevaReserva.voucherQr ?? 'BOOKING-CAR-$pnr-CONFIRMED',
+                                      licencia: licCtrl.text.trim(),
+                                      checkinHecho: dataObj['checkin_status']?.toString() == 'CHECKIN_COMPLETED',
+                                      lugarRetiro: _location,
+                                      fechaRetiro: pStr,
+                                      horaRetiro: _pickupTime,
+                                      fechaDevolucion: dStr,
+                                      horaDevolucion: _dropoffTime,
+                                      ubicacionMostrador: _auto.proveedorUbicacion,
+                                    ),
                                   );
                                 } catch (e) {
                                   setModal(() {

@@ -11,6 +11,8 @@ import '../../utils/destinos_catalog.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/vuelo_passengers_sheet.dart';
 import '../reservas/voucher_qr_screen.dart';
+import '../../utils/cedula_ecuador.dart';
+import '../../widgets/modal_bloqueo_cupo.dart';
 
 class _PassengerFormControllers {
   final String passengerType; // ADULT, YOUTH, CHILD, INFANT
@@ -153,24 +155,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
 
   bool get _esInternacional => DestinosCatalog.esViajeInternacional(_activeOffer.origen, _activeOffer.destino);
 
-  bool _validarCedulaEC(String c) {
-    if (!RegExp(r'^\d{10}$').hasMatch(c)) return false;
-    final prov = int.parse(c.substring(0, 2));
-    final third = int.parse(c[2]);
-    if ((prov < 1 || prov > 24) && prov != 30) return false;
-    if (third > 5) return false;
-    int sum = 0;
-    for (int i = 0; i < 9; i++) {
-      int d = int.parse(c[i]);
-      if (i % 2 == 0) {
-        d *= 2;
-        if (d > 9) d -= 9;
-      }
-      sum += d;
-    }
-    final check = (10 - (sum % 10)) % 10;
-    return check == int.parse(c[9]);
-  }
+  /// Módulo 10 compartido (utils/cedula_ecuador.dart).
+  bool _validarCedulaEC(String c) => cedulaValida(c);
 
   Future<void> _crearHoldYCargarAsientos() async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
@@ -178,39 +164,27 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
     if (!ok || !mounted) return;
     if (!Provider.of<AuthProvider>(context, listen: false).isAuthenticated) return;
 
+    // ModalBloqueoCupo.jsx: cabina + mapa referencial + hold con Idempotency-Key
+    // generada al abrir (un doble clic ya no crea dos holds). Si el usuario cierra
+    // sin bloquear, no se avanza.
+    final hold = await ModalBloqueoCupo.show(
+      context,
+      oferta: _activeOffer,
+      pasajeros: _pax.toApiMap(),
+      cabinaInicial: _activeOption.cabinClass,
+      token: Provider.of<AuthProvider>(context, listen: false).token,
+    );
+    if (hold == null || !mounted) return;
+
     setState(() {
       _creatingHold = true;
       _errorMsg = null;
     });
 
     try {
-      final selections = _activeOffer.itineraries.isNotEmpty
-          ? _activeOffer.itineraries
-              .map((it) => {
-                    'itineraryId': it.itineraryId,
-                    'cabinClass': _activeOption.cabinClass,
-                    'fareBrand': _activeOption.fareBrand,
-                  })
-              .toList()
-          : [
-              {
-                'itineraryId': 'ITIN-1',
-                'cabinClass': _activeOption.cabinClass,
-                'fareBrand': _activeOption.fareBrand,
-              }
-            ];
-
-      final holdRes = await BookingServices.crearHoldVuelo(
-        offerId: _activeOffer.offerId,
-        itinerarySelections: selections,
-        passengersBreakdown: _pax.toApiMap(),
-        idempotencyKey: const Uuid().v4(),
-        token: Provider.of<AuthProvider>(context, listen: false).token,
-      );
-
-      final dataObj = holdRes['data'] is Map ? Map<String, dynamic>.from(holdRes['data']) : holdRes;
-      _holdId = dataObj['holdId']?.toString() ?? dataObj['id']?.toString() ?? 'HOLD-${DateTime.now().millisecondsSinceEpoch}';
-      _holdExpiresAt = dataObj['expiresAt']?.toString();
+      _activeOption = hold.cabina;
+      _holdId = hold.holdId;
+      _holdExpiresAt = hold.expiresAt;
 
       setState(() {
         _creatingHold = false;
