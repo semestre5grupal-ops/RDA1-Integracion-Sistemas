@@ -34,6 +34,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _errorEmail;
   String? _errorPassword;
   String? _errorGeneral;
+  String? _infoGeneral; // alta correcta que requiere confirmar el correo
 
   @override
   void dispose() {
@@ -60,6 +61,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _errorEmail = null;
       _errorPassword = null;
       _errorGeneral = null;
+      _infoGeneral = null;
     });
 
     bool isValid = true;
@@ -128,7 +130,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final auth = context.read<AuthProvider>();
 
     try {
-      final success = await auth.register(
+      final resultado = await auth.register(
         nombre: _nombreCtrl.text.trim(),
         apellido: _apellidoCtrl.text.trim(),
         tipoDocumento: _tipoDocumento,
@@ -138,7 +140,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _passwordCtrl.text,
       );
 
-      if (success && mounted) {
+      if (resultado.ok && resultado.info != null && mounted) {
+        // Sin sesión todavía: igual que RegisterPage.jsx, se avisa y NO se redirige.
+        setState(() => _infoGeneral = resultado.info);
+      } else if (resultado.ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('¡Cuenta creada exitosamente! Bienvenido, ${auth.user?.nombre}.'),
@@ -148,7 +153,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Navigator.pop(context);
       } else if (mounted) {
         setState(() {
-          _errorGeneral = 'No se pudo crear la cuenta. Intente con otro correo.';
+          _errorGeneral = resultado.error ?? 'No se pudo crear la cuenta. Intente con otro correo.';
         });
       }
     } catch (e) {
@@ -203,6 +208,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 20),
 
+                  if (_infoGeneral != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.green.shade300),
+                      ),
+                      child: Text(_infoGeneral!, style: const TextStyle(color: BookingColors.successGreen, fontSize: 13)),
+                    ),
                   if (_errorGeneral != null)
                     Container(
                       padding: const EdgeInsets.all(12),

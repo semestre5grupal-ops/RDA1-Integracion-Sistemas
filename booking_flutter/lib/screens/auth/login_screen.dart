@@ -69,8 +69,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = context.read<AuthProvider>();
 
     try {
-      final success = await auth.login(email, pass);
-      if (success && mounted) {
+      final resultado = await auth.login(email, pass);
+      if (resultado.ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('¡Bienvenido, ${auth.user?.displayName ?? "Usuario"}!'),
@@ -80,7 +80,8 @@ class _LoginScreenState extends State<LoginScreen> {
         Navigator.pop(context);
       } else if (mounted) {
         setState(() {
-          _errorGeneral = 'Credenciales incorrectas. Verifique su correo y contraseña.';
+          // Mensaje del proveedor (credenciales inválidas, correo sin confirmar, red…).
+          _errorGeneral = resultado.error ?? 'No se pudo iniciar sesión.';
         });
       }
     } catch (e) {
