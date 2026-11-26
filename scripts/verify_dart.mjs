@@ -90,7 +90,7 @@ for (const f of files) {
 }
 
 if (errors === 0) {
-  console.log('✅ ALL 46 DART FILES ARE SYNTACTICALLY BALANCED AND FREE OF ERRORS!');
+  console.log(`✅ ALL ${files.length} DART FILES ARE SYNTACTICALLY BALANCED AND FREE OF ERRORS!`);
 } else {
   console.error('❌ Found ' + errors + ' errors.');
   process.exit(1);
