@@ -51,7 +51,30 @@ Apuntar a otro gateway:
 flutter build web --release --dart-define=API_URL=http://localhost:3000/api/v1
 ```
 
-El resultado queda en `build/web/`. Solo la plataforma **web** está configurada; para Android o iOS ejecutar antes `flutter create . --platforms=android,ios`.
+El resultado queda en `build/web/`. Las plataformas **web** y **Android** están configuradas (iOS no).
+
+### APK de Android
+
+Prerrequisitos: Flutter estable y Android SDK (se instala con Android Studio). Verificar con `flutter doctor`.
+
+```bash
+# APK de prueba, firmado con la llave de depuración (sirve para instalar en tu celular)
+flutter build apk --release --dart-define=API_URL=https://booking-core-api.azurewebsites.net/api/v1
+```
+
+El archivo queda en `build/app/outputs/flutter-apk/app-release.apk`. Se instala copiándolo al celular
+o con `adb install -r build/app/outputs/flutter-apk/app-release.apk`.
+
+Para el APK que se entrega, crear `android/key.properties` (no se sube al repositorio) con
+`storeFile`, `storePassword`, `keyAlias` y `keyPassword` de tu llave `.jks`. Con ese archivo el mismo
+comando firma con tu llave.
+
+Notas de Android:
+
+- El identificador de la app es `ec.booking.app` (en `android/app/build.gradle.kts`).
+- El APK de release solo habla `https`. El `http://10.0.2.2:3000` del emulador funciona únicamente en debug.
+- Emulador: `flutter run -d <id-del-emulador>` usa `http://10.0.2.2:3000/api/v1` si no se pasa `API_URL`.
+
 
 ---
 
