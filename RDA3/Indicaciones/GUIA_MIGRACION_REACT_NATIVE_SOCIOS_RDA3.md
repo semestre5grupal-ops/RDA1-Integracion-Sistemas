@@ -17,6 +17,12 @@
 > - **LA APLICACIÓN MÓVIL ES ÚNICAMENTE UN CLIENTE CONSUMIDOR:** Tu app móvil solo debe realizar peticiones HTTP (GET, POST, PATCH) a la API que ya está desplegada y funcionando en la nube (Azure Container Apps / Azure App Service).
 > - **LA CONSOLA ADMINISTRATIVA NO SE MIGRA A MÓVIL:** Los paneles de administración, monitoreo y telemetría operativa se conservan en la aplicación Web de escritorio. La app móvil es **exclusiva para el cliente / turista final**.
 
+### 1.1 Anti-Patrones Prohibidos para el Agente de IA (Lo que NUNCA debe implementar)
+> [!WARNING]
+> 1. **PROHIBIDO CREAR UN CARRITO DE COMPRAS (Cart / Carrito):** Esta plataforma NO es una tienda de comercio electrónico tradicional. Cada reserva (un auto, un hotel, un vuelo o una atracción) se realiza de forma **atómica, directa e individual** mediante `POST /reservas` enviando una cabecera única `Idempotency-Key` (UUIDv4) con un timeout de 45 segundos. Crear un carrito (`CartContext`, `CartScreen`, acumulación de ítems) romperá la orquestación de reservas.
+> 2. **PROHIBIDO USAR DATOS MOCKEADOS O HARDCODEADOS:** Si una petición HTTP devuelve lista vacía `[]` o un error temporal, **nunca** inyectes datos falsos fijos como salvaguarda permanente. Muestra el estado vacío real con un botón interactivo de "Reintentar". Usar mocks estáticos ocultará los datos reales que tus compañeros y profesores registren en Azure durante la evaluación.
+> 3. **PROHIBIDO MIGRAR PANELES DE ADMINISTRACIÓN:** No agregues pantallas de administración, inventario, telemetría o dashboard de métricas. La app es exclusivamente para el cliente/turista final.
+
 ---
 
 ## 2. Ubicación y Aislamiento en tu Repositorio
@@ -77,6 +83,61 @@ mobile_react_native/
         ├── DetailScreen.tsx   # Selector de fechas/turnos y botón "Reservar Ahora"
         ├── MisReservasScreen.tsx # Historial con validación de cancelación (< 24h)
         └── VoucherQrScreen.tsx   # Renderizado de código QR para check-in presencial
+```
+
+### 4.1 Tipado e Ingesta Resiliente en TypeScript (`src/types/index.ts`)
+Dado que los microservicios de tus compañeros y Booking Central pueden responder con nombres de campo alternativos (snake_case vs camelCase o IDs de MongoDB), normaliza los objetos al recibirlos de la API:
+
+```typescript
+export interface ServicioItem {
+  id: string;
+  nombre: string;
+  precio: number;
+  imagenUrl?: string;
+  cuposDisponibles: number;
+}
+
+// Función de mapeo tolerante (anti-crashes por esquemas heterogéneos)
+export function normalizarServicioItem(raw: any): ServicioItem {
+  // 1. Identificador tolerante
+  const idStr = String(
+    raw?.id ||
+    raw?._id ||
+    raw?.auto_id ||
+    raw?.vehicle_id ||
+    raw?.alojamiento_id ||
+    raw?.atraccion_id ||
+    raw?.offerId ||
+    ''
+  );
+
+  // 2. Precio tolerante (soporta número, string u objeto { total: 45 })
+  let precioNum = 25.0;
+  const rawPrice = raw?.precio ?? raw?.price ?? raw?.precio_diario ?? raw?.precio_por_noche;
+  if (typeof rawPrice === 'number') {
+    precioNum = rawPrice;
+  } else if (typeof rawPrice === 'string' && !isNaN(parseFloat(rawPrice))) {
+    precioNum = parseFloat(rawPrice);
+  } else if (rawPrice && typeof rawPrice === 'object' && typeof rawPrice.total === 'number') {
+    precioNum = rawPrice.total;
+  }
+
+  // 3. Extracción de fotos (array de strings, array de objetos { url } o string)
+  let fotoUrl: string | undefined;
+  if (Array.isArray(raw?.photos) && raw.photos.length > 0) {
+    fotoUrl = typeof raw.photos[0] === 'string' ? raw.photos[0] : raw.photos[0]?.url;
+  } else {
+    fotoUrl = raw?.foto_url || raw?.imagen_url;
+  }
+
+  return {
+    id: idStr,
+    nombre: raw?.nombre || raw?.name || raw?.vehiculo || 'Servicio Turístico',
+    precio: precioNum > 0 ? precioNum : 25.0,
+    imagenUrl: fotoUrl,
+    cuposDisponibles: Number(raw?.cupos_disponibles ?? raw?.stock ?? raw?.available_spots ?? 10),
+  };
+}
 ```
 
 ---
@@ -162,6 +223,31 @@ export const cancelarReserva = async (reservaId: string) => {
 ### C. Refresco Inmediato tras Cancelación (Anti-Stale State)
 - Al confirmarse la cancelación desde el backend, actualiza el estado local de la reserva a `'CANCELADA'` inmediatamente con `setReservas(...)`, sin obligar al usuario a recargar la app manualmente.
 
+### D. Sincronización en Vivo y Pull-to-Refresh
+- Envuelve tu listado de catálogo en `CatalogoScreen.tsx` con `FlatList` y la propiedad `refreshControl` usando el componente nativo `RefreshControl` para permitir al usuario deslizar hacia abajo y refrescar los ítems en tiempo real:
+  ```tsx
+  import React, { useState, useCallback } from 'react';
+  import { FlatList, RefreshControl } from 'react-native';
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await cargarCatalogo();
+    setRefreshing(false);
+  }, []);
+
+  <FlatList
+    data={servicios}
+    renderItem={({ item }) => <TarjetaServicio item={item} />}
+    keyExtractor={(item) => item.id}
+    refreshControl={
+      <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#003580']} />
+    }
+  />
+  ```
+- Opcionalmente, puedes configurar un `setInterval(cargarCatalogo, 12000)` en un `useEffect` para refrescar periódicamente la disponibilidad de cupos desde Azure sin bloquear la experiencia de usuario.
+
 ---
 
 ## 7. Instrucciones Específicas por Tipo de Socio
@@ -186,20 +272,29 @@ Identifica cuál es tu servicio y aplica estas directrices particulares:
 
 ## 8. Comandos para Probar y Compilar el APK
 
+> [!NOTE]
+> **Usuarios de Windows (PowerShell):** Ejecuta cada comando en una línea separada. En PowerShell 5.1 no encadenes instrucciones con `&&` ya que arrojará un error de sintaxis; usa `;` o ejecuta comando por comando.
+
 ```bash
 # 1. Ubicarse en la carpeta móvil
 cd mobile_react_native
 
-# 2. Iniciar servidor Expo en modo desarrollo
+# 2. Instalar dependencias
+npm install
+
+# 3. Verificación estática obligatoria de TypeScript (garantiza cero errores de tipos antes de compilar)
+npx tsc --noEmit
+
+# 4. Iniciar servidor Expo en modo desarrollo
 npx expo start
 
-# 3. Probar en navegador Web
+# 5. Probar en navegador Web
 # Presiona 'w' en la terminal de Expo
 
-# 4. Probar en celular Android
+# 6. Probar en celular Android
 # Descarga la app 'Expo Go' de la Play Store y escanea el código QR de la terminal
 
-# 5. Generar archivo instalador APK para entrega del Reto 3
+# 7. Generar archivo instalador APK para entrega del Reto 3
 npx eas build -p android --profile preview
 ```
 *(Si no tienes cuenta EAS configurada, también puedes compilar localmente con `npx expo run:android --variant release`).*
@@ -216,13 +311,21 @@ Nuestro framework asignado para el cliente móvil es REACT NATIVE (Expo con Type
 
 INSTRUCCIONES OBLIGATORIAS Y REGLA DE ORO:
 1. NO MODIFIQUES ningún archivo de nuestro backend existente ni toques controladores, entidades, DTOs ni rutas en Azure. El backend ya está funcionando y aprobado con Booking Central en el RDA2. Cualquier cambio en el backend romperá la integración.
-2. Desarrolla la aplicación móvil en una carpeta nueva en la raíz de nuestro repositorio llamada 'mobile_react_native' usando Expo.
-3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando Axios con las cabeceras estándar 'Content-Type: application/json', 'X-Correlation-Id' e 'Idempotency-Key'.
-4. La aplicación debe contener las siguientes pantallas esenciales:
-   - Pantalla de Catálogo: Listado con tarjetas, imágenes, precios en USD y botón de detalle.
-   - Pantalla de Detalle: Ficha del servicio con selector de fechas/turnos y botón para confirmar la reserva.
-   - Pantalla de Mis Reservas: Historial de reservas con botón de cancelación (oculto si faltan menos de 24 horas para el servicio) y actualización reactiva inmediata del estado al cancelar.
-   - Pantalla de Voucher QR: Generación vectorial de código QR para check-in usando 'react-native-qrcode-svg'.
-5. Deja el proyecto listo y funcional para probarse con 'npx expo start' y generar el APK con 'npx eas build -p android --profile preview'.
+2. Desarrolla la aplicación móvil en una carpeta nueva en la raíz de nuestro repositorio llamada 'mobile_react_native' usando Expo con TypeScript.
+3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando Axios con las cabeceras estándar 'Content-Type: application/json', 'Accept: application/json', 'X-Correlation-Id' e 'Idempotency-Key'.
+
+GUARDRAILS Y ANTI-PATRONES OBLIGATORIOS (LO QUE NO DEBES HACER):
+- PROHIBIDO CREAR UN CARRITO DE COMPRAS: Cada reserva se ejecuta de forma directa, atómica e individual enviando una cabecera 'Idempotency-Key' única (UUIDv4) con timeout de 45s. No agregues CartContext ni pantallas de carrito.
+- PROHIBIDO USAR DATOS MOCKEADOS: Si la API responde con lista vacía o error, muestra un estado visual amigable con botón de reintento. Nunca inventes listas fijas hardcodeadas en producción.
+- PROHIBIDO MIGRAR CONSOLA ADMIN: No agregues paneles de administración, gestión de proveedores ni telemetría. La app es 100% para el cliente final.
+- MODELADO RESILIENTE: En 'normalizarServicioItem', tolera identificadores ('id', '_id', 'auto_id', 'vehicle_id', 'alojamiento_id'), precios (número, string u objeto con total) y fotos (array o string) sin lanzar excepciones.
+
+PANTALLAS ESENCIALES A IMPLEMENTAR:
+1. Pantalla de Catálogo: Listado responsivo con Pull-to-Refresh (FlatList con RefreshControl), imágenes, títulos, precios en USD y botón de detalle.
+2. Pantalla de Detalle: Ficha del servicio con selector de fechas/turnos, aforo restante y botón para confirmar la reserva individual.
+3. Pantalla de Mis Reservas: Historial con botón de cancelación (oculto si faltan menos de 24h para el servicio) y actualización reactiva inmediata del estado al cancelar.
+4. Pantalla de Voucher QR: Generación vectorial de código QR para check-in usando 'react-native-qrcode-svg'.
+
+Deja el proyecto verificado con 'npx tsc --noEmit' y listo para probarse con 'npx expo start' y compilar con 'npx eas build -p android --profile preview'.
 ```
 

@@ -17,6 +17,20 @@
 > - **LA APLICACIÓN MÓVIL ES ÚNICAMENTE UN CLIENTE CONSUMIDOR:** Tu app móvil solo debe realizar peticiones HTTP (GET, POST, PATCH) a la API que ya está desplegada y funcionando en la nube (Azure Container Apps / Azure App Service).
 > - **LA CONSOLA ADMINISTRATIVA NO SE MIGRA A MÓVIL:** Los paneles de administración, monitoreo y telemetría operativa se conservan en la aplicación Web de escritorio. La app móvil es **exclusiva para el cliente / turista final**.
 
+### 1.1. Guardrails y Anti-Patrones Prohibidos para el Agente
+
+> [!WARNING]
+> ### 🚫 ANTI-PATRONES DETECTADOS EN PRUEBAS PILOTO (PROHIBIDO IMPLEMENTAR)
+> 1. **PROHIBIDO EL "CARRITO DE COMPRAS" (Cart / Basket):**
+>    - La arquitectura B2B de Booking Central y de los microservicios socios opera con **reservas atómicas individuales directas**.
+>    - Cada reserva se confirma inmediatamente contra Azure enviando una cabecera `Idempotency-Key` (UUIDv4) y un timeout de 45 segundos.
+>    - Si el agente implementa un carrito multi-ítem, romperá el flujo transaccional y la sincronización de inventario.
+> 2. **PROHIBIDO USAR DATOS MOCKEADOS EN PRODUCCIÓN:**
+>    - Queda prohibido hardcodear listas estáticas de atracciones, vehículos o alojamientos de respaldo (fallback mocks) si la API devuelve lista vacía o error.
+>    - Si el backend devuelve `[]`, la app debe mostrar un estado visual de catálogo vacío ("No hay servicios disponibles en este momento") con un botón de recarga/reintento que llame nuevamente a Azure.
+> 3. **PROHIBIDO MIGRAR LA CONSOLA ADMINISTRATIVA:**
+>    - No añadas pestañas de CRUD de inventario de administradores, métricas de negocio ni gestión de proveedores. La app móvil es 100% para el turista o cliente final.
+
 ---
 
 ## 2. Ubicación y Aislamiento en tu Repositorio
@@ -75,6 +89,120 @@ SocioMobileApp/
     ├── DetallePage.xaml            # DatePicker, selector de horario y botón confirmar
     ├── MisReservasPage.xaml        # Historial de reservas con botón cancelar
     └── VoucherQrPage.xaml          # Renderizado de imagen QR para check-in
+```
+
+### 4.1. Modelado Resiliente y Deserialización Segura en C#
+
+Dado que los distintos microservicios pueden retornar identificadores con nombres alternativos (`id`, `_id`, `auto_id`, `vehicle_id`, `alojamiento_id`), precios en formatos variados (número, string o sub-objeto) y fotos (lista o string único), implementa `Models/ServicioModel.cs` con propiedades tolerantes para evitar excepciones de deserialización (`JsonException` o `NullReferenceException`):
+
+```csharp
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace SocioMobileApp.Models;
+
+public class ServicioModel
+{
+    // Identificadores polimórficos
+    [JsonPropertyName("id")]
+    public string? RawId { get; set; }
+
+    [JsonPropertyName("_id")]
+    public string? RawMongoId { get; set; }
+
+    [JsonPropertyName("auto_id")]
+    public string? RawAutoId { get; set; }
+
+    [JsonPropertyName("vehicle_id")]
+    public string? RawVehicleId { get; set; }
+
+    [JsonPropertyName("alojamiento_id")]
+    public string? RawAlojamientoId { get; set; }
+
+    [JsonIgnore]
+    public string Id => !string.IsNullOrEmpty(RawId) ? RawId :
+                        !string.IsNullOrEmpty(RawMongoId) ? RawMongoId :
+                        !string.IsNullOrEmpty(RawAutoId) ? RawAutoId :
+                        !string.IsNullOrEmpty(RawVehicleId) ? RawVehicleId :
+                        !string.IsNullOrEmpty(RawAlojamientoId) ? RawAlojamientoId :
+                        Guid.NewGuid().ToString();
+
+    // Nombres y Títulos
+    [JsonPropertyName("nombre")]
+    public string? RawNombre { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? RawName { get; set; }
+
+    [JsonPropertyName("titulo")]
+    public string? RawTitulo { get; set; }
+
+    [JsonIgnore]
+    public string Titulo => !string.IsNullOrEmpty(RawTitulo) ? RawTitulo :
+                            !string.IsNullOrEmpty(RawNombre) ? RawNombre :
+                            !string.IsNullOrEmpty(RawName) ? RawName : "Servicio Turístico";
+
+    [JsonPropertyName("descripcion")]
+    public string? Descripcion { get; set; }
+
+    [JsonPropertyName("ciudad")]
+    public string? Ciudad { get; set; }
+
+    // Precios: Deserialización resiliente con JsonElement (soporta número, string u objeto con total/base)
+    [JsonPropertyName("precio")]
+    public JsonElement? RawPrecio { get; set; }
+
+    [JsonPropertyName("precio_base")]
+    public JsonElement? RawPrecioBase { get; set; }
+
+    [JsonIgnore]
+    public double Precio => ExtraerPrecio(RawPrecio) ?? ExtraerPrecio(RawPrecioBase) ?? 0.0;
+
+    private static double? ExtraerPrecio(JsonElement? elemento)
+    {
+        if (!elemento.HasValue) return null;
+        var el = elemento.Value;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetDouble(out var num)) return num;
+        if (el.ValueKind == JsonValueKind.String && double.TryParse(el.GetString(), out var strNum)) return strNum;
+        if (el.ValueKind == JsonValueKind.Object)
+        {
+            if (el.TryGetProperty("total", out var totalEl) && totalEl.TryGetDouble(out var tVal)) return tVal;
+            if (el.TryGetProperty("base", out var baseEl) && baseEl.TryGetDouble(out var bVal)) return bVal;
+        }
+        return null;
+    }
+
+    // Fotos: Deserialización resiliente (soporta array de urls o string único)
+    [JsonPropertyName("fotos")]
+    public JsonElement? RawFotos { get; set; }
+
+    [JsonPropertyName("imagen")]
+    public string? RawImagen { get; set; }
+
+    [JsonIgnore]
+    public string FotoPrincipal
+    {
+        get
+        {
+            if (RawFotos.HasValue)
+            {
+                var el = RawFotos.Value;
+                if (el.ValueKind == JsonValueKind.Array && el.GetArrayLength() > 0)
+                {
+                    var first = el[0].GetString();
+                    if (!string.IsNullOrEmpty(first)) return first;
+                }
+                else if (el.ValueKind == JsonValueKind.String)
+                {
+                    var str = el.GetString();
+                    if (!string.IsNullOrEmpty(str)) return str;
+                }
+            }
+            if (!string.IsNullOrEmpty(RawImagen)) return RawImagen;
+            return "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80";
+        }
+    }
+}
 ```
 
 ---
@@ -171,6 +299,36 @@ public class ApiService
 ### C. Refresco Inmediato tras Cancelación (Anti-Stale State)
 - Al confirmarse la cancelación desde el backend, actualiza el estado local de la reserva a `'CANCELADA'` inmediatamente con `OnPropertyChanged()`, sin obligar al usuario a recargar la app manualmente.
 
+### D. Sincronización en Vivo y Pull-to-Refresh
+- Envuelve tu `CollectionView` de catálogo en `Views/CatalogoPage.xaml` con un control `RefreshView` enlazado a tu ViewModel para permitir al usuario deslizar hacia abajo y refrescar los ítems en tiempo real:
+  ```xml
+  <RefreshView IsRefreshing="{Binding IsRefreshing}"
+               Command="{Binding RefreshCatalogoCommand}"
+               RefreshColor="#003580">
+      <CollectionView ItemsSource="{Binding Servicios}">
+          <CollectionView.ItemTemplate>
+              <DataTemplate>
+                  <!-- Tarjeta visual del servicio -->
+              </DataTemplate>
+          </CollectionView.ItemTemplate>
+      </CollectionView>
+  </RefreshView>
+  ```
+- En `ViewModels/CatalogoViewModel.cs`, implementa el comando de refresco con `CommunityToolkit.Mvvm`:
+  ```csharp
+  [ObservableProperty]
+  private bool isRefreshing;
+
+  [RelayCommand]
+  private async Task RefreshCatalogoAsync()
+  {
+      IsRefreshing = true;
+      await CargarCatalogoAsync();
+      IsRefreshing = false;
+  }
+  ```
+- Opcionalmente, puedes inicializar un temporizador en segundo plano (`IDispatcherTimer`) con intervalo de 12 segundos para actualizar silenciosamente las capacidades y disponibilidad desde Azure.
+
 ---
 
 ## 7. Instrucciones Específicas por Tipo de Socio
@@ -195,6 +353,9 @@ Identifica cuál es tu servicio y aplica estas directrices particulares:
 
 ## 8. Comandos para Probar y Compilar el APK
 
+> [!NOTE]
+> **Usuarios de Windows (PowerShell):** Ejecuta cada comando en una línea separada. En PowerShell 5.1 no encadenes instrucciones con `&&` ya que arrojará un error de sintaxis; usa `;` o ejecuta comando por comando.
+
 ```bash
 # 1. Ubicarse en la carpeta móvil
 cd SocioMobileApp
@@ -202,10 +363,13 @@ cd SocioMobileApp
 # 2. Restaurar dependencias NuGet
 dotnet restore
 
-# 3. Compilar y ejecutar en Windows o Emulador Android
+# 3. Compilación y verificación estática obligatoria (garantiza cero errores de tipos)
+dotnet build
+
+# 4. Ejecutar en Windows o Emulador Android
 dotnet build -t:Run -f net8.0-android
 
-# 4. Generar archivo APK de Producción para entrega del Reto 3
+# 5. Generar archivo APK de Producción para entrega del Reto 3
 dotnet publish -f net8.0-android -c Release -p:AndroidPackageFormat=apk
 ```
 *El instalador APK final estará ubicado en:*  
@@ -224,12 +388,20 @@ Nuestro framework asignado para el cliente móvil es MICROSOFT .NET MAUI (C# / X
 INSTRUCCIONES OBLIGATORIAS Y REGLA DE ORO:
 1. NO MODIFIQUES ningún archivo de nuestro backend existente ni toques controladores, entidades, DTOs ni rutas en Azure. El backend ya está funcionando y aprobado con Booking Central en el RDA2. Cualquier cambio en el backend romperá la integración.
 2. Desarrolla la aplicación móvil en una carpeta nueva en la raíz de nuestro repositorio llamada 'SocioMobileApp' usando .NET MAUI y el patrón MVVM con CommunityToolkit.Mvvm.
-3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando HttpClient con las cabeceras estándar 'Content-Type: application/json', 'X-Correlation-Id' e 'Idempotency-Key'.
-4. La aplicación debe contener las siguientes vistas esenciales:
-   - Vista de Catálogo (CatalogoPage.xaml): Listado CollectionView con tarjetas, imágenes, precios en USD y botón de detalle.
-   - Vista de Detalle (DetallePage.xaml): Ficha del servicio con selector de fechas/turnos y botón para confirmar la reserva.
-   - Vista de Mis Reservas (MisReservasPage.xaml): Historial de reservas con botón de cancelación (oculto si faltan menos de 24 horas para el servicio) y actualización reactiva inmediata del estado al cancelar.
-   - Vista de Voucher QR (VoucherQrPage.xaml): Generación de código QR para check-in usando 'QRCoder'.
-5. Deja el proyecto listo y funcional para compilar con 'dotnet publish -f net8.0-android -c Release -p:AndroidPackageFormat=apk'.
+3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando HttpClient con las cabeceras estándar 'Content-Type: application/json', 'Accept: application/json', 'X-Correlation-Id' e 'Idempotency-Key'.
+
+GUARDRAILS Y ANTI-PATRONES OBLIGATORIOS (LO QUE NO DEBES HACER):
+- PROHIBIDO CREAR UN CARRITO DE COMPRAS: Cada reserva se ejecuta de forma directa, atómica e individual enviando una cabecera 'Idempotency-Key' única (UUIDv4) con timeout de 45s. No agregues CartService ni vistas de carrito.
+- PROHIBIDO USAR DATOS MOCKEADOS: Si la API responde con lista vacía o error, muestra un estado visual amigable con botón de reintento. Nunca inventes listas fijas hardcodeadas en producción.
+- PROHIBIDO MIGRAR CONSOLA ADMIN: No agregues vistas de administración, gestión de inventario de administradores ni telemetría. La app es 100% para el cliente final.
+- MODELADO RESILIENTE: En 'ServicioModel.cs', implementa propiedades tolerantes con JsonElement y fallbacks para identificadores ('id', '_id', 'auto_id', 'vehicle_id', 'alojamiento_id'), precios (número, string u objeto con total/base) y fotos (array o string) sin lanzar excepciones.
+
+VISTAS ESENCIALES A IMPLEMENTAR:
+1. Vista de Catálogo (CatalogoPage.xaml): Listado responsivo con Pull-to-Refresh (RefreshView sobre CollectionView), imágenes, títulos, precios en USD y botón de detalle.
+2. Vista de Detalle (DetallePage.xaml): Ficha del servicio con selector de fechas/turnos, capacidad restante y botón para confirmar la reserva individual.
+3. Vista de Mis Reservas (MisReservasPage.xaml): Historial de reservas con botón de cancelación (oculto si faltan menos de 24 horas para el servicio) y actualización reactiva inmediata del estado al cancelar.
+4. Vista de Voucher QR (VoucherQrPage.xaml): Generación vectorial o PNG de código QR para check-in usando 'QRCoder'.
+
+Deja el proyecto verificado con 'dotnet build' y listo para compilar con 'dotnet publish -f net8.0-android -c Release -p:AndroidPackageFormat=apk'.
 ```
 
