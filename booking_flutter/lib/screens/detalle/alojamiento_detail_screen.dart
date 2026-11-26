@@ -53,9 +53,7 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
     super.initState();
     _prop = widget.alojamiento;
     _checkIn = widget.initialCheckIn ?? DateTime.now().add(const Duration(days: 3));
-    _checkOut = widget.initialCheckOut != null && widget.initialCheckOut!.isAfter(_checkIn)
-        ? widget.initialCheckOut!
-        : _checkIn.add(const Duration(days: 2));
+    _checkOut = widget.initialCheckOut != null && widget.initialCheckOut!.isAfter(_checkIn) ? widget.initialCheckOut! : _checkIn.add(const Duration(days: 2));
     _occupancy = widget.initialOccupancy ?? const OccupancySelection(adultos: 2, habitaciones: 1);
     _loadInitialData();
   }
@@ -234,7 +232,6 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                         ),
                         child: Text(errorMsg!, style: const TextStyle(color: BookingColors.errorRed, fontSize: 12)),
                       ),
-
                     if (step == 0) ...[
                       Row(
                         children: [
@@ -312,9 +309,7 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                         height: 48,
                         child: ElevatedButton(
                           onPressed: () {
-                            if (nombreCtrl.text.trim().isEmpty ||
-                                apellidoCtrl.text.trim().isEmpty ||
-                                !emailCtrl.text.contains('@')) {
+                            if (nombreCtrl.text.trim().isEmpty || apellidoCtrl.text.trim().isEmpty || !emailCtrl.text.contains('@')) {
                               setModal(() => errorMsg = 'Completa nombre, apellido y un correo válido.');
                               return;
                             }
@@ -371,7 +366,8 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text('Total Final:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                Text('US\$ ${grandTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: BookingColors.actionBlue)),
+                                Text('US\$ ${grandTotal.toStringAsFixed(2)}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: BookingColors.actionBlue)),
                               ],
                             ),
                           ],
@@ -383,8 +379,7 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                         decoration: const InputDecoration(labelText: 'Método de pago', border: OutlineInputBorder()),
                         items: [
                           const DropdownMenuItem(value: 'TARJETA', child: Text('Tarjeta de Crédito / Débito')),
-                          if (_prop.pagoEnAlojamiento)
-                            const DropdownMenuItem(value: 'PAGO_EN_ALOJAMIENTO', child: Text('Pagar en el alojamiento (Check-in)')),
+                          if (_prop.pagoEnAlojamiento) const DropdownMenuItem(value: 'PAGO_EN_ALOJAMIENTO', child: Text('Pagar en el alojamiento (Check-in)')),
                         ],
                         onChanged: (v) {
                           if (v != null) setModal(() => metodoPago = v);
@@ -476,15 +471,11 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                                             token: token,
                                           );
 
-                                          final dataObj = resData['data'] is Map
-                                              ? Map<String, dynamic>.from(resData['data'])
-                                              : resData;
+                                          final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
                                           final resId = dataObj['reservation_id']?.toString() ??
                                               dataObj['id']?.toString() ??
                                               'ALO-${DateTime.now().millisecondsSinceEpoch}';
-                                          final pnr = dataObj['codigo_reserva']?.toString() ??
-                                              dataObj['pnr']?.toString() ??
-                                              resId;
+                                          final pnr = dataObj['codigo_reserva']?.toString() ?? dataObj['pnr']?.toString() ?? resId;
 
                                           final nuevaReserva = Reserva(
                                             id: resId,
@@ -685,9 +676,7 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _prop.cancelacionGratis
-                              ? '• Cancelación gratuita disponible hasta 48h antes.'
-                              : '• Tarifa sujeta a condiciones no reembolsables.',
+                          _prop.cancelacionGratis ? '• Cancelación gratuita disponible hasta 48h antes.' : '• Tarifa sujeta a condiciones no reembolsables.',
                           style: TextStyle(fontSize: 12, color: _prop.cancelacionGratis ? BookingColors.successGreen : BookingColors.textMuted),
                         ),
                       ],
@@ -948,9 +937,7 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
                                       ),
                                       Text('$qty', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                       IconButton(
-                                        onPressed: qty < room.availableRooms
-                                            ? () => setState(() => _selectedCounts[room.productId] = qty + 1)
-                                            : null,
+                                        onPressed: qty < room.availableRooms ? () => setState(() => _selectedCounts[room.productId] = qty + 1) : null,
                                         icon: const Icon(Icons.add_circle_outline, color: BookingColors.actionBlue),
                                       ),
                                     ],

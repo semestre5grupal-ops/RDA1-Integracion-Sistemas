@@ -78,9 +78,7 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
         : _pickupDate.add(const Duration(days: 3));
     _pickupTime = widget.pickupTime ?? '10:00';
     _dropoffTime = widget.dropoffTime ?? '10:00';
-    _location = (widget.pickupLocation != null && widget.pickupLocation!.isNotEmpty)
-        ? widget.pickupLocation!
-        : 'Quito';
+    _location = (widget.pickupLocation != null && widget.pickupLocation!.isNotEmpty) ? widget.pickupLocation! : 'Quito';
     _driverAge = widget.initialDriverAge.clamp(18, 99);
     _fetchFreshDetail();
   }
@@ -291,7 +289,6 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                         decoration: BoxDecoration(color: const Color(0xFFFCE8E8), borderRadius: BorderRadius.circular(8)),
                         child: Text(errorMsg!, style: const TextStyle(color: BookingColors.errorRed, fontSize: 12)),
                       ),
-
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(8)),
@@ -299,13 +296,14 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('${_auto.carDisplayName} (${_auto.proveedor})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          Text('${_days} día(s) · ${_coberturaTotal ? "Cobertura Total" : "Cobertura Básica"}', style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
-                          Text('Total + 15% IVA: US\$ ${_grandTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.actionBlue)),
+                          Text('${_days} día(s) · ${_coberturaTotal ? "Cobertura Total" : "Cobertura Básica"}',
+                              style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+                          Text('Total + 15% IVA: US\$ ${_grandTotal.toStringAsFixed(2)}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.actionBlue)),
                         ],
                       ),
                     ),
                     const SizedBox(height: 12),
-
                     TextField(
                       controller: nameCtrl,
                       decoration: const InputDecoration(labelText: 'Conductor principal*', border: OutlineInputBorder()),
@@ -344,7 +342,8 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                     TextField(
                       controller: cardCtrl,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Tarjeta de pago y garantía*', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder()),
+                      decoration:
+                          const InputDecoration(labelText: 'Tarjeta de pago y garantía*', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 14),
                     SizedBox(
@@ -392,15 +391,9 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                                     token: token,
                                   );
 
-                                  final dataObj = resData['data'] is Map
-                                      ? Map<String, dynamic>.from(resData['data'])
-                                      : resData;
-                                  final resId = dataObj['order_id']?.toString() ??
-                                      dataObj['id']?.toString() ??
-                                      'AUTO-${DateTime.now().millisecondsSinceEpoch}';
-                                  final pnr = dataObj['codigo_reserva']?.toString() ??
-                                      dataObj['pnr']?.toString() ??
-                                      resId;
+                                  final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
+                                  final resId = dataObj['order_id']?.toString() ?? dataObj['id']?.toString() ?? 'AUTO-${DateTime.now().millisecondsSinceEpoch}';
+                                  final pnr = dataObj['codigo_reserva']?.toString() ?? dataObj['pnr']?.toString() ?? resId;
 
                                   final nuevaReserva = Reserva(
                                     id: resId,
@@ -591,7 +584,8 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                           children: [
                             Text('Mostrador: ${_auto.proveedorUbicacion}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             const SizedBox(height: 4),
-                            Text('Ciudad de búsqueda: $_location · Atención en Terminal Llegadas 24h.', style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+                            Text('Ciudad de búsqueda: $_location · Atención en Terminal Llegadas 24h.',
+                                style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
                           ],
                         )
                       : Column(
@@ -637,17 +631,16 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                       const Text('Desglose de precio', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       const Divider(height: 16),
                       _priceLine('Alquiler del vehículo ($_days días × \$${_auto.precioPorDia.toStringAsFixed(2)})', _baseRentalTotal),
-                      if (_youngFeeTotal > 0)
-                        _priceLine('Recargo conductor joven (<25 años · $_days d)', _youngFeeTotal),
-                      if (_coverageTotal > 0)
-                        _priceLine('Cobertura Total (+US\$ 18.00/día × $_days d)', _coverageTotal),
+                      if (_youngFeeTotal > 0) _priceLine('Recargo conductor joven (<25 años · $_days d)', _youngFeeTotal),
+                      if (_coverageTotal > 0) _priceLine('Cobertura Total (+US\$ 18.00/día × $_days d)', _coverageTotal),
                       _priceLine('IVA (15% Ecuador)', _iva),
                       const Divider(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Total Final', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Text('US\$ ${_grandTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: BookingColors.primaryBlue)),
+                          Text('US\$ ${_grandTotal.toStringAsFixed(2)}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: BookingColors.primaryBlue)),
                         ],
                       ),
                     ],
@@ -672,8 +665,10 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('$_days día(s) · ${_coberturaTotal ? "Cobertura Total" : "Básica"}', style: const TextStyle(fontSize: 11, color: BookingColors.textMuted)),
-                    Text('US\$ ${_grandTotal.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
+                    Text('$_days día(s) · ${_coberturaTotal ? "Cobertura Total" : "Básica"}',
+                        style: const TextStyle(fontSize: 11, color: BookingColors.textMuted)),
+                    Text('US\$ ${_grandTotal.toStringAsFixed(2)}',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
                     const Text('IVA 15% incluido', style: TextStyle(fontSize: 10, color: BookingColors.successGreen)),
                   ],
                 ),

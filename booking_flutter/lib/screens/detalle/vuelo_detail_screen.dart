@@ -280,9 +280,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       final segId = _activeOffer.primerSegmento?.segmentId ?? 'SEG-1';
 
       if (_selectedSeatNumbers.isNotEmpty && _holdId != null) {
-        final seatsPayload = _selectedSeatNumbers
-            .map((seatNum) => {'segmentId': segId, 'seatNumber': seatNum})
-            .toList();
+        final seatsPayload = _selectedSeatNumbers.map((seatNum) => {'segmentId': segId, 'seatNumber': seatNum}).toList();
         await BookingServices.bloquearAsientos(
           _activeOffer.offerId,
           _holdId!,
@@ -324,12 +322,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       _bookingCompleted = true;
 
       final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
-      final resId = dataObj['bookingId']?.toString() ??
-          dataObj['id']?.toString() ??
-          'VUE-${DateTime.now().millisecondsSinceEpoch}';
-      final pnr = dataObj['pnr']?.toString() ??
-          dataObj['recordLocator']?.toString() ??
-          resId;
+      final resId = dataObj['bookingId']?.toString() ?? dataObj['id']?.toString() ?? 'VUE-${DateTime.now().millisecondsSinceEpoch}';
+      final pnr = dataObj['pnr']?.toString() ?? dataObj['recordLocator']?.toString() ?? resId;
 
       final nuevaReserva = Reserva(
         id: resId,
@@ -394,7 +388,6 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                 ),
                 child: Text(_errorMsg!, style: const TextStyle(color: BookingColors.errorRed, fontSize: 12)),
               ),
-
             if (_step == 0) ...[
               // Resumen del itinerario (ResumenViaje.jsx parity)
               Card(
@@ -411,7 +404,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(color: const Color(0xFFE7F6EC), borderRadius: BorderRadius.circular(4)),
-                            child: Text(_activeOption.fareBrand, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: BookingColors.successGreen)),
+                            child: Text(_activeOption.fareBrand,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: BookingColors.successGreen)),
                           ),
                         ],
                       ),
@@ -439,7 +433,9 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                                       dense: true,
                                       contentPadding: EdgeInsets.zero,
                                       leading: const Icon(Icons.flight, color: BookingColors.primaryBlue),
-                                      title: Text('${seg.originIata} (${extraerHoraIso(seg.departureAt)}) → ${seg.destinationIata} (${extraerHoraIso(seg.arrivalAt)})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                      title: Text(
+                                          '${seg.originIata} (${extraerHoraIso(seg.departureAt)}) → ${seg.destinationIata} (${extraerHoraIso(seg.arrivalAt)})',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                       subtitle: Text(
                                         'Vuelo ${seg.flightNumber} · ${extraerFechaIso(seg.departureAt)} · ${seg.aircraft ?? "Jet comercial"}',
                                         style: const TextStyle(fontSize: 11),
@@ -450,7 +446,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                           );
                         })
                       else
-                        Text('${_activeOffer.origen} (${_activeOffer.horaSalida}) → ${_activeOffer.destino} (${_activeOffer.horaLlegada}) · Vuelo ${_activeOffer.numeroVuelo}'),
+                        Text(
+                            '${_activeOffer.origen} (${_activeOffer.horaSalida}) → ${_activeOffer.destino} (${_activeOffer.horaLlegada}) · Vuelo ${_activeOffer.numeroVuelo}'),
                     ],
                   ),
                 ),
@@ -480,7 +477,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
               if (_esInternacional)
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(8), border: Border.all(color: BookingColors.accentYellow)),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(8), border: Border.all(color: BookingColors.accentYellow)),
                   child: const Row(
                     children: [
                       Icon(Icons.public, color: Colors.orange),
@@ -529,7 +527,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Selección de asientos (Opcional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          Text('${_selectedSeatNumbers.length} / ${_pax.seatedTotal}', style: const TextStyle(color: BookingColors.actionBlue, fontWeight: FontWeight.bold)),
+                          Text('${_selectedSeatNumbers.length} / ${_pax.seatedTotal}',
+                              style: const TextStyle(color: BookingColors.actionBlue, fontWeight: FontWeight.bold)),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -566,14 +565,10 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                                 height: 36,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: !avail
-                                      ? Colors.grey.shade300
-                                      : (selected ? BookingColors.actionBlue : Colors.white),
+                                  color: !avail ? Colors.grey.shade300 : (selected ? BookingColors.actionBlue : Colors.white),
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                    color: !avail
-                                        ? Colors.grey.shade400
-                                        : (selected ? BookingColors.actionBlue : BookingColors.primaryBlue),
+                                    color: !avail ? Colors.grey.shade400 : (selected ? BookingColors.actionBlue : BookingColors.primaryBlue),
                                   ),
                                 ),
                                 child: Text(
@@ -683,14 +678,22 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                       TextField(
                         controller: _cardNumCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Tarjeta de crédito/débito*', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder(), isDense: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Tarjeta de crédito/débito*', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder(), isDense: true),
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Expanded(child: TextField(controller: _cardExpCtrl, decoration: const InputDecoration(labelText: 'MM/AA', border: OutlineInputBorder(), isDense: true))),
+                          Expanded(
+                              child: TextField(
+                                  controller: _cardExpCtrl,
+                                  decoration: const InputDecoration(labelText: 'MM/AA', border: OutlineInputBorder(), isDense: true))),
                           const SizedBox(width: 8),
-                          Expanded(child: TextField(controller: _cardCvvCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'CVV', border: OutlineInputBorder(), isDense: true))),
+                          Expanded(
+                              child: TextField(
+                                  controller: _cardCvvCtrl,
+                                  obscureText: true,
+                                  decoration: const InputDecoration(labelText: 'CVV', border: OutlineInputBorder(), isDense: true))),
                         ],
                       ),
                     ],

@@ -279,9 +279,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   Widget _buildReservaCard(Reserva r) {
     final isVuelo = r.vertical.toLowerCase().contains('vuelo');
     final canCheckIn = isVuelo && !r.esCancelada && r.estado != 'CHECKED_IN';
-    final statusColor = r.esCancelada
-        ? BookingColors.errorRed
-        : (r.estado == 'CHECKED_IN' ? BookingColors.actionBlue : BookingColors.successGreen);
+    final statusColor = r.esCancelada ? BookingColors.errorRed : (r.estado == 'CHECKED_IN' ? BookingColors.actionBlue : BookingColors.successGreen);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -313,12 +311,9 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
               ],
             ),
             const SizedBox(height: 8),
-
             Text(r.servicioNombre, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-            if (r.proveedor != null && r.proveedor!.isNotEmpty)
-              Text(r.proveedor!, style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+            if (r.proveedor != null && r.proveedor!.isNotEmpty) Text(r.proveedor!, style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
             const SizedBox(height: 6),
-
             Row(
               children: [
                 const Icon(Icons.qr_code, size: 14, color: BookingColors.actionBlue),
@@ -334,7 +329,6 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
               style: const TextStyle(fontSize: 12, color: BookingColors.textMuted),
             ),
             const Divider(height: 18),
-
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -376,7 +370,6 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                 ),
               ],
             ),
-
             if (!r.esCancelada) ...[
               const SizedBox(height: 8),
               Row(

@@ -28,8 +28,7 @@ class BookingSearchLoadingView extends StatefulWidget {
   State<BookingSearchLoadingView> createState() => _BookingSearchLoadingViewState();
 }
 
-class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView>
-    with SingleTickerProviderStateMixin {
+class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView> with SingleTickerProviderStateMixin {
   late final List<String> _listaFrases;
   int _fraseIndex = 0;
   int _activoIcono = 0;
@@ -224,9 +223,7 @@ class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView>
                           Icon(
                             item['icon'] as IconData,
                             size: 28,
-                            color: isHighlight
-                                ? BookingColors.actionBlue
-                                : const Color(0xFF64748B),
+                            color: isHighlight ? BookingColors.actionBlue : const Color(0xFF64748B),
                           ),
                           const SizedBox(height: 6),
                           Text(
@@ -235,9 +232,7 @@ class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView>
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: isHighlight ? FontWeight.bold : FontWeight.w500,
-                              color: isHighlight
-                                  ? BookingColors.primaryBlue
-                                  : const Color(0xFF64748B),
+                              color: isHighlight ? BookingColors.primaryBlue : const Color(0xFF64748B),
                               height: 1.2,
                             ),
                           ),
@@ -273,4 +268,3 @@ class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView>
     );
   }
 }
-
