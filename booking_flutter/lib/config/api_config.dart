@@ -4,6 +4,8 @@ class ApiConfig {
   /// En producción (web release o APK release) apunta al API Gateway de Azure.
   /// En desarrollo local usa 10.0.2.2 en emulador Android y localhost en Web/Desktop.
   static String get baseUrl {
+    const envUrl = String.fromEnvironment('API_URL');
+    if (envUrl.isNotEmpty) return envUrl;
     if (kReleaseMode) {
       return 'https://booking-core-api.azurewebsites.net/api/v1';
     }

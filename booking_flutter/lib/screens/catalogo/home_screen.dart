@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -77,23 +78,26 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Atraccion> _atracciones = [];
   List<Auto> _autos = [];
   List<Vuelo> _vuelos = [];
+  Timer? _catalogsPollTimer;
 
   @override
   void initState() {
     super.initState();
     _loadInitialCatalogs();
+    _catalogsPollTimer = Timer.periodic(const Duration(seconds: 12), (_) => _loadInitialCatalogs(silent: true));
   }
 
   @override
   void dispose() {
+    _catalogsPollTimer?.cancel();
     _alojDestinoCtrl.dispose();
     _autoLocCtrl.dispose();
     _atrQueryCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _loadInitialCatalogs() async {
-    setState(() => _loadingCatalog = true);
+  Future<void> _loadInitialCatalogs({bool silent = false}) async {
+    if (!silent) setState(() => _loadingCatalog = true);
     try {
       final results = await Future.wait([
         BookingServices.getAlojamientos(page: 1, limit: 15),
@@ -107,11 +111,11 @@ class _HomeScreenState extends State<HomeScreen> {
           _atracciones = results[1] as List<Atraccion>;
           _autos = results[2] as List<Auto>;
           _vuelos = results[3] as List<Vuelo>;
-          _loadingCatalog = false;
+          if (!silent) _loadingCatalog = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _loadingCatalog = false);
+      if (mounted && !silent) setState(() => _loadingCatalog = false);
     }
   }
 

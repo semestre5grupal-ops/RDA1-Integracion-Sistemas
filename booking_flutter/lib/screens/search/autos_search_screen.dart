@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/auto.dart';
@@ -65,6 +66,7 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
   String? _error;
   List<Auto> _autos = [];
   AutosSearchMetadata _meta = AutosSearchMetadata();
+  Timer? _pollTimer;
 
   String _sortBy = 'recommended'; // recommended, price_asc, price_desc, rating_desc
   String _activeCategoryChip = 'ALL';
@@ -102,19 +104,23 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
     _dropoffTime = _timeSlots.contains(widget.initialDropoffTime) ? widget.initialDropoffTime : '10:00';
     _driverAge = widget.initialDriverAge.clamp(18, 99);
     _fetchAutos();
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchAutos(silent: true));
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _locationCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchAutos() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _fetchAutos({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final res = await BookingServices.searchAutos(
         pickupLocation: _locationCtrl.text.trim(),
@@ -130,11 +136,11 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
         setState(() {
           _autos = res.autos;
           _meta = res.metadata;
-          _loading = false;
+          if (!silent) _loading = false;
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _error = 'No se pudo cargar la flota disponible. Inténtalo nuevamente.';
           _loading = false;

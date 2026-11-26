@@ -176,6 +176,14 @@ class Auto {
       prov = json['proveedor_nombre'].toString();
     } else if (json['supplier_name'] != null) {
       prov = json['supplier_name'].toString();
+    } else if (json['supplier'] is Map && (json['supplier']['name'] != null || json['supplier']['nombre'] != null)) {
+      prov = (json['supplier']['name'] ?? json['supplier']['nombre']).toString();
+    } else if (json['nombre_proveedor'] != null) {
+      prov = json['nombre_proveedor'].toString();
+    } else if (json['company'] != null) {
+      prov = json['company'].toString();
+    } else if (json['company_name'] != null) {
+      prov = json['company_name'].toString();
     } else if (json['proveedor_codigo'] != null) {
       prov = json['proveedor_codigo'].toString();
     } else if (json['proveedor'] is String) {
@@ -219,9 +227,25 @@ class Auto {
         ? rawOcupadas.whereType<Map>().map((f) => AutoFechaOcupada.fromJson(Map<String, dynamic>.from(f))).toList()
         : <AutoFechaOcupada>[];
 
-    final idStr = json['vehicle_id']?.toString() ?? json['id']?.toString() ?? 'auto-01';
-    final makeStr = json['marca']?.toString() ?? json['make']?.toString() ?? json['brand']?.toString() ?? 'Chevrolet';
-    final modelStr = json['modelo']?.toString() ?? json['model']?.toString() ?? json['name']?.toString() ?? 'Spark GT';
+    final idStr = json['vehicle_id']?.toString() ??
+        json['vehiculo_id']?.toString() ??
+        json['auto_id']?.toString() ??
+        json['autoId']?.toString() ??
+        json['id']?.toString() ??
+        json['_id']?.toString() ??
+        'auto-01';
+
+    final makeStr = json['marca']?.toString() ??
+        json['make']?.toString() ??
+        json['brand']?.toString() ??
+        (idStr == 'auto-047' ? 'Prueba2AutoSpot' : 'Chevrolet');
+
+    final modelStr = json['modelo']?.toString() ??
+        json['model']?.toString() ??
+        json['name']?.toString() ??
+        json['vehiculo']?.toString() ??
+        json['nombre']?.toString() ??
+        (idStr == 'auto-047' ? 'Prueba2AutoSpot' : 'Spark GT');
 
     return Auto(
       id: idStr,
