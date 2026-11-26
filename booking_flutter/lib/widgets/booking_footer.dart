@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/info/privacidad_screen.dart';
-import '../screens/info/quiero_ser_proveedor_screen.dart';
 import '../screens/info/terminos_screen.dart';
 import '../theme/booking_colors.dart';
 
@@ -83,44 +82,50 @@ class BookingFooter extends StatelessWidget {
     return Container(
       width: double.infinity,
       color: const Color(0xFFF5F7FA),
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1140),
           child: Column(
             children: [
+              // Enlaces legales (Footer.jsx parity)
               Wrap(
                 alignment: WrapAlignment.center,
-                spacing: 12,
-                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacidadScreen())),
-                    child: const Text('Política de Privacidad', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13)),
+                  InkWell(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacidadScreen())),
+                    child: const Text('Política de Privacidad', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13, decoration: TextDecoration.underline)),
                   ),
-                  TextButton(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TerminosScreen())),
-                    child: const Text('Términos de Uso', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13)),
+                  const Text('·', style: TextStyle(color: BookingColors.textMuted, fontSize: 14)),
+                  InkWell(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TerminosScreen())),
+                    child: const Text('Términos de Uso', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13, decoration: TextDecoration.underline)),
                   ),
-                  TextButton(
-                    onPressed: () => CookieConsentHelper.openPreferencesDialog(context),
-                    child: const Text('Preferencias de cookies', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13)),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const QuieroSerProveedorScreen())),
-                    child: const Text('Registra tu propiedad / empresa', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13, fontWeight: FontWeight.w600)),
+                  const Text('·', style: TextStyle(color: BookingColors.textMuted, fontSize: 14)),
+                  InkWell(
+                    onTap: () => CookieConsentHelper.openPreferencesDialog(context),
+                    child: const Text('Preferencias de cookies', style: TextStyle(color: BookingColors.actionBlue, fontSize: 13, decoration: TextDecoration.underline)),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                '© $anio Booking Prototipo — Proyecto Integrador de Sistemas · Universidad',
+              const SizedBox(height: 12),
+              RichText(
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: BookingColors.textDark),
+                text: TextSpan(
+                  style: const TextStyle(fontSize: 12, color: BookingColors.textDark),
+                  children: [
+                    TextSpan(text: '© $anio '),
+                    const TextSpan(text: 'Booking Prototipo', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const TextSpan(text: ' — Proyecto Integrador de Sistemas · Universidad'),
+                  ],
+                ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               const Text(
-                'Alojamientos · Vuelos · Renta de autos · Atracciones · Ecuador',
+                'Powered by NestJS · React · PostgreSQL · Docker',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11, color: BookingColors.textMuted),
               ),
@@ -131,4 +136,3 @@ class BookingFooter extends StatelessWidget {
     );
   }
 }
-
