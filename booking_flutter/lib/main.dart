@@ -6,6 +6,7 @@ import 'offline/estado_red.dart';
 import 'providers/auth_provider.dart';
 import 'services/sesion_storage.dart';
 import 'providers/currency_provider.dart';
+import 'screens/admin/admin_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/info/privacidad_screen.dart';
@@ -57,6 +58,7 @@ class BookingApp extends StatelessWidget {
           '/facturas': (context) => const FacturasScreen(),
           '/privacidad': (context) => const PrivacidadScreen(),
           '/terminos': (context) => const TerminosScreen(),
+          '/admin': (context) => const AdminScreen(),
           '/ser-proveedor': (context) => const QuieroSerProveedorScreen(),
         },
       ),

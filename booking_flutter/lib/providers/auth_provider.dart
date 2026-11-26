@@ -11,6 +11,10 @@ class AuthUser {
   final String tipoDocumento;
   final String telefono;
 
+  /// `app_metadata.role` de Supabase. Solo el servidor lo puede escribir (no el
+  /// propio usuario), por eso es lo único fiable junto con la lista de correos.
+  final String rolApp;
+
   AuthUser({
     required this.nombre,
     required this.apellido,
@@ -18,7 +22,16 @@ class AuthUser {
     required this.cedula,
     this.tipoDocumento = 'CEDULA',
     required this.telefono,
+    this.rolApp = '',
   });
+
+  /// Mismos correos fijos que `AdminGuard.jsx`. Solo decide si se MUESTRA el
+  /// panel: el backend vuelve a comprobarlo en cada petición de `/admin/*`.
+  static const List<String> correosAdmin = ['admin@booking.com', 'alejandroflores@booking.com'];
+
+  /// Misma regla que la web: correo de la lista o `app_metadata.role == 'admin'`.
+  /// Nunca se mira `user_metadata.role`, que el usuario puede escribir.
+  bool get esAdmin => correosAdmin.contains(email.toLowerCase()) || rolApp == 'admin';
 
   String get displayName => ('$nombre $apellido').trim().isNotEmpty ? ('$nombre $apellido').trim() : (email.split('@').first);
 
@@ -31,6 +44,7 @@ class AuthUser {
         'cedula': cedula,
         'tipo_documento': tipoDocumento,
         'telefono': telefono,
+        'rol_app': rolApp,
       };
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
@@ -40,6 +54,7 @@ class AuthUser {
         cedula: json['cedula']?.toString() ?? '',
         tipoDocumento: json['tipo_documento']?.toString() ?? 'CEDULA',
         telefono: json['telefono']?.toString() ?? '',
+        rolApp: json['rol_app']?.toString() ?? '',
       );
 }
 
@@ -199,7 +214,9 @@ class AuthProvider extends ChangeNotifier {
     if (userObj.isEmpty) return null;
     final meta = userObj['user_metadata'] is Map ? Map<String, dynamic>.from(userObj['user_metadata']) : <String, dynamic>{};
     final email = (userObj['email']?.toString() ?? emailRespaldo).trim().toLowerCase();
+    final appMeta = userObj['app_metadata'] is Map ? Map<String, dynamic>.from(userObj['app_metadata']) : <String, dynamic>{};
     return AuthUser(
+      rolApp: appMeta['role']?.toString() ?? '',
       nombre: meta['nombre']?.toString() ?? email.split('@').first,
       apellido: meta['apellido']?.toString() ?? '',
       email: email,
@@ -426,6 +443,7 @@ class AuthProvider extends ChangeNotifier {
       cedula: user.cedula,
       tipoDocumento: user.tipoDocumento,
       telefono: telefono.trim(),
+      rolApp: servidor?.rolApp ?? user.rolApp,
     );
     await _persistSession();
     notifyListeners();

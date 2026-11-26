@@ -7,6 +7,7 @@ import '../auth/register_screen.dart';
 import '../info/quiero_ser_proveedor_screen.dart';
 import '../reservas/mis_reservas_screen.dart';
 import '../vuelos/estado_vuelo_screen.dart';
+import '../admin/admin_screen.dart';
 import 'facturas_screen.dart';
 
 class PerfilScreen extends StatelessWidget {
@@ -288,6 +289,16 @@ class PerfilScreen extends StatelessWidget {
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EstadoVueloScreen())),
                   ),
+                  if (auth.user?.esAdmin ?? false) ...[
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.admin_panel_settings_outlined, color: BookingColors.actionBlue),
+                      title: const Text('Administración', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Resumen, objetivos de servicio y compras de vuelos'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminScreen())),
+                    ),
+                  ],
                   const Divider(height: 1),
                   ListTile(
                     leading: const Icon(Icons.storefront_outlined, color: BookingColors.actionBlue),
