@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/alojamiento.dart';
 import '../models/reserva.dart';
+import '../offline/cola_reservas.dart';
 import '../providers/auth_provider.dart';
 import '../providers/currency_provider.dart';
 import '../services/api_client.dart';
@@ -408,6 +409,25 @@ class _AlojamientoCheckoutModalState extends State<AlojamientoCheckoutModal> {
     }
 
     if (!mounted) return;
+    // Sin red tras el reintento: se guarda con la MISMA clave (antes se descartaba la clave y el
+    // siguiente toque podía crear otra reserva) y se envía sola al volver la red.
+    if (esErrorDeRed(err)) {
+      await context.read<ColaReservas>().encolar(
+            tipo: 'alojamiento',
+            payload: {
+              'alojamientoId': widget.alojamiento.id,
+              'data': {...payload, 'confirmar_duplicado': true},
+            },
+            idempotencyKey: _idempotencyKey!,
+            titulo: 'Hospedaje: ${widget.alojamiento.nombre}',
+          );
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMsg = 'Sin conexión estable. Guardamos tu reserva y se enviará sola al volver la red (no se cobrará dos veces).';
+      });
+      return;
+    }
     setState(() => _loading = false);
     _manejarError(err);
   }

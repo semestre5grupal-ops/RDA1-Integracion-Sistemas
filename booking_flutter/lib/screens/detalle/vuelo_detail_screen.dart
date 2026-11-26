@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
+import '../../offline/cola_reservas.dart';
 import '../../utils/clave_compra.dart';
 import '../../utils/destinos_catalog.dart';
 import '../../widgets/auth_guard_dialog.dart';
@@ -292,12 +293,31 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
         },
       };
 
-      final resData = await BookingServices.crearReservaVuelo(
-        payload,
-        _claveCompra.idempotencia(_holdId!),
-        token: token,
-        correlationId: _claveCompra.correlacion(_holdId!),
-      );
+      final claveReserva = _claveCompra.idempotencia(_holdId!);
+      final Map<String, dynamic> resData;
+      try {
+        resData = await BookingServices.crearReservaVuelo(
+          payload,
+          claveReserva,
+          token: token,
+          correlationId: _claveCompra.correlacion(_holdId!),
+        );
+      } catch (e) {
+        if (!esErrorDeRed(e) || !mounted) rethrow;
+        // Sin red: la reserva se guarda con la MISMA clave y se envía sola al volver. Si el
+        // precio bloqueado ya venció para entonces, el servidor la rechaza y se avisa con el motivo.
+        await Provider.of<ColaReservas>(context, listen: false).encolar(
+          tipo: 'vuelo',
+          payload: payload,
+          idempotencyKey: claveReserva,
+          titulo: 'Vuelo ${_activeOffer.origen} ➔ ${_activeOffer.destino}',
+        );
+        setState(() {
+          _submittingBooking = false;
+          _errorMsg = 'Sin conexión estable. Guardamos tu reserva y se enviará sola al volver la red (no se cobrará dos veces). Si tu precio bloqueado vence antes, te avisaremos.';
+        });
+        return;
+      }
       _claveCompra.reiniciar();
 
       _bookingCompleted = true;

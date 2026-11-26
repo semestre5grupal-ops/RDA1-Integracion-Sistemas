@@ -8,6 +8,7 @@ import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
+import '../../offline/cola_reservas.dart';
 import '../../utils/clave_compra.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
@@ -290,12 +291,25 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
 
                                   // Misma Idempotency-Key si se reintenta la misma reserva (corte de red):
                                   // no se cobra dos veces. Cambia solo si cambian los datos.
-                                  final resData = await BookingServices.reservarAtraccion(
-                                    _atr.id,
-                                    payload,
-                                    _claveReserva.para(payload),
-                                    token: token,
-                                  );
+                                  final claveReserva = _claveReserva.para(payload);
+                                  final Map<String, dynamic> resData;
+                                  try {
+                                    resData = await BookingServices.reservarAtraccion(_atr.id, payload, claveReserva, token: token);
+                                  } catch (e) {
+                                    if (!esErrorDeRed(e) || !mounted) rethrow;
+                                    // Sin red: se guarda con la MISMA clave y se envía sola al volver.
+                                    await Provider.of<ColaReservas>(this.context, listen: false).encolar(
+                                      tipo: 'atraccion',
+                                      payload: {'atraccionId': _atr.id, 'data': payload},
+                                      idempotencyKey: claveReserva,
+                                      titulo: _atr.nombre,
+                                    );
+                                    setModal(() {
+                                      submitting = false;
+                                      errorMsg = 'Sin conexión estable. Guardamos tu reserva y se enviará sola al volver la red (no se cobrará dos veces).';
+                                    });
+                                    return;
+                                  }
                                   _claveReserva.reiniciar();
 
                                   final dataObj = resData['data'] is Map

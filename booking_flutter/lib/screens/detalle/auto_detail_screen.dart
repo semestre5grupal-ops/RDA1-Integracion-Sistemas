@@ -10,6 +10,7 @@ import '../../theme/booking_colors.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
 import '../../utils/cedula_ecuador.dart';
+import '../../offline/cola_reservas.dart';
 import '../../utils/clave_compra.dart';
 import '../../widgets/auto_voucher_modal.dart';
 
@@ -394,11 +395,25 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
 
                                   // Misma Idempotency-Key si se reintenta la misma reserva (corte de red):
                                   // no se cobra dos veces. Cambia solo si cambian los datos.
-                                  final resData = await BookingServices.reservarAuto(
-                                    payload,
-                                    _claveReserva.para(payload),
-                                    token: token,
-                                  );
+                                  final claveReserva = _claveReserva.para(payload);
+                                  final Map<String, dynamic> resData;
+                                  try {
+                                    resData = await BookingServices.reservarAuto(payload, claveReserva, token: token);
+                                  } catch (e) {
+                                    if (!esErrorDeRed(e) || !mounted) rethrow;
+                                    // Sin red: se guarda con la MISMA clave y se envía sola al volver.
+                                    await Provider.of<ColaReservas>(this.context, listen: false).encolar(
+                                      tipo: 'auto',
+                                      payload: payload,
+                                      idempotencyKey: claveReserva,
+                                      titulo: 'Renta: ${_auto.carDisplayName}',
+                                    );
+                                    setModal(() {
+                                      submitting = false;
+                                      errorMsg = 'Sin conexión estable. Guardamos tu reserva y se enviará sola al volver la red (no se cobrará dos veces).';
+                                    });
+                                    return;
+                                  }
                                   _claveReserva.reiniciar();
 
                                   final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
