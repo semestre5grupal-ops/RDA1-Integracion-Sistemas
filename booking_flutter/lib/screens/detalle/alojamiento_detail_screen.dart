@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
 import '../../models/alojamiento.dart';
-import '../../models/reserva.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
@@ -12,6 +10,7 @@ import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
 import '../../widgets/occupancy_picker_sheet.dart';
 import '../reservas/voucher_qr_screen.dart';
+import '../../widgets/alojamiento_checkout_modal.dart';
 
 class AlojamientoDetailScreen extends StatefulWidget {
   final Alojamiento alojamiento;
@@ -160,374 +159,42 @@ class _AlojamientoDetailScreenState extends State<AlojamientoDetailScreen> {
     if (!ok || !mounted) return;
     if (!Provider.of<AuthProvider>(context, listen: false).isAuthenticated) return;
 
-    final user = Provider.of<AuthProvider>(context, listen: false).user;
-    final token = Provider.of<AuthProvider>(context, listen: false).token;
-
     final selectedRooms = _products.where((r) => (_selectedCounts[r.productId] ?? 0) > 0).toList();
     if (selectedRooms.isEmpty) return;
+    // ReservationRequestDto admite UN tipo de habitación (tipo_habitacion_id) por
+    // reserva, igual que AlojamientoDetail.jsx (cotizacion.producto).
+    if (selectedRooms.length > 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reserva un tipo de habitación por vez: el hotel registra un solo tipo por reserva.')),
+      );
+      return;
+    }
 
-    final nombreCtrl = TextEditingController(text: user?.nombre ?? '');
-    final apellidoCtrl = TextEditingController(text: user?.apellido ?? '');
-    final emailCtrl = TextEditingController(text: user?.email ?? '');
-    final telCtrl = TextEditingController(text: user?.telefono ?? '+593');
-    final docCtrl = TextEditingController(text: user?.cedula ?? '');
-    final notasCtrl = TextEditingController();
-    String docTipo = user?.tipoDocumento ?? 'CEDULA';
-    String metodoPago = _prop.pagoEnAlojamiento ? 'TARJETA' : 'TARJETA';
-    final cardNumCtrl = TextEditingController(text: '4532 8900 1234 5678');
-    final cardExpCtrl = TextEditingController(text: '09/29');
-    final cardCvvCtrl = TextEditingController(text: '842');
-
-    int step = 0;
-    bool submitting = false;
-    String? errorMsg;
-
-    final subtotal = _subtotalSelected;
-    final iva = subtotal * 0.15;
-    final grandTotal = subtotal + iva;
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      isDismissible: false,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModal) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 18,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          step == 0 ? 'Paso 1 de 2: Tus datos' : 'Paso 2 de 2: Pago y confirmación',
-                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: submitting ? null : () => Navigator.pop(ctx),
-                        ),
-                      ],
-                    ),
-                    const Divider(),
-                    if (errorMsg != null)
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFCE8E8),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: BookingColors.errorRed),
-                        ),
-                        child: Text(errorMsg!, style: const TextStyle(color: BookingColors.errorRed, fontSize: 12)),
-                      ),
-                    if (step == 0) ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: nombreCtrl,
-                              decoration: const InputDecoration(labelText: 'Nombre*', border: OutlineInputBorder()),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: apellidoCtrl,
-                              decoration: const InputDecoration(labelText: 'Apellido*', border: OutlineInputBorder()),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: emailCtrl,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: const InputDecoration(labelText: 'Email de confirmación*', border: OutlineInputBorder()),
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: telCtrl,
-                        keyboardType: TextInputType.phone,
-                        decoration: const InputDecoration(labelText: 'Teléfono de contacto*', border: OutlineInputBorder()),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: DropdownButtonFormField<String>(
-                              value: ['CEDULA', 'PASAPORTE', 'RUC'].contains(docTipo) ? docTipo : 'CEDULA',
-                              decoration: const InputDecoration(labelText: 'Documento', border: OutlineInputBorder()),
-                              items: const [
-                                DropdownMenuItem(value: 'CEDULA', child: Text('Cédula')),
-                                DropdownMenuItem(value: 'PASAPORTE', child: Text('Pasaporte')),
-                                DropdownMenuItem(value: 'RUC', child: Text('RUC')),
-                              ],
-                              onChanged: (v) {
-                                if (v != null) setModal(() => docTipo = v);
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: docCtrl,
-                              decoration: InputDecoration(
-                                labelText: widget.alojamiento.id.contains('~') ? 'Número documento*' : 'Número documento',
-                                border: const OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: notasCtrl,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Peticiones especiales (opcional)',
-                          hintText: 'Ej. Piso alto, llegada tarde...',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            if (nombreCtrl.text.trim().isEmpty || apellidoCtrl.text.trim().isEmpty || !emailCtrl.text.contains('@')) {
-                              setModal(() => errorMsg = 'Completa nombre, apellido y un correo válido.');
-                              return;
-                            }
-                            if (widget.alojamiento.id.contains('~') && docCtrl.text.trim().length < 5) {
-                              setModal(() => errorMsg = 'El número de documento es obligatorio para este hotel.');
-                              return;
-                            }
-                            setModal(() {
-                              errorMsg = null;
-                              step = 1;
-                            });
-                          },
-                          style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
-                          child: const Text('Siguiente: Revisar pago >', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ] else ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_prop.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text(
-                              '${DateFormat('dd MMM yyyy').format(_checkIn)} → ${DateFormat('dd MMM yyyy').format(_checkOut)} ($_nights noches · $_totalRoomsSelected hab.)',
-                              style: const TextStyle(fontSize: 12, color: BookingColors.textMuted),
-                            ),
-                            const Divider(height: 14),
-                            ...selectedRooms.map((r) {
-                              final qty = _selectedCounts[r.productId] ?? 1;
-                              return Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(child: Text('$qty x ${r.nombre}', style: const TextStyle(fontSize: 12))),
-                                  Text('US\$ ${(r.price * qty).toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                ],
-                              );
-                            }),
-                            const SizedBox(height: 6),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text('IVA (15% Ecuador):', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
-                                Text('US\$ ${iva.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12)),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text('Total Final:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                Text('US\$ ${grandTotal.toStringAsFixed(2)}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: BookingColors.actionBlue)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: metodoPago,
-                        decoration: const InputDecoration(labelText: 'Método de pago', border: OutlineInputBorder()),
-                        items: [
-                          const DropdownMenuItem(value: 'TARJETA', child: Text('Tarjeta de Crédito / Débito')),
-                          if (_prop.pagoEnAlojamiento) const DropdownMenuItem(value: 'PAGO_EN_ALOJAMIENTO', child: Text('Pagar en el alojamiento (Check-in)')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) setModal(() => metodoPago = v);
-                        },
-                      ),
-                      if (metodoPago == 'TARJETA') ...[
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: cardNumCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Número de tarjeta', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder()),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: cardExpCtrl,
-                                decoration: const InputDecoration(labelText: 'Vencimiento (MM/AA)', border: OutlineInputBorder()),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: cardCvvCtrl,
-                                obscureText: true,
-                                decoration: const InputDecoration(labelText: 'CVV', border: OutlineInputBorder()),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          TextButton(
-                            onPressed: submitting ? null : () => setModal(() => step = 0),
-                            child: const Text('< Atrás'),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: SizedBox(
-                              height: 48,
-                              child: ElevatedButton(
-                                onPressed: submitting
-                                    ? null
-                                    : () async {
-                                        setModal(() {
-                                          submitting = true;
-                                          errorMsg = null;
-                                        });
-                                        try {
-                                          final cin = DateFormat('yyyy-MM-dd').format(_checkIn);
-                                          final cout = DateFormat('yyyy-MM-dd').format(_checkOut);
-                                          final primary = selectedRooms.first;
-                                          final payload = <String, dynamic>{
-                                            'checkin': cin,
-                                            'checkout': cout,
-                                            'adultos': _occupancy.adultos,
-                                            'ninos': _occupancy.ninos,
-                                            'edades_ninos': _occupancy.edadesNinos,
-                                            'habitaciones': _totalRoomsSelected,
-                                            'tipo_habitacion_id': primary.productId,
-                                            'product_id': primary.productId,
-                                            'items': selectedRooms
-                                                .map((r) => {
-                                                      'tipo_habitacion_id': r.productId,
-                                                      'product_id': r.productId,
-                                                      'cantidad': _selectedCounts[r.productId] ?? 1,
-                                                    })
-                                                .toList(),
-                                            'titular': {
-                                              'nombre': nombreCtrl.text.trim(),
-                                              'apellido': apellidoCtrl.text.trim(),
-                                              'email': emailCtrl.text.trim(),
-                                              'telefono': telCtrl.text.trim(),
-                                              'documento_tipo': docTipo,
-                                              if (docCtrl.text.trim().isNotEmpty) 'documento_numero': docCtrl.text.trim(),
-                                            },
-                                            'metodo_pago': metodoPago,
-                                            if (notasCtrl.text.trim().isNotEmpty) 'notas_especiales': notasCtrl.text.trim(),
-                                            'moneda': 'USD',
-                                          };
-
-                                          final resData = await BookingServices.reservarAlojamiento(
-                                            _prop.id,
-                                            payload,
-                                            const Uuid().v4(),
-                                            token: token,
-                                          );
-
-                                          final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
-                                          final resId = dataObj['reservation_id']?.toString() ??
-                                              dataObj['id']?.toString() ??
-                                              'ALO-${DateTime.now().millisecondsSinceEpoch}';
-                                          final pnr = dataObj['codigo_reserva']?.toString() ?? dataObj['pnr']?.toString() ?? resId;
-
-                                          final nuevaReserva = Reserva(
-                                            id: resId,
-                                            vertical: 'alojamientos',
-                                            servicioNombre: '${_prop.nombre} (${primary.nombre})',
-                                            proveedor: _prop.ciudad,
-                                            fecha: cin,
-                                            checkin: cin,
-                                            checkout: cout,
-                                            total: grandTotal,
-                                            estado: (dataObj['status'] ?? dataObj['estado'] ?? 'CONFIRMADA').toString().toUpperCase(),
-                                            voucherQr: dataObj['voucher_qr']?.toString() ?? 'BOOKING-ALO-$pnr',
-                                            pnr: pnr,
-                                            imagenUrl: _prop.imagenUrl,
-                                            fechaCreacion: DateTime.now(),
-                                            fechaServicio: _checkIn,
-                                          );
-
-                                          BookingServices.agregarReservaDirecta(nuevaReserva);
-
-                                          if (!ctx.mounted) return;
-                                          Navigator.pop(ctx);
-                                          if (!mounted) return;
-                                          Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: nuevaReserva)),
-                                          );
-                                        } catch (e) {
-                                          setModal(() {
-                                            submitting = false;
-                                            errorMsg = e is ApiException ? e.userMessage : 'No se pudo completar la reserva: $e';
-                                          });
-                                        }
-                                      },
-                                style: ElevatedButton.styleFrom(backgroundColor: BookingColors.successGreen),
-                                child: submitting
-                                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                    : const Text('Confirmar y emitir voucher', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+    final resultado = await AlojamientoCheckoutModal.show(
+      context,
+      AlojamientoCheckoutModal(
+        alojamiento: _prop,
+        checkin: _checkIn,
+        checkout: _checkOut,
+        adults: _occupancy.adultos,
+        edadesNinos: _occupancy.edadesNinos,
+        rooms: _totalRoomsSelected,
+        tipoHabitacion: selectedRooms.first,
+        nightsCount: _nights,
+        totalPrice: _subtotalSelected,
+      ),
     );
+    if (resultado == null || !mounted) return;
+    switch (resultado.accion) {
+      case AccionTrasReserva.verVoucher:
+        Navigator.push(context, MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: resultado.reserva)));
+        break;
+      case AccionTrasReserva.irAMisReservas:
+        Navigator.pushNamed(context, '/reservas');
+        break;
+      case AccionTrasReserva.ninguna:
+        break;
+    }
   }
 
   @override
