@@ -137,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'codigo': 'GPS',
       'nombre': 'Galápagos',
       'descripcion': 'Paraíso natural único en el mundo',
-      'imagen': 'https://images.unsplash.com/photo-1547459124-e23883747a40?w=400&h=240&fit=crop',
+      'imagen': 'https://cf.bstatic.com/xdata/images/city/600x600/789773.jpg?k=d69235159c2c6133ca29b3c7dfd4898da8521973758ff4e389458e17f9f9c0a4&o=',
       'desde': '\$119',
     },
   ];
