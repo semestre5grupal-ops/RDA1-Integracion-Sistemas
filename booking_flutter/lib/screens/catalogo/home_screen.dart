@@ -36,8 +36,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   static const List<String> _autoTimeSlots = [
-    '07:00', '08:00', '09:00', '10:00', '11:00', '12:00',
-    '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00',
+    '07:00',
+    '08:00',
+    '09:00',
+    '10:00',
+    '11:00',
+    '12:00',
+    '13:00',
+    '14:00',
+    '15:00',
+    '16:00',
+    '17:00',
+    '18:00',
+    '19:00',
+    '20:00',
   ];
 
   MarketplaceCategory _currentCategory = MarketplaceCategory.alojamientos;
@@ -268,14 +280,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      child: isWide ? _buildDesktopSearchRow() : Column(
-        children: [
-          if (_currentCategory == MarketplaceCategory.alojamientos) ..._buildAlojSearchFields(),
-          if (_currentCategory == MarketplaceCategory.vuelos) ..._buildVueloSearchFields(),
-          if (_currentCategory == MarketplaceCategory.autos) ..._buildAutoSearchFields(),
-          if (_currentCategory == MarketplaceCategory.atracciones) ..._buildAtrSearchFields(),
-        ],
-      ),
+      child: isWide
+          ? _buildDesktopSearchRow()
+          : Column(
+              children: [
+                if (_currentCategory == MarketplaceCategory.alojamientos) ..._buildAlojSearchFields(),
+                if (_currentCategory == MarketplaceCategory.vuelos) ..._buildVueloSearchFields(),
+                if (_currentCategory == MarketplaceCategory.autos) ..._buildAutoSearchFields(),
+                if (_currentCategory == MarketplaceCategory.atracciones) ..._buildAtrSearchFields(),
+              ],
+            ),
     );
   }
 
@@ -579,9 +593,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Text('Conductor entre 30 y 65 años', style: TextStyle(fontSize: 12)),
                 if (!_driverAge30to65) ...[
                   const SizedBox(width: 10),
-                  IconButton(icon: const Icon(Icons.remove_circle_outline, size: 18), onPressed: _autoDriverAge > 18 ? () => setState(() => _autoDriverAge--) : null),
+                  IconButton(
+                      icon: const Icon(Icons.remove_circle_outline, size: 18), onPressed: _autoDriverAge > 18 ? () => setState(() => _autoDriverAge--) : null),
                   Text('$_autoDriverAge años', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  IconButton(icon: const Icon(Icons.add_circle_outline, size: 18), onPressed: _autoDriverAge < 99 ? () => setState(() => _autoDriverAge++) : null),
+                  IconButton(
+                      icon: const Icon(Icons.add_circle_outline, size: 18), onPressed: _autoDriverAge < 99 ? () => setState(() => _autoDriverAge++) : null),
                 ],
                 const Spacer(),
                 ...DestinosCatalog.sugerenciasAutos.take(5).map((loc) => Padding(
@@ -813,9 +829,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   value: _vueloOrigin,
                   isExpanded: true,
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: BookingColors.textDark),
-                  items: airports
-                      .map((a) => DropdownMenuItem(value: a.codigo, child: Text('De: ${a.nombre}', overflow: TextOverflow.ellipsis)))
-                      .toList(),
+                  items: airports.map((a) => DropdownMenuItem(value: a.codigo, child: Text('De: ${a.nombre}', overflow: TextOverflow.ellipsis))).toList(),
                   onChanged: (v) {
                     if (v != null) setState(() => _vueloOrigin = v);
                   },
@@ -831,9 +845,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   value: _vueloDest,
                   isExpanded: true,
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: BookingColors.textDark),
-                  items: airports
-                      .map((a) => DropdownMenuItem(value: a.codigo, child: Text('A: ${a.nombre}', overflow: TextOverflow.ellipsis)))
-                      .toList(),
+                  items: airports.map((a) => DropdownMenuItem(value: a.codigo, child: Text('A: ${a.nombre}', overflow: TextOverflow.ellipsis))).toList(),
                   onChanged: (v) {
                     if (v != null) setState(() => _vueloDest = v);
                   },
@@ -1191,11 +1203,27 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
 
     const popularDestinos = [
-      {'name': 'Quito', 'sub': 'Centro Histórico & La Carolina', 'img': 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?auto=format&fit=crop&w=600&q=80'},
-      {'name': 'Guayaquil', 'sub': 'Malecón 2000 & Las Peñas', 'img': 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?auto=format&fit=crop&w=600&q=80'},
+      {
+        'name': 'Quito',
+        'sub': 'Centro Histórico & La Carolina',
+        'img': 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?auto=format&fit=crop&w=600&q=80'
+      },
+      {
+        'name': 'Guayaquil',
+        'sub': 'Malecón 2000 & Las Peñas',
+        'img': 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?auto=format&fit=crop&w=600&q=80'
+      },
       {'name': 'Cuenca', 'sub': 'Río Tomebamba & Cajas', 'img': 'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?auto=format&fit=crop&w=600&q=80'},
-      {'name': 'Baños de Agua Santa', 'sub': 'Aventura & Termas', 'img': 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?auto=format&fit=crop&w=600&q=80'},
-      {'name': 'Islas Galápagos', 'sub': 'Santa Cruz & San Cristóbal', 'img': 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?auto=format&fit=crop&w=600&q=80'},
+      {
+        'name': 'Baños de Agua Santa',
+        'sub': 'Aventura & Termas',
+        'img': 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?auto=format&fit=crop&w=600&q=80'
+      },
+      {
+        'name': 'Islas Galápagos',
+        'sub': 'Santa Cruz & San Cristóbal',
+        'img': 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?auto=format&fit=crop&w=600&q=80'
+      },
     ];
 
     const plannerSpots = {
@@ -1466,7 +1494,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 16),
-
           const Text('Rutas más populares', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
           const Text('Explora tarifas conectadas en vivo con 5 aerolíneas socias', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
           const SizedBox(height: 10),
@@ -1511,7 +1538,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 18),
-
           const Text('Ofertas destacadas de vuelo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
           const SizedBox(height: 8),
           if (_loadingCatalog)
@@ -1530,7 +1556,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text('US\$ ${v.totalPrice.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.actionBlue)),
+                        Text('US\$ ${v.totalPrice.toStringAsFixed(0)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.actionBlue)),
                         const Text('Ver >', style: TextStyle(fontSize: 11, color: BookingColors.textMuted)),
                       ],
                     ),
@@ -1570,7 +1597,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 18),
-
           const Text('Puntos de recogida más populares', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
           const SizedBox(height: 8),
           Wrap(
@@ -1585,7 +1611,6 @@ class _HomeScreenState extends State<HomeScreen> {
             }).toList(),
           ),
           const SizedBox(height: 18),
-
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1653,7 +1678,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (_atrRegionTab == 'Galápagos') return text.contains('galápag') || text.contains('galapag') || text.contains('santa cruz');
       if (_atrRegionTab == 'Costa') return text.contains('guayaquil') || text.contains('manta') || text.contains('montañ') || text.contains('lópez');
       if (_atrRegionTab == 'Amazonía') return text.contains('tena') || text.contains('baños') || text.contains('cuyabeno') || text.contains('amazon');
-      return text.contains('quito') || text.contains('cuenca') || text.contains('cotopaxi') || text.contains('otavalo') || text.contains('mindo') || text.contains('mitad');
+      return text.contains('quito') ||
+          text.contains('cuenca') ||
+          text.contains('cotopaxi') ||
+          text.contains('otavalo') ||
+          text.contains('mindo') ||
+          text.contains('mitad');
     }).toList();
 
     final showcase = filteredByRegion.isNotEmpty ? filteredByRegion : _atracciones;
@@ -1679,7 +1709,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-
           const Text('Explora destinos de actividades', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
           const SizedBox(height: 8),
           Wrap(
@@ -1694,7 +1723,6 @@ class _HomeScreenState extends State<HomeScreen> {
             }).toList(),
           ),
           const SizedBox(height: 16),
-
           const Text('Descubre por regiones de Ecuador', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
           const SizedBox(height: 8),
           Wrap(
@@ -1710,7 +1738,6 @@ class _HomeScreenState extends State<HomeScreen> {
             }).toList(),
           ),
           const SizedBox(height: 10),
-
           if (_loadingCatalog)
             const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
           else
