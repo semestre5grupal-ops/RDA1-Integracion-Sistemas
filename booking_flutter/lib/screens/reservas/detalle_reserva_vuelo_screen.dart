@@ -72,7 +72,7 @@ class _DetalleReservaVueloScreenState extends State<DetalleReservaVueloScreen> {
     } catch (e) {
       setState(() {
         _busyAction = false;
-        _errorMsg = e is ApiException ? e.userMessage : 'No se pudieron emitir los boletos: $e';
+        _errorMsg = e is ApiException ? e.userMessageConCodigo : 'No se pudieron emitir los boletos: $e';
       });
     }
   }
@@ -94,7 +94,7 @@ class _DetalleReservaVueloScreenState extends State<DetalleReservaVueloScreen> {
     } catch (e) {
       setState(() {
         _busyAction = false;
-        _errorMsg = e is ApiException ? e.userMessage : 'No se pudo completar el check-in: $e';
+        _errorMsg = e is ApiException ? e.userMessageConCodigo : 'No se pudo completar el check-in: $e';
       });
     }
   }

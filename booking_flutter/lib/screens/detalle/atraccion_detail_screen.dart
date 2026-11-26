@@ -2,13 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
 import '../../models/atraccion.dart';
 import '../../models/reserva.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
+import '../../utils/clave_compra.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
 import '../reservas/voucher_qr_screen.dart';
@@ -28,6 +28,7 @@ class AtraccionDetailScreen extends StatefulWidget {
 }
 
 class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
+  final ClavePorContenido _claveReserva = ClavePorContenido();
   late Atraccion _atr;
   late DateTime _selectedDate;
   int _photoIndex = 0;
@@ -287,12 +288,15 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                                     'moneda': 'USD',
                                   };
 
+                                  // Misma Idempotency-Key si se reintenta la misma reserva (corte de red):
+                                  // no se cobra dos veces. Cambia solo si cambian los datos.
                                   final resData = await BookingServices.reservarAtraccion(
                                     _atr.id,
                                     payload,
-                                    const Uuid().v4(),
+                                    _claveReserva.para(payload),
                                     token: token,
                                   );
+                                  _claveReserva.reiniciar();
 
                                   final dataObj = resData['data'] is Map
                                       ? Map<String, dynamic>.from(resData['data'])
@@ -332,7 +336,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                                 } catch (e) {
                                   setModal(() {
                                     submitting = false;
-                                    errorMsg = e is ApiException ? e.userMessage : 'Error al reservar la atracción: $e';
+                                    errorMsg = e is ApiException ? e.userMessageConCodigo : 'Error al reservar la atracción: $e';
                                   });
                                 }
                               },

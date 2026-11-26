@@ -480,12 +480,14 @@ class BookingServices {
     Map<String, dynamic> payload,
     String idempotencyKey, {
     String? token,
+    String? correlationId,
   }) async {
     final res = await ApiClient.post(
       '/vuelos/bookings',
       body: payload,
       token: token,
       idempotencyKey: idempotencyKey,
+      correlationId: correlationId,
       includeFingerprint: true,
       timeout: ApiConfig.vuelosBookingTimeout,
     );

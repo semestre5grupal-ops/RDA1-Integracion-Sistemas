@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
 import '../../models/auto.dart';
 import '../../models/reserva.dart';
 import '../../providers/auth_provider.dart';
@@ -11,6 +10,7 @@ import '../../theme/booking_colors.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
 import '../../utils/cedula_ecuador.dart';
+import '../../utils/clave_compra.dart';
 import '../../widgets/auto_voucher_modal.dart';
 
 class AutoDetailScreen extends StatefulWidget {
@@ -38,6 +38,7 @@ class AutoDetailScreen extends StatefulWidget {
 }
 
 class _AutoDetailScreenState extends State<AutoDetailScreen> {
+  final ClavePorContenido _claveReserva = ClavePorContenido();
   static const double _coberturaTotalPorDia = 18.0;
   static const double _recargoJovenPorDiaDefault = 15.0;
 
@@ -391,11 +392,14 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                                     'moneda': 'USD',
                                   };
 
+                                  // Misma Idempotency-Key si se reintenta la misma reserva (corte de red):
+                                  // no se cobra dos veces. Cambia solo si cambian los datos.
                                   final resData = await BookingServices.reservarAuto(
                                     payload,
-                                    const Uuid().v4(),
+                                    _claveReserva.para(payload),
                                     token: token,
                                   );
+                                  _claveReserva.reiniciar();
 
                                   final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
                                   final resId = dataObj['order_id']?.toString() ?? dataObj['id']?.toString() ?? 'AUTO-${DateTime.now().millisecondsSinceEpoch}';
@@ -451,7 +455,7 @@ class _AutoDetailScreenState extends State<AutoDetailScreen> {
                                 } catch (e) {
                                   setModal(() {
                                     submitting = false;
-                                    errorMsg = e is ApiException ? e.userMessage : 'No se pudo reservar el auto: $e';
+                                    errorMsg = e is ApiException ? e.userMessageConCodigo : 'No se pudo reservar el auto: $e';
                                   });
                                 }
                               },

@@ -147,7 +147,7 @@ class _ModalBloqueoCupoState extends State<ModalBloqueoCupo> {
       setState(() => _hold = hold);
       _arrancarCuentaAtras();
     } catch (e) {
-      setState(() => _error = (e is ApiException && e.detail.isNotEmpty) ? e.detail : 'No se pudo bloquear el cupo. Intentalo de nuevo.');
+      setState(() => _error = (e is ApiException && e.detail.isNotEmpty) ? e.userMessageConCodigo : 'No se pudo bloquear el cupo. Intentalo de nuevo.');
     } finally {
       if (mounted) setState(() => _creando = false);
     }

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:booking_flutter/providers/auth_provider.dart';
+import 'package:booking_flutter/services/sesion_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -20,7 +21,7 @@ Map<String, dynamic> _sesion({String token = 'jwt-real', int expiresIn = 3600}) 
 
 Future<AuthProvider> _provider(MockClient client, [Map<String, Object> prefs = const {}]) async {
   SharedPreferences.setMockInitialValues(prefs);
-  final p = AuthProvider(client: client);
+  final p = AuthProvider(client: client, storage: PrefsSesionStorage());
   await p.initAuth();
   return p;
 }
@@ -75,7 +76,7 @@ void main() {
       expect(p.user!.cedula, '1712345675');
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('auth_refresh_token'), 'refresh-1');
-      expect(prefs.getInt('auth_expires_at'), isNotNull);
+      expect(prefs.getString('auth_expires_at'), isNotNull); // ahora se guarda como texto
     });
   });
 
@@ -106,7 +107,7 @@ void main() {
         'auth_expires_at': ahora - 10,
         'auth_user_data': jsonEncode({'nombre': 'Ana', 'email': 'ana@correo.ec'}),
       });
-      final p = AuthProvider(client: MockClient((req) async {
+      final p = AuthProvider(storage: PrefsSesionStorage(), client: MockClient((req) async {
         llamadas++;
         expect(req.url.query, 'grant_type=refresh_token');
         expect(jsonDecode(req.body)['refresh_token'], 'refresh-0');

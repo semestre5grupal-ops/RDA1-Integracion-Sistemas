@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/sesion_storage.dart';
 
 class AuthUser {
   final String nombre;
@@ -69,9 +69,10 @@ class AuthResult {
 ///
 /// Persistencia: supabase-js guarda la sesión (access + refresh token) en
 /// localStorage por defecto (`persistSession: true`), así que la web sobrevive a
-/// una recarga. Aquí se replica con SharedPreferences: se guardan access token,
-/// refresh token y caducidad, y al arrancar se renueva con `grant_type=refresh_token`
-/// si el access token expiró. Si la renovación falla, la sesión se descarta.
+/// una recarga. Aquí se replica en un almacén cifrado del sistema
+/// (`SesionStorage`, Keystore en Android): se guardan access token, refresh token
+/// y caducidad, y al arrancar se renueva con `grant_type=refresh_token` si el
+/// access token expiró. Si la renovación falla, la sesión se descarta.
 class AuthProvider extends ChangeNotifier {
   static const String _supabaseUrl = 'https://owseuntgcgvflqpnmwcc.supabase.co';
 
@@ -89,7 +90,10 @@ class AuthProvider extends ChangeNotifier {
 
   static const Duration _timeout = Duration(seconds: 20);
 
+  static const _clavesSesion = [_kToken, _kRefresh, _kExpiresAt, _kUser, _kName, _kEmail];
+
   final http.Client _http;
+  final SesionStorage _storage;
 
   String? _token;
   String? _refreshToken;
@@ -104,7 +108,9 @@ class AuthProvider extends ChangeNotifier {
   String get userName => _user?.displayName ?? 'Turista';
   String get userEmail => _user?.email ?? '';
 
-  AuthProvider({http.Client? client}) : _http = client ?? http.Client() {
+  AuthProvider({http.Client? client, SesionStorage? storage})
+      : _http = client ?? http.Client(),
+        _storage = storage ?? SecureSesionStorage() {
     initAuth();
   }
 
@@ -120,27 +126,27 @@ class AuthProvider extends ChangeNotifier {
   Future<void> initAuth() => _init ??= _restaurarSesion();
 
   Future<void> _restaurarSesion() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_kToken);
-    final userJson = prefs.getString(_kUser);
+    await _storage.migrarLegado(_clavesSesion);
+    final token = await _storage.leer(_kToken);
+    final userJson = await _storage.leer(_kUser);
 
     // Sesiones inventadas por el antiguo modo demo ('jwt-session-…') o
     // incompletas: no son válidas en el backend y se descartan.
     if (token == null || token.isEmpty || token.startsWith('jwt-session') || userJson == null || userJson.isEmpty) {
-      if (token != null) await _borrarSesionGuardada(prefs);
+      if (token != null) await _borrarSesionGuardada();
       notifyListeners();
       return;
     }
     try {
       _user = AuthUser.fromJson(jsonDecode(userJson) as Map<String, dynamic>);
     } catch (_) {
-      await _borrarSesionGuardada(prefs);
+      await _borrarSesionGuardada();
       notifyListeners();
       return;
     }
     _token = token;
-    _refreshToken = prefs.getString(_kRefresh);
-    _expiresAt = prefs.getInt(_kExpiresAt);
+    _refreshToken = await _storage.leer(_kRefresh);
+    _expiresAt = int.tryParse(await _storage.leer(_kExpiresAt) ?? '');
 
     final ahora = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     if (_expiresAt != null && _expiresAt! <= ahora + 30) {
@@ -427,23 +433,22 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _persistSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (_token != null) await prefs.setString(_kToken, _token!);
-    if (_refreshToken != null) await prefs.setString(_kRefresh, _refreshToken!);
-    if (_expiresAt != null) await prefs.setInt(_kExpiresAt, _expiresAt!);
+    if (_token != null) await _storage.escribir(_kToken, _token!);
+    if (_refreshToken != null) await _storage.escribir(_kRefresh, _refreshToken!);
+    if (_expiresAt != null) await _storage.escribir(_kExpiresAt, _expiresAt!.toString());
     if (_user != null) {
-      await prefs.setString(_kUser, jsonEncode(_user!.toJson()));
-      await prefs.setString(_kName, _user!.displayName);
-      await prefs.setString(_kEmail, _user!.email);
+      await _storage.escribir(_kUser, jsonEncode(_user!.toJson()));
+      await _storage.escribir(_kName, _user!.displayName);
+      await _storage.escribir(_kEmail, _user!.email);
     }
   }
 
-  /// Borra SOLO las claves de sesión. `prefs.clear()` también borraba el
-  /// consentimiento de cookies, la huella del dispositivo (X-Device-Fingerprint,
-  /// que identifica al dueño de las reservas de vuelo) y la moneda elegida.
-  Future<void> _borrarSesionGuardada(SharedPreferences prefs) async {
-    for (final k in const [_kToken, _kRefresh, _kExpiresAt, _kUser, _kName, _kEmail]) {
-      await prefs.remove(k);
+  /// Borra SOLO las claves de sesión: el consentimiento de cookies, la huella del
+  /// dispositivo (X-Device-Fingerprint, que identifica al dueño de las reservas de
+  /// vuelo) y la moneda elegida siguen en `SharedPreferences` y no se tocan.
+  Future<void> _borrarSesionGuardada() async {
+    for (final k in _clavesSesion) {
+      await _storage.borrar(k);
     }
   }
 
@@ -452,7 +457,7 @@ class AuthProvider extends ChangeNotifier {
     _refreshToken = null;
     _expiresAt = null;
     _user = null;
-    await _borrarSesionGuardada(await SharedPreferences.getInstance());
+    await _borrarSesionGuardada();
   }
 
   // --- CERRAR SESIÓN (supabase.auth.signOut) ---

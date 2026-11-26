@@ -27,6 +27,10 @@ class ApiException implements Exception {
   final List<ApiInvalidParam> invalidParams;
   final Map<String, dynamic>? rawBody;
 
+  /// Código de la petición (`X-Correlation-Id`). Es el mismo que se manda al servidor,
+  /// así que con él se encuentra la traza en el panel de observabilidad.
+  final String? correlationId;
+
   ApiException({
     required this.statusCode,
     required this.title,
@@ -35,6 +39,7 @@ class ApiException implements Exception {
     this.type,
     this.invalidParams = const [],
     this.rawBody,
+    this.correlationId,
   });
 
   String get userMessage {
@@ -44,6 +49,14 @@ class ApiException implements Exception {
     if (detail.isNotEmpty) return detail;
     if (title.isNotEmpty) return title;
     return 'Error del servidor (HTTP $statusCode).';
+  }
+
+  /// Mensaje para mostrar en errores de compra: añade el código de soporte para
+  /// que el equipo pueda seguir la petición de punta a punta.
+  String get userMessageConCodigo {
+    final c = correlationId;
+    if (c == null || c.isEmpty) return userMessage;
+    return '$userMessage\nCódigo de soporte: $c';
   }
 
   @override
@@ -104,6 +117,8 @@ class ApiClient {
   }
 
   static ApiException parseError(http.Response res) {
+    // El código que se mandó en la petición; si no está, el que devuelve el servidor.
+    final corr = res.request?.headers['X-Correlation-Id'] ?? res.headers['x-correlation-id'];
     try {
       final decoded = jsonDecode(res.body);
       if (decoded is Map<String, dynamic>) {
@@ -122,6 +137,7 @@ class ApiClient {
           type: decoded['type']?.toString(),
           invalidParams: params,
           rawBody: decoded,
+          correlationId: corr,
         );
       }
     } catch (_) {}
@@ -129,6 +145,7 @@ class ApiClient {
       statusCode: res.statusCode,
       title: 'HTTP ${res.statusCode}',
       detail: res.body.isNotEmpty ? res.body : 'Error inesperado de comunicación.',
+      correlationId: corr,
     );
   }
 

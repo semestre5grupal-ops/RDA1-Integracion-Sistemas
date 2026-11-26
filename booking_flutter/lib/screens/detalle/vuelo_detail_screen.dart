@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
 import '../../models/reserva.dart';
 import '../../models/vuelo.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
+import '../../utils/clave_compra.dart';
 import '../../utils/destinos_catalog.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/vuelo_passengers_sheet.dart';
@@ -63,6 +63,9 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
   String? _errorMsg;
 
   String? _holdId;
+  // Una sola Idempotency-Key y un solo X-Correlation-Id por compra: un reintento tras un
+  // corte de red NO puede crear otra compra (y otro cobro).
+  final ClaveCompra _claveCompra = ClaveCompra();
   String? _holdExpiresAt;
   bool _bookingCompleted = false;
 
@@ -210,7 +213,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
         setState(() {
           _creatingHold = false;
           _loadingSeats = false;
-          _errorMsg = e is ApiException ? e.userMessage : 'No se pudo bloquear la tarifa: $e';
+          _errorMsg = e is ApiException ? e.userMessageConCodigo : 'No se pudo bloquear la tarifa: $e';
         });
       }
     }
@@ -283,15 +286,19 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
         'payment': {
           'method': 'CARD',
           'currency': _activeOffer.currency,
-          'amount': _computedTotal,
+          // Dos decimales exactos: el servidor cobra el precio congelado del hold, este
+          // monto es solo de referencia y no debe llevar restos de coma flotante.
+          'amount': double.parse(_computedTotal.toStringAsFixed(2)),
         },
       };
 
       final resData = await BookingServices.crearReservaVuelo(
         payload,
-        const Uuid().v4(),
+        _claveCompra.idempotencia(_holdId!),
         token: token,
+        correlationId: _claveCompra.correlacion(_holdId!),
       );
+      _claveCompra.reiniciar();
 
       _bookingCompleted = true;
 
@@ -325,7 +332,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       if (mounted) {
         setState(() {
           _submittingBooking = false;
-          _errorMsg = e is ApiException ? e.userMessage : 'No se pudo emitir la reserva de vuelo: $e';
+          _errorMsg = e is ApiException ? e.userMessageConCodigo : 'No se pudo emitir la reserva de vuelo: $e';
         });
       }
     }
