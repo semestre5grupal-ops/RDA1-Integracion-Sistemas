@@ -303,10 +303,30 @@ class Alojamiento {
             : 'SOLO_HABITACION');
 
     return Alojamiento(
-      id: json['id']?.toString() ?? json['alojamiento_id']?.toString() ?? '',
-      nombre: json['nombre']?.toString() ?? json['name']?.toString() ?? 'Alojamiento',
-      descripcion: json['descripcion']?.toString() ?? json['descripcion_camas']?.toString() ?? 'Alojamiento verificado en Ecuador.',
-      ciudad: json['destino']?.toString() ?? ubicacion['city']?.toString() ?? json['ciudad']?.toString() ?? 'Quito',
+      id: json['id']?.toString() ??
+          json['_id']?.toString() ??
+          json['alojamiento_id']?.toString() ??
+          json['alojamientoId']?.toString() ??
+          json['idAlojamiento']?.toString() ??
+          json['id_alojamiento']?.toString() ??
+          json['accommodation_id']?.toString() ??
+          json['accommodationId']?.toString() ??
+          '',
+      nombre: json['nombre']?.toString() ??
+          json['name']?.toString() ??
+          json['title']?.toString() ??
+          'Alojamiento',
+      descripcion: json['descripcion']?.toString() ??
+          json['descripcion_camas']?.toString() ??
+          json['description']?.toString() ??
+          'Alojamiento verificado en Ecuador.',
+      ciudad: json['destino']?.toString() ??
+          ubicacion['city']?.toString() ??
+          ubicacion['ciudad']?.toString() ??
+          ubicacion['address']?.toString() ??
+          json['ciudad']?.toString() ??
+          json['city']?.toString() ??
+          'Quito',
       precioPorNoche: pricePerNight,
       precioTotalCotizado: totalCotizado,
       nochesCotizadas: disp != null ? dispNights : null,

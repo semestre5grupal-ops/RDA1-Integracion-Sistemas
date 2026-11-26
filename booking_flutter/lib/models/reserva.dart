@@ -56,9 +56,13 @@ class Reserva {
     final resId = json['bookingId']?.toString() ??
         json['reservation_id']?.toString() ??
         json['reservationId']?.toString() ??
+        json['id_reserva']?.toString() ??
+        json['reserva_id']?.toString() ??
+        json['idReserva']?.toString() ??
         json['order_id']?.toString() ??
         json['orderId']?.toString() ??
         json['id']?.toString() ??
+        json['_id']?.toString() ??
         '';
 
     final pnrVal = json['pnr']?.toString() ??
@@ -66,6 +70,7 @@ class Reserva {
         json['codigoReserva']?.toString() ??
         json['reservation_code']?.toString() ??
         json['external_order_id']?.toString() ??
+        json['code']?.toString() ??
         resId;
 
     String nombre = json['servicio_nombre']?.toString() ??

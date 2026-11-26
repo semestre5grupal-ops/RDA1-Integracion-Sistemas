@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/alojamiento.dart';
@@ -41,6 +42,7 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
   String? _error;
   List<Alojamiento> _properties = [];
   final Set<String> _wishlist = {};
+  Timer? _pollTimer;
 
   // Ordenamiento y Filtros (idéntico a AlojamientosSearchPage.jsx)
   String _sortBy = 'popularity'; // popularity, price_asc, price_desc, rating, reviews
@@ -68,19 +70,23 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
       _selectedTypes.add(widget.initialPropertyType!);
     }
     _fetchResults();
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchResults(silent: true));
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _destinoCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchResults() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _fetchResults({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final cin = DateFormat('yyyy-MM-dd').format(_checkIn);
       final cout = DateFormat('yyyy-MM-dd').format(_checkOut);
@@ -95,11 +101,11 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
       if (mounted) {
         setState(() {
           _properties = list;
-          _loading = false;
+          if (!silent) _loading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _error = 'Error al conectar con el servidor de alojamientos.';
           _loading = false;

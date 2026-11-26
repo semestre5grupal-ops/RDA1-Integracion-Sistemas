@@ -310,7 +310,7 @@ class Vuelo {
       final finalTotal = conRecargoBooking(rawTotal, recargoPct);
 
       return Vuelo(
-        offerId: json['offerId']?.toString() ?? json['id']?.toString() ?? '',
+        offerId: json['offerId']?.toString() ?? json['offer_id']?.toString() ?? json['id']?.toString() ?? '',
         airlineCode: airlineMap['code']?.toString() ?? 'EQ',
         airlineName: airlineMap['name']?.toString() ?? provMap['name']?.toString() ?? 'Aerolínea Aliada',
         providerCode: provMap['nodeCode']?.toString(),
@@ -324,7 +324,7 @@ class Vuelo {
 
     // 2. Formato plano de respaldo
     return Vuelo(
-      offerId: json['id']?.toString() ?? json['offerId']?.toString() ?? '',
+      offerId: json['id']?.toString() ?? json['offerId']?.toString() ?? json['offer_id']?.toString() ?? '',
       airlineName: json['aerolinea']?.toString() ?? json['airline']?.toString() ?? 'Aerolíneas Aliadas',
       totalPrice: _vueloParseDouble(json['precio'] ?? json['price'], 89.0),
       flatNumber: json['numero_vuelo']?.toString() ?? json['flight_number']?.toString() ?? 'EQ-100',

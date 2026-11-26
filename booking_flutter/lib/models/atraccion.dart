@@ -157,11 +157,11 @@ class Atraccion {
         : (json['price'] is Map ? Map<String, dynamic>.from(json['price']) : <String, dynamic>{});
 
     double adulto = _atrParseDouble(
-      json['precio_unitario_adulto'] ?? json['precio_unitario'] ?? json['precioTicket'],
+      json['precio_unitario_adulto'] ?? json['precio_unitario'] ?? json['precioTicket'] ?? json['adult_price'],
       0,
     );
     if (adulto <= 0) {
-      adulto = _atrParseDouble(pMap['total'] ?? pMap['adult'] ?? pMap['adulto'] ?? pMap['amount'] ?? json['precio'] ?? json['price'], 55.0);
+      adulto = _atrParseDouble(pMap['total'] ?? pMap['adult'] ?? pMap['adulto'] ?? pMap['adult_price'] ?? pMap['amount'] ?? json['precio'] ?? json['price'], 55.0);
     }
     if (adulto <= 0) adulto = 15.0;
 
@@ -253,7 +253,13 @@ class Atraccion {
     }
 
     return Atraccion(
-      id: json['id']?.toString() ?? json['_id']?.toString() ?? json['atraccion_id']?.toString() ?? '',
+      id: json['id']?.toString() ??
+          json['_id']?.toString() ??
+          json['atraccion_id']?.toString() ??
+          json['atraccionId']?.toString() ??
+          json['idAtraccion']?.toString() ??
+          json['id_atraccion']?.toString() ??
+          '',
       nombre: nom,
       descripcion: descCorta.isNotEmpty ? descCorta : descLarga,
       longDescription: descLarga,
