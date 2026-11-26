@@ -129,12 +129,14 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
         dropoffDate: DateFormat('yyyy-MM-dd').format(_dropoffDate),
         dropoffTime: _dropoffTime,
         driverAge: _driverAge,
+        driverAgeBracket: _driverAge >= 30 && _driverAge <= 65,
         category: 'ALL',
         transmission: 'ALL',
       );
+      final filtrados = _filtrarPorTexto(res.autos, _locationCtrl.text);
       if (mounted) {
         setState(() {
-          _autos = res.autos;
+          _autos = filtrados;
           _meta = res.metadata;
           if (!silent) _loading = false;
         });
@@ -147,6 +149,37 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
         });
       }
     }
+  }
+
+  static const List<String> _ciudadesComunes = [
+    'quito', 'guayaquil', 'cuenca', 'manta', 'loja', 'machala', 'galapagos', 'uio', 'gye', 'cue',
+    'aeropuerto mariscal sucre', 'aeropuerto jose joaquin de olmedo', 'tababela', 'ecuador',
+  ];
+
+  static String _normalizar(String t) {
+    const from = 'áàäâéèëêíìïîóòöôúùüûñ';
+    const to = 'aaaaeeeeiiiioooouuuun';
+    final lower = t.toLowerCase();
+    final b = StringBuffer();
+    for (final ch in lower.split('')) {
+      final i = from.indexOf(ch);
+      b.write(i >= 0 ? to[i] : ch);
+    }
+    return b.toString().replaceAll(RegExp(r'[^a-z0-9 ]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Réplica del filtrado de AutosPage.jsx: si el texto de recogida no es solo
+  /// una ciudad/aeropuerto, cada palabra restante debe aparecer en marca,
+  /// modelo, categoría o proveedor (p. ej. "Quito Kia" → solo los Kia).
+  static List<Auto> _filtrarPorTexto(List<Auto> autos, String texto) {
+    final q = _normalizar(texto);
+    if (q.isEmpty || _ciudadesComunes.contains(q)) return autos;
+    final tokens = q.split(' ').where((t) => t.isNotEmpty && !_ciudadesComunes.contains(t)).toList();
+    if (tokens.isEmpty) return autos;
+    return autos.where((c) {
+      final full = _normalizar('${c.marca} ${c.modelo} ${c.categoria} ${c.proveedor}');
+      return tokens.every(full.contains);
+    }).toList();
   }
 
   void _resetAllFilters() {

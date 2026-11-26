@@ -34,6 +34,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
 
   bool _loadingSlots = true;
   List<TimeSlot> _slots = [];
+  String? _slotsError;
   TimeSlot? _selectedSlot;
 
   int _adultos = 1;
@@ -79,7 +80,21 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
       });
     }
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    final slots = await BookingServices.getDisponibilidadAtraccion(widget.atraccion.id, dateStr);
+    final List<TimeSlot> slots;
+    try {
+      slots = await BookingServices.getDisponibilidadAtraccion(widget.atraccion.id, dateStr);
+    } catch (_) {
+      // Error transitorio del socio: en el sondeo silencioso se conservan los
+      // últimos turnos reales; en una carga explícita se informa al usuario.
+      if (mounted && !silent) {
+        setState(() {
+          _slots = [];
+          _slotsError = 'No se pudo consultar la disponibilidad del proveedor. Reintentando…';
+          _loadingSlots = false;
+        });
+      }
+      return;
+    }
     if (mounted) {
       TimeSlot? firstAvail = _selectedSlot;
       if (firstAvail == null || firstAvail.estaAgotado) {
@@ -92,6 +107,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
       }
       setState(() {
         _slots = slots;
+        _slotsError = null;
         _selectedSlot = firstAvail;
         if (!silent) _loadingSlots = false;
         _clampTicketsToCupos();
@@ -527,6 +543,13 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                   const SizedBox(height: 8),
                   if (_loadingSlots)
                     const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                  else if (_slots.isEmpty && _slotsError != null)
+                    Row(
+                      children: [
+                        Expanded(child: Text(_slotsError!, style: const TextStyle(color: BookingColors.errorRed))),
+                        TextButton(onPressed: () => _fetchSlots(), child: const Text('Reintentar')),
+                      ],
+                    )
                   else if (_slots.isEmpty)
                     const Text('No hay horarios registrados para este día.', style: TextStyle(color: BookingColors.errorRed))
                   else
