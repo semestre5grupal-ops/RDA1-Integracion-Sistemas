@@ -1,14 +1,8 @@
-double _atrParseDouble(dynamic val, [double fallback = 0.0]) {
-  if (val is num) return val.toDouble();
-  if (val is String) return double.tryParse(val) ?? fallback;
-  return fallback;
-}
+import '../utils/json_parse.dart';
 
-int _atrParseInt(dynamic val, [int fallback = 0]) {
-  if (val is num) return val.toInt();
-  if (val is String) return int.tryParse(val) ?? fallback;
-  return fallback;
-}
+double _atrParseDouble(dynamic val, [double fallback = 0.0]) => parseDouble(val, fallback);
+
+int _atrParseInt(dynamic val, [int fallback = 0]) => parseInt(val, fallback);
 
 class TimeSlot {
   final String slotId;
@@ -181,15 +175,15 @@ class Atraccion {
     final isSingleRateProvider = provCode == 'NODE_ATR_ARIEL' || provCode == 'NODE_ATR_GLORIA' || provCode == 'NODE_ATR_ALISSON';
 
     final admiteNinosFlag = json['admite_ninos'] != null
-        ? (json['admite_ninos'] == true)
+        ? parseBool(json['admite_ninos'])
         : (!isSingleRateProvider && childVal > 0 && childVal != adulto);
 
     final admiteSeniorsFlag = json['admite_seniors'] != null
-        ? (json['admite_seniors'] == true)
+        ? parseBool(json['admite_seniors'])
         : (!isSingleRateProvider && seniorVal > 0);
 
     final admiteInfantesFlag = json['admite_infantes'] != null
-        ? (json['admite_infantes'] == true)
+        ? parseBool(json['admite_infantes'])
         : (infantVal > 0);
 
     // Fotos
@@ -232,12 +226,11 @@ class Atraccion {
     }
 
     final rawIncludes = json['includes'] ?? json['inclusiones'];
-    final includesList = rawIncludes is List ? rawIncludes.map((e) => e.toString()).toList() : <String>[];
+    final includesList = stringList(rawIncludes);
 
     final rawLangs = json['supported_languages'] ?? json['idiomas'];
-    final langsList = rawLangs is List && rawLangs.isNotEmpty
-        ? rawLangs.map((e) => e.toString()).toList()
-        : <String>['Español', 'Inglés'];
+    final parsedLangs = stringList(rawLangs);
+    final langsList = parsedLangs.isNotEmpty ? parsedLangs : <String>['Español', 'Inglés'];
 
     final ratingsMap = json['ratings'] is Map
         ? Map<String, dynamic>.from(json['ratings'])
@@ -272,7 +265,7 @@ class Atraccion {
       admiteSeniors: admiteSeniorsFlag,
       admiteInfantes: admiteInfantesFlag,
       duracion: json['duration']?.toString() ?? json['duracion']?.toString() ?? json['duracion_estimada']?.toString() ?? '2 horas - 3 horas',
-      freeCancellation: json['free_cancellation'] ?? json['cancelacion_gratis'] ?? true,
+      freeCancellation: parseBool(json['free_cancellation'] ?? json['cancelacion_gratis'], true),
       includes: includesList,
       idiomas: langsList,
       imagenUrl: fotos.first,
@@ -281,7 +274,7 @@ class Atraccion {
       proveedorCodigo: provCode,
       rating: score > 0 ? score : 9.0,
       reviewsCount: revs,
-      categorias: (json['categorias'] is List) ? (json['categorias'] as List).map((e) => e.toString()).toList() : [],
+      categorias: stringList(json['categorias']),
       turnos: slots,
       puntoEncuentro: punto,
     );
