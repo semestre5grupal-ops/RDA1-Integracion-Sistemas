@@ -101,170 +101,197 @@ class _BookingSearchLoadingViewState extends State<BookingSearchLoadingView> wit
 
   @override
   Widget build(BuildContext context) {
+    // Pantalla completa en blanco con el contenido centrado (AlojamientosLoadingView.jsx:
+    // flex column centrado, minHeight 75vh, padding 90px 20px, fondo #fff). Sin
+    // width/height infinitos el Container se encogía al tamaño del Column y en Flutter
+    // Web aparecía como un recuadro en la esquina superior izquierda sobre fondo gris.
     return Container(
+      width: double.infinity,
+      height: double.infinity,
       color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 48),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // 1. Título dinámico con animación Fade
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            transitionBuilder: (child, animation) {
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.15),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
+      alignment: Alignment.center,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            // minHeight = alto visible: así el Column queda centrado en vertical y,
+            // si no cabe (móvil horizontal), se puede desplazar.
+            constraints: BoxConstraints(minHeight: constraints.maxHeight.isFinite ? constraints.maxHeight : 0),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 48),
+                  child: _buildContenido(),
                 ),
-              );
-            },
-            child: Text(
-              _listaFrases[_fraseIndex],
-              key: ValueKey<int>(_fraseIndex),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: BookingColors.textDark,
-                height: 1.25,
               ),
             ),
           ),
-          const SizedBox(height: 8),
+        ),
+      ),
+    );
+  }
 
-          // 2. Subtítulo
-          Text(
-            widget.subtitulo,
+  Widget _buildContenido() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // 1. Título dinámico con animación Fade
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 400),
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.15),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: Text(
+            _listaFrases[_fraseIndex],
+            key: ValueKey<int>(_fraseIndex),
             textAlign: TextAlign.center,
             style: const TextStyle(
-              color: BookingColors.textMuted,
-              fontSize: 14,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: BookingColors.textDark,
+              height: 1.25,
             ),
           ),
-          const SizedBox(height: 28),
+        ),
+        const SizedBox(height: 8),
 
-          // 3. Barra de progreso animada (estilo loading-slide de React)
-          Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(maxWidth: 580),
-            height: 6,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE5E7EB),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: AnimatedBuilder(
-              animation: _progressController,
-              builder: (context, child) {
-                return LayoutBuilder(
-                  builder: (context, constraints) {
-                    final barWidth = constraints.maxWidth * 0.4;
-                    final totalTravel = constraints.maxWidth + barWidth;
-                    final currentLeft = (_progressController.value * totalTravel) - barWidth;
+        // 2. Subtítulo
+        Text(
+          widget.subtitulo,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: BookingColors.textMuted,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 28),
 
-                    return Stack(
+        // 3. Barra de progreso animada (estilo loading-slide de React)
+        Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(maxWidth: 580),
+          height: 6,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE5E7EB),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AnimatedBuilder(
+            animation: _progressController,
+            builder: (context, child) {
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final barWidth = constraints.maxWidth * 0.4;
+                  final totalTravel = constraints.maxWidth + barWidth;
+                  final currentLeft = (_progressController.value * totalTravel) - barWidth;
+
+                  return Stack(
+                    children: [
+                      Positioned(
+                        left: currentLeft,
+                        top: 0,
+                        bottom: 0,
+                        width: barWidth,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: BookingColors.actionBlue,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 36),
+
+        // 4. Grid de 6 íconos de verticales con foco secuencial
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 450;
+              final crossAxisCount = isNarrow ? 3 : 6;
+
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 0.95,
+                ),
+                itemCount: _iconosVerticales.length,
+                itemBuilder: (context, idx) {
+                  final item = _iconosVerticales[idx];
+                  final isHighlight = idx == _activoIcono;
+
+                  return AnimatedScale(
+                    scale: isHighlight ? 1.15 : 1.0,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Positioned(
-                          left: currentLeft,
-                          top: 0,
-                          bottom: 0,
-                          width: barWidth,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: BookingColors.actionBlue,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
+                        Icon(
+                          item['icon'] as IconData,
+                          size: 28,
+                          color: isHighlight ? BookingColors.actionBlue : const Color(0xFF64748B),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          item['label'] as String,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: isHighlight ? FontWeight.bold : FontWeight.w500,
+                            color: isHighlight ? BookingColors.primaryBlue : const Color(0xFF64748B),
+                            height: 1.2,
                           ),
                         ),
                       ],
-                    );
-                  },
-                );
-              },
-            ),
+                    ),
+                  );
+                },
+              );
+            },
           ),
-          const SizedBox(height: 36),
+        ),
+        const SizedBox(height: 32),
 
-          // 4. Grid de 6 íconos de verticales con foco secuencial
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final isNarrow = constraints.maxWidth < 450;
-                final crossAxisCount = isNarrow ? 3 : 6;
-
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 0.95,
-                  ),
-                  itemCount: _iconosVerticales.length,
-                  itemBuilder: (context, idx) {
-                    final item = _iconosVerticales[idx];
-                    final isHighlight = idx == _activoIcono;
-
-                    return AnimatedScale(
-                      scale: isHighlight ? 1.15 : 1.0,
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeOut,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            item['icon'] as IconData,
-                            size: 28,
-                            color: isHighlight ? BookingColors.actionBlue : const Color(0xFF64748B),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            item['label'] as String,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: isHighlight ? FontWeight.bold : FontWeight.w500,
-                              color: isHighlight ? BookingColors.primaryBlue : const Color(0xFF64748B),
-                              height: 1.2,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 32),
-
-          // 5. Indicador de confianza minimalista
-          const Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.check_circle, size: 16, color: BookingColors.successGreen),
-              SizedBox(width: 8),
-              Text(
-                'Tarifas transparentes y confirmación inmediata',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFF475569),
-                ),
+        // 5. Indicador de confianza minimalista
+        const Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.check_circle, size: 16, color: BookingColors.successGreen),
+            SizedBox(width: 8),
+            Text(
+              'Tarifas transparentes y confirmación inmediata',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF475569),
               ),
-            ],
-          ),
-        ],
-      ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
