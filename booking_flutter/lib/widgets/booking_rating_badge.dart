@@ -13,6 +13,9 @@ class BookingRatingBadge extends StatelessWidget {
     this.showText = true,
   });
 
+  /// Etiqueta textual de la puntuación ("Excepcional", "Fantástico", ...).
+  static String textoPuntuacion(double score) => const BookingRatingBadge(rating: 0)._getRatingText(score);
+
   String _getRatingText(double score) {
     if (score >= 9.5) return 'Excepcional';
     if (score >= 9.0) return 'Fantástico';

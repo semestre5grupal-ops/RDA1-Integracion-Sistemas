@@ -29,24 +29,24 @@ class BookingNavHeader extends StatelessWidget {
       case MarketplaceCategory.alojamientos:
         return 'Encuentra tu próximo alojamiento';
       case MarketplaceCategory.vuelos:
-        return 'Compara y reserva vuelos fácilmente';
+        return 'Vuelos nacionales';
       case MarketplaceCategory.autos:
-        return 'Alquiler de autos para cualquier viaje';
+        return 'Alquiler de coches para cualquier tipo de viaje';
       case MarketplaceCategory.atracciones:
-        return 'Atracciones, actividades y tours';
+        return 'Atracciones, actividades y experiencias';
     }
   }
 
   String get _heroSubtitle {
     switch (currentCategory) {
       case MarketplaceCategory.alojamientos:
-        return 'Busca ofertas en hoteles, cabañas, casas y mucho más en Ecuador...';
+        return 'Busca ofertas en hoteles, casas y mucho más...';
       case MarketplaceCategory.vuelos:
-        return 'Viaja por Ecuador y el mundo con aerolíneas aliadas al mejor precio.';
+        return 'Encuentra y reserva tu vuelo en Ecuador al mejor precio.';
       case MarketplaceCategory.autos:
-        return 'Grandes marcas, precios claros y cobertura total sin sorpresas.';
+        return 'Coches fantásticos a precios increíbles de las principales empresas de alquiler';
       case MarketplaceCategory.atracciones:
-        return 'Descubre experiencias inolvidables con cupos y guías certificados.';
+        return 'Descubre nuevas atracciones y experiencias que coincidan con tus intereses y estilo de viaje en Ecuador';
     }
   }
 

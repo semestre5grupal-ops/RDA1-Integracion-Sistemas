@@ -4,8 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../models/alojamiento.dart';
 import '../../models/atraccion.dart';
-import '../../models/auto.dart';
-import '../../models/vuelo.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../services/booking_services.dart';
@@ -19,13 +17,10 @@ import '../../widgets/vuelo_passengers_sheet.dart';
 import '../auth/login_screen.dart';
 import '../detalle/alojamiento_detail_screen.dart';
 import '../detalle/atraccion_detail_screen.dart';
-import '../detalle/auto_detail_screen.dart';
-import '../detalle/vuelo_detail_screen.dart';
 import '../search/alojamientos_search_screen.dart';
 import '../search/atracciones_search_screen.dart';
 import '../search/autos_search_screen.dart';
 import '../search/vuelos_search_screen.dart';
-import '../vuelos/estado_vuelo_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -82,52 +77,160 @@ class _HomeScreenState extends State<HomeScreen> {
   // --- Estado búsqueda Atracciones ---
   final TextEditingController _atrQueryCtrl = TextEditingController();
   DateTime _atrDate = DateTime.now().add(const Duration(days: 4));
-  String _atrRegionTab = 'Sierra';
+  String _atrTabActivo = 'Pichincha';
+  String? _atrSearchError; // aviso flotante (símbolos, espacios dobles, 60 caracteres)
+  String? _atrFormError; // "Por favor proporcione el destino o atracción."
+  bool _atrFlashRed = false;
+  bool _atrShowSuggestions = false;
+  final FocusNode _atrFocus = FocusNode();
+  Timer? _atrFlashTimer;
+
+  /// Sugerencias del buscador (`destinos` en AtraccionesPage.jsx).
+  static const List<String> _atrDestinosSugeridos = [
+    'Quito',
+    'Guayaquil',
+    'Cuenca',
+    'Baños',
+    'Galápagos',
+    'Mindo',
+    'Mitad del Mundo',
+    'Otavalo',
+  ];
 
   // --- Datos Landing en Vivo ---
   bool _loadingCatalog = true;
   List<Alojamiento> _alojamientos = [];
   List<Atraccion> _atracciones = [];
-  List<Auto> _autos = [];
-  List<Vuelo> _vuelos = [];
   Timer? _catalogsPollTimer;
+  Timer? _atrPollTimer;
+  bool _fetchingAloj = false;
+  bool _fetchingAtr = false;
+  String? _alojError;
+  String? _atrError;
+  final ScrollController _scrollCtrl = ScrollController();
+
+  /// Destinos de la sección "Ofertas desde Quito" (DESTINOS_ECUADOR en
+  /// VuelosPage.jsx y AutosPage.jsx: mismos datos en ambas verticales).
+  static const List<Map<String, String>> _destinosEcuador = [
+    {
+      'codigo': 'GYE',
+      'nombre': 'Guayaquil',
+      'descripcion': 'La Perla del Pacífico',
+      'imagen': 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&h=240&fit=crop',
+      'desde': '\$49',
+    },
+    {
+      'codigo': 'CUE',
+      'nombre': 'Cuenca',
+      'descripcion': 'Ciudad Patrimonio de la Humanidad',
+      'imagen': 'https://images.unsplash.com/photo-1519451241324-20b4ea2c4220?w=400&h=240&fit=crop',
+      'desde': '\$59',
+    },
+    {
+      'codigo': 'LOH',
+      'nombre': 'Loja',
+      'descripcion': 'La Capital Musical del Ecuador',
+      'imagen': 'https://images.unsplash.com/photo-1465447142348-e9952c393450?w=400&h=240&fit=crop',
+      'desde': '\$69',
+    },
+    {
+      'codigo': 'GPS',
+      'nombre': 'Galápagos',
+      'descripcion': 'Paraíso natural único en el mundo',
+      'imagen': 'https://images.unsplash.com/photo-1547459124-e23883747a40?w=400&h=240&fit=crop',
+      'desde': '\$119',
+    },
+  ];
 
   @override
   void initState() {
     super.initState();
     _loadInitialCatalogs();
-    _catalogsPollTimer = Timer.periodic(const Duration(seconds: 12), (_) => _loadInitialCatalogs(silent: true));
+    _atrFocus.addListener(() {
+      if (!_atrFocus.hasFocus) {
+        // handleSearchBlur(): oculta sugerencias y normaliza espacios.
+        Future.delayed(const Duration(milliseconds: 200), () {
+          if (!mounted) return;
+          final norm = _atrQueryCtrl.text.trim().replaceAll(RegExp(r'\s{2,}'), ' ');
+          setState(() {
+            _atrShowSuggestions = false;
+            if (norm != _atrQueryCtrl.text) _atrQueryCtrl.text = norm;
+          });
+        });
+      } else {
+        setState(() => _atrShowSuggestions = _atrQueryCtrl.text.trim().isNotEmpty);
+      }
+    });
+    // Sondeo silencioso con la misma cadencia que React: alojamientos cada 5 s
+    // (AlojamientosPage.jsx) y atracciones cada 8 s (AtraccionesPage.jsx).
+    _catalogsPollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollAlojamientos());
+    _atrPollTimer = Timer.periodic(const Duration(seconds: 8), (_) => _pollAtracciones());
   }
 
   @override
   void dispose() {
     _catalogsPollTimer?.cancel();
+    _atrPollTimer?.cancel();
+    _scrollCtrl.dispose();
     _alojDestinoCtrl.dispose();
     _autoLocCtrl.dispose();
     _atrQueryCtrl.dispose();
+    _atrFocus.dispose();
+    _atrFlashTimer?.cancel();
     super.dispose();
   }
 
+  /// Carga los catálogos en vivo de la landing (alojamientos y atracciones,
+  /// igual que AlojamientosPage.jsx y AtraccionesPage.jsx). Cada fuente es
+  /// independiente: si una falla no borra la otra, y en el sondeo silencioso un
+  /// error transitorio conserva lo último que se vio de los socios.
   Future<void> _loadInitialCatalogs({bool silent = false}) async {
-    if (!silent) setState(() => _loadingCatalog = true);
+    if (!silent && mounted) setState(() => _loadingCatalog = true);
+    await Future.wait([_pollAlojamientos(), _pollAtracciones()]);
+    if (mounted && !silent) setState(() => _loadingCatalog = false);
+  }
+
+  /// Cada fuente es independiente y no se encima (isFetchingRef de React):
+  /// un error transitorio conserva lo último que se vio de los socios.
+  Future<void> _pollAlojamientos() async {
+    if (_fetchingAloj) return;
+    _fetchingAloj = true;
     try {
-      final results = await Future.wait([
-        BookingServices.getAlojamientos(page: 1, limit: 15),
-        BookingServices.getAtracciones(page: 1, limit: 25),
-        BookingServices.getAutos(location: 'Quito'),
-        BookingServices.getVuelos(),
-      ]);
+      final data = await BookingServices.getAlojamientos(page: 1, limit: 15);
       if (mounted) {
         setState(() {
-          _alojamientos = results[0] as List<Alojamiento>;
-          _atracciones = results[1] as List<Atraccion>;
-          _autos = results[2] as List<Auto>;
-          _vuelos = results[3] as List<Vuelo>;
-          if (!silent) _loadingCatalog = false;
+          _alojamientos = data;
+          _alojError = null;
         });
       }
     } catch (_) {
-      if (mounted && !silent) setState(() => _loadingCatalog = false);
+      // Se conserva la lista previa: no se reemplaza por datos de ejemplo.
+      // Igual que React, el aviso solo aparece si aún no hay datos en pantalla.
+      if (mounted && _alojamientos.isEmpty) {
+        setState(() => _alojError = 'No se pudieron cargar los alojamientos desde el servidor.');
+      }
+    } finally {
+      _fetchingAloj = false;
+    }
+  }
+
+  Future<void> _pollAtracciones() async {
+    if (_fetchingAtr) return;
+    _fetchingAtr = true;
+    try {
+      final data = await BookingServices.getAtracciones(page: 1, limit: 100);
+      if (mounted) {
+        setState(() {
+          _atracciones = data;
+          _atrError = null;
+        });
+      }
+    } catch (_) {
+      if (mounted && _atracciones.isEmpty) {
+        setState(() => _atrError = 'No se pudo conectar con el servicio de Atracciones.');
+      }
+    } finally {
+      _fetchingAtr = false;
     }
   }
 
@@ -192,14 +295,54 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _launchAtraccionesSearch({String? forcedQuery}) {
-    final q = (forcedQuery ?? _atrQueryCtrl.text).trim();
-    if (q.length > 60) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('El texto de búsqueda no puede superar 60 caracteres.')),
+  void _atrTriggerFlash(String msg) {
+    _atrFlashTimer?.cancel();
+    setState(() {
+      _atrSearchError = msg;
+      _atrFlashRed = true;
+    });
+    _atrFlashTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _atrFlashRed = false);
+    });
+  }
+
+  static final RegExp _atrInvalidChars = RegExp(r'[^a-zA-Z0-9\s,áéíóúÁÉÍÓÚñÑ\-_.]');
+
+  /// handleSearchChange() de AtraccionesPage.jsx: corta a 60, elimina símbolos
+  /// no permitidos y espacios consecutivos, y avisa con un destello rojo.
+  void _onAtrQueryChanged(String raw0) {
+    final raw = raw0.length > 60 ? raw0.substring(0, 60) : raw0;
+    if (_atrInvalidChars.hasMatch(raw)) {
+      _atrTriggerFlash('Solo se permiten letras, números y signos comunes');
+    } else if (RegExp(r'\s{2,}').hasMatch(raw)) {
+      _atrTriggerFlash('No se permiten espacios consecutivos');
+    } else if (raw.length >= 60) {
+      _atrTriggerFlash('Límite máximo de 60 caracteres alcanzado');
+    } else if (_atrSearchError != null) {
+      setState(() => _atrSearchError = null);
+    }
+    final clean = raw.replaceAll(_atrInvalidChars, '').replaceAll(RegExp(r'\s{2,}'), ' ');
+    if (clean != raw0) {
+      _atrQueryCtrl.value = TextEditingValue(
+        text: clean,
+        selection: TextSelection.collapsed(offset: clean.length),
       );
+    }
+    setState(() {
+      _atrShowSuggestions = clean.trim().isNotEmpty;
+      _atrFormError = null;
+    });
+  }
+
+  void _launchAtraccionesSearch({String? forcedQuery}) {
+    final q = (forcedQuery ?? _atrQueryCtrl.text).trim().replaceAll(RegExp(r'\s{2,}'), ' ');
+    if (q.isEmpty) {
+      const mensaje = 'Por favor proporcione el destino o atracción.';
+      setState(() => _atrFormError = mensaje);
+      _atrTriggerFlash(mensaje);
       return;
     }
+    setState(() => _atrFormError = null);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -218,6 +361,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: RefreshIndicator(
         onRefresh: _loadInitialCatalogs,
         child: SingleChildScrollView(
+          controller: _scrollCtrl,
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -614,51 +758,19 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Atracciones desktop horizontal bar
-    return Row(
+    // Atracciones: un solo campo + "Buscar" (search-box de AtraccionesPage.jsx)
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          flex: 4,
-          child: _whiteFieldBox(
-            child: Row(
-              children: [
-                const Icon(Icons.attractions_outlined, color: BookingColors.textMuted, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _atrQueryCtrl,
-                    maxLength: 60,
-                    decoration: const InputDecoration(
-                      hintText: '¿Adónde vas? Tours, museos, aventura...',
-                      counterText: '',
-                      border: InputBorder.none,
-                      isDense: true,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _atrSearchInput()),
+            const SizedBox(width: 4),
+            SizedBox(width: 140, child: _searchButton('Buscar', () => _launchAtraccionesSearch())),
+          ],
         ),
-        const SizedBox(width: 4),
-        Expanded(
-          flex: 3,
-          child: _whiteTapBox(
-            icon: Icons.calendar_today_outlined,
-            text: 'Fecha: ${DateFormat('EEE, dd MMM yyyy').format(_atrDate)}',
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _atrDate,
-                firstDate: DateTime.now(),
-                lastDate: DateTime.now().add(const Duration(days: 365)),
-              );
-              if (picked != null) setState(() => _atrDate = picked);
-            },
-          ),
-        ),
-        const SizedBox(width: 4),
-        SizedBox(width: 140, child: _searchButton('Buscar', () => _launchAtraccionesSearch())),
+        if (_atrFormError != null) _atrFormErrorBox(),
       ],
     );
   }
@@ -1086,62 +1198,153 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Widget> _buildAtrSearchFields() {
     return [
-      _whiteFieldBox(
-        child: Row(
+      _atrSearchInput(),
+      const SizedBox(height: 2),
+      _searchButton('Buscar', () => _launchAtraccionesSearch()),
+      if (_atrFormError != null) _atrFormErrorBox(),
+    ];
+  }
+
+  /// Campo de búsqueda de atracciones con aviso, contador y sugerencias.
+  Widget _atrSearchInput() {
+    final q = _atrQueryCtrl.text;
+    final sugerencias = _atrDestinosSugeridos.where((d) => d.toLowerCase().contains(q.toLowerCase())).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // El aviso flota 32 px por encima del campo sin desplazarlo
+        // (position: absolute; top: -32px en AtraccionesPage.jsx).
+        Stack(
+          clipBehavior: Clip.none,
           children: [
-            const Icon(Icons.attractions_outlined, color: BookingColors.textMuted, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _atrQueryCtrl,
-                maxLength: 60,
-                decoration: const InputDecoration(
-                  hintText: '¿Adónde vas? Tours, museos, aventura...',
-                  counterText: '',
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: _atrFlashRed ? const Color(0xFFFCE8E6) : Colors.white,
+                borderRadius: BorderRadius.circular(2),
+                border: Border.all(color: _atrFlashRed ? const Color(0xFFD93025) : Colors.transparent, width: 3),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.search, color: _atrFlashRed ? const Color(0xFFD93025) : BookingColors.textDark, size: 24),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _atrQueryCtrl,
+                      focusNode: _atrFocus,
+                      onChanged: _onAtrQueryChanged,
+                      onSubmitted: (_) => _launchAtraccionesSearch(),
+                      textInputAction: TextInputAction.search,
+                      decoration: const InputDecoration(
+                        hintText: 'Buscar por nombre de atracción o ciudad...',
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  if (q.length > 30)
+                    Text(
+                      '${q.length}/60',
+                      style: TextStyle(fontSize: 11.5, color: q.length >= 60 ? const Color(0xFFD93025) : const Color(0xFF9CA3AF)),
+                    ),
+                ],
               ),
             ),
+            if (_atrSearchError != null)
+              Positioned(
+                top: -32,
+                left: 0,
+                child: IgnorePointer(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      border: Border.all(color: const Color(0xFFEF4444)),
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 8, offset: Offset(0, 2))],
+                    ),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        '⚠️ ${_atrSearchError!}',
+                        style: const TextStyle(color: Color(0xFF991B1B), fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
-      ),
-      Container(
-        margin: const EdgeInsets.only(top: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: DestinosCatalog.sugerenciasAtracciones.map((dest) {
-              return Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ActionChip(
-                  label: Text(dest, style: const TextStyle(fontSize: 11)),
-                  onPressed: () => setState(() => _atrQueryCtrl.text = dest),
-                ),
-              );
-            }).toList(),
+        if (_atrShowSuggestions && q.isNotEmpty)
+          Material(
+            elevation: 4,
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(4),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                children: sugerencias.isEmpty
+                    ? const [
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          child: Text('No hay resultados', style: TextStyle(color: Color(0xFF666666), fontSize: 15)),
+                        ),
+                      ]
+                    : sugerencias
+                        .map((d) => InkWell(
+                              onTap: () {
+                                // handleSelectSuggestion()
+                                _atrQueryCtrl.text = d;
+                                setState(() {
+                                  _atrShowSuggestions = false;
+                                  _atrSearchError = null;
+                                  _atrFormError = null;
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE7E7E7)))),
+                                child: Row(
+                                  children: [
+                                    const Text('📍', style: TextStyle(color: Color(0xFF666666))),
+                                    const SizedBox(width: 10),
+                                    Text(d, style: const TextStyle(fontSize: 15, color: Color(0xFF333333))),
+                                  ],
+                                ),
+                              ),
+                            ))
+                        .toList(),
+              ),
+            ),
           ),
-        ),
+      ],
+    );
+  }
+
+  Widget _atrFormErrorBox() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(color: const Color(0xFFFCE8E6), borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error, color: Color(0xFFD93025), size: 20),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              _atrFormError!,
+              style: const TextStyle(color: Color(0xFFD93025), fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
-      const SizedBox(height: 4),
-      _whiteTapBox(
-        icon: Icons.calendar_today_outlined,
-        text: 'Fecha de experiencia: ${DateFormat('EEE, dd MMM yyyy').format(_atrDate)}',
-        onTap: () async {
-          final picked = await showDatePicker(
-            context: context,
-            initialDate: _atrDate,
-            firstDate: DateTime.now(),
-            lastDate: DateTime.now().add(const Duration(days: 365)),
-          );
-          if (picked != null) setState(() => _atrDate = picked);
-        },
-      ),
-      const SizedBox(height: 4),
-      _searchButton('Buscar atracciones', () => _launchAtraccionesSearch()),
-    ];
+    );
   }
 
   Widget _whiteFieldBox({required Widget child}) {
@@ -1371,6 +1574,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           if (_loadingCatalog)
             const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+          else if (_alojamientos.isEmpty && _alojError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(_alojError!, style: const TextStyle(color: Color(0xFFD32F2F))),
+            )
           else
             ..._alojamientos.take(6).map((prop) => _buildAlojamientoHomeCard(prop)),
         ],
@@ -1464,113 +1672,212 @@ class _HomeScreenState extends State<HomeScreen> {
   // LANDING: VUELOS
   // ===========================================================================
   Widget _buildVuelosLanding() {
-    const popularRoutes = [
-      {'orig': 'UIO', 'dest': 'GYE', 'title': 'Quito ➔ Guayaquil', 'sub': 'Vuelos frecuentes · ~50 min'},
-      {'orig': 'UIO', 'dest': 'GPS', 'title': 'Quito ➔ Galápagos (Baltra)', 'sub': 'Tarifas ida y vuelta disponibles'},
-      {'orig': 'GYE', 'dest': 'CUE', 'title': 'Guayaquil ➔ Cuenca', 'sub': 'Conexión rápida Austro'},
-      {'orig': 'UIO', 'dest': 'BOG', 'title': 'Quito ➔ Bogotá', 'sub': 'Vuelos internacionales directos'},
-      {'orig': 'GYE', 'dest': 'MIA', 'title': 'Guayaquil ➔ Miami', 'sub': 'Aerolíneas internacionales socias'},
-    ];
+    // Paridad 1:1 con la vista sin búsqueda de VuelosPage.jsx:
+    // Hero "Hay un Ecuador esperándote" → "Ofertas desde Quito" → "Prepárate para viajar".
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ecuadorHeroBanner(
+          imageUrl: 'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=1200&h=400&fit=crop',
+          texto: 'Te llevamos a los mejores destinos dentro del país para que encuentres los lugares que te muevan. Reserva hoy tu próximo vuelo nacional.',
+        ),
+        _ofertasDesdeQuito(
+          badge: 'Acumula millas',
+          semanticPrefix: 'Buscar vuelos a',
+          onTap: (dest) {
+            // seleccionarDestino(): precarga UIO → destino y lleva al buscador.
+            setState(() {
+              _vueloOrigin = 'UIO';
+              _vueloDest = dest['codigo']!;
+            });
+            _scrollToSearchBox();
+          },
+        ),
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF8F8F8),
+            border: Border(top: BorderSide(color: Color(0xFFE7E7E7))),
+          ),
+          child: Column(
+            children: [
+              const Text(
+                'Prepárate para viajar',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 20.8, fontWeight: FontWeight.w700, color: Color(0xFF1A1A1A)),
+              ),
+              const SizedBox(height: 24),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 340),
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => Navigator.pushNamed(context, '/reservas'),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE7E7E7)),
+                        boxShadow: const [BoxShadow(color: Color(0x12000000), blurRadius: 8, offset: Offset(0, 2))],
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEBF3FF),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text('🎫', style: TextStyle(fontSize: 24)),
+                          ),
+                          const SizedBox(width: 16),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Check-in online', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Color(0xFF1A1A1A))),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Obtén tu pase de abordar y ahorra tiempo en el aeropuerto.',
+                                  style: TextStyle(color: Color(0xFF0057B8), fontSize: 13.6, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
+  void _scrollToSearchBox() {
+    if (_scrollCtrl.hasClients) {
+      _scrollCtrl.animateTo(0, duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+    }
+  }
+
+  /// Banner "Hay un Ecuador esperándote" (VuelosPage.jsx / AutosPage.jsx).
+  Widget _ecuadorHeroBanner({required String imageUrl, required String texto}) {
+    final isWide = MediaQuery.of(context).size.width >= 700;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: double.infinity,
+          color: const Color(0xFF003B95),
+          constraints: const BoxConstraints(minHeight: 260),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Opacity(
+                  opacity: 0.45,
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: isWide ? 48 : 24, vertical: 40),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Hay un Ecuador esperándote',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isWide ? 35.2 : 27,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                          shadows: const [Shadow(color: Color(0x66000000), blurRadius: 8, offset: Offset(0, 2))],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        texto,
+                        style: const TextStyle(
+                          color: Color(0xE6FFFFFF),
+                          fontSize: 16.8,
+                          height: 1.6,
+                          shadows: [Shadow(color: Color(0x4D000000), blurRadius: 4, offset: Offset(0, 1))],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Sección "Ofertas desde Quito ▾" con la cuadrícula DESTINOS_ECUADOR.
+  Widget _ofertasDesdeQuito({
+    required String badge,
+    required String semanticPrefix,
+    required ValueChanged<Map<String, String>> onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Card(
-            color: const Color(0xFFEFF6FF),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: BookingColors.primaryBlue,
-                child: Icon(Icons.radar, color: Colors.white),
-              ),
-              title: const Text('Estado de tu vuelo en tiempo real', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: const Text('Consulta puerta de embarque, terminal y estado por número de vuelo', style: TextStyle(fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right, color: BookingColors.actionBlue),
-              onTap: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const EstadoVueloScreen()));
-              },
+          const Text.rich(
+            TextSpan(
+              text: 'Ofertas desde ',
+              children: [TextSpan(text: 'Quito ▾', style: TextStyle(color: Color(0xFF0057B8)))],
             ),
+            style: TextStyle(fontSize: 22.4, fontWeight: FontWeight.w700, color: Color(0xFF1A1A1A)),
           ),
-          const SizedBox(height: 16),
-          const Text('Rutas más populares', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-          const Text('Explora tarifas conectadas en vivo con 5 aerolíneas socias', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 112,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: popularRoutes.length,
-              itemBuilder: (_, i) {
-                final r = popularRoutes[i];
-                return InkWell(
-                  onTap: () => _launchVuelosSearch(orig: r['orig'], dest: r['dest']),
-                  child: Container(
-                    width: 215,
-                    margin: const EdgeInsets.only(right: 10),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.flight_takeoff, color: BookingColors.actionBlue, size: 18),
-                            const SizedBox(width: 6),
-                            Text('${r['orig']} → ${r['dest']}', style: const TextStyle(fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(r['title']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        const SizedBox(height: 2),
-                        Text(r['sub']!, style: const TextStyle(fontSize: 11, color: BookingColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
+          const SizedBox(height: 4),
+          const Text(
+            'Haz clic en un destino para iniciar tu búsqueda directamente.',
+            style: TextStyle(color: Color(0xFF666666), fontSize: 14.4),
           ),
-          const SizedBox(height: 18),
-          const Text('Ofertas destacadas de vuelo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-          const SizedBox(height: 8),
-          if (_loadingCatalog)
-            const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
-          else
-            ..._vuelos.take(5).map((v) => Card(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: BookingColors.primaryBlue,
-                      child: Text(v.airlineCode, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, c) {
+              // grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap 16px
+              const gap = 16.0;
+              final cols = ((c.maxWidth + gap) / (220 + gap)).floor().clamp(1, 4);
+              final w = (c.maxWidth - gap * (cols - 1)) / cols;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: _destinosEcuador.map((d) {
+                  return SizedBox(
+                    width: w,
+                    child: Semantics(
+                      button: true,
+                      label: '$semanticPrefix ${d['nombre']}',
+                      child: _DestinoOfertaCard(destino: d, badge: badge, onTap: () => onTap(d)),
                     ),
-                    title: Text('${v.origen} ➔ ${v.destino} · ${v.aerolinea}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: Text('${v.horaSalida} - ${v.horaLlegada} · ${v.numeroVuelo} (${v.escalas == 0 ? "Directo" : "${v.escalas} escala(s)"})'),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('US\$ ${v.totalPrice.toStringAsFixed(0)}',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.actionBlue)),
-                        const Text('Ver >', style: TextStyle(fontSize: 11, color: BookingColors.textMuted)),
-                      ],
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => VueloDetailScreen(oferta: v, pasajeros: _vueloPassengers),
-                        ),
-                      );
-                    },
-                  ),
-                )),
+                  );
+                }).toList(),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -1580,227 +1887,548 @@ class _HomeScreenState extends State<HomeScreen> {
   // LANDING: AUTOS
   // ===========================================================================
   Widget _buildAutosLanding() {
-    final cur = Provider.of<CurrencyProvider>(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _benefitCard(Icons.verified_user_outlined, 'Cobertura Total Opcional', 'Protección sin franquicia por solo +\$18/día'),
-                _benefitCard(Icons.cleaning_services_outlined, 'Cooldown 2h verificado', 'Desinfección e inspección garantizada entre rentas'),
-                _benefitCard(Icons.cancel_outlined, 'Cancelación flexible', 'Cambia o cancela hasta 24h antes de la recogida'),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          const Text('Puntos de recogida más populares', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: ['Quito', 'Aeropuerto Mariscal Sucre', 'Guayaquil', 'Cuenca', 'Manta'].map((loc) {
-              return ActionChip(
-                avatar: const Icon(Icons.location_on, size: 15, color: BookingColors.actionBlue),
-                label: Text(loc),
-                onPressed: () => _launchAutosSearch(forcedLocation: loc),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Vehículos disponibles en flota', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-              TextButton(onPressed: () => _launchAutosSearch(), child: const Text('Explorar todos >')),
-            ],
-          ),
-          if (_loadingCatalog)
-            const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
-          else
-            ..._autos.take(5).map((auto) => Card(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  child: ListTile(
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Image.network(
-                        auto.imagenUrl ?? '',
-                        width: 64,
-                        height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.directions_car, size: 34),
-                      ),
-                    ),
-                    title: Text('${auto.carDisplayName} · ${auto.proveedor}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: Text(
-                      '${auto.capacidadPasajeros} plazas · ${auto.transmision} · ${auto.maletasGrandes} maleta(s)',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    trailing: Text(
-                      '${cur.formatPrice(auto.precioPorDia, forceDecimals: false)}/d',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: BookingColors.actionBlue),
-                    ),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AutoDetailScreen(
-                            auto: auto,
-                            initialPickupDate: _autoPickupDate,
-                            initialDropoffDate: _autoDropoffDate,
-                            pickupTime: _autoPickupTime,
-                            dropoffTime: _autoDropoffTime,
-                            pickupLocation: _autoLocCtrl.text.trim(),
-                            initialDriverAge: _driverAge30to65 ? 30 : _autoDriverAge,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                )),
-        ],
-      ),
+    // Paridad 1:1 con la vista sin búsqueda de AutosPage.jsx:
+    // Hero "Hay un Ecuador esperándote" → "Ofertas desde Quito".
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _ecuadorHeroBanner(
+          imageUrl: 'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?w=1200&h=400&fit=crop',
+          texto: 'Te llevamos a los mejores destinos dentro del país para que encuentres los lugares que te muevan. Reserva hoy tu próximo vehículo.',
+        ),
+        _ofertasDesdeQuito(
+          badge: 'Oferta especial',
+          semanticPrefix: 'Buscar coches en',
+          onTap: (dest) {
+            // handleDestinationCardClick(): fija el lugar de recogida y busca.
+            _autoLocCtrl.text = dest['nombre']!;
+            _launchAutosSearch(forcedLocation: dest['nombre']);
+          },
+        ),
+      ],
     );
   }
 
   // ===========================================================================
   // LANDING: ATRACCIONES
   // ===========================================================================
+  // Datos de AtraccionesPage.jsx (DESTINOS_TOP, EXPLORA_TABS, DESTINOS_POR_PROVINCIA).
+  static const List<Map<String, String>> _destinosTop = [
+    {
+      'id': 'uio',
+      'nombre': 'Quito',
+      'cosas': '245 cosas que hacer',
+      'img': 'https://images.unsplash.com/photo-1589308078059-be1415eab4c3?w=800&auto=format&fit=crop'
+    },
+    {
+      'id': 'gye',
+      'nombre': 'Guayaquil',
+      'cosas': '128 cosas que hacer',
+      'img': 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&auto=format&fit=crop'
+    },
+    {
+      'id': 'cue',
+      'nombre': 'Cuenca',
+      'cosas': '184 cosas que hacer',
+      'img': 'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?w=800&auto=format&fit=crop'
+    },
+    {
+      'id': 'ban',
+      'nombre': 'Baños',
+      'cosas': '312 cosas que hacer',
+      'img': 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop'
+    },
+    {
+      'id': 'gal',
+      'nombre': 'Galápagos',
+      'cosas': '89 cosas que hacer',
+      'img': 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop'
+    },
+  ];
+
+  static const List<String> _exploraTabs = ['Pichincha', 'Guayas', 'Azuay', 'Tungurahua', 'Manabí', 'Imbabura', 'Galápagos'];
+
+  static const Map<String, List<Map<String, String>>> _destinosPorProvincia = {
+    'Pichincha': [
+      {
+        'nombre': 'Mitad del Mundo',
+        'cosas': '45 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1598971861713-54ad16a7e72e?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Mindo Bosque Nublado',
+        'cosas': '78 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Sangolquí & Valle',
+        'cosas': '12 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Machachi & Volcanes',
+        'cosas': '24 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=800&auto=format&fit=crop'
+      },
+    ],
+    'Guayas': [
+      {
+        'nombre': 'Malecón 2000',
+        'cosas': '52 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1516483638261-f4dbaf036963?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Barrio Las Peñas',
+        'cosas': '34 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Parque de las Iguanas',
+        'cosas': '18 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=800&auto=format&fit=crop'
+      },
+      {'nombre': 'Isla Santay', 'cosas': '22 cosas que hacer', 'img': 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop'},
+    ],
+    'Azuay': [
+      {
+        'nombre': 'Catedral Nueva de Cuenca',
+        'cosas': '38 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1565008447742-97f6f38c985c?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Parque Nacional Cajas',
+        'cosas': '65 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Mirador de Turi',
+        'cosas': '19 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Barranco del Río Tomebamba',
+        'cosas': '27 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&auto=format&fit=crop'
+      },
+    ],
+    'Tungurahua': [
+      {
+        'nombre': 'Pailón del Diablo (Baños)',
+        'cosas': '94 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Casa del Árbol & Columpio',
+        'cosas': '41 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Cascada Manto de la Novia',
+        'cosas': '32 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1533240332313-0db49b459ad6?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Ruta de las Cascadas en Chiva',
+        'cosas': '56 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop'
+      },
+    ],
+    'Manabí': [
+      {
+        'nombre': 'Playa Los Frailes',
+        'cosas': '29 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Parque Nacional Machalilla',
+        'cosas': '48 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Isla de la Plata',
+        'cosas': '31 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Canoa & Clases de Surf',
+        'cosas': '23 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=800&auto=format&fit=crop'
+      },
+    ],
+    'Imbabura': [
+      {
+        'nombre': 'Laguna de Cuicocha',
+        'cosas': '35 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Mercado de Ponchos Otavalo',
+        'cosas': '60 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Cascada de Peguche',
+        'cosas': '21 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Paseo en Lago San Pablo',
+        'cosas': '26 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&auto=format&fit=crop'
+      },
+    ],
+    'Galápagos': [
+      {
+        'nombre': 'Estación Charles Darwin',
+        'cosas': '42 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Tortuga Bay (Santa Cruz)',
+        'cosas': '39 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Túneles de Lava en Isabela',
+        'cosas': '51 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop'
+      },
+      {
+        'nombre': 'Snorkel en Kicker Rock',
+        'cosas': '28 cosas que hacer',
+        'img': 'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=800&auto=format&fit=crop'
+      },
+    ],
+  };
+
+  static const TextStyle _sectionTitle = TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: BookingColors.textDark);
+  static const TextStyle _sectionSubtitle = TextStyle(fontSize: 15.2, color: Color(0xFF474747));
+
+  void _openAtraccionesSearch(String destino) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => AtraccionesSearchScreen(initialQuery: destino, initialDate: _atrDate)),
+    );
+  }
+
+  /// Imagen con degradado inferior y texto blanco (asc-img / destino-top / explora).
+  Widget _overlayImageCard({
+    required String imageUrl,
+    required double height,
+    required double gradientFraction,
+    required Widget overlay,
+    Widget? badge,
+    required VoidCallback onTap,
+  }) {
+    return _HoverZoomCard(
+      onTap: onTap,
+      height: height,
+      imageUrl: imageUrl,
+      gradientFraction: gradientFraction,
+      overlay: overlay,
+      badge: badge,
+    );
+  }
+
   Widget _buildAtraccionesLanding() {
     final auth = Provider.of<AuthProvider>(context);
-    const regiones = ['Sierra', 'Costa', 'Galápagos', 'Amazonía'];
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width <= 768;
 
-    final filteredByRegion = _atracciones.where((a) {
-      final text = '${a.ciudad} ${a.nombre} ${a.descripcion}'.toLowerCase();
-      if (_atrRegionTab == 'Galápagos') return text.contains('galápag') || text.contains('galapag') || text.contains('santa cruz');
-      if (_atrRegionTab == 'Costa') return text.contains('guayaquil') || text.contains('manta') || text.contains('montañ') || text.contains('lópez');
-      if (_atrRegionTab == 'Amazonía') return text.contains('tena') || text.contains('baños') || text.contains('cuyabeno') || text.contains('amazon');
-      return text.contains('quito') ||
-          text.contains('cuenca') ||
-          text.contains('cotopaxi') ||
-          text.contains('otavalo') ||
-          text.contains('mindo') ||
-          text.contains('mitad');
-    }).toList();
-
-    final showcase = filteredByRegion.isNotEmpty ? filteredByRegion : _atracciones;
+    // atraccionesFiltradas: el texto del buscador filtra también la sección "Recomendado".
+    final term = _atrQueryCtrl.text.toLowerCase().trim();
+    final filtradas = term.isEmpty
+        ? _atracciones
+        : _atracciones.where((a) {
+            return a.nombre.toLowerCase().contains(term) ||
+                a.ciudad.toLowerCase().contains(term) ||
+                a.descripcion.toLowerCase().contains(term) ||
+                a.includes.join(' ').toLowerCase().contains(term);
+          }).toList();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!auth.isAuthenticated)
-            Card(
-              color: Colors.white,
-              margin: const EdgeInsets.only(bottom: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade200)),
-              child: ListTile(
-                leading: const Icon(Icons.card_giftcard, color: BookingColors.actionBlue, size: 30),
-                title: const Text('Inicia sesión para gestionar tus reservas Genius', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                subtitle: const Text('Obtén tus códigos QR de ingreso instantáneo y facturación SRI', style: TextStyle(fontSize: 11)),
-                trailing: ElevatedButton(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
-                  style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
-                  child: const Text('Entrar', style: TextStyle(color: Colors.white, fontSize: 12)),
-                ),
+          // ── RECOMENDADO EN QUITO (datos en vivo de los socios) ──
+          const Text('Recomendado en Quito', style: _sectionTitle),
+          const SizedBox(height: 4),
+          const Text('Nuestra selección de las mejores atracciones basada en IA para ti', style: _sectionSubtitle),
+          const SizedBox(height: 16),
+          if (_atrError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(_atrError!, style: const TextStyle(color: Color(0xFFD32F2F))),
+            ),
+          if (_loadingCatalog)
+            const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+          else if (filtradas.isEmpty && _atrError != null)
+            const SizedBox.shrink()
+          else if (filtradas.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 16),
+              child: Text('No hay atracciones publicadas por los proveedores en este momento.', style: _sectionSubtitle),
+            )
+          else
+            SizedBox(
+              height: 336,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: filtradas.length > 8 ? 8 : filtradas.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 16),
+                itemBuilder: (_, idx) {
+                  final a = filtradas[idx];
+                  return SizedBox(
+                    width: 240,
+                    child: _overlayImageCard(
+                      imageUrl: a.imagenUrl ?? '',
+                      height: 320,
+                      gradientFraction: 0.5,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => AtraccionDetailScreen(atraccion: a, initialDate: _atrDate)),
+                      ),
+                      badge: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: BookingColors.darkBlue, borderRadius: BorderRadius.circular(4)),
+                        child: Text('#${idx + 1} Más vendido', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                      ),
+                      overlay: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(a.nombre,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, height: 1.2)),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                decoration: BoxDecoration(color: BookingColors.darkBlue, borderRadius: BorderRadius.circular(4)),
+                                child:
+                                    Text(a.rating.toStringAsFixed(1), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13.6)),
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  '${BookingRatingBadge.textoPuntuacion(a.rating)} (${a.reviewsCount})',
+                                  style: const TextStyle(color: Colors.white, fontSize: 12.8, fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
-          const Text('Explora destinos de actividades', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: ['Quito', 'Galápagos', 'Baños', 'Cuenca', 'Mindo', 'Guayaquil'].map((q) {
-              return ActionChip(
-                avatar: const Icon(Icons.tour, size: 15, color: BookingColors.actionBlue),
-                label: Text(q),
-                onPressed: () => _launchAtraccionesSearch(forcedQuery: q),
-              );
-            }).toList(),
-          ),
+          const SizedBox(height: 48),
+
+          // ── DESTINOS TOP EN ECUADOR (2 grandes arriba, 3 abajo) ──
+          const Text('Destinos top en Ecuador', style: _sectionTitle),
           const SizedBox(height: 16),
-          const Text('Descubre por regiones de Ecuador', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: regiones.map((reg) {
-              final sel = _atrRegionTab == reg;
-              return ChoiceChip(
-                label: Text(reg, style: TextStyle(color: sel ? Colors.white : BookingColors.textDark, fontSize: 12)),
-                selected: sel,
-                selectedColor: BookingColors.actionBlue,
-                onSelected: (_) => setState(() => _atrRegionTab = reg),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 10),
-          if (_loadingCatalog)
-            const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
-          else
-            ...showcase.take(6).map((a) => Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  clipBehavior: Clip.antiAlias,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AtraccionDetailScreen(atraccion: a, initialDate: _atrDate),
-                        ),
-                      );
-                    },
-                    child: Row(
+          LayoutBuilder(builder: (context, c) {
+            const gap = 16.0;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: List.generate(_destinosTop.length, (idx) {
+                final d = _destinosTop[idx];
+                final w = isMobile ? c.maxWidth : (idx < 2 ? (c.maxWidth - gap) / 2 : (c.maxWidth - gap * 2) / 3);
+                return SizedBox(
+                  width: w,
+                  child: _overlayImageCard(
+                    imageUrl: d['img']!,
+                    height: 240,
+                    gradientFraction: 0.4,
+                    onTap: () => _openAtraccionesSearch(d['nombre']!),
+                    overlay: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
-                          width: 112,
-                          height: 112,
-                          child: Image.network(
-                            a.imagenUrl ?? '',
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: Colors.grey.shade200,
-                              child: const Icon(Icons.attractions),
+                        Text(d['nombre']!,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 24,
+                                fontWeight: FontWeight.w700,
+                                shadows: [Shadow(color: Color(0x80000000), blurRadius: 4, offset: Offset(0, 2))])),
+                        Text(d['cosas']!, style: const TextStyle(color: Colors.white, fontSize: 14.4, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            );
+          }),
+          const SizedBox(height: 48),
+
+          // ── TU CUENTA, TUS VIAJES (solo sin sesión) ──
+          if (!auth.isAuthenticated) ...[
+            const Text('Tu cuenta, tus viajes', style: _sectionTitle),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: BookingColors.borderLight),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: isMobile ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                      children: [
+                        Text('Todos los detalles de tus viajes en un mismo lugar',
+                            textAlign: isMobile ? TextAlign.center : TextAlign.start, style: const TextStyle(fontSize: 19.2, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 4),
+                        Text('Inicia sesión para reservar más rápido y administrar tus viajes fácilmente',
+                            textAlign: isMobile ? TextAlign.center : TextAlign.start, style: _sectionSubtitle),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 16,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            ElevatedButton(
+                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF0071C2),
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                              ),
+                              child: const Text('Iniciar sesión', style: TextStyle(fontWeight: FontWeight.w600)),
                             ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.all(10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(a.ciudad, style: const TextStyle(fontSize: 11, color: BookingColors.textMuted)),
-                                    BookingRatingBadge(rating: a.rating),
-                                  ],
-                                ),
-                                const SizedBox(height: 2),
-                                Text(a.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), maxLines: 2, overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 4),
-                                Text(
-                                  a.freeCancellation ? 'Cancelación gratuita · ${a.duracion}' : a.duracion,
-                                  style: const TextStyle(fontSize: 11, color: BookingColors.successGreen, fontWeight: FontWeight.w600),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Desde US\$ ${a.precioAdulto.toStringAsFixed(2)}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: BookingColors.actionBlue),
-                                ),
-                              ],
+                            TextButton(
+                              onPressed: () => Navigator.pushNamed(context, '/register'),
+                              style: TextButton.styleFrom(foregroundColor: const Color(0xFF0071C2)),
+                              child: const Text('Regístrate', style: TextStyle(fontWeight: FontWeight.w600)),
                             ),
-                          ),
+                          ],
                         ),
                       ],
                     ),
                   ),
-                )),
+                  if (!isMobile) const Text('🎁 Genius', style: TextStyle(fontSize: 48)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 48),
+          ],
+
+          // ── CUENTA CON NOSOTROS ──
+          const Text('Cuenta con nosotros', style: _sectionTitle),
+          const SizedBox(height: 16),
+          LayoutBuilder(builder: (context, c) {
+            const features = [
+              ['🎡', 'Descubre las principales atracciones', 'Conoce lo mejor del destino con atracciones, tours, actividades y mucho más'],
+              ['⏱️', 'Rápido y flexible', 'Puedes reservar los boletos online en pocos minutos y hay cancelación gratis en muchas atracciones'],
+              ['🎧', 'Asistencia cuando lo necesites', 'El equipo de Atención al cliente está a tu disposición para ayudarte las 24 horas, todos los días'],
+            ];
+            final w = isMobile ? c.maxWidth : (c.maxWidth - 48) / 3;
+            return Wrap(
+              spacing: 24,
+              runSpacing: 24,
+              children: features.map((f) {
+                return SizedBox(
+                  width: w,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(f[0], style: const TextStyle(fontSize: 32)),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(f[1], style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 4),
+                            Text(f[2], style: const TextStyle(fontSize: 13.6, color: Color(0xFF474747), height: 1.4)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            );
+          }),
+          const SizedBox(height: 48),
+
+          // ── EXPLORA MÁS DESTINOS (pestañas por provincia) ──
+          const Text('Explora más destinos', style: _sectionTitle),
+          const SizedBox(height: 4),
+          const Text('Encuentra cosas que hacer en ciudades de todo el Ecuador', style: _sectionSubtitle),
+          const SizedBox(height: 16),
+          Container(
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: BookingColors.borderLight))),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _exploraTabs.map((tab) {
+                  final active = tab == _atrTabActivo;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 16),
+                    child: InkWell(
+                      onTap: () => setState(() => _atrTabActivo = tab),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border(bottom: BorderSide(color: active ? const Color(0xFF0071C2) : Colors.transparent, width: 2)),
+                        ),
+                        child: Text(tab, style: TextStyle(fontSize: 15.2, color: active ? const Color(0xFF0071C2) : const Color(0xFF474747))),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: LayoutBuilder(
+              key: ValueKey(_atrTabActivo),
+              builder: (context, c) {
+                const gap = 16.0;
+                final cols = isMobile ? 2 : 4;
+                final w = (c.maxWidth - gap * (cols - 1)) / cols;
+                final lista = _destinosPorProvincia[_atrTabActivo] ?? _destinosPorProvincia['Pichincha']!;
+                return Wrap(
+                  spacing: gap,
+                  runSpacing: gap,
+                  children: lista.map((d) {
+                    return SizedBox(
+                      width: w,
+                      child: _overlayImageCard(
+                        imageUrl: d['img']!,
+                        height: 160,
+                        gradientFraction: 0.6,
+                        // navigate(`/search?destino=${dest.nombre.split(' ')[0]}`)
+                        onTap: () => _openAtraccionesSearch(d['nombre']!.split(' ').first),
+                        overlay: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(d['nombre']!, style: const TextStyle(color: Colors.white, fontSize: 17.6, fontWeight: FontWeight.w700)),
+                            Text(d['cosas']!, style: const TextStyle(color: Color(0xE6FFFFFF), fontSize: 12.8)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -1832,6 +2460,188 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Tarjeta de destino de "Ofertas desde Quito" (imagen 150px, badge, nombre,
+/// descripción y "Desde $X"), con la elevación al pasar el cursor del original.
+class _DestinoOfertaCard extends StatefulWidget {
+  final Map<String, String> destino;
+  final String badge;
+  final VoidCallback onTap;
+
+  const _DestinoOfertaCard({required this.destino, required this.badge, required this.onTap});
+
+  @override
+  State<_DestinoOfertaCard> createState() => _DestinoOfertaCardState();
+}
+
+class _DestinoOfertaCardState extends State<_DestinoOfertaCard> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.destino;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          transform: Matrix4.translationValues(0, _hover ? -4 : 0, 0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: _hover ? const Color(0x2E000000) : const Color(0x1A000000),
+                blurRadius: _hover ? 24 : 12,
+                offset: Offset(0, _hover ? 8 : 2),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: 150,
+                width: double.infinity,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      d['imagen']!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Image.network(
+                        'https://picsum.photos/seed/${d['codigo']}/400/240',
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(color: const Color(0xFFE7E7E7)),
+                      ),
+                    ),
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xEBFFFFFF),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          widget.badge,
+                          style: const TextStyle(color: Color(0xFF0057B8), fontSize: 11.5, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(d['nombre']!, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16.8, color: Color(0xFF1A1A1A))),
+                    const SizedBox(height: 2),
+                    Text(d['descripcion']!, style: const TextStyle(color: Color(0xFF666666), fontSize: 13.1)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text('Desde', style: TextStyle(color: Color(0xFF888888), fontSize: 12.8)),
+                        const SizedBox(width: 6),
+                        Text(d['desde']!, style: const TextStyle(color: Color(0xFF0057B8), fontWeight: FontWeight.w800, fontSize: 17.6)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tarjeta de imagen con zoom al pasar el cursor (`:hover img { scale(1.05) }`)
+/// y degradado inferior `linear-gradient(to top, rgba(0,0,0,0.8), transparent)`.
+class _HoverZoomCard extends StatefulWidget {
+  final VoidCallback onTap;
+  final double height;
+  final String imageUrl;
+  final double gradientFraction;
+  final Widget overlay;
+  final Widget? badge;
+
+  const _HoverZoomCard({
+    required this.onTap,
+    required this.height,
+    required this.imageUrl,
+    required this.gradientFraction,
+    required this.overlay,
+    this.badge,
+  });
+
+  @override
+  State<_HoverZoomCard> createState() => _HoverZoomCardState();
+}
+
+class _HoverZoomCardState extends State<_HoverZoomCard> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            height: widget.height,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                AnimatedScale(
+                  scale: _hover ? 1.05 : 1.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Image.network(
+                    widget.imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: const Color(0xFFD9D9D9),
+                      child: const Icon(Icons.image_not_supported_outlined, color: Colors.white),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: widget.height * widget.gradientFraction,
+                  child: const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [Color(0xCC000000), Color(0x00000000)],
+                      ),
+                    ),
+                  ),
+                ),
+                if (widget.badge != null) Positioned(top: 12, left: 12, child: widget.badge!),
+                Positioned(left: 12, right: 12, bottom: 12, child: widget.overlay),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
