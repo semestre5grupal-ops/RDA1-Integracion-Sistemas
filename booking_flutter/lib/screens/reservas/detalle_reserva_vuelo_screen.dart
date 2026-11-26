@@ -5,6 +5,8 @@ import '../../providers/auth_provider.dart';
 import '../../services/api_client.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
+import '../../utils/pase_abordar.dart';
+import '../../utils/puerta_embarque.dart';
 import 'voucher_qr_screen.dart';
 
 class DetalleReservaVueloScreen extends StatefulWidget {
@@ -99,15 +101,7 @@ class _DetalleReservaVueloScreenState extends State<DetalleReservaVueloScreen> {
     }
   }
 
-  Map<String, dynamic>? _findPassForTicket(Map<String, dynamic> ticket) {
-    final tid = ticket['ticketId']?.toString() ?? ticket['id']?.toString();
-    final paxName = ticket['passengerName']?.toString();
-    for (final p in _pases) {
-      if (tid != null && p['ticketId']?.toString() == tid) return p;
-      if (paxName != null && p['passengerName']?.toString() == paxName) return p;
-    }
-    return _pases.isNotEmpty ? _pases.first : null;
-  }
+  Map<String, dynamic>? _findPassForTicket(Map<String, dynamic> ticket) => paseDelBoleto(_pases, ticket);
 
   @override
   Widget build(BuildContext context) {
@@ -229,11 +223,14 @@ class _DetalleReservaVueloScreenState extends State<DetalleReservaVueloScreen> {
     final tStatus = (ticket['status'] ?? 'PENDING').toString().toUpperCase();
     final isIssued = tStatus == 'ISSUED';
     final pax = ticket['passengerName']?.toString() ?? 'Pasajero';
-    final tNum = ticket['ticketNumber']?.toString() ?? '--';
+    final tNum = numeroBoletoDe(ticket);
     final segs = ticket['segments'] is List ? ticket['segments'] as List : [];
     final firstSeg = segs.isNotEmpty && segs.first is Map ? Map<String, dynamic>.from(segs.first) : <String, dynamic>{};
-    final seat = pass?['seatNumber']?.toString() ?? ticket['seatNumber']?.toString() ?? 'Asignación en puerta';
-    final barcode = pass?['barcodeData']?.toString() ?? pass?['boardingPassCode']?.toString();
+    final seat = asientoDe(pass) ?? ticket['seatNumber']?.toString() ?? 'Asignación en puerta';
+    final barcode = codigoBarrasDe(pass);
+    final grupo = grupoEmbarqueDe(pass);
+    final posicion = posicionEmbarqueDe(pass);
+    final puerta = puertaDe(pass); // solo si la aerolínea ya la asignó
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -300,6 +297,14 @@ class _DetalleReservaVueloScreenState extends State<DetalleReservaVueloScreen> {
                 ),
                 const Divider(height: 18),
                 Text('N.º Boleto: $tNum', style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                if (grupo != null) ...[
+                  const SizedBox(height: 4),
+                  Text('Grupo de embarque: $grupo${posicion != null ? ' · posición $posicion' : ''}', style: const TextStyle(fontSize: 12)),
+                ],
+                if (puerta != null) ...[
+                  const SizedBox(height: 4),
+                  Text('Puerta de embarque: $puerta', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: BookingColors.actionBlue)),
+                ],
                 if (barcode != null) ...[
                   const SizedBox(height: 6),
                   Container(
