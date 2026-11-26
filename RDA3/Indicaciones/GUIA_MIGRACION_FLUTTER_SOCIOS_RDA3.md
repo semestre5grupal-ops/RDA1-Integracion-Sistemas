@@ -17,6 +17,12 @@
 > - **LA APLICACIÓN MÓVIL ES ÚNICAMENTE UN CLIENTE CONSUMIDOR:** Tu app móvil solo debe realizar peticiones HTTP (GET, POST, PATCH) a la API que ya está desplegada y funcionando en la nube (Azure Container Apps / Azure App Service).
 > - **LA CONSOLA ADMINISTRATIVA NO SE MIGRA A MÓVIL:** Los paneles de administración, monitoreo y telemetría operativa se conservan en la aplicación Web de escritorio. La app móvil es **exclusiva para el cliente / turista final**.
 
+### 1.1 Anti-Patrones Prohibidos para el Agente de IA (Lo que NUNCA debe implementar)
+> [!WARNING]
+> 1. **PROHIBIDO CREAR UN CARRITO DE COMPRAS (Cart / Carrito):** Esta plataforma NO es una tienda de e-commerce tradicional. Cada reserva (un hotel, un vuelo, un auto o una atracción) se ejecuta de forma **atómica, directa e individual** mediante `POST /reservas` enviando una cabecera única `Idempotency-Key` (UUIDv4) y un timeout de 45 segundos. Inventar un carrito (`CartProvider`, `CartItem`, `/cart`) romperá la lógica transaccional.
+> 2. **PROHIBIDO USAR DATOS MOCKEADOS O HARDCODEADOS:** Si una llamada al backend devuelve una lista vacía `[]` o un error temporal, **nunca** devuelvas una lista falsa fija como fallback permanente. Muestra el estado vacío real con un botón interactivo de "Reintentar". Usar mocks estáticos ocultará los datos reales que tus compañeros y profesores registren en Azure durante la evaluación.
+> 3. **PROHIBIDO INVENTAR BARRAS INFERIORES NO RESPONSIVAS:** No agregues barras de navegación tipo `BottomNavigationBar` con botones inventados ("Facturas", "Admin", etc.). La navegación debe ser limpia y basada en el catálogo y "Mis Reservas".
+
 ---
 
 ## 2. Ubicación y Aislamiento en tu Repositorio
@@ -93,6 +99,67 @@ lib/
     ├── detalle_screen.dart       # Selector interactivo de fechas/turnos y botón reservar
     ├── mis_reservas_screen.dart  # Historial de reservas con validación de cancelación
     └── voucher_qr_screen.dart    # Código QR para check-in presencial offline
+```
+
+### 4.1 Modelado Resiliente de Datos (Tolerancia a Nodos Socios en `fromJson`)
+Debido a que los microservicios pueden retornar ligeras variaciones de nombres de campo (snake_case vs camelCase o IDs de MongoDB), tu modelo en `lib/models/servicio_item.dart` debe deserializar de forma tolerante:
+
+```dart
+class ServicioItem {
+  final String id;
+  final String nombre;
+  final double precio;
+  final String? imagenUrl;
+  final int cuposDisponibles;
+
+  ServicioItem({
+    required this.id,
+    required this.nombre,
+    required this.precio,
+    this.imagenUrl,
+    this.cuposDisponibles = 10,
+  });
+
+  factory ServicioItem.fromJson(Map<String, dynamic> json) {
+    // 1. Identificador tolerante
+    final idStr = json['id']?.toString() ??
+        json['_id']?.toString() ??
+        json['auto_id']?.toString() ??
+        json['vehicle_id']?.toString() ??
+        json['alojamiento_id']?.toString() ??
+        json['atraccion_id']?.toString() ??
+        json['offerId']?.toString() ??
+        '';
+
+    // 2. Precios tolerantes (pueden venir como num, string u objeto { total: 45 })
+    double precioParsed = 0.0;
+    final rawPrice = json['precio'] ?? json['price'] ?? json['precio_diario'] ?? json['precio_por_noche'];
+    if (rawPrice is num) {
+      precioParsed = rawPrice.toDouble();
+    } else if (rawPrice is String) {
+      precioParsed = double.tryParse(rawPrice) ?? 0.0;
+    } else if (rawPrice is Map && rawPrice['total'] != null) {
+      precioParsed = (rawPrice['total'] as num).toDouble();
+    }
+
+    // 3. Extracción de fotos (array de URLs, array de objetos o string único)
+    String? foto;
+    if (json['photos'] is List && (json['photos'] as List).isNotEmpty) {
+      final first = (json['photos'] as List).first;
+      foto = first is Map ? first['url']?.toString() : first?.toString();
+    } else {
+      foto = json['foto_url']?.toString() ?? json['imagen_url']?.toString();
+    }
+
+    return ServicioItem(
+      id: idStr,
+      nombre: json['nombre']?.toString() ?? json['name']?.toString() ?? json['vehiculo']?.toString() ?? 'Servicio Turístico',
+      precio: precioParsed > 0 ? precioParsed : 25.0,
+      imagenUrl: foto,
+      cuposDisponibles: (json['cupos_disponibles'] ?? json['stock'] ?? json['available_spots'] ?? 10) as int,
+    );
+  }
+}
 ```
 
 ---
@@ -184,6 +251,16 @@ class ApiService {
 ### C. Refresco Inmediato tras Cancelación (Anti-Stale State)
 - Al confirmarse la cancelación desde el backend, actualiza el estado local de la reserva a `'CANCELADA'` inmediatamente con `setState()` o mediante tu `Provider`, sin obligar al usuario a reiniciar la app o recargar manualmente.
 
+### D. Sincronización en Vivo y Pull-to-Refresh
+- Envuelve tu listado de catálogo en `home_catalogo_screen.dart` con `RefreshIndicator` para que el usuario pueda deslizar hacia abajo y refrescar los ítems en tiempo real:
+  ```dart
+  RefreshIndicator(
+    onRefresh: () => Provider.of<AppStateProvider>(context, listen: false).cargarCatalogo(),
+    child: ListView.builder(...),
+  )
+  ```
+- Opcionalmente, puedes inicializar un `Timer.periodic(const Duration(seconds: 12), ...)` en tu pantalla principal para mantener los cupos y la disponibilidad sincronizados silenciosamente con Azure.
+
 ---
 
 ## 7. Instrucciones Específicas por Tipo de Socio
@@ -208,6 +285,9 @@ Identifica cuál es tu servicio y aplica estas directrices particulares:
 
 ## 8. Comandos para Probar y Compilar el APK
 
+> [!NOTE]
+> **Usuarios de Windows (PowerShell):** Ejecuta cada comando en una línea separada. En PowerShell 5.1 no encadenes instrucciones con `&&` ya que arrojará un error de sintaxis; usa `;` o ejecuta comando por comando.
+
 ```bash
 # 1. Ubicarse en la carpeta de la app móvil
 cd mi_app_flutter
@@ -215,13 +295,16 @@ cd mi_app_flutter
 # 2. Descargar paquetes
 flutter pub get
 
-# 3. Probar en navegador Web
+# 3. Verificación estática obligatoria (garantiza cero errores de tipos antes de compilar)
+flutter analyze
+
+# 4. Probar en navegador Web
 flutter run -d chrome
 
-# 4. Probar en celular Android (modo Debug con USB o Emulador)
+# 5. Probar en celular Android (modo Debug con USB o Emulador)
 flutter run
 
-# 5. Generar archivo APK de Producción para entrega de la tarea
+# 6. Generar archivo APK de Producción para entrega de la tarea
 flutter build apk --release
 ```
 *El instalador APK final estará ubicado en:*  
@@ -240,13 +323,20 @@ Nuestro framework asignado para el cliente móvil es FLUTTER (Dart).
 INSTRUCCIONES OBLIGATORIAS Y REGLA DE ORO:
 1. NO MODIFIQUES ningún archivo de nuestro backend existente ni toques controladores, entidades, DTOs ni rutas en Azure. El backend ya está funcionando y aprobado con Booking Central en el RDA2. Cualquier cambio en el backend romperá la integración.
 2. Desarrolla la aplicación móvil en una carpeta nueva en la raíz de nuestro repositorio llamada 'mobile_flutter'.
-3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando las cabeceras estándar 'Content-Type: application/json' y 'X-Correlation-Id'.
-4. La aplicación debe contener las siguientes pantallas esenciales:
-   - Pantalla de Catálogo: Listado con imágenes, títulos, precios en USD y botón de detalle.
-   - Pantalla de Detalle: Ficha del servicio con selector de fechas/turnos y botón para confirmar la reserva.
-   - Pantalla de Mis Reservas: Historial de reservas con botón de cancelación (oculto si faltan menos de 24 horas para el servicio) y actualización reactiva inmediata del estado al cancelar.
-   - Pantalla de Voucher QR: Generación vectorial de código QR para check-in usando el paquete 'qr_flutter'.
-5. Utiliza 'provider' para el manejo de estado y 'http' para las peticiones.
-6. Deja el proyecto listo para compilar con 'flutter build apk --release'.
+3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando las cabeceras estándar 'Content-Type: application/json', 'Accept: application/json' y 'X-Correlation-Id'.
+
+GUARDRAILS Y ANTI-PATRONES OBLIGATORIOS (LO QUE NO DEBES HACER):
+- PROHIBIDO CREAR UN CARRITO DE COMPRAS: Cada reserva se ejecuta de forma directa, atómica e individual enviando una cabecera 'Idempotency-Key' única (UUIDv4) con timeout de 45s. No agregues CartProvider ni pantallas de carrito.
+- PROHIBIDO USAR DATOS MOCKEADOS: Si la API responde con lista vacía o error, muestra un estado visual amigable con botón de reintento. Nunca inventes listas fijas hardcodeadas en producción.
+- PROHIBIDO MIGRAR CONSOLA ADMIN: No agregues paneles de administración, gestión de proveedores ni telemetría. La app es 100% para el cliente final.
+- MODELADO RESILIENTE: En 'fromJson', tolera identificadores ('id', '_id', 'auto_id', 'vehicle_id', 'alojamiento_id'), precios (número, string u objeto con total) y fotos (array o string) sin lanzar excepciones.
+
+PANTALLAS ESENCIALES A IMPLEMENTAR:
+1. Pantalla de Catálogo: Listado responsivo con Pull-to-Refresh (RefreshIndicator), imágenes, títulos, precios en USD y botón de detalle.
+2. Pantalla de Detalle: Ficha del servicio con selector de fechas/turnos, capacidad restante y botón para confirmar la reserva individual.
+3. Pantalla de Mis Reservas: Historial con botón de cancelación (oculto si faltan menos de 24h para el servicio) y actualización reactiva inmediata del estado al cancelar.
+4. Pantalla de Voucher QR: Generación vectorial de código QR para check-in usando el paquete 'qr_flutter'.
+
+Utiliza 'provider' para el manejo de estado y 'http' para las peticiones. Deja el proyecto verificado con 'flutter analyze' y listo para compilar con 'flutter build apk --release'.
 ```
 
