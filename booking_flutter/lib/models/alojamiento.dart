@@ -1,3 +1,5 @@
+import '../utils/json_parse.dart';
+
 String formatearRegimenPlan(String? plan) {
   if (plan == null || plan.trim().isEmpty) return 'Solo habitación';
   final raw = plan.trim();
@@ -25,18 +27,9 @@ String formatearRegimenPlan(String? plan) {
   return raw;
 }
 
-double _parseDouble(dynamic val, [double fallback = 0.0]) {
-  if (val is num) return val.toDouble();
-  if (val is String) return double.tryParse(val) ?? fallback;
-  if (val is Map && val['total'] != null) return _parseDouble(val['total'], fallback);
-  return fallback;
-}
+double _parseDouble(dynamic val, [double fallback = 0.0]) => parseDouble(val, fallback);
 
-int _parseInt(dynamic val, [int fallback = 0]) {
-  if (val is num) return val.toInt();
-  if (val is String) return int.tryParse(val) ?? fallback;
-  return fallback;
-}
+int _parseInt(dynamic val, [int fallback = 0]) => parseInt(val, fallback);
 
 class TipoHabitacion {
   final String productId;
@@ -106,7 +99,7 @@ class TipoHabitacion {
       descripcion: json['descripcion']?.toString(),
       mealPlan: formatearRegimenPlan(json['meal_plan']?.toString() ?? json['regimen']?.toString()),
       cancellationText: json['cancelacion_texto']?.toString() ?? json['cancellation_type']?.toString() ?? 'Cancelación gratuita hasta 48 horas antes',
-      reembolsable: json['reembolsable'] ?? true,
+      reembolsable: parseBool(json['reembolsable'], true),
       price: totalStay,
       pricePerNight: priceNight > 0 ? priceNight : totalStay,
       currency: json['currency']?.toString() ?? 'USD',
@@ -277,13 +270,11 @@ class Alojamiento {
     if (pricePerNight <= 0) {
       pricePerNight = _parseDouble(
         json['precioPorNoche'] ?? json['precio_por_noche'] ?? json['precio_noche'] ?? json['precio_minimo'] ?? json['price'],
-        55.0,
+        50.0, // Paridad con getPropPrice() de AlojamientosSearchPage.jsx
       );
     }
 
-    final ams = (json['amenidades'] is List)
-        ? (json['amenidades'] as List).map((e) => e.toString()).toList()
-        : <String>[];
+    final ams = stringList(json['amenidades'] ?? json['amenities'] ?? json['servicios'] ?? json['facilities']);
 
     final scoreRaw = _parseDouble(ratings['score'] ?? json['puntuacion'] ?? json['calificacion'] ?? json['rating'], 0);
     final reviewsRaw = _parseInt(ratings['number_of_reviews'] ?? json['numero_resenas'], 0);
@@ -292,13 +283,13 @@ class Alojamiento {
     final capAd = _parseInt(json['capacidadAdultos'] ?? json['capacidad_adultos'], 2);
     final capNi = _parseInt(json['capacidadNinos'] ?? json['capacidad_ninos'], 0);
 
-    final tienePiscinaFlag = json['tienePiscina'] == true ||
+    final tienePiscinaFlag = parseBool(json['tienePiscina'] ?? json['piscina']) ||
         ams.any((a) => a.toLowerCase().contains('piscina') || a.toLowerCase().contains('pool'));
-    final tieneParkingFlag = json['tieneParqueadero'] == true ||
+    final tieneParkingFlag = parseBool(json['tieneParqueadero'] ?? json['parqueadero']) ||
         ams.any((a) => a.toLowerCase().contains('parqueadero') || a.toLowerCase().contains('estacionamiento') || a.toLowerCase().contains('parking'));
 
     final rawRegimen = json['regimen']?.toString() ??
-        (ams.any((a) => a.toLowerCase().contains('desayuno')) || json['incluye_desayuno'] == true
+        (ams.any((a) => a.toLowerCase().contains('desayuno')) || parseBool(json['incluye_desayuno'])
             ? 'DESAYUNO_INCLUIDO'
             : 'SOLO_HABITACION');
 
@@ -348,8 +339,8 @@ class Alojamiento {
       banos: _parseInt(json['banos'], 1),
       tienePiscina: tienePiscinaFlag,
       tieneParqueadero: tieneParkingFlag,
-      cancelacionGratis: json['cancelacionGratis'] != false && json['es_reembolsable'] != false,
-      pagoEnAlojamiento: politicas['pago_en_alojamiento'] == true || json['pagoEnAlojamiento'] != false,
+      cancelacionGratis: parseBool(json['cancelacionGratis'], true) && parseBool(json['es_reembolsable'], true),
+      pagoEnAlojamiento: parseBool(politicas['pago_en_alojamiento']) || parseBool(json['pagoEnAlojamiento'], true),
       regimen: formatearRegimenPlan(rawRegimen),
       checkinDesde: json['checkin_desde']?.toString() ?? politicas['checkin_desde']?.toString() ?? politicas['check_in']?.toString() ?? '14:00',
       checkinHasta: json['checkin_hasta']?.toString() ?? politicas['checkin_hasta']?.toString(),

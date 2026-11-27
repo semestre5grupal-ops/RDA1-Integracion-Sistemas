@@ -20,9 +20,7 @@ class AuthUser {
     required this.telefono,
   });
 
-  String get displayName => ('$nombre $apellido').trim().isNotEmpty
-      ? ('$nombre $apellido').trim()
-      : (email.split('@').first);
+  String get displayName => ('$nombre $apellido').trim().isNotEmpty ? ('$nombre $apellido').trim() : (email.split('@').first);
 
   String get nombreCompleto => displayName;
 
@@ -45,98 +43,225 @@ class AuthUser {
       );
 }
 
-class AuthProvider extends ChangeNotifier {
-  String? _token;
-  AuthUser? _user;
+/// Resultado de una operación de autenticación.
+///
+/// [ok] solo es `true` cuando Supabase confirmó la operación. [error] trae un
+/// mensaje listo para mostrar; [info] un aviso no bloqueante (p. ej. "revisa tu
+/// correo para confirmar la cuenta", caso en que el alta fue correcta pero no
+/// hay sesión todavía).
+class AuthResult {
+  final bool ok;
+  final String? error;
+  final String? info;
+  const AuthResult.exito({this.info})
+      : ok = true,
+        error = null;
+  const AuthResult.fallo(this.error)
+      : ok = false,
+        info = null;
+}
 
-  bool get isAuthenticated => _token != null && _token!.isNotEmpty;
+/// Sesión de usuario contra Supabase Auth (mismo proyecto que `frontend/`).
+///
+/// Paridad con `LoginPage.jsx` / `RegisterPage.jsx` (supabase-js): una sesión
+/// SOLO existe si Supabase devolvió un `access_token`. No hay modo "demo": una
+/// contraseña incorrecta o un fallo de red devuelven error y no crean sesión.
+///
+/// Persistencia: supabase-js guarda la sesión (access + refresh token) en
+/// localStorage por defecto (`persistSession: true`), así que la web sobrevive a
+/// una recarga. Aquí se replica con SharedPreferences: se guardan access token,
+/// refresh token y caducidad, y al arrancar se renueva con `grant_type=refresh_token`
+/// si el access token expiró. Si la renovación falla, la sesión se descarta.
+class AuthProvider extends ChangeNotifier {
+  static const String _supabaseUrl = 'https://owseuntgcgvflqpnmwcc.supabase.co';
+
+  /// Clave pública "anon" (la misma que usa el frontend). No es un secreto: la
+  /// seguridad la imponen las políticas RLS y el JWT del usuario.
+  static const String _anonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw';
+
+  static const _kToken = 'auth_token';
+  static const _kRefresh = 'auth_refresh_token';
+  static const _kExpiresAt = 'auth_expires_at';
+  static const _kUser = 'auth_user_data';
+  static const _kName = 'auth_name';
+  static const _kEmail = 'auth_email';
+
+  static const Duration _timeout = Duration(seconds: 20);
+
+  final http.Client _http;
+
+  String? _token;
+  String? _refreshToken;
+  int? _expiresAt; // segundos epoch, como `expires_at` de Supabase
+  AuthUser? _user;
+  Future<void>? _init;
+
+  bool get isAuthenticated => _token != null && _token!.isNotEmpty && _user != null;
   String? get token => _token;
   AuthUser? get user => _user;
 
   String get userName => _user?.displayName ?? 'Turista';
   String get userEmail => _user?.email ?? '';
 
-  AuthProvider() {
+  AuthProvider({http.Client? client}) : _http = client ?? http.Client() {
     initAuth();
   }
 
-  Future<void> initAuth() async {
+  Map<String, String> _headers({String? bearer}) => {
+        'apikey': _anonKey,
+        'Content-Type': 'application/json',
+        if (bearer != null) 'Authorization': 'Bearer $bearer',
+      };
+
+  /// Idempotente: el constructor y `main.dart` pueden llamarla; solo se ejecuta
+  /// una vez (dos renovaciones concurrentes gastarían el mismo refresh token, que
+  /// Supabase invalida al usarlo, y la segunda cerraría la sesión).
+  Future<void> initAuth() => _init ??= _restaurarSesion();
+
+  Future<void> _restaurarSesion() async {
     final prefs = await SharedPreferences.getInstance();
-    _token = prefs.getString('auth_token');
-    final userJson = prefs.getString('auth_user_data');
-    if (userJson != null && userJson.isNotEmpty) {
-      try {
-        _user = AuthUser.fromJson(jsonDecode(userJson) as Map<String, dynamic>);
-      } catch (_) {}
-    } else if (_token != null && _token!.isNotEmpty) {
-      final name = prefs.getString('auth_name') ?? 'Turista';
-      final email = prefs.getString('auth_email') ?? 'turista@booking.ec';
-      _user = AuthUser(
-        nombre: name,
-        apellido: '',
-        email: email,
-        cedula: '1724567890',
-        telefono: '0987654321',
-      );
+    final token = prefs.getString(_kToken);
+    final userJson = prefs.getString(_kUser);
+
+    // Sesiones inventadas por el antiguo modo demo ('jwt-session-…') o
+    // incompletas: no son válidas en el backend y se descartan.
+    if (token == null || token.isEmpty || token.startsWith('jwt-session') || userJson == null || userJson.isEmpty) {
+      if (token != null) await _borrarSesionGuardada(prefs);
+      notifyListeners();
+      return;
+    }
+    try {
+      _user = AuthUser.fromJson(jsonDecode(userJson) as Map<String, dynamic>);
+    } catch (_) {
+      await _borrarSesionGuardada(prefs);
+      notifyListeners();
+      return;
+    }
+    _token = token;
+    _refreshToken = prefs.getString(_kRefresh);
+    _expiresAt = prefs.getInt(_kExpiresAt);
+
+    final ahora = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (_expiresAt != null && _expiresAt! <= ahora + 30) {
+      final renovada = await _renovarSesion();
+      if (!renovada) await _cerrarLocal();
     }
     notifyListeners();
   }
 
-  // --- INICIO DE SESIÓN ---
-  Future<bool> login(String email, String password) async {
-    // 1. Intentar autenticar contra Supabase REST directamente si está online
+  /// `POST /auth/v1/token?grant_type=refresh_token`. Devuelve si hay sesión válida.
+  Future<bool> _renovarSesion() async {
+    final refresh = _refreshToken;
+    if (refresh == null || refresh.isEmpty) return false;
     try {
-      final url = Uri.parse('https://owseuntgcgvflqpnmwcc.supabase.co/auth/v1/token?grant_type=password');
-      final res = await http.post(
-        url,
-        headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'email': email.trim().toLowerCase(),
-          'password': password,
-        }),
-      );
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        _token = data['access_token']?.toString() ?? 'jwt-session';
-        final userObj = data['user'];
-        final meta = userObj != null ? (userObj['user_metadata'] ?? {}) : {};
-
-        _user = AuthUser(
-          nombre: meta['nombre']?.toString() ?? (email.split('@').first),
-          apellido: meta['apellido']?.toString() ?? '',
-          email: email.trim().toLowerCase(),
-          cedula: meta['cedula']?.toString() ?? '1724567890',
-          tipoDocumento: meta['tipo_documento']?.toString() ?? 'CEDULA',
-          telefono: meta['telefono']?.toString() ?? '0987654321',
-        );
-
-        await _persistSession();
-        notifyListeners();
-        return true;
-      }
-    } catch (_) {}
-
-    // 2. Si es credencial válida local / demo
-    _token = 'jwt-session-${DateTime.now().millisecondsSinceEpoch}';
-    _user = AuthUser(
-      nombre: email.split('@').first,
-      apellido: '',
-      email: email.trim().toLowerCase(),
-      cedula: '1724567890',
-      telefono: '0987654321',
-    );
-
-    await _persistSession();
-    notifyListeners();
-    return true;
+      final res = await _http
+          .post(
+            Uri.parse('$_supabaseUrl/auth/v1/token?grant_type=refresh_token'),
+            headers: _headers(),
+            body: jsonEncode({'refresh_token': refresh}),
+          )
+          .timeout(_timeout);
+      if (res.statusCode != 200) return false;
+      final data = jsonDecode(res.body);
+      if (data is! Map || (data['access_token']?.toString() ?? '').isEmpty) return false;
+      _aplicarSesion(Map<String, dynamic>.from(data), emailRespaldo: _user?.email ?? '');
+      await _persistSession();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
-  // --- REGISTRO DE CUENTA ---
-  Future<bool> register({
+  /// Toma `access_token`, `refresh_token`, `expires_at|expires_in` y `user` de
+  /// una respuesta de Supabase Auth.
+  void _aplicarSesion(Map<String, dynamic> data, {required String emailRespaldo, AuthUser? usuarioRespaldo}) {
+    _token = data['access_token'].toString();
+    _refreshToken = data['refresh_token']?.toString();
+    final expiresAt = data['expires_at'];
+    final expiresIn = data['expires_in'];
+    if (expiresAt is num) {
+      _expiresAt = expiresAt.toInt();
+    } else if (expiresIn is num) {
+      _expiresAt = DateTime.now().millisecondsSinceEpoch ~/ 1000 + expiresIn.toInt();
+    }
+    final userObj = data['user'] is Map ? Map<String, dynamic>.from(data['user']) : <String, dynamic>{};
+    _user = _usuarioDesdeSupabase(userObj, emailRespaldo: emailRespaldo) ?? usuarioRespaldo ?? _user;
+  }
+
+  AuthUser? _usuarioDesdeSupabase(Map<String, dynamic> userObj, {required String emailRespaldo}) {
+    if (userObj.isEmpty) return null;
+    final meta = userObj['user_metadata'] is Map ? Map<String, dynamic>.from(userObj['user_metadata']) : <String, dynamic>{};
+    final email = (userObj['email']?.toString() ?? emailRespaldo).trim().toLowerCase();
+    return AuthUser(
+      nombre: meta['nombre']?.toString() ?? email.split('@').first,
+      apellido: meta['apellido']?.toString() ?? '',
+      email: email,
+      cedula: meta['cedula']?.toString() ?? '', // sin cédula inventada: la pide el formulario
+      tipoDocumento: meta['tipo_documento']?.toString() ?? 'CEDULA',
+      telefono: meta['telefono']?.toString() ?? '',
+    );
+  }
+
+  /// Mensaje legible de un error de Supabase Auth (`error_description`, `msg`,
+  /// `message` o `error`).
+  static String _mensajeSupabase(http.Response res) {
+    try {
+      final d = jsonDecode(res.body);
+      if (d is Map) {
+        for (final k in const ['error_description', 'msg', 'message', 'error']) {
+          final v = d[k]?.toString();
+          if (v != null && v.isNotEmpty) return v;
+        }
+      }
+    } catch (_) {}
+    return 'HTTP ${res.statusCode}';
+  }
+
+  static const String _errorConexion = 'No se pudo conectar con el servidor de autenticación. Revisa tu conexión e inténtalo de nuevo.';
+
+  // --- INICIO DE SESIÓN (LoginPage.jsx → supabase.auth.signInWithPassword) ---
+  Future<AuthResult> login(String email, String password) async {
+    final cleanEmail = email.trim().toLowerCase();
+    final http.Response res;
+    try {
+      res = await _http
+          .post(
+            Uri.parse('$_supabaseUrl/auth/v1/token?grant_type=password'),
+            headers: _headers(),
+            body: jsonEncode({'email': cleanEmail, 'password': password}),
+          )
+          .timeout(_timeout);
+    } catch (_) {
+      return const AuthResult.fallo(_errorConexion);
+    }
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (data is! Map || (data['access_token']?.toString() ?? '').isEmpty) {
+        return const AuthResult.fallo('El servidor de autenticación no devolvió una sesión válida.');
+      }
+      _aplicarSesion(Map<String, dynamic>.from(data), emailRespaldo: cleanEmail);
+      await _persistSession();
+      notifyListeners();
+      return const AuthResult.exito();
+    }
+
+    final msg = _mensajeSupabase(res);
+    if (msg.contains('Invalid login credentials')) {
+      return const AuthResult.fallo('Correo o contraseña invalidos'); // texto exacto de LoginPage.jsx
+    }
+    if (msg.toLowerCase().contains('email not confirmed')) {
+      return const AuthResult.fallo('Debes confirmar tu correo electrónico antes de iniciar sesión. Revisa tu bandeja de entrada.');
+    }
+    if (res.statusCode == 429) {
+      return const AuthResult.fallo('Demasiados intentos de inicio de sesión. Espera unos minutos e inténtalo de nuevo.');
+    }
+    return AuthResult.fallo(msg);
+  }
+
+  // --- REGISTRO (RegisterPage.jsx → supabase.auth.signUp) ---
+  Future<AuthResult> register({
     required String nombre,
     required String apellido,
     required String tipoDocumento,
@@ -146,54 +271,88 @@ class AuthProvider extends ChangeNotifier {
     required String password,
   }) async {
     final cleanEmail = email.trim().toLowerCase();
-
-    // 1. Intentar registrar en Supabase
+    final http.Response res;
     try {
-      final url = Uri.parse('https://owseuntgcgvflqpnmwcc.supabase.co/auth/v1/signup');
-      final res = await http.post(
-        url,
-        headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'email': cleanEmail,
-          'password': password,
-          'data': {
-            'nombre': nombre.trim(),
-            'apellido': apellido.trim(),
-            'name': '${nombre.trim()} ${apellido.trim()}',
-            'full_name': '${nombre.trim()} ${apellido.trim()}',
-            'cedula': cedula.trim(),
-            'tipo_documento': tipoDocumento,
-            'telefono': telefono.trim(),
-          },
-        }),
-      );
+      res = await _http
+          .post(
+            Uri.parse('$_supabaseUrl/auth/v1/signup'),
+            headers: _headers(),
+            body: jsonEncode({
+              'email': cleanEmail,
+              'password': password,
+              'data': {
+                'nombre': nombre.trim(),
+                'apellido': apellido.trim(),
+                'name': '${nombre.trim()} ${apellido.trim()}',
+                'full_name': '${nombre.trim()} ${apellido.trim()}',
+                'cedula': cedula.trim(),
+                'tipo_documento': tipoDocumento,
+                'telefono': telefono.trim(),
+              },
+            }),
+          )
+          .timeout(_timeout);
+    } catch (_) {
+      return const AuthResult.fallo(_errorConexion);
+    }
 
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        final data = jsonDecode(res.body);
-        _token = data['access_token']?.toString() ?? 'jwt-session-reg-${DateTime.now().millisecondsSinceEpoch}';
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      final msg = _mensajeSupabase(res);
+      final lower = msg.toLowerCase();
+      if (lower.contains('already registered')) {
+        return const AuthResult.fallo('Este correo electrónico ya se encuentra registrado. Debes usar un correo diferente para crear una cuenta nueva.');
       }
-    } catch (_) {}
+      if (res.statusCode == 429 || lower.contains('rate limit')) {
+        return const AuthResult.fallo('Has intentado registrarte demasiadas veces (límite de seguridad). Espera una hora o intenta con otro correo.');
+      }
+      if (msg.contains('Database error saving new user')) {
+        return const AuthResult.fallo('Error al registrar usuario en la base de datos. Por favor, intenta de nuevo.');
+      }
+      if (res.statusCode == 400 || res.statusCode == 422) {
+        return const AuthResult.fallo('Solicitud inválida. Es probable que este correo ya esté en uso o tenga un formato bloqueado. Prueba con otro correo.');
+      }
+      return AuthResult.fallo(msg);
+    }
 
-    _token ??= 'jwt-session-reg-${DateTime.now().millisecondsSinceEpoch}';
+    final decoded = jsonDecode(res.body);
+    final data = decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+    // Con confirmación de correo activa, Supabase devuelve el usuario en la raíz
+    // (sin sesión); con autoconfirmación, una sesión con `user` dentro.
+    final userObj = data['user'] is Map ? Map<String, dynamic>.from(data['user']) : (data['id'] != null ? data : <String, dynamic>{});
 
-    _user = AuthUser(
-      nombre: nombre.trim(),
-      apellido: apellido.trim(),
-      email: cleanEmail,
-      cedula: cedula.trim(),
-      tipoDocumento: tipoDocumento,
-      telefono: telefono.trim(),
+    // Supabase ofusca el alta de un correo ya existente: devuelve un usuario
+    // con `identities` vacío (misma detección que RegisterPage.jsx).
+    final identities = userObj['identities'];
+    if (identities is List && identities.isEmpty) {
+      return const AuthResult.fallo('Este correo electrónico ya se encuentra registrado. Usa uno diferente o inicia sesión.');
+    }
+
+    if ((data['access_token']?.toString() ?? '').isNotEmpty) {
+      _aplicarSesion(
+        data,
+        emailRespaldo: cleanEmail,
+        usuarioRespaldo: AuthUser(
+          nombre: nombre.trim(),
+          apellido: apellido.trim(),
+          email: cleanEmail,
+          cedula: cedula.trim(),
+          tipoDocumento: tipoDocumento,
+          telefono: telefono.trim(),
+        ),
+      );
+      await _persistSession();
+      notifyListeners();
+      return const AuthResult.exito();
+    }
+
+    // Alta correcta pero sin sesión: hay que confirmar el correo.
+    return const AuthResult.exito(
+      info: '¡Registro exitoso! Por seguridad, revisa tu correo electrónico para confirmar tu cuenta y luego inicia sesión.',
     );
-
-    await _persistSession();
-    notifyListeners();
-    return true;
   }
 
   // --- ACTUALIZAR PERFIL (y contraseña opcional, parity con Navbar.jsx) ---
+  /// Devuelve `null` si todo se guardó en Supabase, o el mensaje de error.
   Future<String?> updateProfile({
     required String nombre,
     required String apellido,
@@ -202,64 +361,64 @@ class AuthProvider extends ChangeNotifier {
     String? currentPassword,
     String? newPassword,
   }) async {
-    const supaUrl = 'https://owseuntgcgvflqpnmwcc.supabase.co';
-    const supaKey =
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw';
-
+    final user = _user;
+    if (!isAuthenticated || user == null) return 'Tu sesión no es válida. Inicia sesión nuevamente.';
     final cleanEmail = email.trim().toLowerCase();
-    final isRealJwt = _token != null && !_token!.startsWith('jwt-session');
 
     if (newPassword != null && newPassword.isNotEmpty) {
       if (currentPassword == null || currentPassword.isEmpty) {
         return 'Debes ingresar tu contraseña actual para cambiarla.';
       }
-      if (isRealJwt && _user != null) {
-        try {
-          final verifyRes = await http.post(
-            Uri.parse('$supaUrl/auth/v1/token?grant_type=password'),
-            headers: {'apikey': supaKey, 'Content-Type': 'application/json'},
-            body: jsonEncode({'email': _user!.email, 'password': currentPassword}),
-          );
-          if (verifyRes.statusCode != 200) {
-            return 'La contraseña actual es incorrecta.';
-          }
-        } catch (_) {}
+      try {
+        final verifyRes = await _http
+            .post(
+              Uri.parse('$_supabaseUrl/auth/v1/token?grant_type=password'),
+              headers: _headers(),
+              body: jsonEncode({'email': user.email, 'password': currentPassword}),
+            )
+            .timeout(_timeout);
+        if (verifyRes.statusCode != 200) return 'La contraseña actual es incorrecta.';
+      } catch (_) {
+        // Sin verificar la contraseña actual no se cambia la contraseña.
+        return _errorConexion;
       }
     }
 
-    if (isRealJwt) {
-      try {
-        final bodyMap = <String, dynamic>{
-          'data': {
-            'nombre': nombre.trim(),
-            'apellido': apellido.trim(),
-            'telefono': telefono.trim(),
-          },
-        };
-        if (cleanEmail.isNotEmpty && cleanEmail != _user?.email) {
-          bodyMap['email'] = cleanEmail;
-        }
-        if (newPassword != null && newPassword.isNotEmpty) {
-          bodyMap['password'] = newPassword;
-        }
-        await http.put(
-          Uri.parse('$supaUrl/auth/v1/user'),
-          headers: {
-            'apikey': supaKey,
-            'Authorization': 'Bearer $_token',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(bodyMap),
-        );
-      } catch (_) {}
+    final bodyMap = <String, dynamic>{
+      'data': {'nombre': nombre.trim(), 'apellido': apellido.trim(), 'telefono': telefono.trim()},
+      if (cleanEmail.isNotEmpty && cleanEmail != user.email) 'email': cleanEmail,
+      if (newPassword != null && newPassword.isNotEmpty) 'password': newPassword,
+    };
+    final http.Response res;
+    try {
+      res = await _http.put(Uri.parse('$_supabaseUrl/auth/v1/user'), headers: _headers(bearer: _token), body: jsonEncode(bodyMap)).timeout(_timeout);
+    } catch (_) {
+      return _errorConexion;
+    }
+    if (res.statusCode == 401) {
+      await _cerrarLocal();
+      notifyListeners();
+      return 'Tu sesión expiró. Inicia sesión nuevamente.';
+    }
+    if (res.statusCode != 200) {
+      final msg = _mensajeSupabase(res);
+      if (res.statusCode == 429 || msg.contains('rate')) {
+        return 'Supabase bloqueó temporalmente los cambios por demasiados intentos. Espera unos minutos e inténtalo de nuevo.';
+      }
+      if (msg.contains('already')) return 'Ese correo ya está en uso por otra cuenta.';
+      return 'Error al actualizar el perfil: $msg';
     }
 
+    // Con cambio de correo, Supabase mantiene el correo actual hasta que se
+    // confirme el nuevo; se refleja lo que devuelve el servidor.
+    final decoded = jsonDecode(res.body);
+    final servidor = decoded is Map ? _usuarioDesdeSupabase(Map<String, dynamic>.from(decoded), emailRespaldo: user.email) : null;
     _user = AuthUser(
       nombre: nombre.trim(),
       apellido: apellido.trim(),
-      email: cleanEmail,
-      cedula: _user?.cedula ?? '',
-      tipoDocumento: _user?.tipoDocumento ?? 'CEDULA',
+      email: servidor?.email ?? user.email,
+      cedula: user.cedula,
+      tipoDocumento: user.tipoDocumento,
       telefono: telefono.trim(),
     );
     await _persistSession();
@@ -269,20 +428,43 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _persistSession() async {
     final prefs = await SharedPreferences.getInstance();
-    if (_token != null) await prefs.setString('auth_token', _token!);
+    if (_token != null) await prefs.setString(_kToken, _token!);
+    if (_refreshToken != null) await prefs.setString(_kRefresh, _refreshToken!);
+    if (_expiresAt != null) await prefs.setInt(_kExpiresAt, _expiresAt!);
     if (_user != null) {
-      await prefs.setString('auth_user_data', jsonEncode(_user!.toJson()));
-      await prefs.setString('auth_name', _user!.displayName);
-      await prefs.setString('auth_email', _user!.email);
+      await prefs.setString(_kUser, jsonEncode(_user!.toJson()));
+      await prefs.setString(_kName, _user!.displayName);
+      await prefs.setString(_kEmail, _user!.email);
     }
   }
 
-  // --- CERRAR SESIÓN ---
-  Future<void> logout() async {
+  /// Borra SOLO las claves de sesión. `prefs.clear()` también borraba el
+  /// consentimiento de cookies, la huella del dispositivo (X-Device-Fingerprint,
+  /// que identifica al dueño de las reservas de vuelo) y la moneda elegida.
+  Future<void> _borrarSesionGuardada(SharedPreferences prefs) async {
+    for (final k in const [_kToken, _kRefresh, _kExpiresAt, _kUser, _kName, _kEmail]) {
+      await prefs.remove(k);
+    }
+  }
+
+  Future<void> _cerrarLocal() async {
     _token = null;
+    _refreshToken = null;
+    _expiresAt = null;
     _user = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await _borrarSesionGuardada(await SharedPreferences.getInstance());
+  }
+
+  // --- CERRAR SESIÓN (supabase.auth.signOut) ---
+  Future<void> logout() async {
+    final token = _token;
+    await _cerrarLocal();
     notifyListeners();
+    if (token != null) {
+      // Revoca el refresh token en Supabase; si falla, la sesión local ya se cerró.
+      try {
+        await _http.post(Uri.parse('$_supabaseUrl/auth/v1/logout'), headers: _headers(bearer: token)).timeout(_timeout);
+      } catch (_) {}
+    }
   }
 }

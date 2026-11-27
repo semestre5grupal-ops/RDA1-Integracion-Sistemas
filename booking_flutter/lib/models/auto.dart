@@ -1,15 +1,8 @@
-double _autoParseDouble(dynamic val, [double fallback = 0.0]) {
-  if (val is num) return val.toDouble();
-  if (val is String) return double.tryParse(val) ?? fallback;
-  if (val is Map && val['total'] != null) return _autoParseDouble(val['total'], fallback);
-  return fallback;
-}
+import '../utils/json_parse.dart';
 
-int _autoParseInt(dynamic val, [int fallback = 0]) {
-  if (val is num) return val.toInt();
-  if (val is String) return int.tryParse(val) ?? fallback;
-  return fallback;
-}
+double _autoParseDouble(dynamic val, [double fallback = 0.0]) => parseDouble(val, fallback);
+
+int _autoParseInt(dynamic val, [int fallback = 0]) => parseInt(val, fallback);
 
 class AutoFechaOcupada {
   final String pickup;
@@ -238,14 +231,14 @@ class Auto {
     final makeStr = json['marca']?.toString() ??
         json['make']?.toString() ??
         json['brand']?.toString() ??
-        (idStr == 'auto-047' ? 'Prueba2AutoSpot' : 'Chevrolet');
+        '';
 
     final modelStr = json['modelo']?.toString() ??
         json['model']?.toString() ??
         json['name']?.toString() ??
         json['vehiculo']?.toString() ??
         json['nombre']?.toString() ??
-        (idStr == 'auto-047' ? 'Prueba2AutoSpot' : 'Spark GT');
+        'Vehículo';
 
     return Auto(
       id: idStr,
@@ -264,10 +257,10 @@ class Auto {
       puertas: _autoParseInt(json['puertas'] ?? json['doors'], 4),
       maletasGrandes: _autoParseInt(json['maletas_grandes'] ?? json['bag_capacity'] ?? json['maletas'], 1),
       maletasPequenas: _autoParseInt(json['maletas_pequenas'], 1),
-      aireAcondicionado: json['aire_acondicionado'] ?? true,
-      kilometrajeIlimitado: json['kilometraje_ilimitado'] ?? true,
+      aireAcondicionado: parseBool(json['aire_acondicionado'] ?? json['air_conditioning'], true),
+      kilometrajeIlimitado: parseBool(json['kilometraje_ilimitado'] ?? json['unlimited_mileage'], true),
       politicaCombustible: json['politica_combustible']?.toString() ?? 'Lleno a lleno',
-      cancelacionGratuita: json['cancelacion_gratuita'] ?? true,
+      cancelacionGratuita: parseBool(json['cancelacion_gratuita'] ?? json['free_cancellation'], true),
       imagenUrl: imgs.first,
       images: imgs,
       supplierId: supId,
@@ -280,7 +273,7 @@ class Auto {
       fechasOcupadas: ocupadas,
       kilometrajeActual: json['kilometraje_actual'] != null ? _autoParseInt(json['kilometraje_actual']) : null,
       proximoMantenimientoKm: json['proximo_mantenimiento_km'] != null ? _autoParseInt(json['proximo_mantenimiento_km']) : null,
-      mantenimientoRequerido: json['mantenimiento_requerido'] == true,
+      mantenimientoRequerido: parseBool(json['mantenimiento_requerido']),
     );
   }
 }
@@ -297,7 +290,7 @@ class AutosSearchMetadata {
   factory AutosSearchMetadata.fromJson(Map<String, dynamic>? json) {
     if (json == null) return AutosSearchMetadata();
     return AutosSearchMetadata(
-      surchargeApplied: json['surcharge_applied'] == true,
+      surchargeApplied: parseBool(json['surcharge_applied']),
       surchargeAmount: _autoParseDouble(json['surcharge_amount'], 15.0),
     );
   }

@@ -1,9 +1,6 @@
-double _resParseDouble(dynamic val, [double fallback = 0.0]) {
-  if (val is num) return val.toDouble();
-  if (val is String) return double.tryParse(val) ?? fallback;
-  if (val is Map && val['total'] != null) return _resParseDouble(val['total'], fallback);
-  return fallback;
-}
+import '../utils/json_parse.dart';
+
+double _resParseDouble(dynamic val, [double fallback = 0.0]) => parseDouble(val, fallback);
 
 class Reserva {
   final String id;

@@ -63,6 +63,19 @@ class _VuelosLoadingViewState extends State<VuelosLoadingView> {
 
   @override
   Widget build(BuildContext context) {
+    // Ocupa todo el cuerpo con fondo blanco. Va alineada ARRIBA, no centrada:
+    // en VuelosPage.jsx <VuelosCargando /> se pinta en la sección de resultados
+    // (cabecera de progreso + tarjetas esqueleto), igual que la lista que reemplaza.
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.white,
+      alignment: Alignment.topCenter,
+      child: _buildScroll(),
+    );
+  }
+
+  Widget _buildScroll() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Center(
@@ -177,4 +190,3 @@ class _VuelosLoadingViewState extends State<VuelosLoadingView> {
     );
   }
 }
-

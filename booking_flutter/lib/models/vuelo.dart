@@ -1,15 +1,8 @@
-double _vueloParseDouble(dynamic val, [double fallback = 0.0]) {
-  if (val is num) return val.toDouble();
-  if (val is String) return double.tryParse(val) ?? fallback;
-  if (val is Map && val['total'] != null) return _vueloParseDouble(val['total'], fallback);
-  return fallback;
-}
+import '../utils/json_parse.dart';
 
-int _vueloParseInt(dynamic val, [int fallback = 0]) {
-  if (val is num) return val.toInt();
-  if (val is String) return int.tryParse(val) ?? fallback;
-  return fallback;
-}
+double _vueloParseDouble(dynamic val, [double fallback = 0.0]) => parseDouble(val, fallback);
+
+int _vueloParseInt(dynamic val, [int fallback = 0]) => parseInt(val, fallback);
 
 double conRecargoBooking(double valor, double pct) {
   if (pct <= 0) return valor;
@@ -154,8 +147,8 @@ class VueloCabinOption {
       cabinClass: json['cabinClass']?.toString() ?? 'ECONOMY',
       fareBrand: json['fareBrand']?.toString() ?? 'STANDARD',
       availableSeats: _vueloParseInt(json['availableSeats'], 9),
-      isRefundable: rules['isRefundable'] == true,
-      isChangeable: rules['isChangeable'] == true,
+      isRefundable: parseBool(rules['isRefundable']),
+      isChangeable: parseBool(rules['isChangeable']),
       personalItemIncluded: bag['personalItemIncluded'] ?? true,
       carryOnIncluded: _vueloParseInt(bag['carryOnIncluded'], 1),
       checkedBaggageIncluded: _vueloParseInt(bag['checkedBaggageIncluded'], 0),

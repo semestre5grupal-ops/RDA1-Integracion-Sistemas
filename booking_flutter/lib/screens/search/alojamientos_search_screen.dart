@@ -107,7 +107,7 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
     } catch (e) {
       if (mounted && !silent) {
         setState(() {
-          _error = 'Error al conectar con el servidor de alojamientos.';
+          _error = 'Error al conectar con el servidor.';
           _loading = false;
         });
       }

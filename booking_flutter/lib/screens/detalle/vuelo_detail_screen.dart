@@ -11,6 +11,8 @@ import '../../utils/destinos_catalog.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/vuelo_passengers_sheet.dart';
 import '../reservas/voucher_qr_screen.dart';
+import '../../utils/cedula_ecuador.dart';
+import '../../widgets/modal_bloqueo_cupo.dart';
 
 class _PassengerFormControllers {
   final String passengerType; // ADULT, YOUTH, CHILD, INFANT
@@ -153,24 +155,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
 
   bool get _esInternacional => DestinosCatalog.esViajeInternacional(_activeOffer.origen, _activeOffer.destino);
 
-  bool _validarCedulaEC(String c) {
-    if (!RegExp(r'^\d{10}$').hasMatch(c)) return false;
-    final prov = int.parse(c.substring(0, 2));
-    final third = int.parse(c[2]);
-    if ((prov < 1 || prov > 24) && prov != 30) return false;
-    if (third > 5) return false;
-    int sum = 0;
-    for (int i = 0; i < 9; i++) {
-      int d = int.parse(c[i]);
-      if (i % 2 == 0) {
-        d *= 2;
-        if (d > 9) d -= 9;
-      }
-      sum += d;
-    }
-    final check = (10 - (sum % 10)) % 10;
-    return check == int.parse(c[9]);
-  }
+  /// Módulo 10 compartido (utils/cedula_ecuador.dart).
+  bool _validarCedulaEC(String c) => cedulaValida(c);
 
   Future<void> _crearHoldYCargarAsientos() async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
@@ -178,39 +164,27 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
     if (!ok || !mounted) return;
     if (!Provider.of<AuthProvider>(context, listen: false).isAuthenticated) return;
 
+    // ModalBloqueoCupo.jsx: cabina + mapa referencial + hold con Idempotency-Key
+    // generada al abrir (un doble clic ya no crea dos holds). Si el usuario cierra
+    // sin bloquear, no se avanza.
+    final hold = await ModalBloqueoCupo.show(
+      context,
+      oferta: _activeOffer,
+      pasajeros: _pax.toApiMap(),
+      cabinaInicial: _activeOption.cabinClass,
+      token: Provider.of<AuthProvider>(context, listen: false).token,
+    );
+    if (hold == null || !mounted) return;
+
     setState(() {
       _creatingHold = true;
       _errorMsg = null;
     });
 
     try {
-      final selections = _activeOffer.itineraries.isNotEmpty
-          ? _activeOffer.itineraries
-              .map((it) => {
-                    'itineraryId': it.itineraryId,
-                    'cabinClass': _activeOption.cabinClass,
-                    'fareBrand': _activeOption.fareBrand,
-                  })
-              .toList()
-          : [
-              {
-                'itineraryId': 'ITIN-1',
-                'cabinClass': _activeOption.cabinClass,
-                'fareBrand': _activeOption.fareBrand,
-              }
-            ];
-
-      final holdRes = await BookingServices.crearHoldVuelo(
-        offerId: _activeOffer.offerId,
-        itinerarySelections: selections,
-        passengersBreakdown: _pax.toApiMap(),
-        idempotencyKey: const Uuid().v4(),
-        token: Provider.of<AuthProvider>(context, listen: false).token,
-      );
-
-      final dataObj = holdRes['data'] is Map ? Map<String, dynamic>.from(holdRes['data']) : holdRes;
-      _holdId = dataObj['holdId']?.toString() ?? dataObj['id']?.toString() ?? 'HOLD-${DateTime.now().millisecondsSinceEpoch}';
-      _holdExpiresAt = dataObj['expiresAt']?.toString();
+      _activeOption = hold.cabina;
+      _holdId = hold.holdId;
+      _holdExpiresAt = hold.expiresAt;
 
       setState(() {
         _creatingHold = false;
@@ -280,9 +254,7 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       final segId = _activeOffer.primerSegmento?.segmentId ?? 'SEG-1';
 
       if (_selectedSeatNumbers.isNotEmpty && _holdId != null) {
-        final seatsPayload = _selectedSeatNumbers
-            .map((seatNum) => {'segmentId': segId, 'seatNumber': seatNum})
-            .toList();
+        final seatsPayload = _selectedSeatNumbers.map((seatNum) => {'segmentId': segId, 'seatNumber': seatNum}).toList();
         await BookingServices.bloquearAsientos(
           _activeOffer.offerId,
           _holdId!,
@@ -324,12 +296,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
       _bookingCompleted = true;
 
       final dataObj = resData['data'] is Map ? Map<String, dynamic>.from(resData['data']) : resData;
-      final resId = dataObj['bookingId']?.toString() ??
-          dataObj['id']?.toString() ??
-          'VUE-${DateTime.now().millisecondsSinceEpoch}';
-      final pnr = dataObj['pnr']?.toString() ??
-          dataObj['recordLocator']?.toString() ??
-          resId;
+      final resId = dataObj['bookingId']?.toString() ?? dataObj['id']?.toString() ?? 'VUE-${DateTime.now().millisecondsSinceEpoch}';
+      final pnr = dataObj['pnr']?.toString() ?? dataObj['recordLocator']?.toString() ?? resId;
 
       final nuevaReserva = Reserva(
         id: resId,
@@ -394,7 +362,6 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                 ),
                 child: Text(_errorMsg!, style: const TextStyle(color: BookingColors.errorRed, fontSize: 12)),
               ),
-
             if (_step == 0) ...[
               // Resumen del itinerario (ResumenViaje.jsx parity)
               Card(
@@ -411,7 +378,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(color: const Color(0xFFE7F6EC), borderRadius: BorderRadius.circular(4)),
-                            child: Text(_activeOption.fareBrand, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: BookingColors.successGreen)),
+                            child: Text(_activeOption.fareBrand,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: BookingColors.successGreen)),
                           ),
                         ],
                       ),
@@ -439,7 +407,9 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                                       dense: true,
                                       contentPadding: EdgeInsets.zero,
                                       leading: const Icon(Icons.flight, color: BookingColors.primaryBlue),
-                                      title: Text('${seg.originIata} (${extraerHoraIso(seg.departureAt)}) → ${seg.destinationIata} (${extraerHoraIso(seg.arrivalAt)})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                      title: Text(
+                                          '${seg.originIata} (${extraerHoraIso(seg.departureAt)}) → ${seg.destinationIata} (${extraerHoraIso(seg.arrivalAt)})',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                       subtitle: Text(
                                         'Vuelo ${seg.flightNumber} · ${extraerFechaIso(seg.departureAt)} · ${seg.aircraft ?? "Jet comercial"}',
                                         style: const TextStyle(fontSize: 11),
@@ -450,7 +420,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                           );
                         })
                       else
-                        Text('${_activeOffer.origen} (${_activeOffer.horaSalida}) → ${_activeOffer.destino} (${_activeOffer.horaLlegada}) · Vuelo ${_activeOffer.numeroVuelo}'),
+                        Text(
+                            '${_activeOffer.origen} (${_activeOffer.horaSalida}) → ${_activeOffer.destino} (${_activeOffer.horaLlegada}) · Vuelo ${_activeOffer.numeroVuelo}'),
                     ],
                   ),
                 ),
@@ -480,7 +451,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
               if (_esInternacional)
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(8), border: Border.all(color: BookingColors.accentYellow)),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFFFFF8E1), borderRadius: BorderRadius.circular(8), border: Border.all(color: BookingColors.accentYellow)),
                   child: const Row(
                     children: [
                       Icon(Icons.public, color: Colors.orange),
@@ -529,7 +501,8 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Selección de asientos (Opcional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          Text('${_selectedSeatNumbers.length} / ${_pax.seatedTotal}', style: const TextStyle(color: BookingColors.actionBlue, fontWeight: FontWeight.bold)),
+                          Text('${_selectedSeatNumbers.length} / ${_pax.seatedTotal}',
+                              style: const TextStyle(color: BookingColors.actionBlue, fontWeight: FontWeight.bold)),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -566,14 +539,10 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                                 height: 36,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: !avail
-                                      ? Colors.grey.shade300
-                                      : (selected ? BookingColors.actionBlue : Colors.white),
+                                  color: !avail ? Colors.grey.shade300 : (selected ? BookingColors.actionBlue : Colors.white),
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                    color: !avail
-                                        ? Colors.grey.shade400
-                                        : (selected ? BookingColors.actionBlue : BookingColors.primaryBlue),
+                                    color: !avail ? Colors.grey.shade400 : (selected ? BookingColors.actionBlue : BookingColors.primaryBlue),
                                   ),
                                 ),
                                 child: Text(
@@ -683,14 +652,22 @@ class _VueloDetailScreenState extends State<VueloDetailScreen> {
                       TextField(
                         controller: _cardNumCtrl,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Tarjeta de crédito/débito*', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder(), isDense: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Tarjeta de crédito/débito*', prefixIcon: Icon(Icons.credit_card), border: OutlineInputBorder(), isDense: true),
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Expanded(child: TextField(controller: _cardExpCtrl, decoration: const InputDecoration(labelText: 'MM/AA', border: OutlineInputBorder(), isDense: true))),
+                          Expanded(
+                              child: TextField(
+                                  controller: _cardExpCtrl,
+                                  decoration: const InputDecoration(labelText: 'MM/AA', border: OutlineInputBorder(), isDense: true))),
                           const SizedBox(width: 8),
-                          Expanded(child: TextField(controller: _cardCvvCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'CVV', border: OutlineInputBorder(), isDense: true))),
+                          Expanded(
+                              child: TextField(
+                                  controller: _cardCvvCtrl,
+                                  obscureText: true,
+                                  decoration: const InputDecoration(labelText: 'CVV', border: OutlineInputBorder(), isDense: true))),
                         ],
                       ),
                     ],
