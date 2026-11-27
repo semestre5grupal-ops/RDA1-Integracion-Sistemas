@@ -289,7 +289,7 @@ class PerfilScreen extends StatelessWidget {
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EstadoVueloScreen())),
                   ),
-                  if (auth.user?.esAdmin ?? false) ...[
+                  if (panelAdminVisible && (auth.user?.esAdmin ?? false)) ...[
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.admin_panel_settings_outlined, color: BookingColors.actionBlue),

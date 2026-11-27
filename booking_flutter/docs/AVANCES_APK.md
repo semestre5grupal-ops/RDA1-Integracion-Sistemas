@@ -16,7 +16,7 @@ Parte de `feat/flutter-paridad-frontend` (PR #281). No cambia el backend, la web
 | Alojamientos | Tras un corte de red se borraba la clave y el siguiente toque podía crear otra reserva | Conserva la clave y encola la reserva |
 | Telemetría | La app no enviaba eventos | `Telemetria` envía eventos de uso a `/telemetry/events` (nunca rompe la app si falla) |
 | Icono | El de Flutter | Icono propio (avión sobre fondo azul) en todas las densidades, incluido el adaptable de Android |
-| Administración | No existía en la app | Panel de solo lectura (Perfil → Administración, solo para admins): Resumen (KPIs, serie, verticales, destinos), Objetivos de servicio (SLO, presupuesto de error, latencias) y Compras de vuelos con diagrama de tiempos (Gantt) y pasos por código de correlación |
+| Administración | No existía en la app | Panel de solo lectura, OCULTO por defecto en el APK (se activa con `--dart-define=ADMIN_PANEL=true`; entonces aparece en Perfil → Administración solo para admins): Resumen (KPIs, serie, verticales, destinos), Objetivos de servicio (SLO, presupuesto de error, latencias) y Compras de vuelos con diagrama de tiempos (Gantt) y pasos por código de correlación |
 | Pruebas | 35 | 96 (sesión, claves, errores, centavos, pase de abordar, cola sin conexión, telemetría, admin) |
 
 ## Cómo probar en un celular
@@ -33,7 +33,7 @@ Lista de pruebas sugerida:
 - [ ] Vuelo con 2 pasajeros: cada boleto muestra su propio asiento.
 - [ ] Modo avión justo al pagar un auto o una atracción: aparece el aviso "reserva en espera"; al volver la red se envía sola y NO se cobra dos veces.
 - [ ] Un error de compra muestra el código de soporte.
-- [ ] Con una cuenta admin aparece "Administración" en Perfil; con una cuenta normal no aparece.
+- [ ] (Solo si se compiló con ADMIN_PANEL=true) Con una cuenta admin aparece "Administración" en Perfil; con una cuenta normal no aparece.
 - [ ] Administración: Resumen cambia de período, Objetivos muestra los SLO, Compras abre el diagrama de tiempos de una compra.
 
 ## Lo que falta (no se hizo en esta rama)

@@ -58,7 +58,7 @@ class BookingApp extends StatelessWidget {
           '/facturas': (context) => const FacturasScreen(),
           '/privacidad': (context) => const PrivacidadScreen(),
           '/terminos': (context) => const TerminosScreen(),
-          '/admin': (context) => const AdminScreen(),
+          if (panelAdminVisible) '/admin': (context) => const AdminScreen(),
           '/ser-proveedor': (context) => const QuieroSerProveedorScreen(),
         },
       ),

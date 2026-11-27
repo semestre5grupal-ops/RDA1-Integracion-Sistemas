@@ -8,6 +8,10 @@ import '../../theme/booking_colors.dart';
 import '../../utils/casos_vuelo.dart';
 import '../../utils/gantt.dart';
 
+/// El panel de administración va OCULTO en el APK normal. Para incluirlo en una
+/// compilación de pruebas: `--dart-define=ADMIN_PANEL=true`.
+const bool panelAdminVisible = bool.fromEnvironment('ADMIN_PANEL', defaultValue: false);
+
 /// Panel de administración para el celular (solo lectura): resumen del negocio,
 /// objetivos de servicio y compras de vuelos con su diagrama de tiempos.
 ///
