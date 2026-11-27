@@ -2,9 +2,9 @@
 
 > **Asignatura:** Integración de Sistemas — 6to Semestre  
 > **Plataforma Integradora:** Booking Central  
-> **Framework Asignado:** **React Native (Expo / TypeScript o JavaScript)**  
+> **Framework Asignado:** **React Native (Expo + TypeScript)**  
 > **Destinatarios:** Socios Federados (Atracciones, Autos, Alojamientos, Vuelos)  
-> **Instrucciones para el Estudiante:** Entrega este archivo completo a tu agente de IA (Cascade, Cursor, Copilot, Claude o ChatGPT). Tu agente tiene aquí todas las especificaciones necesarias para crear tu aplicación móvil sin poner en riesgo tu backend ni la integración con Booking Central.
+> **Instrucciones para el Estudiante:** Entrega este archivo completo a tu agente de IA (Cascade, Cursor, Copilot, Claude o ChatGPT). Contiene todo lo necesario para construir tu app móvil como **cliente** de tu API ya desplegada en Azure, sin poner en riesgo tu backend ni la integración con Booking Central.
 
 ---
 
@@ -12,320 +12,516 @@
 
 > [!CAUTION]
 > ### 🛑 INSTRUCCIÓN CRÍTICA PARA EL AGENTE DE IA
-> - **QUEDA ESTRICTAMENTE PROHIBIDO MODIFICAR, EDITAR O REFACTORIZAR CUALQUIER ARCHIVO DEL BACKEND EXISTENTE** (controladores, rutas, entidades de base de datos, DTOs, servicios o scripts de despliegue en Azure).
-> - **NO MODIFICAR LOS CONTRATOS OPENAPI v3:** La integración B2B con Booking Central ya fue probada y aprobada en el RDA2. Cualquier cambio en rutas, payloads o modelos romperá las transacciones federadas (Sagas, cancelaciones, sincronización de cupos) y arruinará la calificación de ambos grupos.
-> - **LA APLICACIÓN MÓVIL ES ÚNICAMENTE UN CLIENTE CONSUMIDOR:** Tu app móvil solo debe realizar peticiones HTTP (GET, POST, PATCH) a la API que ya está desplegada y funcionando en la nube (Azure Container Apps / Azure App Service).
-> - **LA CONSOLA ADMINISTRATIVA NO SE MIGRA A MÓVIL:** Los paneles de administración, monitoreo y telemetría operativa se conservan en la aplicación Web de escritorio. La app móvil es **exclusiva para el cliente / turista final**.
+> - **QUEDA ESTRICTAMENTE PROHIBIDO MODIFICAR, EDITAR, REFACTORIZAR, FORMATEAR O "ARREGLAR" CUALQUIER ARCHIVO DEL BACKEND EXISTENTE** (controladores, rutas, entidades, DTOs, servicios, migraciones, variables de entorno, `Dockerfile` o scripts de despliegue en Azure). Tampoco se ejecutan despliegues ni migraciones de base de datos.
+> - **NO MODIFICAR LOS CONTRATOS OPENAPI v3:** La integración B2B con Booking Central se probó y aprobó en el RDA2. Cambiar una ruta, un campo o un código de estado rompe las transacciones federadas (Sagas, cancelaciones, sincronización de cupos) y afecta la calificación de **ambos** grupos.
+> - **NO INVENTAR ENDPOINTS:** La app solo consume rutas que **ya existen** en tu backend (ver §2.1). Si una pantalla necesita un dato que la API no expone, la pantalla se simplifica; la API no se cambia.
+> - **LA APLICACIÓN MÓVIL ES ÚNICAMENTE UN CLIENTE CONSUMIDOR:** solo realiza peticiones HTTP a la API ya desplegada en Azure (App Service / Container Apps).
+> - **LA CONSOLA ADMINISTRATIVA NO SE MIGRA A MÓVIL:** paneles de administración, monitoreo y telemetría se quedan en la web. La app es **exclusiva para el cliente / turista final**.
 
 ### 1.1 Anti-Patrones Prohibidos para el Agente de IA (Lo que NUNCA debe implementar)
+
 > [!WARNING]
-> 1. **PROHIBIDO CREAR UN CARRITO DE COMPRAS (Cart / Carrito):** Esta plataforma NO es una tienda de comercio electrónico tradicional. Cada reserva (un auto, un hotel, un vuelo o una atracción) se realiza de forma **atómica, directa e individual** mediante `POST /reservas` enviando una cabecera única `Idempotency-Key` (UUIDv4) con un timeout de 45 segundos. Crear un carrito (`CartContext`, `CartScreen`, acumulación de ítems) romperá la orquestación de reservas.
-> 2. **PROHIBIDO USAR DATOS MOCKEADOS O HARDCODEADOS:** Si una petición HTTP devuelve lista vacía `[]` o un error temporal, **nunca** inyectes datos falsos fijos como salvaguarda permanente. Muestra el estado vacío real con un botón interactivo de "Reintentar". Usar mocks estáticos ocultará los datos reales que tus compañeros y profesores registren en Azure durante la evaluación.
-> 3. **PROHIBIDO MIGRAR PANELES DE ADMINISTRACIÓN:** No agregues pantallas de administración, inventario, telemetría o dashboard de métricas. La app es exclusivamente para el cliente/turista final.
+> 1. **🚫 PROHIBIDO EL CARRITO DE COMPRAS (Cart / Basket):** La integración B2B con Booking Central opera **solo con reservas atómicas individuales y directas**: el usuario confirma **una** reserva y la app hace **un** `POST` a la ruta de reservas de tu backend, con cabecera `Idempotency-Key` (UUIDv4) y timeout de **45 segundos**. No existen `CartContext`, `CartProvider`, `useCart`, `CartService`, `CartScreen`, "Agregar al carrito" ni checkout multi-ítem. Un carrito rompe la orquestación transaccional y la sincronización de inventario.
+> 2. **🚫 PROHIBIDO USAR MOCKS ESTÁTICOS:** Nunca devuelvas arrays falsos desde un `catch` ni como "respaldo" cuando la API responde `[]`. La app debe reflejar **en vivo** lo que existe en Azure: los profesores crearán datos durante la evaluación y deben verlos aparecer. Si la API devuelve `[]` → estado visual **"No hay servicios disponibles"** con botón **Reintentar**. Si falla → mensaje de error con **Reintentar**. Esto incluye **valores inventados**: no rellenes un precio ausente con `25` ni un aforo ausente con `10`; muestra "Precio no disponible" / oculta el dato.
+> 3. **🚫 PROHIBIDO MIGRAR LA CONSOLA DE ADMINISTRACIÓN:** Cero dashboards, métricas, gestión de proveedores, CRUD de inventario o pantallas de "crear/editar servicio". Solo flujos del cliente final: explorar, ver detalle, reservar, ver/cancelar sus reservas y mostrar su voucher.
+> 4. **🚫 PROHIBIDO INVENTAR NAVEGACIÓN:** No agregues una barra de pestañas inferior (`@react-navigation/bottom-tabs`) ni botones con secciones que no existen ("Facturas", "Admin", "Ofertas"…). Navegación mínima con **native-stack**: **Catálogo → Detalle → Confirmación/Voucher**, con un acceso a **"Mis Reservas"** en la cabecera.
 
 ---
 
 ## 2. Ubicación y Aislamiento en tu Repositorio
 
-Para evitar colisiones con tu código de servidor y garantizar un repositorio limpio:
-1. Crea una carpeta dedicada en la raíz de tu repositorio (por ejemplo: `mi_app_rn/` o `mobile_react_native/`).
-2. Configura un archivo `.gitignore` dentro de esa carpeta para no subir artefactos temporales:
+1. Crea una carpeta dedicada en la raíz de tu repositorio, por ejemplo `mobile_react_native/`. **No** muevas ni renombres nada del backend.
+2. Agrega un `.gitignore` dentro de esa carpeta:
    ```gitignore
    node_modules/
    .expo/
    dist/
+   android/
+   ios/
    npm-debug.*
    *.apk
    *.aab
    .env
    ```
 
+### 2.1 Descubre tu contrato real ANTES de escribir código (solo lectura)
+
+> [!IMPORTANT]
+> Las rutas que aparecen en los ejemplos de esta guía (`/catalogo`, `/reservas`, `/reservas/{id}/cancel`) son **marcadores de posición**. El agente debe **leer (sin editar)** el backend del repositorio —controladores/routers y, si existe, el `openapi.yaml`/Swagger— y completar esta tabla **antes** de programar. Si una fila no se puede llenar con una ruta existente, esa función no se implementa.
+
+| Función en la app | Método + ruta real en TU backend | Campos del body / query | Forma de la respuesta |
+| :--- | :--- | :--- | :--- |
+| Listar catálogo | `GET /...` | filtros opcionales | ¿`[...]` o `{ data: [...] }`? |
+| Detalle de un servicio | `GET /.../{id}` | — | objeto |
+| Disponibilidad (turnos, fechas, cupos) | `GET /...` | `date`, … | lista |
+| Crear reserva | `POST /...` | campos exactos del DTO | id / código / estado |
+| Listar mis reservas | `GET /...` | `email` / cédula / token | lista |
+| Cancelar reserva | `POST` o `PATCH /...` | `reason`, … | estado |
+
 ---
 
-## 3. Configuración Inicial del Proyecto (Expo Recomendado)
+## 3. Configuración Inicial del Proyecto (Expo)
 
-Se recomienda fuertemente el uso de **Expo** por su velocidad de compilación, estabilidad y soporte multiplataforma inmediato sin necesidad de complejas configuraciones nativas de Android Studio:
+Expo evita configurar Android Studio para desarrollar. Ejecuta **un comando por línea** (en PowerShell 5.1 no uses `&&`):
 
-```bash
-# 1. Crear proyecto Expo con plantilla de pestañas o en blanco
+```powershell
+# 1. Crear el proyecto Expo con TypeScript
 npx create-expo-app mobile_react_native --template blank-typescript
 
-# 2. Navegar a la carpeta creada
+# 2. Entrar a la carpeta
 cd mobile_react_native
 
-# 3. Instalar las dependencias oficiales y probadas
-npx expo install @react-navigation/native @react-navigation/native-stack @react-navigation/bottom-tabs
-npx expo install react-native-screens react-native-safe-area-context
-npx expo install react-native-svg react-native-qrcode-svg
-npm install axios uuid
-npm install --save-dev @types/uuid
+# 3. Navegación (solo stack: sin barra de pestañas inferior)
+npx expo install @react-navigation/native @react-navigation/native-stack react-native-screens react-native-safe-area-context
+
+# 4. QR, selector de fecha/hora y UUID nativo (expo-crypto evita el polyfill de 'uuid')
+npx expo install react-native-svg react-native-qrcode-svg @react-native-community/datetimepicker expo-crypto
+
+# 5. Cliente HTTP
+npm install axios
 ```
+
+> [!NOTE]
+> Usa `npx expo install` (no `npm install`) para los paquetes nativos: elige la versión compatible con tu SDK de Expo. Para los UUID usa `Crypto.randomUUID()` de `expo-crypto`; el paquete `uuid` por sí solo falla en React Native con *"crypto.getRandomValues() not supported"*.
 
 ---
 
 ## 4. Arquitectura de Código Recomendada
 
-Organiza tu código en `src/` bajo una estructura limpia:
-
 ```text
 mobile_react_native/
-├── package.json
-├── App.tsx                    # Punto de entrada con NavigationContainer y StatusBar
+├── App.tsx                       # NavigationContainer + stack
+├── app.json / eas.json
 └── src/
+    ├── config.ts                 # URL base (EXPO_PUBLIC_API_URL)
     ├── api/
-    │   └── client.ts          # Instancia Axios con baseURL a Azure y cabeceras de trazabilidad
+    │   └── client.ts             # Axios: cabeceras, timeouts, errores RFC 7807
     ├── types/
-    │   └── index.ts           # Interfaces TypeScript (Servicio, Reserva, TimeSlot)
+    │   └── index.ts              # Interfaces + normalizadores tolerantes
     ├── navigation/
-    │   └── AppNavigator.tsx   # StackNavigator (Home, Detalle, Checkout, Reservas, Voucher)
+    │   └── AppNavigator.tsx      # Stack: Catalogo, Detalle, Confirmacion, MisReservas, Voucher
     └── screens/
-        ├── HomeScreen.tsx     # Catálogo con imágenes, precios y selector de categorías
-        ├── DetailScreen.tsx   # Selector de fechas/turnos y botón "Reservar Ahora"
-        ├── MisReservasScreen.tsx # Historial con validación de cancelación (< 24h)
-        └── VoucherQrScreen.tsx   # Renderizado de código QR para check-in presencial
+        ├── CatalogoScreen.tsx    # FlatList + RefreshControl + estados vacío/error
+        ├── DetalleScreen.tsx     # Selector de fechas/turnos y "Reservar"
+        ├── MisReservasScreen.tsx # Historial y cancelación
+        └── VoucherQrScreen.tsx   # QR para check-in
 ```
 
-### 4.1 Tipado e Ingesta Resiliente en TypeScript (`src/types/index.ts`)
-Dado que los microservicios de tus compañeros y Booking Central pueden responder con nombres de campo alternativos (snake_case vs camelCase o IDs de MongoDB), normaliza los objetos al recibirlos de la API:
+### 4.1 Modelado Resiliente y Deserialización Polimórfica (`normalizarServicioItem`)
+
+Los microservicios de los socios no comparten nombres ni tipos: `id` vs `_id` vs `auto_id`, precios como `45`, `"45.00"` o `{ "total": 45 }`, fotos como lista de textos, lista de objetos `{ "url": ... }` o un texto suelto. TypeScript **no valida en tiempo de ejecución** lo que llega del servidor: normaliza siempre en la frontera de la API con estos helpers, que nunca lanzan.
 
 ```typescript
+// src/types/index.ts
+
 export interface ServicioItem {
   id: string;
   nombre: string;
-  precio: number;
-  imagenUrl?: string;
-  cuposDisponibles: number;
+  precio: number | null; // null = "Precio no disponible" (no se inventa)
+  imagenUrl: string | null;
+  cuposDisponibles: number | null; // null = el socio no informa aforo
+  proveedor: string | null;
 }
 
-// Función de mapeo tolerante (anti-crashes por esquemas heterogéneos)
-export function normalizarServicioItem(raw: any): ServicioItem {
-  // 1. Identificador tolerante
-  const idStr = String(
-    raw?.id ||
-    raw?._id ||
-    raw?.auto_id ||
-    raw?.vehicle_id ||
-    raw?.alojamiento_id ||
-    raw?.atraccion_id ||
-    raw?.offerId ||
-    ''
+type Json = Record<string, unknown>;
+
+const esObjeto = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Primer valor no vacío entre `keys`, como texto. Ignora objetos y arrays. */
+export function primerTexto(raw: Json, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = raw[k];
+    if (v === null || v === undefined || typeof v === 'object') continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+/** Número desde 45, "45.00", "$1,250.50" o {total|amount|adult|value}. null si no se puede. */
+export function aNumero(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const n = parseFloat(v.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+  if (esObjeto(v)) {
+    for (const k of ['total', 'amount', 'adult', 'value', 'precio', 'price']) {
+      const n = aNumero(v[k]);
+      if (n !== null) return n;
+    }
+  }
+  return null;
+}
+
+/** Array de objetos desde `[...]`, `{data: [...]}`, `{items: [...]}` o `{results: [...]}`. */
+export function extraerLista(data: unknown): Json[] {
+  const lista = esObjeto(data) ? (data.data ?? data.items ?? data.results ?? data.content) : data;
+  return Array.isArray(lista) ? lista.filter(esObjeto) : [];
+}
+
+export function normalizarServicioItem(raw: Json): ServicioItem {
+  // 1. Identificador tolerante (numérico o texto)
+  const id =
+    primerTexto(raw, ['id', '_id', 'auto_id', 'vehicle_id', 'vehiculo_id', 'alojamiento_id', 'atraccion_id', 'offer_id', 'offerId', 'vuelo_id']) ?? '';
+
+  // 2. Precio tolerante (número, texto u objeto)
+  const precio = aNumero(
+    raw.precio ?? raw.price ?? raw.precio_diario ?? raw.precio_por_noche ?? raw.precio_por_dia ?? raw.tarifa,
   );
 
-  // 2. Precio tolerante (soporta número, string u objeto { total: 45 })
-  let precioNum = 25.0;
-  const rawPrice = raw?.precio ?? raw?.price ?? raw?.precio_diario ?? raw?.precio_por_noche;
-  if (typeof rawPrice === 'number') {
-    precioNum = rawPrice;
-  } else if (typeof rawPrice === 'string' && !isNaN(parseFloat(rawPrice))) {
-    precioNum = parseFloat(rawPrice);
-  } else if (rawPrice && typeof rawPrice === 'object' && typeof rawPrice.total === 'number') {
-    precioNum = rawPrice.total;
+  // 3. Foto: lista de textos, lista de objetos {url} o campo directo
+  const fotos = raw.photos ?? raw.fotos ?? raw.imagenes;
+  let foto: string | null = null;
+  if (Array.isArray(fotos) && fotos.length > 0) {
+    const primera: unknown = fotos[0];
+    foto = esObjeto(primera) ? (primerTexto(primera, ['url']) ?? null) : typeof primera === 'string' ? primera : null;
   }
+  foto = foto ?? primerTexto(raw, ['foto_url', 'imagen_url', 'image_url', 'imagen', 'image']);
 
-  // 3. Extracción de fotos (array de strings, array de objetos { url } o string)
-  let fotoUrl: string | undefined;
-  if (Array.isArray(raw?.photos) && raw.photos.length > 0) {
-    fotoUrl = typeof raw.photos[0] === 'string' ? raw.photos[0] : raw.photos[0]?.url;
-  } else {
-    fotoUrl = raw?.foto_url || raw?.imagen_url;
-  }
+  // 4. Proveedor: objeto {nombre|name} o texto plano
+  const prov = raw.proveedor;
+  const proveedor = esObjeto(prov) ? primerTexto(prov, ['nombre', 'name']) : primerTexto(raw, ['proveedor', 'proveedor_nombre', 'company']);
+
+  const cupos = aNumero(raw.cupos_disponibles ?? raw.cupos ?? raw.stock ?? raw.available_spots);
 
   return {
-    id: idStr,
-    nombre: raw?.nombre || raw?.name || raw?.vehiculo || 'Servicio Turístico',
-    precio: precioNum > 0 ? precioNum : 25.0,
-    imagenUrl: fotoUrl,
-    cuposDisponibles: Number(raw?.cupos_disponibles ?? raw?.stock ?? raw?.available_spots ?? 10),
+    id,
+    nombre: primerTexto(raw, ['nombre', 'name', 'titulo', 'title', 'vehiculo', 'modelo']) ?? 'Servicio sin nombre',
+    precio: precio !== null && precio > 0 ? precio : null,
+    imagenUrl: foto && foto.startsWith('http') ? foto : null,
+    cuposDisponibles: cupos !== null ? Math.round(cupos) : null,
+    proveedor,
   };
 }
 ```
+
+> [!NOTE]
+> Si un ítem trae un campo con un nombre que no está en estas listas, **agrega el nombre a la lista**; nunca descartes el ítem ni lo reemplaces por un mock.
 
 ---
 
 ## 5. Implementación de Servicios y Conectividad HTTP
 
-En `src/api/client.ts`, centraliza la comunicación con tu backend en Azure. **Incluye siempre las cabeceras estándar de trazabilidad (`X-Correlation-Id`, `Idempotency-Key`)**:
+La URL base se define sin tocar el código. Crea `.env` en `mobile_react_native/` (Expo expone las variables con prefijo `EXPO_PUBLIC_`):
+
+```bash
+EXPO_PUBLIC_API_URL=https://tu-api-desplegada.azurewebsites.net/api/v3
+```
+
+`src/api/client.ts` centraliza cabeceras, timeouts y errores (los backends NestJS/Express suelen responder con ProblemDetails RFC 7807: `{ title, detail, status }`):
 
 ```typescript
-import axios from 'axios';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
+import axios, { AxiosError } from 'axios';
+import * as Crypto from 'expo-crypto';
+import { extraerLista, normalizarServicioItem, ServicioItem } from '../types';
 
-// IMPORTANTE: Reemplazar con la URL HTTPS de tu API ya desplegada en Azure
-export const BASE_URL = 'https://tu-api-desplegada.azurewebsites.net/api/v3';
+export const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://tu-api-desplegada.azurewebsites.net/api/v3';
+const TIMEOUT_LECTURA = 20_000;
+const TIMEOUT_RESERVA = 45_000; // reservas y cancelaciones
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 8000,
-  headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-  },
+  timeout: TIMEOUT_LECTURA,
+  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 });
 
-// Interceptor para inyectar trazabilidad en cada petición
+// Trazabilidad: un X-Correlation-Id por petición. La Idempotency-Key NO se genera
+// aquí: la pasa quien llama, para reutilizarla en los reintentos (ver §5.1).
 apiClient.interceptors.request.use((config) => {
-  config.headers['X-Correlation-Id'] = uuidv4();
-  if (config.method === 'post' && !config.headers['Idempotency-Key']) {
-    config.headers['Idempotency-Key'] = uuidv4();
-  }
+  config.headers.set('X-Correlation-Id', Crypto.randomUUID());
   return config;
 });
 
-// Métodos de negocio
-export const getCatalogo = async () => {
-  const response = await apiClient.get('/atracciones'); // o /vehiculos, /alojamientos, etc.
-  return response.data;
-};
+/** Mensaje legible de un error: `detail` del ProblemDetails, timeout o red. */
+export function mensajeDeError(e: unknown): string {
+  const err = e as AxiosError<{ detail?: string; message?: string; title?: string }>;
+  if (err?.code === 'ECONNABORTED') return 'El servidor tardó demasiado en responder.';
+  if (err?.response?.data) {
+    const d = err.response.data;
+    return d.detail ?? d.message ?? d.title ?? `Error del servidor (HTTP ${err.response.status}).`;
+  }
+  return 'No se pudo conectar con el servidor. Revisa tu conexión.';
+}
 
-export const crearReserva = async (payload: any) => {
-  const response = await apiClient.post('/reservas', payload);
-  return response.data;
-};
+/** Catálogo. Lanza el error: la PANTALLA decide qué mostrar. */
+export async function getCatalogo(): Promise<ServicioItem[]> {
+  const { data } = await apiClient.get('/catalogo'); // ← ruta real (§2.1)
+  return extraerLista(data).map(normalizarServicioItem);
+}
 
-export const cancelarReserva = async (reservaId: string) => {
-  const response = await apiClient.post(`/reservas/${reservaId}/cancel`);
-  return response.data;
-};
+/** Reserva atómica con la clave de idempotencia del intento actual. */
+export async function crearReserva(payload: Record<string, unknown>, idempotencyKey: string) {
+  const { data } = await apiClient.post('/reservas', payload, { // ← ruta real (§2.1)
+    timeout: TIMEOUT_RESERVA,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  return data;
+}
+
+export async function cancelarReserva(reservaId: string, motivo: string, idempotencyKey: string) {
+  const { data } = await apiClient.post(
+    `/reservas/${encodeURIComponent(reservaId)}/cancel`, // ← ruta real (§2.1)
+    { reason: motivo },
+    { timeout: TIMEOUT_RESERVA, headers: { 'Idempotency-Key': idempotencyKey } },
+  );
+  return data;
+}
+```
+
+### 5.1 Uso correcto de la `Idempotency-Key`
+
+> [!IMPORTANT]
+> La clave identifica **una intención de compra**, no una petición HTTP. Genérala **una vez** cuando el usuario abre la confirmación y **reutilízala** si reintenta tras un timeout o un error de red: así el backend devuelve la misma reserva en vez de crear dos (y no descuenta dos cupos). Genera una nueva solo cuando la reserva terminó con éxito o el usuario cambia los datos (fecha, turno, cantidades).
+
+```tsx
+import { useRef, useState } from 'react';
+import * as Crypto from 'expo-crypto';
+import { crearReserva, mensajeDeError } from '../api/client';
+
+export function useConfirmarReserva(payload: Record<string, unknown>) {
+  const claveRef = useRef(Crypto.randomUUID()); // una por apertura de la pantalla
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirmar() {
+    if (enviando) return null; // evita el doble toque
+    setEnviando(true);
+    setError(null);
+    try {
+      return await crearReserva(payload, claveRef.current);
+    } catch (e) {
+      setError(`${mensajeDeError(e)} Reintenta: no se duplicará tu reserva.`);
+      return null;
+    } finally {
+      setEnviando(false);
+    }
+  }
+  return { confirmar, enviando, error };
+}
 ```
 
 ---
 
 ## 6. Reglas de Negocio Esenciales en la App Móvil
 
-### A. Regla Invariante de Cancelación (24h / 48h)
-- En `MisReservasScreen.tsx`, **oculta o deshabilita el botón "Cancelar Reserva" si faltan menos de 24 horas** (o 48 horas en atracciones) para la fecha del servicio.
-- **Implementación en TypeScript:**
+### A. Regla de Cancelación (24 h)
+- El **backend decide** si una cancelación procede; la app solo **refleja** la regla para no ofrecer un botón que fallará. Usa la misma ventana que tu backend (24 h en el RDA2, salvo que tu política diga otra cosa) y, si el backend rechaza igualmente, muestra su mensaje (`mensajeDeError`).
   ```typescript
-  const puedeCancelar = (fechaServicioStr: string): boolean => {
-    const fechaServicio = new Date(fechaServicioStr);
-    const ahora = new Date();
-    const diferenciaHoras = (fechaServicio.getTime() - ahora.getTime()) / (1000 * 60 * 60);
-    return diferenciaHoras >= 24; // 48 para atracciones reguladas si aplica tu regla
-  };
+  export function puedeCancelar(fechaServicioIso: string, horasMinimas = 24): boolean {
+    const fecha = new Date(fechaServicioIso).getTime();
+    if (Number.isNaN(fecha)) return false; // fecha ilegible: que decida el backend
+    return (fecha - Date.now()) / 3_600_000 >= horasMinimas;
+  }
   ```
 
-### B. Emisión de Voucher con Código QR para Check-in Offline
-- Utiliza `react-native-qrcode-svg` para mostrar un QR con la información necesaria para el check-in:
+### B. Voucher con Código QR para Check-in
+- El contenido del QR es el **identificador real** que devolvió tu backend (código/PNR), no uno inventado:
   ```tsx
   import QRCode from 'react-native-qrcode-svg';
 
   <View style={{ alignItems: 'center', padding: 20 }}>
-    <QRCode
-      value={`BOOKING-RESERVA:${reserva.id}|CLIENTE:${reserva.clienteNombre}`}
-      size={220}
-      color="#003580"
-      backgroundColor="white"
-    />
+    <QRCode value={`BOOKING-RESERVA:${reserva.codigo}`} size={220} color="#003580" backgroundColor="white" />
   </View>
   ```
 
-### C. Refresco Inmediato tras Cancelación (Anti-Stale State)
-- Al confirmarse la cancelación desde el backend, actualiza el estado local de la reserva a `'CANCELADA'` inmediatamente con `setReservas(...)`, sin obligar al usuario a recargar la app manualmente.
+### C. Refresco Inmediato tras Cancelar (Anti-Stale State)
+- Si el backend confirma la cancelación, actualiza la reserva a `CANCELADA` con `setReservas(...)` **y** recarga la lista desde la API para mostrar lo que el servidor registró.
 
 ### D. Sincronización en Vivo y Pull-to-Refresh
-- Envuelve tu listado de catálogo en `CatalogoScreen.tsx` con `FlatList` y la propiedad `refreshControl` usando el componente nativo `RefreshControl` para permitir al usuario deslizar hacia abajo y refrescar los ítems en tiempo real:
-  ```tsx
-  import React, { useState, useCallback } from 'react';
-  import { FlatList, RefreshControl } from 'react-native';
 
-  const [refreshing, setRefreshing] = useState(false);
+Pantalla completa del catálogo con los cuatro estados (cargando, error, vacío, datos), **Pull-to-Refresh** (`FlatList` + `refreshControl`) y sondeo silencioso cada 12 s que se detiene al salir de la pantalla. El estado vacío/error va en `ListEmptyComponent` para que también se pueda deslizar para refrescar.
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await cargarCatalogo();
-    setRefreshing(false);
+```tsx
+// src/screens/CatalogoScreen.tsx
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Button, FlatList, Image, Pressable, RefreshControl, Text, View } from 'react-native';
+import { getCatalogo, mensajeDeError } from '../api/client';
+import type { ServicioItem } from '../types';
+
+export default function CatalogoScreen({ navigation }: { navigation: any }) {
+  const [items, setItems] = useState<ServicioItem[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [refrescando, setRefrescando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const enCurso = useRef(false);
+
+  const cargar = useCallback(async (silencioso = false) => {
+    if (enCurso.current) return; // no solapar peticiones
+    enCurso.current = true;
+    try {
+      const datos = await getCatalogo();
+      setItems(datos);
+      setError(null);
+    } catch (e) {
+      // En el sondeo se conserva lo último real; en carga explícita se informa.
+      if (!silencioso) setError(mensajeDeError(e));
+    } finally {
+      enCurso.current = false;
+      setCargando(false);
+    }
   }, []);
 
-  <FlatList
-    data={servicios}
-    renderItem={({ item }) => <TarjetaServicio item={item} />}
-    keyExtractor={(item) => item.id}
-    refreshControl={
-      <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#003580']} />
+  useEffect(() => {
+    cargar();
+    const id = setInterval(() => cargar(true), 12_000); // refleja lo que se crea en Azure
+    return () => clearInterval(id); // sin esto sigue llamando a la API tras salir
+  }, [cargar]);
+
+  const onRefresh = useCallback(async () => {
+    setRefrescando(true);
+    try {
+      await cargar();
+    } finally {
+      setRefrescando(false);
     }
-  />
-  ```
-- Opcionalmente, puedes configurar un `setInterval(cargarCatalogo, 12000)` en un `useEffect` para refrescar periódicamente la disponibilidad de cupos desde Azure sin bloquear la experiencia de usuario.
+  }, [cargar]);
+
+  if (cargando && items.length === 0) {
+    return <ActivityIndicator style={{ flex: 1 }} size="large" color="#003580" />;
+  }
+
+  return (
+    <FlatList
+      data={items}
+      keyExtractor={(item, i) => item.id || String(i)}
+      contentContainerStyle={items.length === 0 ? { flexGrow: 1 } : undefined}
+      refreshControl={<RefreshControl refreshing={refrescando} onRefresh={onRefresh} colors={['#003580']} />}
+      ListEmptyComponent={
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+          <Text style={{ textAlign: 'center', marginBottom: 12 }}>{error ?? 'No hay servicios disponibles en este momento.'}</Text>
+          <Button title="Reintentar" onPress={() => cargar()} />
+        </View>
+      }
+      renderItem={({ item }) => (
+        <Pressable onPress={() => navigation.navigate('Detalle', { servicio: item })} style={{ flexDirection: 'row', padding: 12 }}>
+          {item.imagenUrl ? <Image source={{ uri: item.imagenUrl }} style={{ width: 56, height: 56, marginRight: 12 }} /> : null}
+          <View>
+            <Text style={{ fontWeight: 'bold' }}>{item.nombre}</Text>
+            <Text>{item.precio !== null ? `US$ ${item.precio.toFixed(2)}` : 'Precio no disponible'}</Text>
+          </View>
+        </Pressable>
+      )}
+    />
+  );
+}
+```
 
 ---
 
 ## 7. Instrucciones Específicas por Tipo de Socio
 
-Identifica cuál es tu servicio y aplica estas directrices particulares:
+> [!NOTE]
+> Los nombres de campo de cada vertical salen de **tu** backend (§2.1). Las listas de opciones (tipos de habitación, clases, categorías) se obtienen de la API; **no** se escriben a mano en la app.
 
-### 🎭 Si eres Socio de ATRACCIONES (Gloria, Dilan, Michael, Ariel, Alisson):
-- **Time Slots y Aforo:** En `DetailScreen.tsx`, muestra un selector interactivo de fechas que consulte los horarios disponibles (`time_slots`) y pinte botones con la **capacidad restante** en tiempo real.
-- **Tickets:** Si manejas tarifas por edad (Adulto, Niño, Tercera Edad), incluye contadores `+ / -` independientes.
+### 🎭 Si eres Socio de ATRACCIONES (Gloria, Dilan, Michael, Ariel, Alisson)
+- **Turnos (`time_slots`) y aforo:** al elegir fecha (`DateTimePicker`, `minimumDate={new Date()}`) consulta la ruta de disponibilidad de tu backend y pinta un chip (`Pressable`) por turno con su **aforo restante** (`"10:00 · 6 cupos"`). Turno con 0 cupos o estado `AGOTADO` → chip deshabilitado (`disabled`). Refresca los turnos cada 10–12 s mientras la pantalla esté abierta.
+- **Tickets por edad:** contadores `−/+` independientes (Adulto, Niño; y Tercera Edad/Infante si tu API los admite) con al menos 1 adulto, y **suma total ≤ aforo del turno**. Total = Σ (cantidad × precio de su categoría).
+- **Tarifa única:** si tu API no distingue edades, muestra **un solo** contador "Personas (Entrada General)" y envía el total como adultos.
 
-### 🚗 Si eres Socio de AUTOS (Esteban / Mateo - RutaLibre Autos):
-- **Fechas y Días:** El usuario selecciona fecha/hora de retiro y fecha/hora de devolución; calcula el número de días y el costo total automáticamente.
-- **Cooldown de 2 Horas:** En la ficha de detalle, muestra un indicador de estado del vehículo (disponible vs en período de inspección técnica de 2h tras entrega).
+### 🚗 Si eres Socio de AUTOS (Esteban / Mateo — RutaLibre Autos)
+- **Rango fecha/hora:** retiro y devolución con `DateTimePicker` (`mode="date"` y luego `mode="time"`); la devolución debe ser **posterior** al retiro.
+- **Días y tarifa automáticos:** `dias = max(1, ceil(horas / 24))` y `total = dias × precio_diario` (más los recargos que tu API devuelva). Muestra el desglose antes de confirmar.
+  ```typescript
+  export function diasRenta(retiro: Date, devolucion: Date): number {
+    const horas = (devolucion.getTime() - retiro.getTime()) / 3_600_000;
+    return horas <= 24 ? 1 : Math.ceil(horas / 24);
+  }
+  ```
+- **Cooldown de 2 horas (inspección técnica):** tras cada entrega el vehículo queda 2 h en limpieza/inspección. Muestra un badge **"Disponible"** o **"En inspección técnica — disponible a las 14:30"** a partir del estado/fecha que **tu API** expone (p. ej. `estado: 'EN_LIMPIEZA'` o una marca de fin de cooldown) y deshabilita "Reservar" mientras dure. No simules el cooldown en la app si la API no lo informa.
 
-### 🏨 Si eres Socio de ALOJAMIENTOS:
-- Permite seleccionar rango de fechas (Check-in / Check-out), calcula automáticamente las noches de estancia y permite elegir el Tipo de Habitación (Simple, Doble, Suite).
+### 🏨 Si eres Socio de ALOJAMIENTOS
+- **Check-in / Check-out:** dos `DateTimePicker` (el de salida con `minimumDate` = check-in + 1 día).
+- **Noches:** `noches = max(1, round((checkOut − checkIn) / 86_400_000))`. **Total** = noches × precio por noche del tipo elegido × habitaciones.
+- **Tipo de habitación (Simple, Doble, Suite…):** selector construido con los tipos que devuelve tu API (nombre, capacidad, precio, disponibilidad). Tipo sin disponibilidad → deshabilitado.
 
-### ✈️ Si eres Socio de VUELOS:
-- Permite seleccionar origen/destino, cantidad de pasajeros, clase (Económica / Ejecutiva) y muestra el estado del vuelo (A tiempo, En vuelo, Demorado).
+### ✈️ Si eres Socio de VUELOS
+- **Origen/Destino:** selectores de códigos IATA con validación **origen ≠ destino**.
+- **Pasajeros:** contadores con al menos 1 adulto y bebés ≤ adultos.
+- **Clase (Económica / Ejecutiva):** solo las clases con disponibilidad que traiga la oferta.
+- **Badge de estado:** mapea el estado de tu API a un badge de color: `SCHEDULED/ON_TIME` → "A tiempo" (verde), `DELAYED` → "Demorado" (ámbar), `IN_FLIGHT/DEPARTED` → "En vuelo" (azul), `CANCELLED` → "Cancelado" (rojo); un estado desconocido se muestra tal cual.
 
 ---
 
-## 8. Comandos para Probar y Compilar el APK
+## 8. Comandos para Verificar y Compilar el APK
 
 > [!NOTE]
-> **Usuarios de Windows (PowerShell):** Ejecuta cada comando en una línea separada. En PowerShell 5.1 no encadenes instrucciones con `&&` ya que arrojará un error de sintaxis; usa `;` o ejecuta comando por comando.
+> **Windows (PowerShell 5.1):** ejecuta **un comando por línea**. No uses `&&` (en PowerShell 5.1 es un error de sintaxis); si necesitas encadenar, usa `;`.
 
-```bash
-# 1. Ubicarse en la carpeta móvil
+Para que EAS genere un **APK** instalable (y no un `.aab`), crea `eas.json` en `mobile_react_native/`:
+
+```json
+{
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" }
+    }
+  }
+}
+```
+
+```powershell
+# 1. Entrar a la carpeta de la app
 cd mobile_react_native
 
 # 2. Instalar dependencias
 npm install
 
-# 3. Verificación estática obligatoria de TypeScript (garantiza cero errores de tipos antes de compilar)
+# 3. Verificación estática OBLIGATORIA: debe terminar sin errores antes de compilar
 npx tsc --noEmit
 
-# 4. Iniciar servidor Expo en modo desarrollo
+# 4. Comprobar que las versiones nativas coinciden con tu SDK de Expo
+npx expo install --check
+
+# 5. Servidor de desarrollo (pulsa 'w' para la web o escanea el QR con Expo Go)
 npx expo start
 
-# 5. Probar en navegador Web
-# Presiona 'w' en la terminal de Expo
-
-# 6. Probar en celular Android
-# Descarga la app 'Expo Go' de la Play Store y escanea el código QR de la terminal
-
-# 7. Generar archivo instalador APK para entrega del Reto 3
-npx eas build -p android --profile preview
+# 6. APK en la nube con EAS (requiere cuenta gratuita de Expo)
+npx eas-cli login
+npx eas-cli build -p android --profile preview
 ```
-*(Si no tienes cuenta EAS configurada, también puedes compilar localmente con `npx expo run:android --variant release`).*
+
+*EAS entrega un enlace de descarga del APK.* Alternativa local (requiere Android Studio/SDK instalado): `npx expo run:android --variant release`, que deja el APK en `android/app/build/outputs/apk/release/app-release.apk`. Instálalo en un celular real y confirma que el catálogo carga con la URL de Azure.
 
 ---
 
 ## 9. Prompt Copy-Paste para tu Agente de IA
 
-Copia el siguiente recuadro y pégaselo directamente a tu asistente de IA (Cascade, Cursor, Copilot, ChatGPT, etc.):
-
 ```text
-Hola agente. Estamos trabajando en la entrega del Reto 3 (RDA3) de la asignatura Integración de Sistemas.
-Nuestro framework asignado para el cliente móvil es REACT NATIVE (Expo con TypeScript).
+Hola agente. Trabajamos en el Reto 3 (RDA3) de Integración de Sistemas. Framework asignado: REACT NATIVE (Expo + TypeScript).
+Vas a construir una app móvil que es SOLO un cliente HTTP de nuestra API ya desplegada en Azure.
 
-INSTRUCCIONES OBLIGATORIAS Y REGLA DE ORO:
-1. NO MODIFIQUES ningún archivo de nuestro backend existente ni toques controladores, entidades, DTOs ni rutas en Azure. El backend ya está funcionando y aprobado con Booking Central en el RDA2. Cualquier cambio en el backend romperá la integración.
-2. Desarrolla la aplicación móvil en una carpeta nueva en la raíz de nuestro repositorio llamada 'mobile_react_native' usando Expo con TypeScript.
-3. La aplicación móvil se conectará como cliente HTTP a nuestra API ya desplegada en Azure, utilizando Axios con las cabeceras estándar 'Content-Type: application/json', 'Accept: application/json', 'X-Correlation-Id' e 'Idempotency-Key'.
+REGLA DE ORO (NO NEGOCIABLE):
+1. NO modifiques, formatees ni "arregles" NINGÚN archivo del backend (controladores, rutas, DTOs, entidades, migraciones, .env, Dockerfile, scripts de Azure). No despliegues nada. El backend y sus contratos OpenAPI ya están aprobados con Booking Central (RDA2); cualquier cambio rompe la integración.
+2. NO inventes endpoints. Primero LEE (sin editar) el backend del repositorio y escríbeme una tabla con las rutas reales para: listar catálogo, detalle, disponibilidad, crear reserva, listar mis reservas y cancelar (método, ruta, body, forma de la respuesta). Usa solo esas rutas.
+3. Crea la app en una carpeta nueva 'mobile_react_native' en la raíz con Expo + TypeScript. La URL base va en EXPO_PUBLIC_API_URL.
 
-GUARDRAILS Y ANTI-PATRONES OBLIGATORIOS (LO QUE NO DEBES HACER):
-- PROHIBIDO CREAR UN CARRITO DE COMPRAS: Cada reserva se ejecuta de forma directa, atómica e individual enviando una cabecera 'Idempotency-Key' única (UUIDv4) con timeout de 45s. No agregues CartContext ni pantallas de carrito.
-- PROHIBIDO USAR DATOS MOCKEADOS: Si la API responde con lista vacía o error, muestra un estado visual amigable con botón de reintento. Nunca inventes listas fijas hardcodeadas en producción.
-- PROHIBIDO MIGRAR CONSOLA ADMIN: No agregues paneles de administración, gestión de proveedores ni telemetría. La app es 100% para el cliente final.
-- MODELADO RESILIENTE: En 'normalizarServicioItem', tolera identificadores ('id', '_id', 'auto_id', 'vehicle_id', 'alojamiento_id'), precios (número, string u objeto con total) y fotos (array o string) sin lanzar excepciones.
+PROHIBIDO:
+- Carrito de compras (CartContext, useCart, CartService, CartScreen). Cada reserva es individual y directa: un POST con cabecera 'Idempotency-Key' (UUID de expo-crypto) y timeout de 45 s. La clave se genera UNA vez por intento (useRef) y se reutiliza en los reintentos; no la generes en un interceptor.
+- Mocks o datos inventados: nada de arrays falsos en un catch, ni precio/cupos por defecto. Si la API devuelve [] muestra "No hay servicios disponibles" con botón Reintentar; si falla, muestra el error con Reintentar.
+- Consola de administración, dashboards, métricas o CRUD de inventario. La app es solo para el cliente final.
+- Barra de pestañas inferior o botones de secciones inexistentes. Navegación con native-stack: Catálogo → Detalle → Voucher, y "Mis Reservas" en la cabecera.
 
-PANTALLAS ESENCIALES A IMPLEMENTAR:
-1. Pantalla de Catálogo: Listado responsivo con Pull-to-Refresh (FlatList con RefreshControl), imágenes, títulos, precios en USD y botón de detalle.
-2. Pantalla de Detalle: Ficha del servicio con selector de fechas/turnos, aforo restante y botón para confirmar la reserva individual.
-3. Pantalla de Mis Reservas: Historial con botón de cancelación (oculto si faltan menos de 24h para el servicio) y actualización reactiva inmediata del estado al cancelar.
-4. Pantalla de Voucher QR: Generación vectorial de código QR para check-in usando 'react-native-qrcode-svg'.
+OBLIGATORIO:
+- normalizarServicioItem tolerante y sin 'any': ids ('id','_id','auto_id','vehicle_id','alojamiento_id','atraccion_id','offer_id'), precios (número, texto u objeto {total|amount}), fotos (lista de textos, lista de {url} o texto) y respuestas [ ] o {data:[ ]}.
+- Axios con 'Content-Type' y 'Accept' application/json y 'X-Correlation-Id' por petición; errores mostrando 'detail' del ProblemDetails.
+- Catálogo con FlatList + refreshControl (RefreshControl), ListEmptyComponent con Reintentar y sondeo cada 12 s con clearInterval al desmontar, sin borrar datos si falla.
+- Mis Reservas: cancelación solo si faltan >= 24 h (el backend tiene la última palabra) y refresco inmediato del estado.
+- Voucher con react-native-qrcode-svg usando el código real devuelto por la API.
+- Instala paquetes nativos con 'npx expo install'. Aplica las reglas de mi vertical de la sección 7 de la guía.
 
-Deja el proyecto verificado con 'npx tsc --noEmit' y listo para probarse con 'npx expo start' y compilar con 'npx eas build -p android --profile preview'.
+ENTREGA: 'npx tsc --noEmit' sin errores, eas.json con buildType apk y APK generado con 'npx eas-cli build -p android --profile preview'. En Windows PowerShell no uses '&&': un comando por línea.
 ```
 
+---
+
+## 10. Checklist de Aceptación (revísalo antes de entregar)
+
+- [ ] `git status` no muestra cambios fuera de `mobile_react_native/` (el backend está intacto).
+- [ ] La tabla de §2.1 está completa y la app usa solo esas rutas.
+- [ ] Con la API devolviendo `[]` se ve el estado vacío con **Reintentar** (no datos falsos).
+- [ ] Un ítem creado en Azure aparece en la app sin reinstalarla (pull-to-refresh o sondeo).
+- [ ] Un doble toque en "Confirmar" crea **una sola** reserva.
+- [ ] No existe ningún archivo, contexto o pantalla de carrito ni de administración.
+- [ ] `npx tsc --noEmit` termina sin errores y el APK carga datos en un celular real.
