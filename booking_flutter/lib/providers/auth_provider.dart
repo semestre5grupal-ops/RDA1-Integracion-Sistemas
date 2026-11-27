@@ -89,12 +89,18 @@ class AuthResult {
 /// y caducidad, y al arrancar se renueva con `grant_type=refresh_token` si el
 /// access token expiró. Si la renovación falla, la sesión se descarta.
 class AuthProvider extends ChangeNotifier {
-  static const String _supabaseUrl = 'https://owseuntgcgvflqpnmwcc.supabase.co';
+  /// Proyecto de Supabase vigente (el anterior, owseuntgcgvflqpnmwcc, quedó
+  /// bloqueado por cuota). Se puede cambiar al compilar sin tocar el código:
+  /// `--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
+  static const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://icpxceybcqkmkjuahkam.supabase.co');
 
   /// Clave pública "anon" (la misma que usa el frontend). No es un secreto: la
   /// seguridad la imponen las políticas RLS y el JWT del usuario.
-  static const String _anonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im93c2V1bnRnY2d2ZmxxcG5td2NjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Nzg3OTIsImV4cCI6MjEwNjE1NDc5Mn0.L4XXan0fWLnfkQNVTexlwYNc6SjZcSG3DoobZYcl0yw';
+  static const String _anonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljcHhjZXliY3FrbWtqdWFoa2FtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU3ODM2MDgsImV4cCI6MjExMTM1OTYwOH0.lGRzPGdpdxfdFwHv9Uz68HrWzx56T8fVvqcLZh7zrbw',
+  );
 
   static const _kToken = 'auth_token';
   static const _kRefresh = 'auth_refresh_token';

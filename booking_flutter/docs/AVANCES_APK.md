@@ -42,6 +42,7 @@ Lista de pruebas sugerida:
 - **Admin:** solo lectura (no hay gestión de usuarios, proveedores ni finanzas). La lista de correos admin está duplicada de la web; el que manda es el servidor (responde 403 a quien no lo es). Las compras agrupan por código de correlación sin la post-venta por PNR de la web.
 - **Mis Reservas:** la pantalla web tiene 2.857 líneas y la de Flutter 410. Hay que comparar función por función (cancelación con cotización, equipaje, boletos, facturas por vertical).
 - **Idiomas:** descartado por ahora; la app queda solo en español.
+- **Supabase:** la app apunta al proyecto nuevo (`icpxceybcqkmkjuahkam`); los usuarios del proyecto viejo no existen ahí salvo que se migren. Se cambia con `--dart-define=SUPABASE_URL=… --dart-define=SUPABASE_ANON_KEY=…`.
 - **Firma con la llave real de entrega** (`android/key.properties`); hoy el release se firma con la de depuración.
 - **Vuelos con socios reales:** probar con cada aerolínea, incluida la clase ejecutiva de GabatAIR que hoy falla de su lado.
 - **Notificaciones push, biometría y enlaces profundos:** mejoras opcionales.
