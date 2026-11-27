@@ -4,7 +4,7 @@ import { useAutoRefresh } from '../../../hooks/useAutoRefresh';
 import { ActualizadoHace } from '../panelUtils';
 import { ProcesoEnVivo } from '../ProcesoEnVivo';
 import { saludDeTramos } from '../ArquitecturaVuelos';
-import { GanttCompra } from './GanttCompra';
+import { GanttCompra } from './GanttCompra.jsx';
 import { ObjetivosSlo } from './ObjetivosSlo';
 import { armarCasos, BARRA_COMPRA, COLUMNAS_AEROLINEA, esPrueba, PASOS, porAerolinea, resumen } from './modeloVuelos';
 
