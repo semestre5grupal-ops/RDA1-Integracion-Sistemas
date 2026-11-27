@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { UsuarioSupabase } from './administradores';
+import { getCachedSupabaseUser, setCachedSupabaseUser } from './supabase-token-cache';
 
 /**
  * Valida un JWT de Supabase contra el servidor de Supabase y devuelve el usuario.
@@ -29,10 +30,15 @@ export class SesionSupabaseService {
 
   /** Usuario dueño del token, o `null` si el token no es válido o caducó. */
   async obtenerUsuario(token: string): Promise<UsuarioSupabase | null> {
+    const cached = getCachedSupabaseUser<UsuarioSupabase>(token);
+    if (cached) return cached;
+
     try {
       const { data, error } = await this.obtenerCliente().auth.getUser(token);
       if (error || !data?.user) return null;
-      return data.user as UsuarioSupabase;
+      const user = data.user as UsuarioSupabase;
+      setCachedSupabaseUser(token, user);
+      return user;
     } catch (e: any) {
       this.logger.warn(`No se pudo validar la sesión: ${e?.message}`);
       return null;

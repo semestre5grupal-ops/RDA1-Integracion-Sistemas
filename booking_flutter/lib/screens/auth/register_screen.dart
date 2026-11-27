@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/api_client.dart';
 import '../../theme/booking_colors.dart';
 import 'login_screen.dart';
 import '../../utils/cedula_ecuador.dart';
@@ -127,6 +129,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!_validarFormulario()) return;
 
     setState(() => _submitting = true);
+
+    // 1. Verificar si la identificación ya se encuentra registrada en Booking Central (paridad React)
+    try {
+      final checkRes = await ApiClient.post(
+        '/clientes/validar-identificacion',
+        body: {
+          'identificacion': _cedulaCtrl.text.trim(),
+          'tipo': _tipoDocumento,
+        },
+      );
+      if (checkRes.statusCode == 200) {
+        final data = jsonDecode(checkRes.body);
+        if (data is Map<String, dynamic> && data['registrado'] == true) {
+          final masked = data['cliente_existente']?['email_enmascarado'] ?? 'cuenta existente';
+          if (mounted) {
+            setState(() {
+              _errorCedula = 'Esta identificación ya se encuentra registrada en Booking Central ($masked). Por favor inicia sesión o recupera tu cuenta.';
+              _submitting = false;
+            });
+          }
+          return;
+        }
+      }
+    } catch (_) {
+      // Si la API perimetral no responde, continúa con la validación de Supabase
+    }
+
     final auth = context.read<AuthProvider>();
 
     try {

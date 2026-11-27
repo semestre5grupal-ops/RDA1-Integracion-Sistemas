@@ -1,5 +1,6 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
+import { getCachedSupabaseUser, setCachedSupabaseUser } from '../auth/supabase-token-cache';
 
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
@@ -72,6 +73,12 @@ export class SupabaseAuthGuard implements CanActivate {
 
     const token = parts[1];
 
+    const cachedUser = getCachedSupabaseUser(token);
+    if (cachedUser) {
+      request.user = cachedUser;
+      return true;
+    }
+
     // Se valida el token de forma segura contra el servidor de Supabase
     // Esto previene que se falsifiquen tokens en Base64
     const { data, error } = await this.supabase.auth.getUser(token);
@@ -80,6 +87,7 @@ export class SupabaseAuthGuard implements CanActivate {
       throw new UnauthorizedException(`Token inválido o expirado: ${error?.message || 'Usuario no encontrado'}`);
     }
 
+    setCachedSupabaseUser(token, data.user);
     // Inyectar el usuario validado en el objeto de la petición para que los controladores lo usen
     request.user = data.user;
     return true;
