@@ -7,9 +7,14 @@ export class EdgeRateLimitMiddleware implements NestMiddleware {
   constructor(private readonly rateLimitService: InMemoryRateLimitService) {}
 
   use(req: Request, res: Response, next: NextFunction) {
-    // Si la ruta es estática o de documentación swagger/redoc, permitir paso libre
+    // Si la ruta es estática, monitoreo keep-alive o de documentación swagger/redoc, permitir paso libre
     const path = req.originalUrl || req.url || '';
-    if (path.startsWith('/api/docs') || path.startsWith('/api/redoc') || path.includes('/favicon.ico')) {
+    if (
+      path.startsWith('/api/docs') ||
+      path.startsWith('/api/redoc') ||
+      path.includes('/favicon.ico') ||
+      path.includes('/health/keep-alive')
+    ) {
       return next();
     }
 

@@ -10,6 +10,7 @@ import { Configuracion } from './entities/configuracion.entity';
 
 import { WinstonPhysicalLoggerService } from './logger/winston-logger.service';
 import { TraceContextService } from './tracing/trace-context.service';
+import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { TraceContextService } from './tracing/trace-context.service';
       Configuracion,
     ]),
   ],
+  controllers: [HealthController],
   providers: [WinstonPhysicalLoggerService, TraceContextService],
   exports: [TypeOrmModule, WinstonPhysicalLoggerService, TraceContextService],
 })
