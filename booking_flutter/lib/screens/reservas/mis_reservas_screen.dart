@@ -131,12 +131,26 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
 
   Future<void> _loadReservas() async {
     if (!mounted) return;
-    setState(() => _loading = true);
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final list = await BookingServices.getMisReservas(
-      token: auth.token,
-      email: auth.user?.email,
-    );
+    // Sin sesión no hay nada que pedir: antes se quedaba cargando para siempre.
+    if (!auth.isAuthenticated) {
+      setState(() {
+        _reservas = [];
+        _loading = false;
+      });
+      return;
+    }
+    setState(() => _loading = true);
+    List<Reserva> list;
+    try {
+      list = await BookingServices.getMisReservas(
+        token: auth.token,
+        email: auth.user?.email,
+      );
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
     if (mounted) {
       // Fusión Composable: preserva las tarjetas que ya estaban visibles
       final actualizadas = List<Reserva>.from(_reservas);

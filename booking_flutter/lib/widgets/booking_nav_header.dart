@@ -6,6 +6,7 @@ import '../screens/auth/register_screen.dart';
 import '../screens/perfil/perfil_screen.dart';
 import '../screens/reservas/mis_reservas_screen.dart';
 import '../theme/booking_colors.dart';
+import '../utils/pantalla.dart';
 
 enum MarketplaceCategory {
   alojamientos,
@@ -93,8 +94,47 @@ class BookingNavHeader extends StatelessWidget {
     );
   }
 
+  /// Vertical en celular: ícono arriba y nombre corto abajo; las 4 caben siempre.
+  Widget _buildCategoryTab({required MarketplaceCategory category, required IconData icon, required String label}) {
+    final isSelected = currentCategory == category;
+    return Expanded(
+      child: Semantics(
+        selected: isSelected,
+        button: true,
+        child: InkWell(
+          onTap: () => onCategoryChanged(category),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 56),
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isSelected ? Colors.white.withValues(alpha: 0.16) : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 1.5),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: Colors.white, size: 22),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final compacto = esCompacto(context);
     final auth = Provider.of<AuthProvider>(context);
     final user = auth.user;
     final isWide = MediaQuery.of(context).size.width >= 860;
@@ -117,11 +157,11 @@ class BookingNavHeader extends StatelessWidget {
                     // Logo Booking.com
                     InkWell(
                       onTap: () => onCategoryChanged(MarketplaceCategory.alojamientos),
-                      child: const Text(
+                      child: Text(
                         'Booking.com',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 23,
+                          fontSize: compacto ? 21 : 23,
                           fontWeight: FontWeight.bold,
                           letterSpacing: -0.4,
                         ),
@@ -132,8 +172,9 @@ class BookingNavHeader extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (auth.isAuthenticated && user != null) ...[
-                          // Botón outline "Mis reservas" (Navbar.jsx parity)
-                          OutlinedButton(
+                          // Botón outline "Mis reservas" (Navbar.jsx parity). En celular
+                          // ya está en la barra inferior.
+                          if (!compacto) OutlinedButton(
                             onPressed: () => Navigator.push(
                               context,
                               MaterialPageRoute(builder: (_) => const MisReservasScreen()),
@@ -150,7 +191,7 @@ class BookingNavHeader extends StatelessWidget {
                               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          if (!compacto) const SizedBox(width: 10),
                           // Píldora de usuario con menú desplegable anclado flotante (Navbar.jsx dropdown parity)
                           Theme(
                             data: Theme.of(context).copyWith(
@@ -232,7 +273,7 @@ class BookingNavHeader extends StatelessWidget {
                                       ),
                                     ),
                                     const SizedBox(width: 7),
-                                    Text(
+                                    if (!compacto) Text(
                                       user.nombre.isNotEmpty ? user.nombre : 'Usuario',
                                       style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
                                     ),
@@ -244,8 +285,9 @@ class BookingNavHeader extends StatelessWidget {
                             ),
                           ),
                         ] else ...[
-                          // Botones cuando NO está autenticado (Navbar.jsx parity)
-                          ElevatedButton(
+                          // Botones cuando NO está autenticado (Navbar.jsx parity). En celular
+                          // solo "Iniciar sesión": desde ahí se llega a crear cuenta.
+                          if (!compacto) ElevatedButton(
                             onPressed: () => Navigator.push(
                               context,
                               MaterialPageRoute(builder: (_) => const RegisterScreen()),
@@ -260,7 +302,7 @@ class BookingNavHeader extends StatelessWidget {
                             ),
                             child: const Text('Regístrate', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                           ),
-                          const SizedBox(width: 8),
+                          if (!compacto) const SizedBox(width: 8),
                           ElevatedButton(
                             onPressed: () => Navigator.push(
                               context,
@@ -283,7 +325,19 @@ class BookingNavHeader extends StatelessWidget {
                 ),
               ),
 
-              // 2. Barra de píldoras de categorías (Exactamente 4: Hospedajes, Vuelos, Renta de autos, Atracciones)
+              // 2. Categorías. En celular: 4 pestañas iguales que siempre caben.
+              if (compacto)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(13, 6, 13, 4),
+                  child: Row(children: [
+                    _buildCategoryTab(category: MarketplaceCategory.alojamientos, icon: Icons.hotel, label: 'Hospedajes'),
+                    _buildCategoryTab(category: MarketplaceCategory.vuelos, icon: Icons.flight, label: 'Vuelos'),
+                    _buildCategoryTab(category: MarketplaceCategory.autos, icon: Icons.directions_car, label: 'Autos'),
+                    _buildCategoryTab(category: MarketplaceCategory.atracciones, icon: Icons.attractions, label: 'Atracciones'),
+                  ]),
+                )
+              else
+              // Barra de píldoras de categorías (Exactamente 4: Hospedajes, Vuelos, Renta de autos, Atracciones)
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
