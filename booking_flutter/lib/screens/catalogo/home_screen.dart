@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../utils/pantalla.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../models/alojamiento.dart';
@@ -1649,11 +1650,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: Text(
                             prop.nombre,
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: BookingColors.actionBlue),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        BookingRatingBadge(rating: prop.rating),
+                        const SizedBox(width: 6),
+                        // En celular solo la nota: "Muy bueno" le quitaba espacio al nombre.
+                        BookingRatingBadge(rating: prop.rating, showText: !esCompacto(context)),
                       ],
                     ),
                     Text('${prop.ciudad} · ${prop.tipoPropiedad}', style: const TextStyle(fontSize: 11, color: BookingColors.textMuted)),
@@ -1663,8 +1666,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       style: const TextStyle(fontSize: 11, color: BookingColors.successGreen, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    // Wrap: si precio y enlace no caben en una línea, el enlace baja.
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 2,
                       children: [
                         Text(
                           '${cur.formatPrice(prop.precioPorNoche, forceDecimals: false)} / noche',

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../widgets/fila_precio_accion.dart';
 import 'package:intl/intl.dart';
 import '../../models/alojamiento.dart';
 import '../../services/booking_services.dart';
@@ -939,11 +940,8 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
                   ],
 
                   const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Column(
+                  FilaPrecioAccion(
+                      precio: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -969,7 +967,7 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
                           ),
                         ],
                       ),
-                      ElevatedButton(
+                      accion: ElevatedButton(
                         onPressed: () {
                           Navigator.push(
                             context,
@@ -986,7 +984,6 @@ class _AlojamientosSearchScreenState extends State<AlojamientosSearchScreen> {
                         style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
                         child: const Text('Ver disponibilidad >', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                       ),
-                    ],
                   ),
                 ],
               ),

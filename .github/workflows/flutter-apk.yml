@@ -1,7 +1,8 @@
 name: Flutter APK
 
-# Compila el APK de la app móvil y lo publica como pre-release con un enlace fijo:
-#   https://github.com/<repo>/releases/download/apk-flutter-latest/booking.apk
+# Compila el APK de la app móvil (rama flutter-apk-completar) y lo publica con un enlace fijo propio,
+# distinto del de main (apk-flutter-latest) para que una compilación de main no lo reemplace:
+#   https://github.com/<repo>/releases/download/apk-movil-latest/booking.apk
 # Solo corre en la rama de la app móvil (o a mano) y no toca el backend ni la web.
 on:
   push:
@@ -39,8 +40,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete apk-flutter-latest --cleanup-tag -y || true
-          gh release create apk-flutter-latest booking.apk \
+          gh release delete apk-movil-latest --cleanup-tag -y || true
+          gh release create apk-movil-latest booking.apk \
             --prerelease --target "$GITHUB_SHA" \
             --title "APK de prueba (rama flutter-apk-completar)" \
             --notes "Compilado desde $GITHUB_SHA. Firmado con llave de depuración: solo para pruebas."

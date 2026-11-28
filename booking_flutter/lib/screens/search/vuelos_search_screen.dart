@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/pantalla.dart';
 import 'package:intl/intl.dart';
 import '../../models/vuelo.dart';
 import '../../services/booking_services.dart';
@@ -805,17 +806,31 @@ class _VuelosSearchScreenState extends State<VuelosSearchScreen> {
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: BookingColors.textDark),
               ),
               const SizedBox(height: 10),
-              SizedBox(
-                height: 258,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: fareCards.length,
-                  itemBuilder: (_, idx) {
-                    final fc = fareCards[idx];
-                    final opt = fc.option;
-                    return Container(
-                      width: 224,
-                      margin: const EdgeInsets.only(right: 10),
+              if (esCompacto(context))
+                // En celular las tarifas van una debajo de otra: en horizontal con alto
+                // fijo se cortaban con letra grande y obligaban a deslizar de lado.
+                Column(children: [for (final fc in fareCards) _tarjetaTarifa(group, fc, horizontal: false)])
+              else
+                SizedBox(
+                  height: 258,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: fareCards.length,
+                    itemBuilder: (_, idx) => _tarjetaTarifa(group, fareCards[idx], horizontal: true),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tarjetaTarifa(_FlightGroup group, _FareCardItem fc, {required bool horizontal}) {
+    final opt = fc.option;
+    return Container(
+                      width: horizontal ? 224 : double.infinity,
+                      margin: horizontal ? const EdgeInsets.only(right: 10) : const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF9FBFF),
@@ -861,7 +876,7 @@ class _VuelosSearchScreenState extends State<VuelosSearchScreen> {
                             opt.isRefundable ? 'Reembolsable' : 'No reembolsable',
                             opt.isRefundable ? BookingColors.successGreen : BookingColors.textMuted,
                           ),
-                          const Spacer(),
+                          if (horizontal) const Spacer() else const SizedBox(height: 10),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -904,14 +919,6 @@ class _VuelosSearchScreenState extends State<VuelosSearchScreen> {
                           ),
                         ],
                       ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
     );
   }
 

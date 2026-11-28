@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/booking_colors.dart';
 import '../utils/pantalla.dart';
@@ -19,6 +20,10 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   bool _showCookieBanner = false;
+
+  /// El chat se esconde mientras se baja por la página y vuelve al subir,
+  /// para no tapar precios ni textos (patrón habitual de botón flotante en Android).
+  bool _chatVisible = true;
 
   /// Pestaña activa de la barra inferior (solo en celular):
   /// 0 Inicio · 1 Reservas · 2 Estado de vuelo · 3 Cuenta.
@@ -71,14 +76,29 @@ class _MainShellState extends State<MainShell> {
     final cuerpo = Stack(
       children: [
         // Inicio se mantiene vivo (conserva búsqueda y desplazamiento al cambiar de pestaña).
-        Offstage(offstage: !enInicio, child: TickerMode(enabled: enInicio, child: const HomeScreen())),
+        Offstage(
+          offstage: !enInicio,
+          child: TickerMode(
+            enabled: enInicio,
+            child: NotificationListener<UserScrollNotification>(
+              onNotification: (n) {
+                if (n.metrics.axis != Axis.vertical) return false;
+                final mostrar = n.direction != ScrollDirection.reverse;
+                if (compacto && mostrar != _chatVisible) setState(() => _chatVisible = mostrar);
+                return false;
+              },
+              child: const HomeScreen(),
+            ),
+          ),
+        ),
         if (!enInicio) Positioned.fill(child: _pestanaActual()),
 
         // Chat flotante: solo en Inicio, para no tapar reservas, formularios ni pagos.
         if (enInicio)
-          Positioned(
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
             right: 16,
-            bottom: _showCookieBanner ? (compacto ? 150 : 96) : 18,
+            bottom: (!compacto || _chatVisible) ? (_showCookieBanner ? (compacto ? 150 : 96) : 18) : -90,
             child: const ChatbotFlotante(),
           ),
 

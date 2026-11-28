@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../utils/pantalla.dart';
+import '../../widgets/fila_precio_accion.dart';
 import 'package:intl/intl.dart';
 import '../../models/auto.dart';
 import '../../services/booking_services.dart';
@@ -959,18 +961,24 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      auto.proveedor,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue),
+                  // Flexible: nombres de proveedor largos ya no empujan la nota fuera de la tarjeta.
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        auto.proveedor,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue),
+                      ),
                     ),
                   ),
-                  BookingRatingBadge(rating: auto.proveedorRating),
+                  const SizedBox(width: 8),
+                  BookingRatingBadge(rating: auto.proveedorRating, showText: !esCompacto(context)),
                 ],
               ),
               const SizedBox(height: 10),
@@ -1079,11 +1087,8 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
               ),
               const Divider(height: 18),
 
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Column(
+              FilaPrecioAccion(
+                  precio: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
@@ -1100,7 +1105,7 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
                       ),
                     ],
                   ),
-                  ElevatedButton(
+                  accion: ElevatedButton(
                     onPressed: () {
                       Navigator.push(
                         context,
@@ -1120,7 +1125,6 @@ class _AutosSearchScreenState extends State<AutosSearchScreen> {
                     style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
                     child: const Text('Ver oferta >', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
-                ],
               ),
             ],
           ),

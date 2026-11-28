@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../widgets/fila_precio_accion.dart';
 import '../../models/atraccion.dart';
 import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
@@ -319,10 +320,8 @@ class _AtraccionesSearchScreenState extends State<AtraccionesSearchScreen> {
                     const Text('📅 Cancelación gratis disponible', style: TextStyle(fontSize: 12, color: BookingColors.successGreen, fontWeight: FontWeight.bold)),
                   ],
                   const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
+                  FilaPrecioAccion(
+                      precio: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text('Desde', style: TextStyle(fontSize: 11, color: BookingColors.textMuted)),
@@ -334,7 +333,7 @@ class _AtraccionesSearchScreenState extends State<AtraccionesSearchScreen> {
                             Text('Niños: US\$ ${a.precioNino!.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: BookingColors.successGreen)),
                         ],
                       ),
-                      ElevatedButton(
+                      accion: ElevatedButton(
                         onPressed: () {
                           Navigator.push(
                             context,
@@ -344,7 +343,6 @@ class _AtraccionesSearchScreenState extends State<AtraccionesSearchScreen> {
                         style: ElevatedButton.styleFrom(backgroundColor: BookingColors.actionBlue),
                         child: const Text('Más info y turnos >', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                       ),
-                    ],
                   ),
                 ],
               ),
