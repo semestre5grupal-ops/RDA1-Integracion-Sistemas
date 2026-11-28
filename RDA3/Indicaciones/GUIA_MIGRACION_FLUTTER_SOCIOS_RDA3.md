@@ -394,6 +394,8 @@ class _ConfirmarReservaState extends State<ConfirmarReserva> {
 
 ### C. Refresco Inmediato tras Cancelar (Anti-Stale State)
 - Si el backend confirma la cancelación, actualiza la reserva a `CANCELADA` en el estado (`setState` / `notifyListeners`) **y** recarga la lista desde la API para mostrar lo que el servidor registró.
+- Oculta el botón **"Cancelar"** cuando el estado ya sea `CANCELADA` o `ASISTIDA` / `CONFIRMED_ATTENDED`.
+- **Evita el rebote de estado con el sondeo:** incrementa un contador de versión (`_epoch++`) al cancelar o refrescar y descarta cualquier respuesta de sondeo que haya iniciado antes de esa acción (para que un `GET` lento en vuelo no vuelva a pintar `CONFIRMED` sobre una tarjeta recién cancelada).
 
 ### D. Sincronización en Vivo y Pull-to-Refresh
 
@@ -566,6 +568,9 @@ flutter build apk --release --dart-define=API_URL=https://tu-api-desplegada.azur
 ```
 
 *El APK queda en:* `build/app/outputs/flutter-apk/app-release.apk`. Instálalo en un celular real y confirma que el catálogo carga (si no carga, revisa el permiso `INTERNET` de §3).
+
+> [!NOTE]
+> **CORS al probar en Chrome (`flutter run -d chrome`):** si el navegador bloquea peticiones a tu API en Azure por políticas CORS, **NO modifiques la configuración de CORS del backend**. Prueba directamente en emulador o celular Android (o con el APK): en móvil nativo no existe CORS.
 
 ---
 

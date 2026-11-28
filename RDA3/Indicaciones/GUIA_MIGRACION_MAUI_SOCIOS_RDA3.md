@@ -432,6 +432,8 @@ public partial class DetalleViewModel(ApiService api) : ObservableObject
 
 ### C. Refresco Inmediato tras Cancelar (Anti-Stale State)
 - Si el backend confirma la cancelación, cambia el `Estado` de la reserva a `CANCELADA` (propiedad `[ObservableProperty]`, que notifica a la vista) **y** recarga la lista desde la API para mostrar lo que el servidor registró.
+- Oculta el botón **"Cancelar"** cuando el estado ya sea `CANCELADA` o `ASISTIDA` / `CONFIRMED_ATTENDED`.
+- **Evita el rebote de estado con el sondeo:** incrementa un contador de versión (`_epoch++`) al cancelar o refrescar y descarta cualquier respuesta de sondeo que haya iniciado antes de esa acción (para que un `GET` lento en vuelo no vuelva a pintar `CONFIRMED` sobre una tarjeta recién cancelada).
 
 ### D. Sincronización en Vivo y Pull-to-Refresh
 

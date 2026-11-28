@@ -334,6 +334,8 @@ export function useConfirmarReserva(payload: Record<string, unknown>) {
 
 ### C. Refresco Inmediato tras Cancelar (Anti-Stale State)
 - Si el backend confirma la cancelación, actualiza la reserva a `CANCELADA` con `setReservas(...)` **y** recarga la lista desde la API para mostrar lo que el servidor registró.
+- Oculta el botón **"Cancelar"** cuando el estado ya sea `CANCELADA` o `ASISTIDA` / `CONFIRMED_ATTENDED`.
+- **Evita el rebote de estado con el sondeo:** incrementa una referencia de versión (`epochRef.current++`) al cancelar o refrescar y descarta cualquier respuesta de sondeo que haya iniciado antes de esa acción (para que un `GET` lento en vuelo no vuelva a pintar `CONFIRMED` sobre una tarjeta recién cancelada).
 
 ### D. Sincronización en Vivo y Pull-to-Refresh
 
@@ -490,6 +492,9 @@ npx eas-cli build -p android --profile preview
 ```
 
 *EAS entrega un enlace de descarga del APK.* Alternativa local (requiere Android Studio/SDK instalado): `npx expo run:android --variant release`, que deja el APK en `android/app/build/outputs/apk/release/app-release.apk`. Instálalo en un celular real y confirma que el catálogo carga con la URL de Azure.
+
+> [!NOTE]
+> **CORS al probar en navegador (Expo Web `w`):** si el navegador bloquea peticiones a tu API en Azure por políticas CORS, **NO modifiques la configuración de CORS del backend**. Prueba en **Expo Go** (celular), emulador Android o con el APK: en móvil nativo no existe CORS.
 
 ---
 
