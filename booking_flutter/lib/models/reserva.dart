@@ -187,4 +187,24 @@ class Reserva {
       fechaServicio: fechaServicio,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'vertical': vertical,
+    'servicio_nombre': servicioNombre,
+    'proveedor': proveedor,
+    'fecha': fecha,
+    'hora': hora,
+    'checkin': checkin,
+    'checkout': checkout,
+    'total': total,
+    'estado': estado,
+    'status': estado,
+    'voucher_qr': voucherQr,
+    'pnr': pnr,
+    'imagenUrl': imagenUrl,
+    'detalleExtra': detalleExtra,
+    'createdAt': fechaCreacion.toIso8601String(),
+    'fechaServicio': fechaServicio.toIso8601String(),
+  };
 }
