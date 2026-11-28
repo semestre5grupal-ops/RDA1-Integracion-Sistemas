@@ -58,6 +58,7 @@ const DILAN_KNOWN_IDS = new Set([
 @Injectable()
 export class AtraccionesService implements OnModuleInit {
   private readonly logger = new Logger(AtraccionesService.name);
+  private availabilityCache = new Map<string, { timestamp: number; data: any }>();
   private readonly EXTERNAL_API_URL = process.env.ATRACCIONES_API_URL || 'https://jsonplaceholder.typicode.com/posts';
 
   async onModuleInit() {
@@ -1136,6 +1137,12 @@ export class AtraccionesService implements OnModuleInit {
   // ============================================================================
   async getAvailability(id: string, date?: string): Promise<any> {
     const targetDate = date || new Date().toISOString().split('T')[0];
+    const cacheKey = `${id}:${targetDate}`;
+    const cached = this.availabilityCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 20000) {
+      this.logger.debug(`[Cache Hit] Disponibilidad para ${cacheKey} servida desde memoria (0ms)`);
+      return cached.data;
+    }
     this.logger.log(`Consultando turnos y aforo para atracción ${id} en fecha ${targetDate}`);
 
     let item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
@@ -1160,6 +1167,11 @@ export class AtraccionesService implements OnModuleInit {
     let isGloria = partnerCode === 'NODE_ATR_GLORIA' || gloriaKnownIds.has(id);
     let isDilan = partnerCode === 'NODE_ATR_DILAN';
     let isAriel = partnerCode === 'NODE_ATR_ARIEL';
+
+    if (id === 'AsM3HitC5wbZ' || (item?.nombre || '').toLowerCase().includes('tourgirls')) {
+      isMichael = true;
+      isDilan = false;
+    }
 
     if (!isAlisson && !isMichael && !isGloria && !isDilan && !isAriel) {
       if (DILAN_KNOWN_IDS.has(id) || id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
@@ -1225,7 +1237,7 @@ export class AtraccionesService implements OnModuleInit {
               precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 15),
             };
           });
-          return {
+          const result = {
             atraccion_id: id,
             date: targetDate,
             fecha: targetDate,
@@ -1234,6 +1246,8 @@ export class AtraccionesService implements OnModuleInit {
             time_slots: mappedSlots,
             turnos: mappedSlots,
           };
+          this.availabilityCache.set(cacheKey, { timestamp: Date.now(), data: result });
+          return result;
         }
       } catch (err: any) {
         this.logger.warn(`Error consultando disponibilidad en TourGirls (Michael): ${err.message}`);
@@ -1498,7 +1512,7 @@ export class AtraccionesService implements OnModuleInit {
             {
               params: { date: targetDate },
               headers: { 'x-api-key': '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568' },
-              timeout: 5000,
+              timeout: 1500,
             },
           ),
         );
@@ -3396,6 +3410,8 @@ export class AtraccionesService implements OnModuleInit {
       atraccionId === 'Fy6d7XTppVZ5' ||
       atraccionId === 'rLohsmEh6809' ||
       atraccionId === '1X755jE2isp4' ||
+      atraccionId === 'AsM3HitC5wbZ' ||
+      (reserva?.specialRequirements || '').toLowerCase().includes('tourgirls') ||
       (reserva?.voucherQrPayload || '').toUpperCase().includes('TOURGIRLS');
 
     if (isGloria) {

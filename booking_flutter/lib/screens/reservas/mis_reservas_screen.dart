@@ -25,6 +25,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   String _selectedVertical = 'todos'; // todos, alojamientos, vuelos, autos, atracciones
   String? _lastAuthKey;
   Timer? _pollTimer;
+  final Set<String> _cancellingIds = {};
 
   @override
   void initState() {
@@ -126,6 +127,9 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   }
 
   Future<void> _confirmarCancelacion(Reserva r) async {
+    // Si ya está cancelándose, evitar doble invocación
+    if (_cancellingIds.contains(r.id)) return;
+
     // Vuelos: el backend exige el quoteId de /cancellation-quote (CancelBookingRequestDto).
     if (r.vertical.toLowerCase().contains('vuelo')) {
       return _postventaVuelo(r, TipoPostventa.cancelar);
@@ -164,22 +168,61 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
 
     if (confirm != true || !mounted) return;
 
+    // Desactivar inmediatamente el botón y actualizar estado optimista
+    setState(() {
+      _cancellingIds.add(r.id);
+      final idx = _reservas.indexWhere((item) => item.id == r.id || (item.pnr != null && item.pnr == r.pnr));
+      if (idx != -1) {
+        final old = _reservas[idx];
+        _reservas[idx] = Reserva(
+          id: old.id,
+          vertical: old.vertical,
+          servicioNombre: old.servicioNombre,
+          proveedor: old.proveedor,
+          fecha: old.fecha,
+          hora: old.hora,
+          checkin: old.checkin,
+          checkout: old.checkout,
+          total: old.total,
+          estado: 'CANCELLED',
+          voucherQr: old.voucherQr,
+          pnr: old.pnr,
+          imagenUrl: old.imagenUrl,
+          detalleExtra: old.detalleExtra,
+          fechaCreacion: old.fechaCreacion,
+          fechaServicio: old.fechaServicio,
+        );
+      }
+    });
+
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final ok = await BookingServices.cancelarReserva(
-      r.id,
-      r.vertical,
-      token: auth.token,
-      reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : 'Cancelación cliente',
-    );
+    bool ok = false;
+    try {
+      ok = await BookingServices.cancelarReserva(
+        r.id,
+        r.vertical,
+        token: auth.token,
+        reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : 'Cancelación cliente',
+      );
+    } catch (_) {
+      ok = false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cancellingIds.remove(r.id);
+        });
+      }
+    }
 
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(ok ? 'Reserva cancelada correctamente.' : 'No se pudo cancelar en el proveedor.'),
         backgroundColor: ok ? BookingColors.successGreen : BookingColors.errorRed,
       ),
     );
-    if (ok) _loadReservas();
+    _loadReservas();
   }
 
   List<Reserva> get _filteredReservas {
@@ -395,7 +438,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.qr_code, size: 14, color: BookingColors.actionBlue),
+                const Icon(Icons.confirmation_number_outlined, size: 14, color: BookingColors.actionBlue),
                 const SizedBox(width: 4),
                 Text('PNR / Código: ${r.pnr ?? r.id}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace')),
               ],
@@ -436,13 +479,6 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                           icon: const Icon(Icons.airplane_ticket_outlined, size: 16),
                           label: const Text('Boletos / Pase', style: TextStyle(fontSize: 12)),
                         ),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: r)));
-                        },
-                        icon: const Icon(Icons.qr_code_2, size: 16),
-                        label: const Text('Voucher QR', style: TextStyle(fontSize: 12)),
-                      ),
                       if (isVuelo && !r.esCancelada && !r.esAsistido) ...[
                         OutlinedButton.icon(
                           onPressed: () => _cambiarFechaVuelo(r),
@@ -525,8 +561,21 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                   ),
                   if (r.cancelable)
                     TextButton(
-                      onPressed: () => _confirmarCancelacion(r),
-                      child: const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
+                      onPressed: _cancellingIds.contains(r.id) ? null : () => _confirmarCancelacion(r),
+                      child: _cancellingIds.contains(r.id)
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                SizedBox(
+                                  width: 13,
+                                  height: 13,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
+                                ),
+                                SizedBox(width: 6),
+                                Text('Cancelando...', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                              ],
+                            )
+                          : const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
                     ),
                 ],
               ),

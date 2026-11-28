@@ -11,7 +11,6 @@ import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../../widgets/auth_guard_dialog.dart';
 import '../../widgets/booking_rating_badge.dart';
-import '../reservas/voucher_qr_screen.dart';
 
 class AtraccionDetailScreen extends StatefulWidget {
   final Atraccion atraccion;
@@ -36,6 +35,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
   List<TimeSlot> _slots = [];
   String? _slotsError;
   TimeSlot? _selectedSlot;
+  final Map<String, List<TimeSlot>> _slotsCache = {};
 
   int _adultos = 1;
   int _ninos = 0;
@@ -73,13 +73,36 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
   }
 
   Future<void> _fetchSlots({bool silent = false}) async {
-    if (!silent) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
+    // Si ya tenemos los horarios en caché local para este día, mostrarlos de inmediato
+    if (!silent && _slotsCache.containsKey(dateStr) && _slotsCache[dateStr]!.isNotEmpty) {
+      final cachedSlots = _slotsCache[dateStr]!;
+      TimeSlot? firstAvail = _selectedSlot;
+      if (firstAvail == null || firstAvail.estaAgotado) {
+        for (final s in cachedSlots) {
+          if (!s.estaAgotado) {
+            firstAvail = s;
+            break;
+          }
+        }
+      }
+      setState(() {
+        _slots = cachedSlots;
+        _loadingSlots = false;
+        _slotsError = null;
+        _selectedSlot = firstAvail ?? cachedSlots.first;
+        _clampTicketsToCupos();
+      });
+      // Continuar con actualización silenciosa para verificar si hubo cambios en vivo
+      silent = true;
+    } else if (!silent) {
       setState(() {
         _loadingSlots = true;
         _selectedSlot = null;
       });
     }
-    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+
     final List<TimeSlot> slots;
     try {
       slots = await BookingServices.getDisponibilidadAtraccion(widget.atraccion.id, dateStr);
@@ -96,6 +119,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
       return;
     }
     if (mounted) {
+      _slotsCache[dateStr] = slots;
       TimeSlot? firstAvail = _selectedSlot;
       if (firstAvail == null || firstAvail.estaAgotado) {
         for (final s in slots) {
@@ -108,7 +132,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
       setState(() {
         _slots = slots;
         _slotsError = null;
-        _selectedSlot = firstAvail;
+        _selectedSlot = firstAvail ?? (slots.isNotEmpty ? slots.first : null);
         if (!silent) _loadingSlots = false;
         _clampTicketsToCupos();
       });
@@ -360,10 +384,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                                   if (!ctx.mounted) return;
                                   Navigator.pop(ctx);
                                   if (!mounted) return;
-                                  Navigator.pushReplacement(
-                                    context,
-                                    MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: nuevaReserva)),
-                                  );
+                                  _showBookingSuccessDialog(nuevaReserva);
                                 } catch (e) {
                                   setModal(() {
                                     submitting = false;
@@ -374,7 +395,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                         style: ElevatedButton.styleFrom(backgroundColor: BookingColors.successGreen),
                         child: submitting
                             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : const Text('Pagar y obtener código QR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            : const Text('Confirmar y pagar entrada(s)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],
@@ -387,10 +408,117 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
     );
   }
 
+  Future<void> _showBookingSuccessDialog(Reserva r) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: BookingColors.successGreen, size: 28),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '¡Reserva Confirmada!',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: BookingColors.textDark),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Tu reserva para "' + r.servicioNombre + '" ha sido confirmada con éxito.', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Código PNR:', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+                      SelectableText(
+                        r.pnr ?? r.id,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'monospace', color: BookingColors.primaryBlue),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Fecha y Horario:', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+                      Text(r.fecha + (r.hora != null ? ' · ' + r.hora! : ''), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total pagado:', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
+                      Text('US$ ' + r.total.toStringAsFixed(2), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Puedes consultar o gestionar tu reserva en cualquier momento desde la sección Mis Reservas.',
+              style: TextStyle(fontSize: 11, color: BookingColors.textMuted),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              Navigator.pop(context);
+            },
+            child: const Text('Seguir explorando', style: TextStyle(color: BookingColors.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              Navigator.pushNamed(context, '/reservas');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: BookingColors.primaryBlue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Ir a Mis Reservas'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<DateTime> get _dateStrip {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final sel = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+
+    DateTime start = today;
+    if (sel.difference(today).inDays >= 4) {
+      start = sel.subtract(const Duration(days: 2));
+      if (start.isBefore(today)) start = today;
+    }
+    return List.generate(10, (i) => start.add(Duration(days: i)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final photos = _atr.fotosUrls.isNotEmpty ? _atr.fotosUrls : [_atr.imagenUrl ?? ''];
-    final dateStrip = List.generate(7, (i) => DateTime.now().add(Duration(days: i)));
+    final dateStrip = _dateStrip;
 
     return Scaffold(
       backgroundColor: BookingColors.backgroundLight,
@@ -505,7 +633,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                     children: [
                       ListTile(
                         dense: true,
-                        title: Text('Presenta tu entrada digital QR en el punto de encuentro 15 minutos antes de la hora reservada.'),
+                        title: Text('Presenta tu confirmación de reserva (PNR) y documento de identidad en el punto de encuentro 15 minutos antes de la hora reservada.'),
                       ),
                       ListTile(
                         dense: true,
@@ -537,6 +665,27 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                         },
                       ),
                     ],
+                  ),
+                  Container(
+                    margin: const EdgeInsets.only(top: 4, bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: BookingColors.actionBlue.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: BookingColors.actionBlue.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.event_available, size: 16, color: BookingColors.actionBlue),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Fecha seleccionada: ' + DateFormat('EEEE, d MMM yyyy').format(_selectedDate),
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: BookingColors.actionBlue),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   SizedBox(
                     height: 62,
