@@ -537,17 +537,29 @@ class BookingServices {
   }
 
   static Future<List<Reserva>> getMisReservas({String? token, String? email}) async {
-    final results = <Reserva>[..._reservasEnMemoria];
-    final seenIds = results.map((r) => r.id).toSet();
+    // Mapa indexado por ID y por PNR para unificar y no duplicar
+    final Map<String, Reserva> itemsMap = {};
+    for (final r in _reservasEnMemoria) {
+      itemsMap[r.id] = r;
+      if (r.pnr != null && r.pnr!.isNotEmpty) {
+        itemsMap[r.pnr!] = r;
+      }
+    }
 
     void mergeList(List<dynamic> rawList, String vertical) {
       for (final item in rawList) {
         if (item is Map) {
           try {
             final r = Reserva.fromJson(Map<String, dynamic>.from(item), forcedVertical: vertical);
-            if (!seenIds.contains(r.id)) {
-              seenIds.add(r.id);
-              results.add(r);
+            // El backend tiene el estado real y más fresco (ej. CONFIRMADO_ASISTIDO del socio)
+            itemsMap[r.id] = r;
+            if (r.pnr != null && r.pnr!.isNotEmpty) {
+              itemsMap[r.pnr!] = r;
+            }
+            // Sincronizar memoria interna si ya estaba guardada
+            final memIdx = _reservasEnMemoria.indexWhere((m) => m.id == r.id || (m.pnr != null && m.pnr == r.pnr));
+            if (memIdx != -1) {
+              _reservasEnMemoria[memIdx] = r;
             }
           } catch (_) {}
         }
@@ -611,6 +623,17 @@ class BookingServices {
       }(),
     ]);
 
+    // Extraer lista única conservando el objeto Reserva más reciente
+    final seen = <String>{};
+    final results = <Reserva>[];
+    for (final r in itemsMap.values) {
+      if (!seen.contains(r.id)) {
+        seen.add(r.id);
+        results.add(r);
+      }
+    }
+
+    results.sort((a, b) => b.fechaCreacion.compareTo(a.fechaCreacion));
     return results;
   }
 

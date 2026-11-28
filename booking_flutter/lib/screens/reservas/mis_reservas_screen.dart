@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/reserva.dart';
@@ -23,6 +24,54 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   List<Reserva> _reservas = [];
   String _selectedVertical = 'todos'; // todos, alojamientos, vuelos, autos, atracciones
   String? _lastAuthKey;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startSilentPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startSilentPolling() {
+    _pollTimer?.cancel();
+    // Sondeo periódico cada 2.8s (simulación gRPC / eventos reactivos en segundo plano)
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 2800), (_) => _pollReservasSilencioso());
+  }
+
+  Future<void> _pollReservasSilencioso() async {
+    if (!mounted) return;
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    try {
+      final list = await BookingServices.getMisReservas(
+        token: auth.token,
+        email: auth.user?.email,
+      );
+      if (!mounted) return;
+      // Verificar si hubo cambios en cantidad o en estados (ej. CONFIRMED -> CONFIRMADO_ASISTIDO)
+      bool hayCambios = list.length != _reservas.length;
+      if (!hayCambios) {
+        for (int i = 0; i < list.length; i++) {
+          if (list[i].id != _reservas[i].id || list[i].estado != _reservas[i].estado) {
+            hayCambios = true;
+            break;
+          }
+        }
+      }
+      if (hayCambios) {
+        setState(() {
+          _reservas = list;
+        });
+      }
+    } catch (_) {
+      // Ignorar errores transitorios de red en el sondeo de fondo
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -272,8 +321,13 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
 
   Widget _buildReservaCard(Reserva r) {
     final isVuelo = r.vertical.toLowerCase().contains('vuelo');
-    final canCheckIn = isVuelo && !r.esCancelada && r.estado != 'CHECKED_IN';
-    final statusColor = r.esCancelada ? BookingColors.errorRed : (r.estado == 'CHECKED_IN' ? BookingColors.actionBlue : BookingColors.successGreen);
+    final canCheckIn = isVuelo && !r.esCancelada && !r.esAsistido;
+    final statusColor = r.esCancelada
+        ? BookingColors.errorRed
+        : (r.esAsistido ? const Color(0xFF15803D) : BookingColors.successGreen);
+    final statusBg = r.esCancelada
+        ? BookingColors.errorRed.withValues(alpha: 0.12)
+        : (r.esAsistido ? const Color(0xFFDCFCE7) : BookingColors.successGreen.withValues(alpha: 0.12));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -298,14 +352,45 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
-                  child: Text(r.estado, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusBg,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (r.esAsistido) ...[
+                        const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF15803D)),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        r.estadoDisplay,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(r.servicioNombre, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
+            if (r.esAsistido) ...[
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  const Icon(Icons.verified, size: 13, color: Color(0xFF15803D)),
+                  const SizedBox(width: 4),
+                  Text(
+                    r.vertical.contains('auto')
+                        ? '• Llaves entregadas (Servicio en curso)'
+                        : '• Asistencia confirmada (Sí asistió)',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D)),
+                  ),
+                ],
+              ),
+            ],
             if (r.proveedor != null && r.proveedor!.isNotEmpty) Text(r.proveedor!, style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
             const SizedBox(height: 6),
             Row(
@@ -358,7 +443,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                         icon: const Icon(Icons.qr_code_2, size: 16),
                         label: const Text('Voucher QR', style: TextStyle(fontSize: 12)),
                       ),
-                      if (isVuelo && !r.esCancelada) ...[
+                      if (isVuelo && !r.esCancelada && !r.esAsistido) ...[
                         OutlinedButton.icon(
                           onPressed: () => _cambiarFechaVuelo(r),
                           icon: const Icon(Icons.event_repeat, size: 16),
@@ -381,7 +466,51 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                 ),
               ],
             ),
-            if (!r.esCancelada) ...[
+            if (r.esCancelada) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.cancel_outlined, size: 16, color: BookingColors.errorRed),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Esta reserva se encuentra cancelada.',
+                        style: TextStyle(fontSize: 11, color: BookingColors.errorRed, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (r.esAsistido) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle_outline, size: 16, color: Color(0xFF15803D)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Check-in realizado / Asistencia confirmada. Servicio en curso. La cancelación no aplica una vez iniciado o completado el servicio.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
