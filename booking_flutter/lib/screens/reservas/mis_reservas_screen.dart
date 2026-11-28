@@ -63,6 +63,10 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
         email: auth.user?.email,
       );
       if (!mounted) return;
+      // Protección de Resiliencia: si la lista remota vino vacía por fallo de red, NUNCA borrar las reservas existentes
+      if (list.isEmpty && _reservas.isNotEmpty) {
+        return;
+      }
       // Verificar si hubo cambios en cantidad, orden o en estados
       bool hayCambios = list.length != _reservas.length;
       if (!hayCambios) {
@@ -563,26 +567,10 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
                     ),
                   ),
                   if (r.cancelable)
-                    Builder(builder: (ctx) {
-                      final isCancelling = _cancellingIds.contains(r.id) || (r.pnr != null && _cancellingIds.contains(r.pnr!));
-                      return TextButton(
-                        onPressed: isCancelling ? null : () => _confirmarCancelacion(r),
-                        child: isCancelling
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  SizedBox(
-                                    width: 13,
-                                    height: 13,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
-                                  ),
-                                  SizedBox(width: 6),
-                                  Text('Cancelando...', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                                ],
-                              )
-                            : const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
-                      );
-                    }),
+                    TextButton(
+                      onPressed: () => _confirmarCancelacion(r),
+                      child: const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
                 ],
               ),
             ],

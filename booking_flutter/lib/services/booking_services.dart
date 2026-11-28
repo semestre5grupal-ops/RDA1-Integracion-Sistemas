@@ -588,18 +588,21 @@ class BookingServices {
       final cnl = prefs.getStringList(_kCancelledOrders) ?? [];
       _cancelledKeys.addAll(cnl);
 
-      // Cargar reservas persistidas localmente
-      final rawAtrac = prefs.getStringList(_kReservasAtracciones) ?? [];
-      for (final s in rawAtrac) {
-        try {
-          final m = jsonDecode(s);
-          if (m is Map<String, dynamic>) {
-            final r = Reserva.fromJson(m, forcedVertical: 'atracciones');
-            if (!_reservasEnMemoria.any((x) => x.id == r.id || (x.pnr != null && x.pnr == r.pnr))) {
-              _reservasEnMemoria.add(r);
+      // Cargar reservas persistidas localmente de todas las verticales
+      for (final key in [_kReservasAtracciones, _kReservasAutos, _kReservasAlojamientos]) {
+        final vert = key == _kReservasAutos ? 'autos' : (key == _kReservasAlojamientos ? 'alojamientos' : 'atracciones');
+        final rawList = prefs.getStringList(key) ?? [];
+        for (final s in rawList) {
+          try {
+            final m = jsonDecode(s);
+            if (m is Map<String, dynamic>) {
+              final r = Reserva.fromJson(m, forcedVertical: vert);
+              if (!_reservasEnMemoria.any((x) => x.id == r.id || (x.pnr != null && x.pnr == r.pnr))) {
+                _reservasEnMemoria.add(r);
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
       _storageLoaded = true;
     } catch (_) {}
@@ -611,6 +614,27 @@ class BookingServices {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_kCheckedInOrders, _checkedInKeys.toList());
+      for (final key in [_kReservasAtracciones, _kReservasAutos, _kReservasAlojamientos]) {
+        final rawList = prefs.getStringList(key) ?? [];
+        final updatedList = <String>[];
+        for (final itemStr in rawList) {
+          try {
+            final m = jsonDecode(itemStr);
+            if (m is Map<String, dynamic>) {
+              if (m['id'] == id || (pnr != null && (m['pnr'] == pnr || m['id'] == pnr))) {
+                m['estado'] = 'CONFIRMADO_ASISTIDO';
+                m['status'] = 'CONFIRMADO_ASISTIDO';
+                updatedList.add(jsonEncode(m));
+                continue;
+              }
+            }
+            updatedList.add(itemStr);
+          } catch (_) {
+            updatedList.add(itemStr);
+          }
+        }
+        await prefs.setStringList(key, updatedList);
+      }
     } catch (_) {}
   }
 
@@ -620,6 +644,27 @@ class BookingServices {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_kCancelledOrders, _cancelledKeys.toList());
+      for (final key in [_kReservasAtracciones, _kReservasAutos, _kReservasAlojamientos]) {
+        final rawList = prefs.getStringList(key) ?? [];
+        final updatedList = <String>[];
+        for (final itemStr in rawList) {
+          try {
+            final m = jsonDecode(itemStr);
+            if (m is Map<String, dynamic>) {
+              if (m['id'] == id || (pnr != null && (m['pnr'] == pnr || m['id'] == pnr))) {
+                m['estado'] = 'CANCELLED';
+                m['status'] = 'CANCELLED';
+                updatedList.add(jsonEncode(m));
+                continue;
+              }
+            }
+            updatedList.add(itemStr);
+          } catch (_) {
+            updatedList.add(itemStr);
+          }
+        }
+        await prefs.setStringList(key, updatedList);
+      }
     } catch (_) {}
   }
 
