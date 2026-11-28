@@ -7,7 +7,6 @@ import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
 import 'detalle_reserva_vuelo_screen.dart';
-import 'voucher_qr_screen.dart';
 import '../../widgets/booking_footer.dart';
 import '../../widgets/modal_cambio_fecha.dart';
 import '../../widgets/modal_postventa.dart';
@@ -19,7 +18,7 @@ class MisReservasScreen extends StatefulWidget {
   State<MisReservasScreen> createState() => _MisReservasScreenState();
 }
 
-class _MisReservasScreenState extends State<MisReservasScreen> {
+class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindingObserver {
   bool _loading = true;
   List<Reserva> _reservas = [];
   String _selectedVertical = 'todos'; // todos, alojamientos, vuelos, autos, atracciones
@@ -30,19 +29,29 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startSilentPolling();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Al volver a la pestaña/ventana de la app, disparar de inmediato sincronización silenciosa (igual a visibilitychange en React)
+      _pollReservasSilencioso();
+    }
+  }
+
   void _startSilentPolling() {
     _pollTimer?.cancel();
-    // Sondeo periódico cada 2.8s (simulación gRPC / eventos reactivos en segundo plano)
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 2800), (_) => _pollReservasSilencioso());
+    // Sondeo periódico cada 2.5s (simulación reactiva de eventos gRPC en segundo plano)
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) => _pollReservasSilencioso());
   }
 
   Future<void> _pollReservasSilencioso() async {
@@ -54,11 +63,15 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
         email: auth.user?.email,
       );
       if (!mounted) return;
-      // Verificar si hubo cambios en cantidad o en estados (ej. CONFIRMED -> CONFIRMADO_ASISTIDO)
+      // Verificar si hubo cambios en cantidad o en estados
       bool hayCambios = list.length != _reservas.length;
       if (!hayCambios) {
-        for (int i = 0; i < list.length; i++) {
-          if (list[i].id != _reservas[i].id || list[i].estado != _reservas[i].estado) {
+        for (final item in list) {
+          final local = _reservas.firstWhere(
+            (r) => r.id == item.id || (r.pnr != null && item.pnr != null && r.pnr == item.pnr) || (item.pnr != null && r.id == item.pnr),
+            orElse: () => item,
+          );
+          if (local.estado.toUpperCase() != item.estado.toUpperCase()) {
             hayCambios = true;
             break;
           }
@@ -127,8 +140,9 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   }
 
   Future<void> _confirmarCancelacion(Reserva r) async {
+    final cancelKey = (r.pnr != null && r.pnr!.isNotEmpty) ? r.pnr! : r.id;
     // Si ya está cancelándose, evitar doble invocación
-    if (_cancellingIds.contains(r.id)) return;
+    if (_cancellingIds.contains(r.id) || _cancellingIds.contains(cancelKey)) return;
 
     // Vuelos: el backend exige el quoteId de /cancellation-quote (CancelBookingRequestDto).
     if (r.vertical.toLowerCase().contains('vuelo')) {
@@ -168,30 +182,17 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
 
     if (confirm != true || !mounted) return;
 
-    // Desactivar inmediatamente el botón y actualizar estado optimista
+    // Desactivar inmediatamente el botón y actualizar estado optimista a CANCELLED
     setState(() {
       _cancellingIds.add(r.id);
-      final idx = _reservas.indexWhere((item) => item.id == r.id || (item.pnr != null && item.pnr == r.pnr));
+      _cancellingIds.add(cancelKey);
+      final idx = _reservas.indexWhere((item) =>
+          item.id == r.id ||
+          item.id == cancelKey ||
+          (item.pnr != null && item.pnr == cancelKey) ||
+          (r.pnr != null && item.pnr == r.pnr));
       if (idx != -1) {
-        final old = _reservas[idx];
-        _reservas[idx] = Reserva(
-          id: old.id,
-          vertical: old.vertical,
-          servicioNombre: old.servicioNombre,
-          proveedor: old.proveedor,
-          fecha: old.fecha,
-          hora: old.hora,
-          checkin: old.checkin,
-          checkout: old.checkout,
-          total: old.total,
-          estado: 'CANCELLED',
-          voucherQr: old.voucherQr,
-          pnr: old.pnr,
-          imagenUrl: old.imagenUrl,
-          detalleExtra: old.detalleExtra,
-          fechaCreacion: old.fechaCreacion,
-          fechaServicio: old.fechaServicio,
-        );
+        _reservas[idx] = _reservas[idx].copyWithEstado('CANCELLED');
       }
     });
 
@@ -201,6 +202,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
       ok = await BookingServices.cancelarReserva(
         r.id,
         r.vertical,
+        pnr: r.pnr,
         token: auth.token,
         reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : 'Cancelación cliente',
       );
@@ -210,6 +212,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
       if (mounted) {
         setState(() {
           _cancellingIds.remove(r.id);
+          _cancellingIds.remove(cancelKey);
         });
       }
     }
@@ -222,7 +225,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
         backgroundColor: ok ? BookingColors.successGreen : BookingColors.errorRed,
       ),
     );
-    _loadReservas();
+    _pollReservasSilencioso();
   }
 
   List<Reserva> get _filteredReservas {
@@ -560,23 +563,26 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                     ),
                   ),
                   if (r.cancelable)
-                    TextButton(
-                      onPressed: _cancellingIds.contains(r.id) ? null : () => _confirmarCancelacion(r),
-                      child: _cancellingIds.contains(r.id)
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: const [
-                                SizedBox(
-                                  width: 13,
-                                  height: 13,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
-                                ),
-                                SizedBox(width: 6),
-                                Text('Cancelando...', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                              ],
-                            )
-                          : const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
-                    ),
+                    Builder(builder: (ctx) {
+                      final isCancelling = _cancellingIds.contains(r.id) || (r.pnr != null && _cancellingIds.contains(r.pnr!));
+                      return TextButton(
+                        onPressed: isCancelling ? null : () => _confirmarCancelacion(r),
+                        child: isCancelling
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  SizedBox(
+                                    width: 13,
+                                    height: 13,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
+                                  ),
+                                  SizedBox(width: 6),
+                                  Text('Cancelando...', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                ],
+                              )
+                            : const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
+                      );
+                    }),
                 ],
               ),
             ],

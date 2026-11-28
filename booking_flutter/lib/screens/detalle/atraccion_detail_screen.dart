@@ -465,7 +465,7 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Text('Total pagado:', style: TextStyle(fontSize: 12, color: BookingColors.textMuted)),
-                      Text('US$ ' + r.total.toStringAsFixed(2), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
+                      Text('US\$ ${r.total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: BookingColors.primaryBlue)),
                     ],
                   ),
                 ],
@@ -507,12 +507,10 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
     final today = DateTime(now.year, now.month, now.day);
     final sel = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
 
-    DateTime start = today;
-    if (sel.difference(today).inDays >= 4) {
-      start = sel.subtract(const Duration(days: 2));
-      if (start.isBefore(today)) start = today;
-    }
-    return List.generate(10, (i) => start.add(Duration(days: i)));
+    // Centrar la fecha seleccionada para que siempre aparezca directamente visible en la tira
+    DateTime start = sel.subtract(const Duration(days: 2));
+    if (start.isBefore(today)) start = today;
+    return List.generate(14, (i) => start.add(Duration(days: i)));
   }
 
   @override
