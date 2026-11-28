@@ -24,6 +24,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
   String _selectedVertical = 'todos'; // todos, alojamientos, vuelos, autos, atracciones
   String? _lastAuthKey;
   Timer? _pollTimer;
+  bool _isPolling = false;
   final Set<String> _cancellingIds = {};
 
   @override
@@ -43,47 +44,77 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Al volver a la pestaña/ventana de la app, disparar de inmediato sincronización silenciosa (igual a visibilitychange en React)
+      // Al volver a la app, sincronizar de inmediato
       _pollReservasSilencioso();
     }
   }
 
   void _startSilentPolling() {
     _pollTimer?.cancel();
-    // Sondeo periódico cada 2.5s (simulación reactiva de eventos gRPC en segundo plano)
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) => _pollReservasSilencioso());
+    // Sondeo periódico cada 3.0s con mutex (_isPolling) para evitar sobreposición y carreras
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 3000), (_) => _pollReservasSilencioso());
   }
 
   Future<void> _pollReservasSilencioso() async {
-    if (!mounted) return;
-    final auth = Provider.of<AuthProvider>(context, listen: false);
+    if (_isPolling || !mounted) return;
+    _isPolling = true;
     try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
       final list = await BookingServices.getMisReservas(
         token: auth.token,
         email: auth.user?.email,
       );
       if (!mounted) return;
-      // Verificar si hubo cambios en cantidad, orden o en estados
-      bool hayCambios = list.length != _reservas.length;
-      if (!hayCambios) {
-        for (int i = 0; i < list.length; i++) {
-          final item = list[i];
-          final localIdx = _reservas.indexWhere(
-            (r) => r.id == item.id || (r.pnr != null && item.pnr != null && r.pnr == item.pnr) || (item.pnr != null && r.id == item.pnr),
-          );
-          if (localIdx == -1 || _reservas[localIdx].estado.toUpperCase() != item.estado.toUpperCase()) {
-            hayCambios = true;
-            break;
+
+      // Reactividad tipo Composable (Android / React MisReservasPage.jsx):
+      // Si la respuesta de red viene parcial o con menos reservas debido a latencia celular,
+      // NUNCA eliminar ni hacer desaparecer las tarjetas ya mostradas en pantalla.
+      // Se actualiza ÚNICAMENTE el estado de cada tarjeta in-place por su PNR/ID,
+      // dejando las demás tarjetas 100% intactas, sin parpadeo ni recargas visuales.
+      bool hayCambios = false;
+      final actualizadas = List<Reserva>.from(_reservas);
+
+      for (final incoming in list) {
+        final idx = actualizadas.indexWhere((r) =>
+            r.id == incoming.id ||
+            (r.pnr != null && incoming.pnr != null && r.pnr == incoming.pnr) ||
+            (incoming.pnr != null && r.id == incoming.pnr) ||
+            (r.pnr != null && incoming.id == r.pnr));
+
+        if (idx != -1) {
+          final existing = actualizadas[idx];
+
+          // Regla de Preservación Monotónica (Paridad frontend/MisReservasPage.jsx):
+          // Si una reserva ya se encuentra CANCELLED o CONFIRMADO_ASISTIDO,
+          // NUNCA se degrada a CONFIRMED por respuestas transitorias desfasadas.
+          String finalStatus = incoming.estado;
+          if (existing.esCancelada && !incoming.esCancelada) {
+            finalStatus = 'CANCELLED';
+          } else if (existing.esAsistido && !incoming.esAsistido) {
+            finalStatus = existing.estado;
           }
+
+          if (existing.estado.toUpperCase() != finalStatus.toUpperCase()) {
+            actualizadas[idx] = existing.copyWithEstado(finalStatus);
+            hayCambios = true;
+          }
+        } else {
+          // Nueva reserva que no estaba previamente en la lista:
+          actualizadas.insert(0, incoming);
+          hayCambios = true;
         }
       }
-      if (hayCambios) {
+
+      // Si no hubo cambios de estado visibles, no disparamos setState (0 parpadeos)
+      if (hayCambios && mounted) {
         setState(() {
-          _reservas = list;
+          _reservas = actualizadas;
         });
       }
     } catch (_) {
-      // Ignorar errores transitorios de red en el sondeo de fondo
+      // Ignorar errores transitorios de red en el sondeo en segundo plano
+    } finally {
+      _isPolling = false;
     }
   }
 
@@ -107,8 +138,29 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
       email: auth.user?.email,
     );
     if (mounted) {
+      // Fusión Composable: preserva las tarjetas que ya estaban visibles
+      final actualizadas = List<Reserva>.from(_reservas);
+      for (final incoming in list) {
+        final idx = actualizadas.indexWhere((r) =>
+            r.id == incoming.id ||
+            (r.pnr != null && incoming.pnr != null && r.pnr == incoming.pnr) ||
+            (incoming.pnr != null && r.id == incoming.pnr) ||
+            (r.pnr != null && incoming.id == r.pnr));
+        if (idx != -1) {
+          final existing = actualizadas[idx];
+          String finalStatus = incoming.estado;
+          if (existing.esCancelada && !incoming.esCancelada) {
+            finalStatus = 'CANCELLED';
+          } else if (existing.esAsistido && !incoming.esAsistido) {
+            finalStatus = existing.estado;
+          }
+          actualizadas[idx] = existing.copyWithEstado(finalStatus);
+        } else {
+          actualizadas.insert(0, incoming);
+        }
+      }
       setState(() {
-        _reservas = list;
+        _reservas = actualizadas.isNotEmpty ? actualizadas : list;
         _loading = false;
       });
     }
@@ -563,26 +615,10 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
                     ),
                   ),
                   if (r.cancelable)
-                    Builder(builder: (ctx) {
-                      final isCancelling = _cancellingIds.contains(r.id) || (r.pnr != null && _cancellingIds.contains(r.pnr!));
-                      return TextButton(
-                        onPressed: isCancelling ? null : () => _confirmarCancelacion(r),
-                        child: isCancelling
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  SizedBox(
-                                    width: 13,
-                                    height: 13,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
-                                  ),
-                                  SizedBox(width: 6),
-                                  Text('Cancelando...', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                                ],
-                              )
-                            : const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
-                      );
-                    }),
+                    TextButton(
+                      onPressed: () => _confirmarCancelacion(r),
+                      child: const Text('Cancelar reserva', style: TextStyle(color: BookingColors.errorRed, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
                 ],
               ),
             ],

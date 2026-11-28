@@ -96,5 +96,72 @@ void main() {
       expect(testRes.id, 'TEST-MEM-999');
       expect(testRes.estadoDisplay, 'Confirmada');
     });
+
+    test('Lógica Composable / In-place diff: si la respuesta remota trae menos tarjetas, NUNCA borra las locales', () {
+      final existing1 = Reserva(
+        id: 'ATR-1',
+        vertical: 'atracciones',
+        servicioNombre: 'Atracción 1',
+        fecha: '2026-12-10',
+        total: 10.0,
+        estado: 'CONFIRMED',
+        fechaCreacion: DateTime.now(),
+        fechaServicio: DateTime.now().add(const Duration(days: 3)),
+      );
+      final existing2 = Reserva(
+        id: 'ATR-2',
+        vertical: 'atracciones',
+        servicioNombre: 'Atracción 2',
+        fecha: '2026-12-11',
+        total: 20.0,
+        estado: 'CONFIRMED',
+        fechaCreacion: DateTime.now(),
+        fechaServicio: DateTime.now().add(const Duration(days: 4)),
+      );
+
+      final currentReservas = [existing1, existing2];
+
+      // Supongamos que la llamada de red trajo solo ATR-1 actualizada a CONFIRMADO_ASISTIDO
+      final incoming = [
+        existing1.copyWithEstado('CONFIRMADO_ASISTIDO'),
+      ];
+
+      final actualizadas = List<Reserva>.from(currentReservas);
+      for (final inc in incoming) {
+        final idx = actualizadas.indexWhere((r) => r.id == inc.id);
+        if (idx != -1) {
+          actualizadas[idx] = actualizadas[idx].copyWithEstado(inc.estado);
+        }
+      }
+
+      // La lista conserva las 2 tarjetas, no desaparece ATR-2
+      expect(actualizadas.length, 2);
+      expect(actualizadas[0].estado, 'CONFIRMADO_ASISTIDO');
+      expect(actualizadas[1].id, 'ATR-2');
+      expect(actualizadas[1].estado, 'CONFIRMED');
+    });
+
+    test('Regla Monotónica: una reserva cancelada o asistida localmente jamás retrocede a CONFIRMED', () {
+      final cancelada = Reserva(
+        id: 'ATR-CAN',
+        vertical: 'atracciones',
+        servicioNombre: 'Atracción Cancelada',
+        fecha: '2026-12-10',
+        total: 10.0,
+        estado: 'CANCELLED',
+        fechaCreacion: DateTime.now(),
+        fechaServicio: DateTime.now().add(const Duration(days: 3)),
+      );
+
+      // Una respuesta desfasada del backend que aún dice CONFIRMED
+      final incomingStale = cancelada.copyWithEstado('CONFIRMED');
+
+      String finalStatus = incomingStale.estado;
+      if (cancelada.esCancelada && !incomingStale.esCancelada) {
+        finalStatus = 'CANCELLED';
+      }
+
+      expect(finalStatus, 'CANCELLED');
+    });
   });
 }

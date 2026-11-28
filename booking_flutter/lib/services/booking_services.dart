@@ -588,18 +588,21 @@ class BookingServices {
       final cnl = prefs.getStringList(_kCancelledOrders) ?? [];
       _cancelledKeys.addAll(cnl);
 
-      // Cargar reservas persistidas localmente
-      final rawAtrac = prefs.getStringList(_kReservasAtracciones) ?? [];
-      for (final s in rawAtrac) {
-        try {
-          final m = jsonDecode(s);
-          if (m is Map<String, dynamic>) {
-            final r = Reserva.fromJson(m, forcedVertical: 'atracciones');
-            if (!_reservasEnMemoria.any((x) => x.id == r.id || (x.pnr != null && x.pnr == r.pnr))) {
-              _reservasEnMemoria.add(r);
+      // Cargar reservas persistidas localmente de todas las verticales
+      for (final key in [_kReservasAtracciones, _kReservasAutos, _kReservasAlojamientos]) {
+        final vert = key == _kReservasAutos ? 'autos' : (key == _kReservasAlojamientos ? 'alojamientos' : 'atracciones');
+        final rawList = prefs.getStringList(key) ?? [];
+        for (final s in rawList) {
+          try {
+            final m = jsonDecode(s);
+            if (m is Map<String, dynamic>) {
+              final r = Reserva.fromJson(m, forcedVertical: vert);
+              if (!_reservasEnMemoria.any((x) => x.id == r.id || (x.pnr != null && x.pnr == r.pnr))) {
+                _reservasEnMemoria.add(r);
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
       _storageLoaded = true;
     } catch (_) {}
@@ -608,18 +611,76 @@ class BookingServices {
   static Future<void> marcarAsistidoLocal(String id, {String? pnr}) async {
     _checkedInKeys.add(id);
     if (pnr != null && pnr.isNotEmpty) _checkedInKeys.add(pnr);
+    for (int i = 0; i < _reservasEnMemoria.length; i++) {
+      final m = _reservasEnMemoria[i];
+      if (m.id == id ||
+          m.pnr == id ||
+          (pnr != null && (m.id == pnr || m.pnr == pnr || m.pnr == id))) {
+        _reservasEnMemoria[i] = m.copyWithEstado('CONFIRMADO_ASISTIDO');
+      }
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_kCheckedInOrders, _checkedInKeys.toList());
+      for (final key in [_kReservasAtracciones, _kReservasAutos, _kReservasAlojamientos]) {
+        final rawList = prefs.getStringList(key) ?? [];
+        final updatedList = <String>[];
+        for (final itemStr in rawList) {
+          try {
+            final m = jsonDecode(itemStr);
+            if (m is Map<String, dynamic>) {
+              if (m['id'] == id || (pnr != null && (m['pnr'] == pnr || m['id'] == pnr)) || m['pnr'] == id) {
+                m['estado'] = 'CONFIRMADO_ASISTIDO';
+                m['status'] = 'CONFIRMADO_ASISTIDO';
+                updatedList.add(jsonEncode(m));
+                continue;
+              }
+            }
+            updatedList.add(itemStr);
+          } catch (_) {
+            updatedList.add(itemStr);
+          }
+        }
+        await prefs.setStringList(key, updatedList);
+      }
     } catch (_) {}
   }
 
   static Future<void> marcarCanceladoLocal(String id, {String? pnr}) async {
     _cancelledKeys.add(id);
     if (pnr != null && pnr.isNotEmpty) _cancelledKeys.add(pnr);
+    for (int i = 0; i < _reservasEnMemoria.length; i++) {
+      final m = _reservasEnMemoria[i];
+      if (m.id == id ||
+          m.pnr == id ||
+          (pnr != null && (m.id == pnr || m.pnr == pnr || m.pnr == id))) {
+        _reservasEnMemoria[i] = m.copyWithEstado('CANCELLED');
+      }
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_kCancelledOrders, _cancelledKeys.toList());
+      for (final key in [_kReservasAtracciones, _kReservasAutos, _kReservasAlojamientos]) {
+        final rawList = prefs.getStringList(key) ?? [];
+        final updatedList = <String>[];
+        for (final itemStr in rawList) {
+          try {
+            final m = jsonDecode(itemStr);
+            if (m is Map<String, dynamic>) {
+              if (m['id'] == id || (pnr != null && (m['pnr'] == pnr || m['id'] == pnr)) || m['pnr'] == id) {
+                m['estado'] = 'CANCELLED';
+                m['status'] = 'CANCELLED';
+                updatedList.add(jsonEncode(m));
+                continue;
+              }
+            }
+            updatedList.add(itemStr);
+          } catch (_) {
+            updatedList.add(itemStr);
+          }
+        }
+        await prefs.setStringList(key, updatedList);
+      }
     } catch (_) {}
   }
 
@@ -670,7 +731,7 @@ class BookingServices {
               apiItems[r.pnr!] = r;
             }
 
-            // Sincronizar memoria interna si ya estaba guardada para que no quede con estado desactualizado
+            // Sincronizar memoria interna para que no desaparezca en caídas intermitentes de red
             final memIdx = _reservasEnMemoria.indexWhere((m) =>
                 m.id == r.id ||
                 (m.pnr != null && m.pnr == r.pnr) ||
@@ -678,6 +739,8 @@ class BookingServices {
                 (m.pnr != null && m.pnr == r.id));
             if (memIdx != -1) {
               _reservasEnMemoria[memIdx] = r;
+            } else {
+              _reservasEnMemoria.add(r);
             }
           } catch (_) {}
         }
