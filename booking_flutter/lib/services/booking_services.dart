@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import '../utils/json_parse.dart';
 import '../config/api_config.dart';
 import 'api_client.dart';
@@ -536,19 +539,123 @@ class BookingServices {
   // 5. MIS RESERVAS MULTI-VERTICAL & COMPENSACIÓN SAGA
   // =========================================================================
 
-  static final List<Reserva> _reservasEnMemoria = [];
-  static final Set<String> _cancelledKeys = {};
+  static const String _kCheckedInOrders = 'checked_in_orders';
+  static const String _kCancelledOrders = 'cancelled_orders';
+  static const String _kReservasAtracciones = 'reservas_atracciones';
+  static const String _kReservasAutos = 'reservas_autos';
+  static const String _kReservasAlojamientos = 'reservas_alojamientos';
 
-  static void agregarReservaDirecta(Reserva r) {
+  static final List<Reserva> _reservasEnMemoria = [];
+  static final Set<String> _checkedInKeys = {};
+  static final Set<String> _cancelledKeys = {};
+  static bool _storageLoaded = false;
+
+  static const List<String> _estadosAsistidos = [
+    'CONFIRMADO_ASISTIDO',
+    'CHECKED_IN',
+    'ASISTIDO',
+    'PICKED_UP',
+    'ENTREGADO',
+    'COMPLETED',
+    'RETURNED',
+  ];
+
+  /// Consulta autoritativa en tiempo real al endpoint de ciclo de vida de Booking Central.
+  /// Este endpoint consulta directamente schema_auditoria.auditoria_transaccional
+  /// donde se registran los eventos de Check-in presencial emitidos por los socios externos.
+  static Future<Map<String, dynamic>?> consultarEstadoReserva(String pnrOrId) async {
+    try {
+      final clean = pnrOrId.trim();
+      if (clean.isEmpty) return null;
+      final res = await ApiClient.get(
+        '/reservas/${Uri.encodeComponent(clean)}/estado',
+        timeout: const Duration(seconds: 4),
+      );
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> _asegurarStorageCargado() async {
+    if (_storageLoaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final chk = prefs.getStringList(_kCheckedInOrders) ?? [];
+      _checkedInKeys.addAll(chk);
+      final cnl = prefs.getStringList(_kCancelledOrders) ?? [];
+      _cancelledKeys.addAll(cnl);
+
+      // Cargar reservas persistidas localmente
+      final rawAtrac = prefs.getStringList(_kReservasAtracciones) ?? [];
+      for (final s in rawAtrac) {
+        try {
+          final m = jsonDecode(s);
+          if (m is Map<String, dynamic>) {
+            final r = Reserva.fromJson(m, forcedVertical: 'atracciones');
+            if (!_reservasEnMemoria.any((x) => x.id == r.id || (x.pnr != null && x.pnr == r.pnr))) {
+              _reservasEnMemoria.add(r);
+            }
+          }
+        } catch (_) {}
+      }
+      _storageLoaded = true;
+    } catch (_) {}
+  }
+
+  static Future<void> marcarAsistidoLocal(String id, {String? pnr}) async {
+    _checkedInKeys.add(id);
+    if (pnr != null && pnr.isNotEmpty) _checkedInKeys.add(pnr);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kCheckedInOrders, _checkedInKeys.toList());
+    } catch (_) {}
+  }
+
+  static Future<void> marcarCanceladoLocal(String id, {String? pnr}) async {
+    _cancelledKeys.add(id);
+    if (pnr != null && pnr.isNotEmpty) _cancelledKeys.add(pnr);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kCancelledOrders, _cancelledKeys.toList());
+    } catch (_) {}
+  }
+
+  static Future<void> agregarReservaDirecta(Reserva r) async {
+    await _asegurarStorageCargado();
     _reservasEnMemoria.removeWhere((item) =>
         item.id == r.id ||
         (item.pnr != null && r.pnr != null && item.pnr == r.pnr) ||
         (r.pnr != null && item.id == r.pnr));
     _reservasEnMemoria.insert(0, r);
+
+    // Persistir de inmediato en SharedPreferences (paridad total con localStorage de React)
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = r.vertical.contains('auto')
+          ? _kReservasAutos
+          : (r.vertical.contains('aloj') ? _kReservasAlojamientos : _kReservasAtracciones);
+      final rawList = prefs.getStringList(key) ?? [];
+      final encoded = jsonEncode(r.toJson());
+      rawList.removeWhere((s) {
+        try {
+          final m = jsonDecode(s);
+          return m['id'] == r.id || (r.pnr != null && m['pnr'] == r.pnr);
+        } catch (_) {
+          return false;
+        }
+      });
+      rawList.insert(0, encoded);
+      await prefs.setStringList(key, rawList);
+    } catch (_) {}
   }
 
   static Future<List<Reserva>> getMisReservas({String? token, String? email}) async {
-    // Mapa indexado por PNR y por ID para unificar autoritativamente
+    await _asegurarStorageCargado();
+
+    final cleanEmail = (email ?? '').trim().toLowerCase();
     final Map<String, Reserva> apiItems = {};
 
     void mergeList(List<dynamic> rawList, String vertical) {
@@ -591,15 +698,24 @@ class BookingServices {
         } catch (_) {}
       }(),
 
-      // 2. Atracciones
+      // 2. Atracciones (con fallback resiliente si el filtro por email en la API devuelve vacío)
       () async {
         try {
-          final params = (email != null && email.isNotEmpty) ? {'email': email} : null;
+          final params = cleanEmail.isNotEmpty ? {'email': cleanEmail} : null;
           final res = await ApiClient.get('/atracciones/reservations', queryParams: params, token: token);
           if (res.statusCode == 200) {
             final data = jsonDecode(res.body);
             final list = data is List ? data : (data['data'] ?? []);
-            if (list is List) mergeList(list, 'atracciones');
+            if (list is List && list.isNotEmpty) {
+              mergeList(list, 'atracciones');
+            } else if (cleanEmail.isNotEmpty) {
+              final fallbackRes = await ApiClient.get('/atracciones/reservations', token: token);
+              if (fallbackRes.statusCode == 200) {
+                final fbData = jsonDecode(fallbackRes.body);
+                final fbList = fbData is List ? fbData : (fbData['data'] ?? []);
+                if (fbList is List) mergeList(fbList, 'atracciones');
+              }
+            }
           }
         } catch (_) {}
       }(),
@@ -607,12 +723,21 @@ class BookingServices {
       // 3. Autos
       () async {
         try {
-          final params = (email != null && email.isNotEmpty) ? {'email': email} : null;
+          final params = cleanEmail.isNotEmpty ? {'email': cleanEmail} : null;
           final res = await ApiClient.get('/autos/orders', queryParams: params, token: token);
           if (res.statusCode == 200) {
             final data = jsonDecode(res.body);
             final list = data is List ? data : (data['data'] ?? []);
-            if (list is List) mergeList(list, 'autos');
+            if (list is List && list.isNotEmpty) {
+              mergeList(list, 'autos');
+            } else if (cleanEmail.isNotEmpty) {
+              final fbRes = await ApiClient.get('/autos/orders', token: token);
+              if (fbRes.statusCode == 200) {
+                final fbData = jsonDecode(fbRes.body);
+                final fbList = fbData is List ? fbData : (fbData['data'] ?? []);
+                if (fbList is List) mergeList(fbList, 'autos');
+              }
+            }
           }
         } catch (_) {}
       }(),
@@ -634,36 +759,75 @@ class BookingServices {
       }(),
     ]);
 
-    // Extraer lista única conservando el objeto Reserva autoritativo más fresco
+    // Combinar reservas autoritativas de la API y reservas locales (eliminando duplicados)
     final seenKeys = <String>{};
     final results = <Reserva>[];
 
-    // 1. Primero las reservas que provienen autoritativamente de la API
-    for (final r in apiItems.values) {
+    void addReservaUnica(Reserva r) {
       final pnrKey = (r.pnr != null && r.pnr!.isNotEmpty) ? r.pnr! : r.id;
       if (!seenKeys.contains(r.id) && !seenKeys.contains(pnrKey)) {
         seenKeys.add(r.id);
         seenKeys.add(pnrKey);
-        if (_cancelledKeys.contains(r.id) || _cancelledKeys.contains(pnrKey)) {
+
+        // Regla Monotónica de Estado (Paridad React):
+        // Si el PNR/ID ya fue cancelado o asistido, NUNCA degradar a CONFIRMED
+        if (_cancelledKeys.contains(r.id) || _cancelledKeys.contains(pnrKey) || r.esCancelada) {
+          _cancelledKeys.add(r.id);
+          _cancelledKeys.add(pnrKey);
           results.add(r.copyWithEstado('CANCELLED'));
+        } else if (_checkedInKeys.contains(r.id) || _checkedInKeys.contains(pnrKey) || _estadosAsistidos.contains(r.estado.toUpperCase())) {
+          _checkedInKeys.add(r.id);
+          _checkedInKeys.add(pnrKey);
+          results.add(r.copyWithEstado('CONFIRMADO_ASISTIDO'));
         } else {
           results.add(r);
         }
       }
     }
 
-    // 2. Luego aquellas reservas en memoria que aún no hayan sido devueltas por la API
+    // 1. Reservas de la API
+    for (final r in apiItems.values) {
+      addReservaUnica(r);
+    }
+
+    // 2. Reservas en memoria local (persisten incluso si la API estuviera inaccesible)
     for (final r in _reservasEnMemoria) {
-      final pnrKey = (r.pnr != null && r.pnr!.isNotEmpty) ? r.pnr! : r.id;
-      if (!seenKeys.contains(r.id) && !seenKeys.contains(pnrKey)) {
-        seenKeys.add(r.id);
-        seenKeys.add(pnrKey);
-        if (_cancelledKeys.contains(r.id) || _cancelledKeys.contains(pnrKey)) {
-          results.add(r.copyWithEstado('CANCELLED'));
-        } else {
-          results.add(r);
-        }
-      }
+      addReservaUnica(r);
+    }
+
+    // 3. Sondeo reactivo en tiempo real al endpoint de auditoría /reservas/:pnr/estado
+    // para todas las reservas de atracciones y autos que aún no figuren como asistidas o canceladas.
+    // Esto detecta al instante cuando el socio confirma asistencia en su portal!
+    final activas = results.where((r) =>
+        !r.esCancelada &&
+        !r.esAsistido &&
+        r.pnr != null &&
+        r.pnr!.isNotEmpty &&
+        r.pnr != 'ATRAC' &&
+        r.pnr != 'AUTO').toList();
+
+    if (activas.isNotEmpty) {
+      await Future.wait(
+        activas.map((item) async {
+          final estadoData = await consultarEstadoReserva(item.pnr!);
+          if (estadoData != null) {
+            final st = (estadoData['status'] ?? estadoData['estado'] ?? '').toString().toUpperCase();
+            if (_estadosAsistidos.contains(st)) {
+              await marcarAsistidoLocal(item.id, pnr: item.pnr);
+              final idx = results.indexWhere((x) => x.id == item.id || (item.pnr != null && x.pnr == item.pnr));
+              if (idx != -1) {
+                results[idx] = results[idx].copyWithEstado('CONFIRMADO_ASISTIDO');
+              }
+            } else if (st == 'CANCELLED' || st == 'CANCELADA') {
+              await marcarCanceladoLocal(item.id, pnr: item.pnr);
+              final idx = results.indexWhere((x) => x.id == item.id || (item.pnr != null && x.pnr == item.pnr));
+              if (idx != -1) {
+                results[idx] = results[idx].copyWithEstado('CANCELLED');
+              }
+            }
+          }
+        }),
+      );
     }
 
     results.sort((a, b) => b.fechaCreacion.compareTo(a.fechaCreacion));
@@ -678,9 +842,8 @@ class BookingServices {
     String reason = 'Cancelación solicitada por el cliente',
   }) async {
     final targetCode = (pnr != null && pnr.isNotEmpty) ? pnr : id;
-    _cancelledKeys.add(id);
-    _cancelledKeys.add(targetCode);
-    if (pnr != null && pnr.isNotEmpty) _cancelledKeys.add(pnr);
+    await marcarCanceladoLocal(id, pnr: targetCode);
+    if (pnr != null && pnr.isNotEmpty) await marcarCanceladoLocal(pnr);
 
     // Actualizar inmediatamente en memoria local cualquier coincidencia de id o pnr
     for (int i = 0; i < _reservasEnMemoria.length; i++) {
@@ -691,8 +854,6 @@ class BookingServices {
           m.pnr == targetCode ||
           (m.pnr != null && (m.pnr == pnr || id.contains(m.pnr!)))) {
         _reservasEnMemoria[i] = m.copyWithEstado('CANCELLED');
-        if (m.pnr != null) _cancelledKeys.add(m.pnr!);
-        _cancelledKeys.add(m.id);
       }
     }
 
@@ -711,19 +872,43 @@ class BookingServices {
       path = '/atracciones/reservations/${Uri.encodeComponent(targetCode)}/cancel';
     }
 
+    // Idempotency UUID reglamentario
+    final idemUuid = const Uuid().v4();
+    final corrUuid = const Uuid().v4();
+
+    // 1. Invocar Endpoint de Cancelación en Azure Booking Core
     try {
-      final res = await ApiClient.post(
+      await ApiClient.post(
         path,
         body: {'reason': reason},
         token: token,
-        idempotencyKey: 'cancel-$targetCode-${DateTime.now().millisecondsSinceEpoch}',
+        idempotencyKey: idemUuid,
+        correlationId: corrUuid,
         includeFingerprint: fingerprint,
         timeout: ApiConfig.sagaTimeout,
       );
-      if (res.statusCode == 200 || res.statusCode == 201 || res.statusCode == 204) {
-        return true;
-      }
     } catch (_) {}
+
+    // 2. Notificación Directa al Socio Externo (TourGirls / Descubre EC) para sincronización inmediata
+    if (v.contains('atrac') || targetCode.startsWith('DEC-') || targetCode.startsWith('TG-')) {
+      try {
+        final tgClient = http.Client();
+        await tgClient.post(
+          Uri.parse('https://tourgirls-gateway-mm.azurewebsites.net/api/v3/atracciones/reservas/${Uri.encodeComponent(targetCode)}/cancel'),
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': 'Bw_Y7_TsbB7DcETwoa-mw6xSunT_rP5nHf_ZitpfB2w',
+            'Idempotency-Key': const Uuid().v4(),
+            'X-Correlation-Id': const Uuid().v4(),
+          },
+          body: jsonEncode({
+            'reason': reason,
+            'solicitante': 'BOOKING_FLUTTER',
+          }),
+        ).timeout(const Duration(seconds: 4));
+      } catch (_) {}
+    }
+
     return true; // Garantizar consistencia optimista en el cliente
   }
 

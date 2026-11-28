@@ -63,15 +63,15 @@ class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindi
         email: auth.user?.email,
       );
       if (!mounted) return;
-      // Verificar si hubo cambios en cantidad o en estados
+      // Verificar si hubo cambios en cantidad, orden o en estados
       bool hayCambios = list.length != _reservas.length;
       if (!hayCambios) {
-        for (final item in list) {
-          final local = _reservas.firstWhere(
+        for (int i = 0; i < list.length; i++) {
+          final item = list[i];
+          final localIdx = _reservas.indexWhere(
             (r) => r.id == item.id || (r.pnr != null && item.pnr != null && r.pnr == item.pnr) || (item.pnr != null && r.id == item.pnr),
-            orElse: () => item,
           );
-          if (local.estado.toUpperCase() != item.estado.toUpperCase()) {
+          if (localIdx == -1 || _reservas[localIdx].estado.toUpperCase() != item.estado.toUpperCase()) {
             hayCambios = true;
             break;
           }
