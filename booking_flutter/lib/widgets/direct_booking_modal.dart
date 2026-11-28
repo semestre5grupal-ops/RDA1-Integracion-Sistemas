@@ -4,7 +4,6 @@ import '../models/reserva.dart';
 import '../providers/auth_provider.dart';
 import '../services/booking_services.dart';
 import '../theme/booking_colors.dart';
-import '../screens/reservas/voucher_qr_screen.dart';
 
 class DirectBookingModal {
   static Future<void> show(
@@ -334,7 +333,7 @@ class DirectBookingModal {
                                         Text('Total pagado (con IVA 15%): US\$ ${total.toStringAsFixed(2)}'),
                                         const SizedBox(height: 6),
                                         const Text(
-                                          'Tu voucher con código QR y la factura electrónica SRI ya están disponibles en tu sección de reservas.',
+                                          'Tu confirmación de reserva y comprobante electrónico ya están disponibles en tu sección de reservas.',
                                           style: TextStyle(fontSize: 12, color: BookingColors.textMuted),
                                         ),
                                       ],
@@ -343,26 +342,19 @@ class DirectBookingModal {
                                       TextButton(
                                         onPressed: () {
                                           Navigator.pop(dialogCtx);
-                                          Navigator.pushNamed(context, '/reservas');
                                         },
-                                        child: const Text('Ir a Mis Reservas', style: TextStyle(color: BookingColors.textDark)),
+                                        child: const Text('Cerrar', style: TextStyle(color: BookingColors.textMuted)),
                                       ),
-                                      ElevatedButton.icon(
+                                      ElevatedButton(
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: BookingColors.primaryBlue,
                                           foregroundColor: Colors.white,
                                         ),
                                         onPressed: () {
                                           Navigator.pop(dialogCtx);
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) => VoucherQrScreen(reserva: nuevaReserva),
-                                            ),
-                                          );
+                                          Navigator.pushNamed(context, '/reservas');
                                         },
-                                        icon: const Icon(Icons.qr_code, size: 18),
-                                        label: const Text('Ver Voucher QR'),
+                                        child: const Text('Ir a Mis Reservas'),
                                       ),
                                     ],
                                   ),

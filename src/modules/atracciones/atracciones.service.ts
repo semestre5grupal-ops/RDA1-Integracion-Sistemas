@@ -58,6 +58,7 @@ const DILAN_KNOWN_IDS = new Set([
 @Injectable()
 export class AtraccionesService implements OnModuleInit {
   private readonly logger = new Logger(AtraccionesService.name);
+  private availabilityCache = new Map<string, { timestamp: number; data: any }>();
   private readonly EXTERNAL_API_URL = process.env.ATRACCIONES_API_URL || 'https://jsonplaceholder.typicode.com/posts';
 
   async onModuleInit() {
@@ -1136,6 +1137,12 @@ export class AtraccionesService implements OnModuleInit {
   // ============================================================================
   async getAvailability(id: string, date?: string): Promise<any> {
     const targetDate = date || new Date().toISOString().split('T')[0];
+    const cacheKey = `${id}:${targetDate}`;
+    const cached = this.availabilityCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 20000) {
+      this.logger.debug(`[Cache Hit] Disponibilidad para ${cacheKey} servida desde memoria (0ms)`);
+      return cached.data;
+    }
     this.logger.log(`Consultando turnos y aforo para atracción ${id} en fecha ${targetDate}`);
 
     let item = await this.atraccionRepo.findOne({ where: [{ id }, { slug: id }] });
@@ -1160,6 +1167,11 @@ export class AtraccionesService implements OnModuleInit {
     let isGloria = partnerCode === 'NODE_ATR_GLORIA' || gloriaKnownIds.has(id);
     let isDilan = partnerCode === 'NODE_ATR_DILAN';
     let isAriel = partnerCode === 'NODE_ATR_ARIEL';
+
+    if (id === 'AsM3HitC5wbZ' || (item?.nombre || '').toLowerCase().includes('tourgirls')) {
+      isMichael = true;
+      isDilan = false;
+    }
 
     if (!isAlisson && !isMichael && !isGloria && !isDilan && !isAriel) {
       if (DILAN_KNOWN_IDS.has(id) || id.startsWith('6f03') || id === '6f035852-c8a8-49b1-a771-1b34b07e972d') {
@@ -1204,22 +1216,28 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && (Array.isArray(data.turnos) || Array.isArray(data.time_slots))) {
           const rawSlots = data.turnos || data.time_slots;
-          const mappedSlots = rawSlots.map((s: any) => ({
-            id: s.slot_id || `slot-${id}`,
-            slot_id: s.slot_id || `slot-${id}`,
-            time: s.time || s.hora || '09:00 a.m.',
-            hora: s.hora || s.time || '09:00 a.m.',
-            hora_inicio: s.hora || s.time || '09:00 a.m.',
-            capacidad_total: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos_totales: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            cupos_disponibles: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            status: s.estado || s.status || 'DISPONIBLE',
-            estado: s.estado || s.status || 'DISPONIBLE',
-            precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 30),
-            precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 15),
-          }));
-          return {
+          const mappedSlots = rawSlots.map((s: any) => {
+            const rawCupos = s.cupos_disponibles ?? s.available_slots ?? s.available_spots ?? s.cupos ?? s.cupo ?? s.disponibles ?? s.available ?? s.capacidad ?? s.capacity ?? s.aforo ?? (typeof s.disponible === 'number' ? s.disponible : undefined);
+            const rawTotal = s.cupos_totales ?? s.total_slots ?? s.total_spots ?? s.capacidad_total ?? s.capacidad ?? s.capacity ?? s.aforo ?? s.total ?? rawCupos;
+            const cuposDisponibles = rawCupos !== undefined ? Number(rawCupos) : 0;
+            const capacidadTotal = rawTotal !== undefined ? Number(rawTotal) : cuposDisponibles;
+            return {
+              id: s.slot_id || `slot-${id}`,
+              slot_id: s.slot_id || `slot-${id}`,
+              time: s.time || s.hora || '09:00 a.m.',
+              hora: s.hora || s.time || '09:00 a.m.',
+              hora_inicio: s.hora || s.time || '09:00 a.m.',
+              capacidad_total: capacidadTotal,
+              cupos_totales: capacidadTotal,
+              cupos: cuposDisponibles,
+              cupos_disponibles: cuposDisponibles,
+              status: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              estado: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 30),
+              precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 15),
+            };
+          });
+          const result = {
             atraccion_id: id,
             date: targetDate,
             fecha: targetDate,
@@ -1228,6 +1246,8 @@ export class AtraccionesService implements OnModuleInit {
             time_slots: mappedSlots,
             turnos: mappedSlots,
           };
+          this.availabilityCache.set(cacheKey, { timestamp: Date.now(), data: result });
+          return result;
         }
       } catch (err: any) {
         this.logger.warn(`Error consultando disponibilidad en TourGirls (Michael): ${err.message}`);
@@ -1249,21 +1269,27 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && (Array.isArray(data.turnos) || Array.isArray(data.time_slots))) {
           const rawSlots = data.turnos || data.time_slots;
-          const mappedSlots = rawSlots.map((s: any) => ({
-            id: s.slot_id || `slot-${id}`,
-            slot_id: s.slot_id || `slot-${id}`,
-            time: s.time || s.hora || '09:00 a.m.',
-            hora: s.hora || s.time || '09:00 a.m.',
-            hora_inicio: s.hora || s.time || '09:00 a.m.',
-            capacidad_total: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos_totales: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            cupos_disponibles: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            status: s.estado || s.status || 'DISPONIBLE',
-            estado: s.estado || s.status || 'DISPONIBLE',
-            precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 25),
-            precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 12.5),
-          }));
+          const mappedSlots = rawSlots.map((s: any) => {
+            const rawCupos = s.cupos_disponibles ?? s.available_slots ?? s.available_spots ?? s.cupos ?? s.cupo ?? s.disponibles ?? s.available ?? s.capacidad ?? s.capacity ?? s.aforo ?? (typeof s.disponible === 'number' ? s.disponible : undefined);
+            const rawTotal = s.cupos_totales ?? s.total_slots ?? s.total_spots ?? s.capacidad_total ?? s.capacidad ?? s.capacity ?? s.aforo ?? s.total ?? rawCupos;
+            const cuposDisponibles = rawCupos !== undefined ? Number(rawCupos) : 0;
+            const capacidadTotal = rawTotal !== undefined ? Number(rawTotal) : cuposDisponibles;
+            return {
+              id: s.slot_id || `slot-${id}`,
+              slot_id: s.slot_id || `slot-${id}`,
+              time: s.time || s.hora || '09:00 a.m.',
+              hora: s.hora || s.time || '09:00 a.m.',
+              hora_inicio: s.hora || s.time || '09:00 a.m.',
+              capacidad_total: capacidadTotal,
+              cupos_totales: capacidadTotal,
+              cupos: cuposDisponibles,
+              cupos_disponibles: cuposDisponibles,
+              status: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              estado: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 25),
+              precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 12.5),
+            };
+          });
           return {
             atraccion_id: id,
             date: targetDate,
@@ -1486,28 +1512,34 @@ export class AtraccionesService implements OnModuleInit {
             {
               params: { date: targetDate },
               headers: { 'x-api-key': '40f8a31375e24536bf1dd8f48dd48a94c7187e498b5df568' },
-              timeout: 5000,
+              timeout: 1500,
             },
           ),
         );
 
         if (data && (Array.isArray(data.turnos) || Array.isArray(data.time_slots))) {
           const rawSlots = data.turnos || data.time_slots;
-          const mappedSlots = rawSlots.map((s: any) => ({
-            id: s.slot_id || `slot-${id}`,
-            slot_id: s.slot_id,
-            time: s.time || s.hora || '09:00 a.m.',
-            hora: s.hora || s.time || '09:00 a.m.',
-            hora_inicio: s.hora || s.time || '09:00 a.m.',
-            capacidad_total: Number(s.cupos_totales ?? s.total_slots ?? 5),
-            cupos_totales: Number(s.cupos_totales ?? s.total_slots ?? 5),
-            cupos: Number(s.cupos_disponibles ?? s.available_slots ?? 5),
-            cupos_disponibles: Number(s.cupos_disponibles ?? s.available_slots ?? 5),
-            status: s.estado || s.status || 'DISPONIBLE',
-            estado: s.estado || s.status || 'DISPONIBLE',
-            precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 50),
-            precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 25),
-          }));
+          const mappedSlots = rawSlots.map((s: any) => {
+            const rawCupos = s.cupos_disponibles ?? s.available_slots ?? s.available_spots ?? s.cupos ?? s.cupo ?? s.disponibles ?? s.available ?? s.capacidad ?? s.capacity ?? s.aforo ?? (typeof s.disponible === 'number' ? s.disponible : undefined);
+            const rawTotal = s.cupos_totales ?? s.total_slots ?? s.total_spots ?? s.capacidad_total ?? s.capacidad ?? s.capacity ?? s.aforo ?? s.total ?? rawCupos;
+            const cuposDisponibles = rawCupos !== undefined ? Number(rawCupos) : 0;
+            const capacidadTotal = rawTotal !== undefined ? Number(rawTotal) : cuposDisponibles;
+            return {
+              id: s.slot_id || `slot-${id}`,
+              slot_id: s.slot_id,
+              time: s.time || s.hora || '09:00 a.m.',
+              hora: s.hora || s.time || '09:00 a.m.',
+              hora_inicio: s.hora || s.time || '09:00 a.m.',
+              capacidad_total: capacidadTotal,
+              cupos_totales: capacidadTotal,
+              cupos: cuposDisponibles,
+              cupos_disponibles: cuposDisponibles,
+              status: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              estado: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 50),
+              precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 25),
+            };
+          });
           return {
             atraccion_id: id,
             date: targetDate,
@@ -1621,8 +1653,8 @@ export class AtraccionesService implements OnModuleInit {
 
     // Si no existen turnos en la base para esa fecha, generar slots predeterminados en memoria
     if (!turnos || turnos.length === 0) {
-      const fallbackCap = isGloria ? 5 : Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 20);
-      let s09 = Math.min(14, fallbackCap), s11 = Math.min(3, fallbackCap), s14 = Math.min(18, fallbackCap);
+      const fallbackCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || (item as any)?.aforo || 5);
+      let s09 = Math.min(5, fallbackCap), s11 = Math.min(3, fallbackCap), s14 = Math.min(5, fallbackCap);
       if (this.inventoryService) {
         const grpcStock = this.inventoryService.getInventory(id, targetDate);
         grpcStock.forEach((s) => {
@@ -3378,6 +3410,8 @@ export class AtraccionesService implements OnModuleInit {
       atraccionId === 'Fy6d7XTppVZ5' ||
       atraccionId === 'rLohsmEh6809' ||
       atraccionId === '1X755jE2isp4' ||
+      atraccionId === 'AsM3HitC5wbZ' ||
+      (reserva?.specialRequirements || '').toLowerCase().includes('tourgirls') ||
       (reserva?.voucherQrPayload || '').toUpperCase().includes('TOURGIRLS');
 
     if (isGloria) {

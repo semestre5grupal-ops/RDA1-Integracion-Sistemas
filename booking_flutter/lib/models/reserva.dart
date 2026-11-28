@@ -23,6 +23,23 @@ class Reserva {
   String get itemNombre => servicioNombre;
   String get tipo => vertical;
   bool get esCancelada => estado.toUpperCase() == 'CANCELADA' || estado.toUpperCase() == 'CANCELLED';
+  bool get esAsistido => const [
+        'CONFIRMADO_ASISTIDO',
+        'CHECKED_IN',
+        'ASISTIDO',
+        'PICKED_UP',
+        'ENTREGADO',
+        'COMPLETED',
+      ].contains(estado.toUpperCase());
+  bool get esConfirmada => estado.toUpperCase() == 'CONFIRMED' || estado.toUpperCase() == 'CONFIRMADA';
+
+  String get estadoDisplay {
+    if (esCancelada) return 'Cancelada';
+    if (esAsistido) return 'Check-in Realizado (Sí asistió)';
+    if (esConfirmada) return 'Confirmada';
+    if (estado.toUpperCase() == 'PENDING') return 'Pendiente';
+    return estado;
+  }
 
   Reserva({
     required this.id,
@@ -140,11 +157,54 @@ class Reserva {
     );
   }
 
-  /// Regla estricta de cancelación: 48 horas para alojamientos, 24 horas para el resto.
+  /// Regla estricta de cancelación:
+  /// - Si ya fue cancelada o ya se realizó el check-in / asistencia, NO es cancelable.
+  /// - 48 horas para alojamientos, 24 horas para el resto.
   bool get cancelable {
-    if (esCancelada) return false;
+    if (esCancelada || esAsistido) return false;
     final horasRestantes = fechaServicio.difference(DateTime.now()).inHours;
     final horasLimite = vertical.toLowerCase().contains('alojamiento') ? 48 : 24;
     return horasRestantes >= horasLimite;
   }
+
+  Reserva copyWithEstado(String nuevoEstado) {
+    return Reserva(
+      id: id,
+      vertical: vertical,
+      servicioNombre: servicioNombre,
+      proveedor: proveedor,
+      fecha: fecha,
+      hora: hora,
+      checkin: checkin,
+      checkout: checkout,
+      total: total,
+      estado: nuevoEstado,
+      voucherQr: voucherQr,
+      pnr: pnr,
+      imagenUrl: imagenUrl,
+      detalleExtra: detalleExtra,
+      fechaCreacion: fechaCreacion,
+      fechaServicio: fechaServicio,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'vertical': vertical,
+    'servicio_nombre': servicioNombre,
+    'proveedor': proveedor,
+    'fecha': fecha,
+    'hora': hora,
+    'checkin': checkin,
+    'checkout': checkout,
+    'total': total,
+    'estado': estado,
+    'status': estado,
+    'voucher_qr': voucherQr,
+    'pnr': pnr,
+    'imagenUrl': imagenUrl,
+    'detalleExtra': detalleExtra,
+    'createdAt': fechaCreacion.toIso8601String(),
+    'fechaServicio': fechaServicio.toIso8601String(),
+  };
 }

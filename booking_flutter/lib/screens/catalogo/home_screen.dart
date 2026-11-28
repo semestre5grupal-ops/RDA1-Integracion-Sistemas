@@ -29,7 +29,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const List<String> _autoTimeSlots = [
     '07:00',
     '08:00',
@@ -105,6 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _atrPollTimer;
   bool _fetchingAloj = false;
   bool _fetchingAtr = false;
+  bool _isAppActive = true;
   String? _alojError;
   String? _atrError;
   final ScrollController _scrollCtrl = ScrollController();
@@ -137,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'codigo': 'GPS',
       'nombre': 'Galápagos',
       'descripcion': 'Paraíso natural único en el mundo',
-      'imagen': 'https://images.unsplash.com/photo-1547459124-e23883747a40?w=400&h=240&fit=crop',
+      'imagen': 'https://cf.bstatic.com/xdata/images/city/600x600/789773.jpg?k=d69235159c2c6133ca29b3c7dfd4898da8521973758ff4e389458e17f9f9c0a4&o=',
       'desde': '\$119',
     },
   ];
@@ -145,6 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadInitialCatalogs();
     _atrFocus.addListener(() {
       if (!_atrFocus.hasFocus) {
@@ -161,14 +163,27 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => _atrShowSuggestions = _atrQueryCtrl.text.trim().isNotEmpty);
       }
     });
-    // Sondeo silencioso con la misma cadencia que React: alojamientos cada 5 s
-    // (AlojamientosPage.jsx) y atracciones cada 8 s (AtraccionesPage.jsx).
-    _catalogsPollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollAlojamientos());
-    _atrPollTimer = Timer.periodic(const Duration(seconds: 8), (_) => _pollAtracciones());
+    // Sondeo silencioso eficiente: solo consulta cuando la pestaña/app está activa
+    // y con cadencia moderada para evitar consumo excesivo de cuota (egress).
+    _catalogsPollTimer = Timer.periodic(const Duration(seconds: 15), (_) => _pollAlojamientos());
+    _atrPollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _pollAtracciones());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final active = state == AppLifecycleState.resumed;
+    if (active && !_isAppActive) {
+      _isAppActive = true;
+      _pollAlojamientos();
+      _pollAtracciones();
+    } else if (!active) {
+      _isAppActive = false;
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _catalogsPollTimer?.cancel();
     _atrPollTimer?.cancel();
     _scrollCtrl.dispose();
@@ -193,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Cada fuente es independiente y no se encima (isFetchingRef de React):
   /// un error transitorio conserva lo último que se vio de los socios.
   Future<void> _pollAlojamientos() async {
-    if (_fetchingAloj) return;
+    if (_fetchingAloj || !_isAppActive) return;
     _fetchingAloj = true;
     try {
       final data = await BookingServices.getAlojamientos(page: 1, limit: 15);
@@ -215,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pollAtracciones() async {
-    if (_fetchingAtr) return;
+    if (_fetchingAtr || !_isAppActive) return;
     _fetchingAtr = true;
     try {
       final data = await BookingServices.getAtracciones(page: 1, limit: 100);

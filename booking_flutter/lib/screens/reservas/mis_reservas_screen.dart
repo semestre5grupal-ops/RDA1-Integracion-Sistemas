@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/reserva.dart';
@@ -6,7 +7,6 @@ import '../../services/booking_services.dart';
 import '../../theme/booking_colors.dart';
 import '../auth/login_screen.dart';
 import 'detalle_reserva_vuelo_screen.dart';
-import 'voucher_qr_screen.dart';
 import '../../widgets/booking_footer.dart';
 import '../../widgets/modal_cambio_fecha.dart';
 import '../../widgets/modal_postventa.dart';
@@ -18,11 +18,105 @@ class MisReservasScreen extends StatefulWidget {
   State<MisReservasScreen> createState() => _MisReservasScreenState();
 }
 
-class _MisReservasScreenState extends State<MisReservasScreen> {
+class _MisReservasScreenState extends State<MisReservasScreen> with WidgetsBindingObserver {
   bool _loading = true;
   List<Reserva> _reservas = [];
   String _selectedVertical = 'todos'; // todos, alojamientos, vuelos, autos, atracciones
   String? _lastAuthKey;
+  Timer? _pollTimer;
+  bool _isPolling = false;
+  final Set<String> _cancellingIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startSilentPolling();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Al volver a la app, sincronizar de inmediato
+      _pollReservasSilencioso();
+    }
+  }
+
+  void _startSilentPolling() {
+    _pollTimer?.cancel();
+    // Sondeo periódico cada 3.0s con mutex (_isPolling) para evitar sobreposición y carreras
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 3000), (_) => _pollReservasSilencioso());
+  }
+
+  Future<void> _pollReservasSilencioso() async {
+    if (_isPolling || !mounted) return;
+    _isPolling = true;
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final list = await BookingServices.getMisReservas(
+        token: auth.token,
+        email: auth.user?.email,
+      );
+      if (!mounted) return;
+
+      // Reactividad tipo Composable (Android / React MisReservasPage.jsx):
+      // Si la respuesta de red viene parcial o con menos reservas debido a latencia celular,
+      // NUNCA eliminar ni hacer desaparecer las tarjetas ya mostradas en pantalla.
+      // Se actualiza ÚNICAMENTE el estado de cada tarjeta in-place por su PNR/ID,
+      // dejando las demás tarjetas 100% intactas, sin parpadeo ni recargas visuales.
+      bool hayCambios = false;
+      final actualizadas = List<Reserva>.from(_reservas);
+
+      for (final incoming in list) {
+        final idx = actualizadas.indexWhere((r) =>
+            r.id == incoming.id ||
+            (r.pnr != null && incoming.pnr != null && r.pnr == incoming.pnr) ||
+            (incoming.pnr != null && r.id == incoming.pnr) ||
+            (r.pnr != null && incoming.id == r.pnr));
+
+        if (idx != -1) {
+          final existing = actualizadas[idx];
+
+          // Regla de Preservación Monotónica (Paridad frontend/MisReservasPage.jsx):
+          // Si una reserva ya se encuentra CANCELLED o CONFIRMADO_ASISTIDO,
+          // NUNCA se degrada a CONFIRMED por respuestas transitorias desfasadas.
+          String finalStatus = incoming.estado;
+          if (existing.esCancelada && !incoming.esCancelada) {
+            finalStatus = 'CANCELLED';
+          } else if (existing.esAsistido && !incoming.esAsistido) {
+            finalStatus = existing.estado;
+          }
+
+          if (existing.estado.toUpperCase() != finalStatus.toUpperCase()) {
+            actualizadas[idx] = existing.copyWithEstado(finalStatus);
+            hayCambios = true;
+          }
+        } else {
+          // Nueva reserva que no estaba previamente en la lista:
+          actualizadas.insert(0, incoming);
+          hayCambios = true;
+        }
+      }
+
+      // Si no hubo cambios de estado visibles, no disparamos setState (0 parpadeos)
+      if (hayCambios && mounted) {
+        setState(() {
+          _reservas = actualizadas;
+        });
+      }
+    } catch (_) {
+      // Ignorar errores transitorios de red en el sondeo en segundo plano
+    } finally {
+      _isPolling = false;
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -44,8 +138,29 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
       email: auth.user?.email,
     );
     if (mounted) {
+      // Fusión Composable: preserva las tarjetas que ya estaban visibles
+      final actualizadas = List<Reserva>.from(_reservas);
+      for (final incoming in list) {
+        final idx = actualizadas.indexWhere((r) =>
+            r.id == incoming.id ||
+            (r.pnr != null && incoming.pnr != null && r.pnr == incoming.pnr) ||
+            (incoming.pnr != null && r.id == incoming.pnr) ||
+            (r.pnr != null && incoming.id == r.pnr));
+        if (idx != -1) {
+          final existing = actualizadas[idx];
+          String finalStatus = incoming.estado;
+          if (existing.esCancelada && !incoming.esCancelada) {
+            finalStatus = 'CANCELLED';
+          } else if (existing.esAsistido && !incoming.esAsistido) {
+            finalStatus = existing.estado;
+          }
+          actualizadas[idx] = existing.copyWithEstado(finalStatus);
+        } else {
+          actualizadas.insert(0, incoming);
+        }
+      }
       setState(() {
-        _reservas = list;
+        _reservas = actualizadas.isNotEmpty ? actualizadas : list;
         _loading = false;
       });
     }
@@ -77,6 +192,10 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
   }
 
   Future<void> _confirmarCancelacion(Reserva r) async {
+    final cancelKey = (r.pnr != null && r.pnr!.isNotEmpty) ? r.pnr! : r.id;
+    // Si ya está cancelándose, evitar doble invocación
+    if (_cancellingIds.contains(r.id) || _cancellingIds.contains(cancelKey)) return;
+
     // Vuelos: el backend exige el quoteId de /cancellation-quote (CancelBookingRequestDto).
     if (r.vertical.toLowerCase().contains('vuelo')) {
       return _postventaVuelo(r, TipoPostventa.cancelar);
@@ -115,22 +234,50 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
 
     if (confirm != true || !mounted) return;
 
+    // Desactivar inmediatamente el botón y actualizar estado optimista a CANCELLED
+    setState(() {
+      _cancellingIds.add(r.id);
+      _cancellingIds.add(cancelKey);
+      final idx = _reservas.indexWhere((item) =>
+          item.id == r.id ||
+          item.id == cancelKey ||
+          (item.pnr != null && item.pnr == cancelKey) ||
+          (r.pnr != null && item.pnr == r.pnr));
+      if (idx != -1) {
+        _reservas[idx] = _reservas[idx].copyWithEstado('CANCELLED');
+      }
+    });
+
     final auth = Provider.of<AuthProvider>(context, listen: false);
-    final ok = await BookingServices.cancelarReserva(
-      r.id,
-      r.vertical,
-      token: auth.token,
-      reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : 'Cancelación cliente',
-    );
+    bool ok = false;
+    try {
+      ok = await BookingServices.cancelarReserva(
+        r.id,
+        r.vertical,
+        pnr: r.pnr,
+        token: auth.token,
+        reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : 'Cancelación cliente',
+      );
+    } catch (_) {
+      ok = false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cancellingIds.remove(r.id);
+          _cancellingIds.remove(cancelKey);
+        });
+      }
+    }
 
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(ok ? 'Reserva cancelada correctamente.' : 'No se pudo cancelar en el proveedor.'),
         backgroundColor: ok ? BookingColors.successGreen : BookingColors.errorRed,
       ),
     );
-    if (ok) _loadReservas();
+    _pollReservasSilencioso();
   }
 
   List<Reserva> get _filteredReservas {
@@ -272,8 +419,13 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
 
   Widget _buildReservaCard(Reserva r) {
     final isVuelo = r.vertical.toLowerCase().contains('vuelo');
-    final canCheckIn = isVuelo && !r.esCancelada && r.estado != 'CHECKED_IN';
-    final statusColor = r.esCancelada ? BookingColors.errorRed : (r.estado == 'CHECKED_IN' ? BookingColors.actionBlue : BookingColors.successGreen);
+    final canCheckIn = isVuelo && !r.esCancelada && !r.esAsistido;
+    final statusColor = r.esCancelada
+        ? BookingColors.errorRed
+        : (r.esAsistido ? const Color(0xFF15803D) : BookingColors.successGreen);
+    final statusBg = r.esCancelada
+        ? BookingColors.errorRed.withValues(alpha: 0.12)
+        : (r.esAsistido ? const Color(0xFFDCFCE7) : BookingColors.successGreen.withValues(alpha: 0.12));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -298,19 +450,50 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
-                  child: Text(r.estado, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusBg,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (r.esAsistido) ...[
+                        const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF15803D)),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        r.estadoDisplay,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(r.servicioNombre, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: BookingColors.textDark)),
+            if (r.esAsistido) ...[
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  const Icon(Icons.verified, size: 13, color: Color(0xFF15803D)),
+                  const SizedBox(width: 4),
+                  Text(
+                    r.vertical.contains('auto')
+                        ? '• Llaves entregadas (Servicio en curso)'
+                        : '• Asistencia confirmada (Sí asistió)',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D)),
+                  ),
+                ],
+              ),
+            ],
             if (r.proveedor != null && r.proveedor!.isNotEmpty) Text(r.proveedor!, style: const TextStyle(fontSize: 12, color: BookingColors.textMuted)),
             const SizedBox(height: 6),
             Row(
               children: [
-                const Icon(Icons.qr_code, size: 14, color: BookingColors.actionBlue),
+                const Icon(Icons.confirmation_number_outlined, size: 14, color: BookingColors.actionBlue),
                 const SizedBox(width: 4),
                 Text('PNR / Código: ${r.pnr ?? r.id}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace')),
               ],
@@ -351,14 +534,7 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                           icon: const Icon(Icons.airplane_ticket_outlined, size: 16),
                           label: const Text('Boletos / Pase', style: TextStyle(fontSize: 12)),
                         ),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => VoucherQrScreen(reserva: r)));
-                        },
-                        icon: const Icon(Icons.qr_code_2, size: 16),
-                        label: const Text('Voucher QR', style: TextStyle(fontSize: 12)),
-                      ),
-                      if (isVuelo && !r.esCancelada) ...[
+                      if (isVuelo && !r.esCancelada && !r.esAsistido) ...[
                         OutlinedButton.icon(
                           onPressed: () => _cambiarFechaVuelo(r),
                           icon: const Icon(Icons.event_repeat, size: 16),
@@ -381,7 +557,51 @@ class _MisReservasScreenState extends State<MisReservasScreen> {
                 ),
               ],
             ),
-            if (!r.esCancelada) ...[
+            if (r.esCancelada) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.cancel_outlined, size: 16, color: BookingColors.errorRed),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Esta reserva se encuentra cancelada.',
+                        style: TextStyle(fontSize: 11, color: BookingColors.errorRed, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (r.esAsistido) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle_outline, size: 16, color: Color(0xFF15803D)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Check-in realizado / Asistencia confirmada. Servicio en curso. La cancelación no aplica una vez iniciado o completado el servicio.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
