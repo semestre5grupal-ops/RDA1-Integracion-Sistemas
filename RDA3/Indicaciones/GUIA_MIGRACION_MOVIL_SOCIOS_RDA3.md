@@ -36,6 +36,6 @@ Envía a tu compañero **únicamente el archivo correspondiente a su framework s
 ## 📩 Cómo Utilizar Estas Guías con tus Compañeros
 
 1. Pregúntale a tu compañero de equipo socio (o revisa el sorteo de la cátedra) cuál de los 3 frameworks le correspondió (**Flutter, React Native o .NET MAUI**).
-2. Abre la guía correspondiente en esta misma carpeta y compártele el contenido.
-3. Tu compañero solo debe **copiar el texto de la guía y pegárselo a su agente de IA** (Cascade, Cursor, Copilot, ChatGPT, etc.).
+2. Abre la guía correspondiente en esta misma carpeta y compártele el **archivo completo**.
+3. Tu compañero debe **entregar la guía completa (no solo el recuadro de la sección 9)** a su agente de IA (Cascade, Cursor, Copilot, ChatGPT, etc.) para que lea las secciones §2.1, §4.1, §5, §6.D y §7.
 4. Su agente de IA sabrá exactamente qué carpetas crear, qué paquetes instalar, qué pantallas implementar y qué comandos correr para compilar el APK sin tocar su servidor.

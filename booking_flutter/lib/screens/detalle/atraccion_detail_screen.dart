@@ -271,20 +271,35 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
                                 });
                                 try {
                                   final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                                  final docId = (user?.cedula ?? '').isNotEmpty ? user!.cedula : '1755073481';
                                   final payload = <String, dynamic>{
+                                    'atraccion_id': _atr.id,
+                                    'atraccionId': _atr.id,
                                     'slot_id': _selectedSlot!.slotId,
+                                    'date': dateStr,
                                     'fecha': dateStr,
+                                    'time': _selectedSlot!.horaInicio,
                                     'hora': _selectedSlot!.horaInicio,
+                                    'ticket_count': _totalTickets,
                                     'adult_count': _adultos,
                                     'child_count': _ninos,
                                     'senior_count': _seniors,
                                     'infant_count': _infantes,
-                                    'personas': _totalTickets,
-                                    'nombre_cliente': nameCtrl.text.trim(),
-                                    'email_cliente': emailCtrl.text.trim(),
-                                    'telefono': telCtrl.text.trim(),
+                                    'customer_name': nameCtrl.text.trim(),
+                                    'customer_email': emailCtrl.text.trim(),
+                                    'customer_phone': telCtrl.text.trim(),
+                                    'document_id': docId,
+                                    'customer': {
+                                      'full_name': nameCtrl.text.trim(),
+                                      'nombre': nameCtrl.text.trim(),
+                                      'email': emailCtrl.text.trim(),
+                                      'phone': telCtrl.text.trim(),
+                                      'telefono': telCtrl.text.trim(),
+                                      'document_id': docId,
+                                    },
+                                    'payment_method': 'CREDIT_CARD',
                                     'metodo_pago': 'TARJETA',
-                                    'moneda': 'USD',
+                                    'proveedor_codigo': _atr.proveedorCodigo,
                                   };
 
                                   final resData = await BookingServices.reservarAtraccion(

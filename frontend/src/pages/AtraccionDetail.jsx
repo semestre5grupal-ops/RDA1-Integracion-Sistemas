@@ -21,14 +21,14 @@ export function AtraccionDetail() {
   const isLoggedIn = !!user;
   const { convertPrice } = useCurrency();
   const isAdmin = user?.email === 'admin@booking.com' || user?.email === 'alejandroflores@booking.com' || user?.user_metadata?.role === 'admin';
-  
+
   const [atraccion, setAtraccion] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isBooking, setIsBooking] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  
+
   // Auth & UI States
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showVoucherModal, setShowVoucherModal] = useState(false);
@@ -36,7 +36,7 @@ export function AtraccionDetail() {
   const [paymentMethod, setPaymentMethod] = useState('visa');
   const [showOfflineModal, setShowOfflineModal] = useState(false);
   const [pendingOfflinePay, setPendingOfflinePay] = useState(false);
-  
+
   // Horarios y disponibilidad dinámica (RDA2)
   const [timeSlots, setTimeSlots] = useState([
     { time: '09:00 a.m.', cupos: 8, estado: 'DISPONIBLE' },
@@ -90,7 +90,7 @@ export function AtraccionDetail() {
       });
       try {
         localStorage.removeItem(`atraccion_form_${id}`);
-      } catch (_) {}
+      } catch (_) { }
     }
   }, [id, todayStr]);
 
@@ -117,7 +117,7 @@ export function AtraccionDetail() {
         const list = Array.isArray(res) ? res : (res?.turnos || res?.time_slots || res?.slots || []);
         if (Array.isArray(list) && list.length > 0) {
           const mapped = list.map(s => {
-            const cuposNum = Number(s.cupos ?? s.cupos_disponibles ?? s.available_spots ?? 5);
+            const cuposNum = Number(s.cupos ?? s.cupos_disponibles ?? s.available_spots ?? s.available_slots ?? s.disponibles ?? s.cupo ?? s.capacity ?? s.capacidad ?? s.aforo ?? 5);
             const timeVal = s.time || s.horaInicio || s.hora || '09:00 a.m.';
             return {
               ...s,
@@ -154,7 +154,7 @@ export function AtraccionDetail() {
           });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [id, form.date]);
 
   useEffect(() => {
@@ -166,15 +166,15 @@ export function AtraccionDetail() {
 
   const provCodigo = atraccion?.proveedor_codigo || atraccion?.proveedorCodigo || atraccion?.proveedor?.codigo || atraccion?.proveedor?.id || '';
   const admiteNinos = Boolean(
-    atraccion?.admite_ninos ?? 
+    atraccion?.admite_ninos ??
     (provCodigo !== 'NODE_ATR_ARIEL' && provCodigo !== 'NODE_ATR_GLORIA' && provCodigo !== 'NODE_ATR_ALISSON' && atraccion?.price?.child > 0 && atraccion?.price?.child !== atraccion?.price?.adult)
   );
   const admiteSeniors = Boolean(
-    atraccion?.admite_seniors ?? 
+    atraccion?.admite_seniors ??
     (provCodigo !== 'NODE_ATR_ARIEL' && provCodigo !== 'NODE_ATR_GLORIA' && provCodigo !== 'NODE_ATR_ALISSON' && atraccion?.price?.senior > 0)
   );
   const admiteInfantes = Boolean(
-    atraccion?.admite_infantes ?? 
+    atraccion?.admite_infantes ??
     (atraccion?.price?.infant > 0)
   );
   const soloPersonas = !admiteNinos && !admiteSeniors && !admiteInfantes;
@@ -183,21 +183,21 @@ export function AtraccionDetail() {
   const precioNino = admiteNinos ? parseFloat(atraccion?.price?.child || (precioAdulto * 0.5).toFixed(2)) : precioAdulto;
   const precioSenior = admiteSeniors ? parseFloat(atraccion?.price?.senior || (precioAdulto * 0.7).toFixed(2)) : precioAdulto;
   const precioInfante = 0.0;
-  const totalTickets = soloPersonas 
-    ? (form.adult_count || 1) 
+  const totalTickets = soloPersonas
+    ? (form.adult_count || 1)
     : ((form.adult_count || 0) + (admiteNinos ? (form.child_count || 0) : 0) + (admiteSeniors ? (form.senior_count || 0) : 0) + (admiteInfantes ? (form.infant_count || 0) : 0));
   const totalCalculado = soloPersonas
     ? parseFloat(((form.adult_count || 1) * precioAdulto).toFixed(2))
     : parseFloat(
-        ((form.adult_count * precioAdulto) + 
-         (admiteNinos ? (form.child_count * precioNino) : 0) + 
-         (admiteSeniors ? (form.senior_count * precioSenior) : 0) + 
-         (admiteInfantes ? (form.infant_count * precioInfante) : 0)).toFixed(2)
-      );
+      ((form.adult_count * precioAdulto) +
+        (admiteNinos ? (form.child_count * precioNino) : 0) +
+        (admiteSeniors ? (form.senior_count * precioSenior) : 0) +
+        (admiteInfantes ? (form.infant_count * precioInfante) : 0)).toFixed(2)
+    );
 
   // Heurística 5 & V-07: Validación reactiva de aforo y cupos en turno
   const selectedSlot = timeSlots.find(s => s.time === form.time) || timeSlots[0];
-  const cuposDisponibles = selectedSlot ? Number(selectedSlot.cupos ?? selectedSlot.cupos_disponibles ?? selectedSlot.available_spots ?? 10) : 10;
+  const cuposDisponibles = selectedSlot ? Number(selectedSlot.cupos ?? selectedSlot.cupos_disponibles ?? selectedSlot.available_spots ?? 5) : 5;
   const isAgotadoSlot = selectedSlot ? (selectedSlot.estado === 'AGOTADO' || cuposDisponibles <= 0) : false;
   const cuposExcedidos = totalTickets > cuposDisponibles;
   const canAddMoreTickets = !isAgotadoSlot && totalTickets < cuposDisponibles;
@@ -320,7 +320,7 @@ export function AtraccionDetail() {
           return;
         }
       }
-      
+
       const realPnr = result?.reservation_code || result?.reservation_id || result?.pnr || idempotencyKey;
       const atraccionRes = {
         id: realPnr,
@@ -348,7 +348,7 @@ export function AtraccionDetail() {
       setTimeSlots(prev => prev.map(slot => {
         const sTime = slot.time || slot.hora || slot.hora_inicio || '';
         const curTime = form.time || '';
-        const match = sTime === curTime || 
+        const match = sTime === curTime ||
           sTime.replace(/[^0-9]/g, '').slice(0, 4) === curTime.replace(/[^0-9]/g, '').slice(0, 4);
         if (match) {
           const currentCupos = Number(slot.cupos ?? slot.cupos_disponibles ?? slot.available_spots ?? 0);
@@ -368,7 +368,7 @@ export function AtraccionDetail() {
       // Sincronizar en segundo plano con el backend y la API oficial
       try {
         refrescarDisponibilidad();
-      } catch (_) {}
+      } catch (_) { }
 
       // Resetear el selector de personas y categorías inmediatamente tras confirmar la compra
       setForm(prev => ({
@@ -381,7 +381,7 @@ export function AtraccionDetail() {
       }));
       try {
         localStorage.removeItem(`atraccion_form_${id}`);
-      } catch (_) {}
+      } catch (_) { }
 
       const existing = JSON.parse(localStorage.getItem('reservas_atracciones') || '[]');
       localStorage.setItem('reservas_atracciones', JSON.stringify([atraccionRes, ...existing]));
@@ -404,9 +404,9 @@ export function AtraccionDetail() {
       }
 
     } catch (err) {
-      setBookingResult({ 
-        success: false, 
-        error: err.message || 'Error desconocido al procesar la reserva' 
+      setBookingResult({
+        success: false,
+        error: err.message || 'Error desconocido al procesar la reserva'
       });
     } finally {
       setIsBooking(false);
@@ -422,11 +422,11 @@ export function AtraccionDetail() {
   return (
     <div className="search-page-wrapper">
       <div className="breadcrumb-nav" style={{ paddingTop: 24 }}>
-        <span onClick={() => navigate('/')} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/'); } }} style={{cursor: 'pointer'}}>Inicio</span> {'>'} <span>Atracciones</span> {'>'} <span>Cosas que hacer en Quito</span> {'>'} <span>Centro Histórico</span> {'>'} <strong>{atraccion.nombre || atraccion.name || 'Tour y Experiencia'}</strong>
+        <span onClick={() => navigate('/')} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/'); } }} style={{ cursor: 'pointer' }}>Inicio</span> {'>'} <span>Atracciones</span> {'>'} <span>Cosas que hacer en Quito</span> {'>'} <span>Centro Histórico</span> {'>'} <strong>{atraccion.nombre || atraccion.name || 'Tour y Experiencia'}</strong>
       </div>
 
       <main className="detail-layout">
-        
+
         {/* COLUMNA IZQUIERDA: CONTENIDO */}
         <div className="detail-content">
           <div className="detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -461,7 +461,7 @@ export function AtraccionDetail() {
               <div className="gallery-badge-overlay">
                 <div className="gb-score">9.8</div>
                 <div className="gb-text">
-                  <strong>Excepcional</strong><br/>
+                  <strong>Excepcional</strong><br />
                   <a href="#reviews" style={{ color: 'white', textDecoration: 'underline', cursor: 'pointer' }}>142 opiniones verificadas {'>'}</a>
                 </div>
               </div>
@@ -473,7 +473,7 @@ export function AtraccionDetail() {
                 <div className="gallery-badge-overlay">
                   <div className="gb-score">9.8</div>
                   <div className="gb-text">
-                    <strong>Excepcional</strong><br/>
+                    <strong>Excepcional</strong><br />
                     <a href="#reviews" style={{ color: 'white', textDecoration: 'underline', cursor: 'pointer' }}>142 opiniones verificadas {'>'}</a>
                   </div>
                 </div>
@@ -490,28 +490,28 @@ export function AtraccionDetail() {
             <div className="dh-item">
               <span className="icon success">✔️</span>
               <div>
-                <strong>Cancelación gratis</strong><br/>
+                <strong>Cancelación gratis</strong><br />
                 <span className="muted">Hasta 24 horas antes del inicio del turno</span>
               </div>
             </div>
             <div className="dh-item">
               <span className="icon">⏱️</span>
               <div>
-                <strong>Duración: 3 horas</strong><br/>
+                <strong>Duración: 3 horas</strong><br />
                 <span className="muted">Horario flexible con múltiples turnos</span>
               </div>
             </div>
             <div className="dh-item">
               <span className="icon">🗣️</span>
               <div>
-                <strong>Guía bilingüe oficial</strong><br/>
+                <strong>Guía bilingüe oficial</strong><br />
                 <span className="muted">Español e Inglés incluidos</span>
               </div>
             </div>
             <div className="dh-item">
               <span className="icon">🐾</span>
               <div>
-                <strong>Animales de servicio</strong><br/>
+                <strong>Animales de servicio</strong><br />
                 <span className="muted">Se admiten perros de asistencia</span>
               </div>
             </div>
@@ -622,7 +622,7 @@ export function AtraccionDetail() {
               <div className="rs-badge" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                 <span className="score" style={{ background: '#003580', color: '#fff', fontSize: '1.8rem', fontWeight: 800, padding: '12px 18px', borderRadius: '8px' }}>9.8</span>
                 <div>
-                  <strong style={{ fontSize: '1.2rem', color: '#1a1a1a' }}>Excepcional</strong><br/>
+                  <strong style={{ fontSize: '1.2rem', color: '#1a1a1a' }}>Excepcional</strong><br />
                   <span className="muted">Basado en 142 opiniones verificadas de viajeros</span>
                 </div>
               </div>
@@ -651,7 +651,7 @@ export function AtraccionDetail() {
               <div className="like-card" style={{ background: '#fff', border: '1px solid #e5e7eb', padding: '16px', borderRadius: '8px' }}>
                 <div className="user-info" style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
                   <div className="avatar" style={{ width: 36, height: 36, borderRadius: '50%', background: '#006ce4', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>C</div>
-                  <div><strong>Carlos M.</strong><br/><span style={{ fontSize: '0.8rem', color: '#6b7280' }}>🇪🇨 Ecuador</span></div>
+                  <div><strong>Carlos M.</strong><br /><span style={{ fontSize: '0.8rem', color: '#6b7280' }}>🇪🇨 Ecuador</span></div>
                 </div>
                 <p style={{ fontSize: '0.88rem', fontStyle: 'italic', margin: 0 }}>"El recorrido fue impecable. El guía Carlos conocía a fondo la historia y la degustación de cacao fue insuperable."</p>
               </div>
@@ -659,7 +659,7 @@ export function AtraccionDetail() {
               <div className="like-card" style={{ background: '#fff', border: '1px solid #e5e7eb', padding: '16px', borderRadius: '8px' }}>
                 <div className="user-info" style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
                   <div className="avatar" style={{ width: 36, height: 36, borderRadius: '50%', background: '#059669', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>E</div>
-                  <div><strong>Elena R.</strong><br/><span style={{ fontSize: '0.8rem', color: '#6b7280' }}>🇪🇸 España</span></div>
+                  <div><strong>Elena R.</strong><br /><span style={{ fontSize: '0.8rem', color: '#6b7280' }}>🇪🇸 España</span></div>
                 </div>
                 <p style={{ fontSize: '0.88rem', fontStyle: 'italic', margin: 0 }}>"Muy fácil hacer la reserva y el check-in con el código QR. El mirador del Panecillo ofrece fotos espectaculares."</p>
               </div>
@@ -689,14 +689,14 @@ export function AtraccionDetail() {
                 📅 Cambiar fecha ({form.date})
               </a>
             )}
-            
+
             {showCalendar ? (
               <div className="custom-calendar-container" style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px', marginTop: '12px', marginBottom: '20px', background: '#fff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button 
-                      type="button" 
-                      onClick={prevMonth} 
+                    <button
+                      type="button"
+                      onClick={prevMonth}
                       style={{ background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', padding: '4px 8px', fontSize: '0.85rem' }}
                       title="Mes anterior"
                     >
@@ -705,9 +705,9 @@ export function AtraccionDetail() {
                     <strong style={{ fontSize: '1rem', textTransform: 'capitalize' }}>
                       {calendarViewDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
                     </strong>
-                    <button 
-                      type="button" 
-                      onClick={nextMonth} 
+                    <button
+                      type="button"
+                      onClick={nextMonth}
                       style={{ background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', padding: '4px 8px', fontSize: '0.85rem' }}
                       title="Mes siguiente"
                     >
@@ -738,7 +738,7 @@ export function AtraccionDetail() {
                     const isSelected = form.date === dateStr;
                     const isPast = dateStr < todayStr;
                     return (
-                      <div 
+                      <div
                         key={dateStr}
                         onClick={() => {
                           if (isPast) return;
@@ -766,10 +766,10 @@ export function AtraccionDetail() {
 
                 <div style={{ marginTop: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>O elige en el selector:</span>
-                  <input 
-                    type="date" 
-                    min={todayStr} 
-                    value={form.date} 
+                  <input
+                    type="date"
+                    min={todayStr}
+                    value={form.date}
                     onChange={(e) => {
                       if (e.target.value) {
                         setForm({ ...form, date: e.target.value });
@@ -793,12 +793,12 @@ export function AtraccionDetail() {
                   const isActive = form.date === dateStr;
 
                   return (
-                    <div 
-                      key={dateStr} 
-                      className={`date-box ${isActive ? 'active' : ''}`} 
+                    <div
+                      key={dateStr}
+                      className={`date-box ${isActive ? 'active' : ''}`}
                       onClick={() => {
                         if (isPast) return;
-                        setForm({...form, date: dateStr});
+                        setForm({ ...form, date: dateStr });
                       }}
                       style={{
                         flex: 1,
@@ -874,8 +874,8 @@ export function AtraccionDetail() {
                     <span style={{ fontSize: '0.82rem', color: '#4b5563', fontWeight: 500 }}>{convertPrice(precioAdulto)} c/u</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       disabled={(form.adult_count || 1) <= 1}
                       onClick={() => setForm({ ...form, adult_count: Math.max(1, (form.adult_count || 1) - 1), child_count: 0, senior_count: 0, infant_count: 0 })}
                       style={{ width: 34, height: 34, borderRadius: '6px', border: '1px solid #d1d5db', background: (form.adult_count || 1) <= 1 ? '#f3f4f6' : '#fff', cursor: (form.adult_count || 1) <= 1 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: (form.adult_count || 1) <= 1 ? 0.5 : 1 }}
@@ -883,8 +883,8 @@ export function AtraccionDetail() {
                       -
                     </button>
                     <span style={{ minWidth: 24, textAlign: 'center', fontWeight: 700, fontSize: '0.95rem' }}>{form.adult_count || 1}</span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       disabled={!canAddMoreTickets}
                       onClick={() => {
                         if (!canAddMoreTickets) return;
@@ -907,8 +907,8 @@ export function AtraccionDetail() {
                       <span style={{ fontSize: '0.8rem', color: '#6b7280' }}>{convertPrice(precioAdulto)} c/u</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button 
-                        type="button" 
+                      <button
+                        type="button"
                         disabled={form.adult_count <= (totalTickets > form.adult_count ? 0 : 1)}
                         onClick={() => setForm({ ...form, adult_count: Math.max((totalTickets > form.adult_count ? 0 : 1), form.adult_count - 1) })}
                         style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.adult_count <= (totalTickets > form.adult_count ? 0 : 1) ? '#f3f4f6' : '#fff', cursor: form.adult_count <= (totalTickets > form.adult_count ? 0 : 1) ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.adult_count <= (totalTickets > form.adult_count ? 0 : 1) ? 0.5 : 1 }}
@@ -916,8 +916,8 @@ export function AtraccionDetail() {
                         -
                       </button>
                       <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.adult_count}</span>
-                      <button 
-                        type="button" 
+                      <button
+                        type="button"
                         disabled={!canAddMoreTickets}
                         onClick={() => {
                           if (!canAddMoreTickets) return;
@@ -939,8 +939,8 @@ export function AtraccionDetail() {
                         <span style={{ fontSize: '0.8rem', color: '#15803d' }}>Tarifa Niño: {convertPrice(precioNino)}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           disabled={form.child_count <= 0}
                           onClick={() => setForm({ ...form, child_count: Math.max(0, form.child_count - 1) })}
                           style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.child_count <= 0 ? '#f3f4f6' : '#fff', cursor: form.child_count <= 0 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.child_count <= 0 ? 0.5 : 1 }}
@@ -948,8 +948,8 @@ export function AtraccionDetail() {
                           -
                         </button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.child_count}</span>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           disabled={!canAddMoreTickets}
                           onClick={() => {
                             if (!canAddMoreTickets) return;
@@ -972,8 +972,8 @@ export function AtraccionDetail() {
                         <span style={{ fontSize: '0.8rem', color: '#0369a1' }}>Tarifa 3ra Edad: {convertPrice(precioSenior)}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           disabled={form.senior_count <= 0}
                           onClick={() => setForm({ ...form, senior_count: Math.max(0, form.senior_count - 1) })}
                           style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.senior_count <= 0 ? '#f3f4f6' : '#fff', cursor: form.senior_count <= 0 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.senior_count <= 0 ? 0.5 : 1 }}
@@ -981,8 +981,8 @@ export function AtraccionDetail() {
                           -
                         </button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.senior_count}</span>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           disabled={!canAddMoreTickets}
                           onClick={() => {
                             if (!canAddMoreTickets) return;
@@ -1005,8 +1005,8 @@ export function AtraccionDetail() {
                         <span style={{ fontSize: '0.78rem', color: '#15803d', fontWeight: 600 }}>Tarifa {convertPrice(precioInfante)} (Cupo legal)</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           disabled={form.infant_count <= 0}
                           onClick={() => setForm({ ...form, infant_count: Math.max(0, form.infant_count - 1) })}
                           style={{ width: 32, height: 32, borderRadius: '4px', border: '1px solid #d1d5db', background: form.infant_count <= 0 ? '#f3f4f6' : '#fff', cursor: form.infant_count <= 0 ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: form.infant_count <= 0 ? 0.5 : 1 }}
@@ -1014,8 +1014,8 @@ export function AtraccionDetail() {
                           -
                         </button>
                         <span style={{ minWidth: 20, textAlign: 'center', fontWeight: 700 }}>{form.infant_count}</span>
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           disabled={!canAddMoreTickets}
                           onClick={() => {
                             if (!canAddMoreTickets) return;
@@ -1056,9 +1056,9 @@ export function AtraccionDetail() {
                     {(form.special_requirements || '').length}/250
                   </span>
                 </div>
-                <input 
+                <input
                   id="special-requirements-input"
-                  type="text" 
+                  type="text"
                   maxLength={250}
                   placeholder="Ej. Alergia a frutos secos / Silla de ruedas"
                   value={form.special_requirements || ''}
@@ -1072,12 +1072,12 @@ export function AtraccionDetail() {
                       special_requirements: (prev.special_requirements || '').trim().replace(/\s{2,}/g, ' ')
                     }));
                   }}
-                  style={{ 
-                    width: '100%', 
-                    padding: '8px 10px', 
-                    borderRadius: '6px', 
-                    border: (form.special_requirements?.length || 0) >= 250 ? '1px solid #d93025' : '1px solid #d1d5db', 
-                    fontSize: '0.85rem' 
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: (form.special_requirements?.length || 0) >= 250 ? '1px solid #d93025' : '1px solid #d1d5db',
+                    fontSize: '0.85rem'
                   }}
                 />
               </div>
@@ -1085,10 +1085,10 @@ export function AtraccionDetail() {
               {isLoggedIn ? (
                 <>
                   <label style={{ fontWeight: 600, fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Método de pago:</label>
-                  <select 
-                    className="full-width-input" 
-                    style={{ width: '100%', padding: '8px', marginBottom: '16px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '0.9rem' }} 
-                    value={paymentMethod} 
+                  <select
+                    className="full-width-input"
+                    style={{ width: '100%', padding: '8px', marginBottom: '16px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                    value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                   >
                     <option value="visa">Visa Débito ****1234</option>
@@ -1113,38 +1113,38 @@ export function AtraccionDetail() {
                       </div>
                     ) : (
                       <>
-                        <button 
-                          className="search-btn" 
-                          style={{ 
-                            width: '100%', 
-                            padding: '14px', 
-                            fontSize: '1rem', 
-                            marginTop: 16, 
-                            borderRadius: '8px', 
-                            background: (isBooking || cuposExcedidos || isAgotadoSlot) ? '#9ca3af' : '#006ce4', 
-                            color: '#fff', 
-                            border: 'none', 
-                            fontWeight: 700, 
+                        <button
+                          className="search-btn"
+                          style={{
+                            width: '100%',
+                            padding: '14px',
+                            fontSize: '1rem',
+                            marginTop: 16,
+                            borderRadius: '8px',
+                            background: (isBooking || cuposExcedidos || isAgotadoSlot) ? '#9ca3af' : '#006ce4',
+                            color: '#fff',
+                            border: 'none',
+                            fontWeight: 700,
                             cursor: (isBooking || cuposExcedidos || isAgotadoSlot) ? 'not-allowed' : 'pointer',
                             transition: 'background 0.2s'
-                          }} 
-                          onClick={handleBooking} 
+                          }}
+                          onClick={handleBooking}
                           disabled={isBooking || cuposExcedidos || isAgotadoSlot}
                         >
-                          {isBooking 
-                            ? 'Procesando tu reserva y generando entradas...' 
-                            : isAgotadoSlot 
-                            ? 'Turno Agotado' 
-                            : cuposExcedidos 
-                            ? `Excede Cupos Libres (${cuposDisponibles})` 
-                            : `Pagar y Confirmar (${totalTickets} ${soloPersonas ? (totalTickets === 1 ? 'persona' : 'personas') : 'boletos'})`}
+                          {isBooking
+                            ? 'Procesando tu reserva y generando entradas...'
+                            : isAgotadoSlot
+                              ? 'Turno Agotado'
+                              : cuposExcedidos
+                                ? `Excede Cupos Libres (${cuposDisponibles})`
+                                : `Pagar y Confirmar (${totalTickets} ${soloPersonas ? (totalTickets === 1 ? 'persona' : 'personas') : 'boletos'})`}
                         </button>
 
                         {showOfflineModal && (
                           <OfflineReservaModal
                             onContinuar={() => {
                               setShowOfflineModal(false);
-                              handleBooking({ preventDefault: () => {} });
+                              handleBooking({ preventDefault: () => { } });
                             }}
                             onCancelar={() => {
                               setShowOfflineModal(false);
@@ -1164,7 +1164,7 @@ export function AtraccionDetail() {
                   </button>
                 </div>
               )}
-              
+
               {bookingResult?.error && (
                 <div style={{ color: '#dc2626', fontSize: '0.85rem', marginTop: 12, background: '#fee2e2', padding: '8px', borderRadius: '6px' }}>
                   {bookingResult.error}
@@ -1188,7 +1188,7 @@ export function AtraccionDetail() {
             <p style={{ color: '#4b5563', marginBottom: '20px', fontSize: '0.95rem' }}>
               Tu comprobante y voucher digital han sido generados para <strong>{user?.email}</strong>.
             </p>
-            
+
             <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', textAlign: 'left', marginBottom: '20px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ color: '#64748b' }}>Localizador / PNR:</span>
@@ -1205,7 +1205,7 @@ export function AtraccionDetail() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button 
+              <button
                 style={{ width: '100%', padding: '12px', fontSize: '1rem', borderRadius: '8px', background: '#006ce4', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}
                 onClick={() => {
                   setShowSuccessModal(false);
@@ -1214,7 +1214,7 @@ export function AtraccionDetail() {
               >
                 🎟️ Ver Voucher Digital con Código QR
               </button>
-              <button 
+              <button
                 style={{ width: '100%', padding: '10px', fontSize: '0.9rem', borderRadius: '8px', background: '#f1f5f9', color: '#475569', border: 'none', fontWeight: 600, cursor: 'pointer' }}
                 onClick={() => setShowSuccessModal(false)}
               >
@@ -1227,8 +1227,8 @@ export function AtraccionDetail() {
 
       {/* MODAL DE VOUCHER DIGITAL CON QR Y CHECK-IN */}
       {showVoucherModal && confirmedReservation && (
-        <VoucherModal 
-          isOpen={showVoucherModal} 
+        <VoucherModal
+          isOpen={showVoucherModal}
           onClose={() => setShowVoucherModal(false)}
           reserva={confirmedReservation}
           atraccion={atraccion}
@@ -1237,12 +1237,12 @@ export function AtraccionDetail() {
         />
       )}
 
-      <ReportModal 
-        isOpen={showReportModal} 
-        onClose={() => setShowReportModal(false)} 
-        entityName={atraccion.nombre || atraccion.name || 'Atracción'} 
-        pnrOrId={atraccion?.id || 'ATRAC'} 
-        type="Atracción" 
+      <ReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        entityName={atraccion.nombre || atraccion.name || 'Atracción'}
+        pnrOrId={atraccion?.id || 'ATRAC'}
+        type="Atracción"
       />
     </div>
   );

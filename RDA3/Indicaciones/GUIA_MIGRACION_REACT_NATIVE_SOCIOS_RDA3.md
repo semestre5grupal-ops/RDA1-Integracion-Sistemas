@@ -301,6 +301,13 @@ export function useConfirmarReserva(payload: Record<string, unknown>) {
 }
 ```
 
+### 5.2 Autenticación, Supabase y URLs vigentes (si tu API protege rutas)
+
+> [!WARNING]
+> - **URL y variables vigentes:** configura en `EXPO_PUBLIC_API_URL` la URL HTTPS actual de tu API en Azure (no uses URLs viejas de pruebas o servidores obsoletos en Render). Recuerda que `.env` no se sube a GitHub: verifica las variables vigentes de tu despliegue web.
+> - **Ante un `401 Unauthorized`, NO toques el backend:** queda prohibido desactivar guards/middlewares de autenticación en el servidor. Implementa el login en la app o inyecta `Authorization: Bearer <token>` en el interceptor de `apiClient`.
+> - **PROHIBIDO usar `service_role` o secretos en móvil:** un APK se puede decompilar. Si tu app usa Supabase Auth, usa **solo** `SUPABASE_URL` y `ANON_KEY` vigentes de tu web de producción (nunca `service_role` ni secretos de BD).
+
 ---
 
 ## 6. Reglas de Negocio Esenciales en la App Móvil
@@ -488,6 +495,9 @@ npx eas-cli build -p android --profile preview
 
 ## 9. Prompt Copy-Paste para tu Agente de IA
 
+> [!IMPORTANT]
+> **Copia o adjunta el archivo `.md` completo, no solo este recuadro.** Así tu agente podrá consultar las secciones **§2.1** (descubrimiento de rutas reales), **§4.1** (`normalizarServicioItem`), **§5** (`apiClient` e `Idempotency-Key`), **§6.D** (`CatalogoScreen` completo) y **§7** (reglas de tu vertical).
+
 ```text
 Hola agente. Trabajamos en el Reto 3 (RDA3) de Integración de Sistemas. Framework asignado: REACT NATIVE (Expo + TypeScript).
 Vas a construir una app móvil que es SOLO un cliente HTTP de nuestra API ya desplegada en Azure.
@@ -502,6 +512,7 @@ PROHIBIDO:
 - Mocks o datos inventados: nada de arrays falsos en un catch, ni precio/cupos por defecto. Si la API devuelve [] muestra "No hay servicios disponibles" con botón Reintentar; si falla, muestra el error con Reintentar.
 - Consola de administración, dashboards, métricas o CRUD de inventario. La app es solo para el cliente final.
 - Barra de pestañas inferior o botones de secciones inexistentes. Navegación con native-stack: Catálogo → Detalle → Voucher, y "Mis Reservas" en la cabecera.
+- Desactivar la autenticación del backend ante un 401 o incrustar claves privadas (service_role, secretos). Usa la URL HTTPS vigente en Azure y, si tu API exige login/Supabase, usa la ANON_KEY vigente de tu web y envía 'Authorization: Bearer <token>'.
 
 OBLIGATORIO:
 - normalizarServicioItem tolerante y sin 'any': ids ('id','_id','auto_id','vehicle_id','alojamiento_id','atraccion_id','offer_id'), precios (número, texto u objeto {total|amount}), fotos (lista de textos, lista de {url} o texto) y respuestas [ ] o {data:[ ]}.
@@ -509,7 +520,7 @@ OBLIGATORIO:
 - Catálogo con FlatList + refreshControl (RefreshControl), ListEmptyComponent con Reintentar y sondeo cada 12 s con clearInterval al desmontar, sin borrar datos si falla.
 - Mis Reservas: cancelación solo si faltan >= 24 h (el backend tiene la última palabra) y refresco inmediato del estado.
 - Voucher con react-native-qrcode-svg usando el código real devuelto por la API.
-- Instala paquetes nativos con 'npx expo install'. Aplica las reglas de mi vertical de la sección 7 de la guía.
+- Instala paquetes nativos con 'npx expo install'. Sigue la implementación de referencia de las secciones 2.1, 4.1, 5, 6.D y las reglas de mi vertical de la sección 7 de la guía.
 
 ENTREGA: 'npx tsc --noEmit' sin errores, eas.json con buildType apk y APK generado con 'npx eas-cli build -p android --profile preview'. En Windows PowerShell no uses '&&': un comando por línea.
 ```

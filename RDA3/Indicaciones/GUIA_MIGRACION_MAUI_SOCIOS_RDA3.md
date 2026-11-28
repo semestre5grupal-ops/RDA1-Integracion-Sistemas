@@ -393,6 +393,13 @@ public partial class DetalleViewModel(ApiService api) : ObservableObject
 }
 ```
 
+### 5.2 Autenticación, Supabase y URLs vigentes (si tu API protege rutas)
+
+> [!WARNING]
+> - **URL y variables vigentes:** coloca en `BaseUrl` la URL HTTPS actual de tu API en Azure (no uses URLs viejas de pruebas o servidores obsoletos en Render). Recuerda que los `.env` / secretos no se suben a GitHub: revisa las variables vigentes de tu despliegue web.
+> - **Ante un `401 Unauthorized`, NO toques el backend:** queda prohibido desactivar guards/middlewares de autenticación en el servidor. Implementa el login en MAUI o agrega `req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);` en `HttpRequestMessage`.
+> - **PROHIBIDO usar `service_role` o secretos en móvil:** un APK se puede decompilar. Si tu app usa Supabase Auth, usa **solo** `SUPABASE_URL` y `ANON_KEY` vigentes de tu web de producción (nunca `service_role` ni secretos de BD).
+
 ---
 
 ## 6. Reglas de Negocio Esenciales en la App Móvil
@@ -446,7 +453,8 @@ public partial class DetalleViewModel(ApiService api) : ObservableObject
     <RefreshView IsRefreshing="{Binding IsRefreshing, Mode=TwoWay}"
                  Command="{Binding RefreshCatalogoCommand}"
                  RefreshColor="#003580">
-        <CollectionView ItemsSource="{Binding Servicios}"
+        <CollectionView x:Name="ListaCatalogo"
+                        ItemsSource="{Binding Servicios}"
                         SelectionMode="Single"
                         SelectionChangedCommand="{Binding VerDetalleCommand}"
                         SelectionChangedCommandParameter="{Binding SelectedItem, Source={RelativeSource Self}}">
@@ -557,7 +565,12 @@ public partial class CatalogoPage : ContentPage
 {
     private readonly CatalogoViewModel _vm;
     public CatalogoPage(CatalogoViewModel vm) { InitializeComponent(); BindingContext = _vm = vm; }
-    protected override async void OnAppearing() { base.OnAppearing(); await _vm.IniciarAsync(Dispatcher); }
+    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+        ListaCatalogo.SelectedItem = null; // permite volver a tocar el mismo ítem al regresar de Detalle
+        await _vm.IniciarAsync(Dispatcher);
+    }
     protected override void OnDisappearing() { base.OnDisappearing(); _vm.Detener(); }
 }
 ```
@@ -627,6 +640,9 @@ dotnet publish -f net10.0-android -c Release -p:AndroidPackageFormat=apk
 
 ## 9. Prompt Copy-Paste para tu Agente de IA
 
+> [!IMPORTANT]
+> **Copia o adjunta el archivo `.md` completo, no solo este recuadro.** Así tu agente podrá consultar las secciones **§2.1** (descubrimiento de rutas reales), **§4.1** (`JsonCampos` y `ServicioModel`), **§5** (`ApiService` e `Idempotency-Key`), **§6.D** (`CatalogoPage` y `CatalogoViewModel`) y **§7** (reglas de tu vertical).
+
 ```text
 Hola agente. Trabajamos en el Reto 3 (RDA3) de Integración de Sistemas. Framework asignado: .NET MAUI (C# / XAML, .NET 10).
 Vas a construir una app móvil que es SOLO un cliente HTTP de nuestra API ya desplegada en Azure.
@@ -641,14 +657,15 @@ PROHIBIDO:
 - Mocks o datos inventados: nada de listas falsas en un catch, ni precio/cupos/fotos por defecto. Si la API devuelve [] muestra EmptyView "No hay servicios disponibles" con botón Reintentar; si falla, el error con Reintentar.
 - Consola de administración, dashboards, métricas o CRUD de inventario. La app es solo para el cliente final.
 - TabBar o menús con secciones inexistentes. Navegación con Shell: Catálogo → Detalle → Voucher, y ToolbarItem "Mis Reservas".
+- Desactivar la autenticación del backend ante un 401 o incrustar claves privadas (service_role, secretos). Usa la URL HTTPS vigente en Azure y, si tu API exige login/Supabase, usa la ANON_KEY vigente de tu web y envía 'Authorization: Bearer <token>'.
 
 OBLIGATORIO:
 - ServicioModel con [JsonExtensionData] Dictionary<string, JsonElement> y propiedades calculadas que nunca lanzan: ids ('id','_id','auto_id','vehicle_id','alojamiento_id','atraccion_id','offer_id', numéricos o texto), precios (número, texto u objeto {total|amount}), fotos (lista de textos, lista de {url} o texto) y respuestas [ ] o {data:[ ]}. Nada de 'public string? Id' tipado (un id numérico lanza JsonException). El Id nunca es un Guid aleatorio.
 - HttpClient singleton con cabeceras por petición en HttpRequestMessage (nunca modificar DefaultRequestHeaders): 'Accept: application/json', 'X-Correlation-Id', 'Idempotency-Key' cuando aplique; errores mostrando 'detail' del ProblemDetails.
-- Catálogo con RefreshView (IsRefreshing TwoWay) sobre CollectionView con EmptyView, RelayCommand de refresco y sondeo IDispatcherTimer de 12 s que arranca en OnAppearing y se detiene en OnDisappearing, sin borrar datos si falla.
+- Catálogo con RefreshView (IsRefreshing TwoWay) sobre CollectionView con EmptyView, limpia SelectedItem = null al volver (OnAppearing) para poder reabrir el mismo ítem, RelayCommand de refresco y sondeo IDispatcherTimer de 12 s que arranca en OnAppearing y se detiene en OnDisappearing, sin borrar datos si falla.
 - Mis Reservas: cancelación solo si faltan >= 24 h (el backend tiene la última palabra) y refresco inmediato del estado.
 - Voucher con QRCoder usando el código real devuelto por la API.
-- Aplica las reglas de mi vertical de la sección 7 de la guía.
+- Sigue la implementación de referencia de las secciones 2.1, 4.1, 5, 6.D y las reglas de mi vertical de la sección 7 de la guía.
 
 ENTREGA: 'dotnet build -f net10.0-android' con 0 errores y APK generado con 'dotnet publish -f net10.0-android -c Release -p:AndroidPackageFormat=apk'. En Windows PowerShell no uses '&&': un comando por línea.
 ```

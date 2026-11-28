@@ -1204,21 +1204,27 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && (Array.isArray(data.turnos) || Array.isArray(data.time_slots))) {
           const rawSlots = data.turnos || data.time_slots;
-          const mappedSlots = rawSlots.map((s: any) => ({
-            id: s.slot_id || `slot-${id}`,
-            slot_id: s.slot_id || `slot-${id}`,
-            time: s.time || s.hora || '09:00 a.m.',
-            hora: s.hora || s.time || '09:00 a.m.',
-            hora_inicio: s.hora || s.time || '09:00 a.m.',
-            capacidad_total: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos_totales: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            cupos_disponibles: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            status: s.estado || s.status || 'DISPONIBLE',
-            estado: s.estado || s.status || 'DISPONIBLE',
-            precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 30),
-            precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 15),
-          }));
+          const mappedSlots = rawSlots.map((s: any) => {
+            const rawCupos = s.cupos_disponibles ?? s.available_slots ?? s.available_spots ?? s.cupos ?? s.cupo ?? s.disponibles ?? s.available ?? s.capacidad ?? s.capacity ?? s.aforo ?? (typeof s.disponible === 'number' ? s.disponible : undefined);
+            const rawTotal = s.cupos_totales ?? s.total_slots ?? s.total_spots ?? s.capacidad_total ?? s.capacidad ?? s.capacity ?? s.aforo ?? s.total ?? rawCupos;
+            const cuposDisponibles = rawCupos !== undefined ? Number(rawCupos) : 0;
+            const capacidadTotal = rawTotal !== undefined ? Number(rawTotal) : cuposDisponibles;
+            return {
+              id: s.slot_id || `slot-${id}`,
+              slot_id: s.slot_id || `slot-${id}`,
+              time: s.time || s.hora || '09:00 a.m.',
+              hora: s.hora || s.time || '09:00 a.m.',
+              hora_inicio: s.hora || s.time || '09:00 a.m.',
+              capacidad_total: capacidadTotal,
+              cupos_totales: capacidadTotal,
+              cupos: cuposDisponibles,
+              cupos_disponibles: cuposDisponibles,
+              status: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              estado: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 30),
+              precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 15),
+            };
+          });
           return {
             atraccion_id: id,
             date: targetDate,
@@ -1249,21 +1255,27 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && (Array.isArray(data.turnos) || Array.isArray(data.time_slots))) {
           const rawSlots = data.turnos || data.time_slots;
-          const mappedSlots = rawSlots.map((s: any) => ({
-            id: s.slot_id || `slot-${id}`,
-            slot_id: s.slot_id || `slot-${id}`,
-            time: s.time || s.hora || '09:00 a.m.',
-            hora: s.hora || s.time || '09:00 a.m.',
-            hora_inicio: s.hora || s.time || '09:00 a.m.',
-            capacidad_total: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos_totales: Number(s.cupos_totales ?? s.total_slots ?? 20),
-            cupos: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            cupos_disponibles: Number(s.cupos_disponibles ?? s.available_slots ?? 20),
-            status: s.estado || s.status || 'DISPONIBLE',
-            estado: s.estado || s.status || 'DISPONIBLE',
-            precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 25),
-            precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 12.5),
-          }));
+          const mappedSlots = rawSlots.map((s: any) => {
+            const rawCupos = s.cupos_disponibles ?? s.available_slots ?? s.available_spots ?? s.cupos ?? s.cupo ?? s.disponibles ?? s.available ?? s.capacidad ?? s.capacity ?? s.aforo ?? (typeof s.disponible === 'number' ? s.disponible : undefined);
+            const rawTotal = s.cupos_totales ?? s.total_slots ?? s.total_spots ?? s.capacidad_total ?? s.capacidad ?? s.capacity ?? s.aforo ?? s.total ?? rawCupos;
+            const cuposDisponibles = rawCupos !== undefined ? Number(rawCupos) : 0;
+            const capacidadTotal = rawTotal !== undefined ? Number(rawTotal) : cuposDisponibles;
+            return {
+              id: s.slot_id || `slot-${id}`,
+              slot_id: s.slot_id || `slot-${id}`,
+              time: s.time || s.hora || '09:00 a.m.',
+              hora: s.hora || s.time || '09:00 a.m.',
+              hora_inicio: s.hora || s.time || '09:00 a.m.',
+              capacidad_total: capacidadTotal,
+              cupos_totales: capacidadTotal,
+              cupos: cuposDisponibles,
+              cupos_disponibles: cuposDisponibles,
+              status: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              estado: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 25),
+              precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 12.5),
+            };
+          });
           return {
             atraccion_id: id,
             date: targetDate,
@@ -1493,21 +1505,27 @@ export class AtraccionesService implements OnModuleInit {
 
         if (data && (Array.isArray(data.turnos) || Array.isArray(data.time_slots))) {
           const rawSlots = data.turnos || data.time_slots;
-          const mappedSlots = rawSlots.map((s: any) => ({
-            id: s.slot_id || `slot-${id}`,
-            slot_id: s.slot_id,
-            time: s.time || s.hora || '09:00 a.m.',
-            hora: s.hora || s.time || '09:00 a.m.',
-            hora_inicio: s.hora || s.time || '09:00 a.m.',
-            capacidad_total: Number(s.cupos_totales ?? s.total_slots ?? 5),
-            cupos_totales: Number(s.cupos_totales ?? s.total_slots ?? 5),
-            cupos: Number(s.cupos_disponibles ?? s.available_slots ?? 5),
-            cupos_disponibles: Number(s.cupos_disponibles ?? s.available_slots ?? 5),
-            status: s.estado || s.status || 'DISPONIBLE',
-            estado: s.estado || s.status || 'DISPONIBLE',
-            precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 50),
-            precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 25),
-          }));
+          const mappedSlots = rawSlots.map((s: any) => {
+            const rawCupos = s.cupos_disponibles ?? s.available_slots ?? s.available_spots ?? s.cupos ?? s.cupo ?? s.disponibles ?? s.available ?? s.capacidad ?? s.capacity ?? s.aforo ?? (typeof s.disponible === 'number' ? s.disponible : undefined);
+            const rawTotal = s.cupos_totales ?? s.total_slots ?? s.total_spots ?? s.capacidad_total ?? s.capacidad ?? s.capacity ?? s.aforo ?? s.total ?? rawCupos;
+            const cuposDisponibles = rawCupos !== undefined ? Number(rawCupos) : 0;
+            const capacidadTotal = rawTotal !== undefined ? Number(rawTotal) : cuposDisponibles;
+            return {
+              id: s.slot_id || `slot-${id}`,
+              slot_id: s.slot_id,
+              time: s.time || s.hora || '09:00 a.m.',
+              hora: s.hora || s.time || '09:00 a.m.',
+              hora_inicio: s.hora || s.time || '09:00 a.m.',
+              capacidad_total: capacidadTotal,
+              cupos_totales: capacidadTotal,
+              cupos: cuposDisponibles,
+              cupos_disponibles: cuposDisponibles,
+              status: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              estado: s.estado || s.status || (cuposDisponibles > 0 ? 'DISPONIBLE' : 'AGOTADO'),
+              precio_adulto_slot: Number(s.precio_adulto_slot || s.price_adult || 50),
+              precio_nino_slot: Number(s.precio_nino_slot || s.price_child || 25),
+            };
+          });
           return {
             atraccion_id: id,
             date: targetDate,
@@ -1621,8 +1639,8 @@ export class AtraccionesService implements OnModuleInit {
 
     // Si no existen turnos en la base para esa fecha, generar slots predeterminados en memoria
     if (!turnos || turnos.length === 0) {
-      const fallbackCap = isGloria ? 5 : Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || 20);
-      let s09 = Math.min(14, fallbackCap), s11 = Math.min(3, fallbackCap), s14 = Math.min(18, fallbackCap);
+      const fallbackCap = Number((item as any)?.capacidadMaxima || (item as any)?.capacidad || (item as any)?.aforo || 5);
+      let s09 = Math.min(5, fallbackCap), s11 = Math.min(3, fallbackCap), s14 = Math.min(5, fallbackCap);
       if (this.inventoryService) {
         const grpcStock = this.inventoryService.getInventory(id, targetDate);
         grpcStock.forEach((s) => {
