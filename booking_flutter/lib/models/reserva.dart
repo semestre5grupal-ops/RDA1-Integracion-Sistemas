@@ -166,4 +166,25 @@ class Reserva {
     final horasLimite = vertical.toLowerCase().contains('alojamiento') ? 48 : 24;
     return horasRestantes >= horasLimite;
   }
+
+  Reserva copyWithEstado(String nuevoEstado) {
+    return Reserva(
+      id: id,
+      vertical: vertical,
+      servicioNombre: servicioNombre,
+      proveedor: proveedor,
+      fecha: fecha,
+      hora: hora,
+      checkin: checkin,
+      checkout: checkout,
+      total: total,
+      estado: nuevoEstado,
+      voucherQr: voucherQr,
+      pnr: pnr,
+      imagenUrl: imagenUrl,
+      detalleExtra: detalleExtra,
+      fechaCreacion: fechaCreacion,
+      fechaServicio: fechaServicio,
+    );
+  }
 }

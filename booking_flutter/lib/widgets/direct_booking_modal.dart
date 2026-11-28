@@ -4,7 +4,6 @@ import '../models/reserva.dart';
 import '../providers/auth_provider.dart';
 import '../services/booking_services.dart';
 import '../theme/booking_colors.dart';
-import '../screens/reservas/voucher_qr_screen.dart';
 
 class DirectBookingModal {
   static Future<void> show(
