@@ -363,6 +363,13 @@ class _ConfirmarReservaState extends State<ConfirmarReserva> {
 }
 ```
 
+### 5.2 Autenticación, Supabase y URLs vigentes (si tu API protege rutas)
+
+> [!WARNING]
+> - **URL y variables vigentes:** toma la URL HTTPS actual de tu API en Azure (no uses URLs viejas de pruebas o servidores obsoletos en Render). Recuerda que los archivos `.env` no se suben a GitHub: revisa las variables vigentes de tu despliegue web.
+> - **Ante un `401 Unauthorized`, NO toques el backend:** queda prohibido desactivar guards/middlewares de autenticación en el servidor. Implementa el login en Flutter o envía `Authorization: Bearer <token>` en `_headers(...)`.
+> - **PROHIBIDO usar `service_role` o secretos en móvil:** un APK se puede decompilar. Si tu app usa Supabase Auth, usa **solo** `SUPABASE_URL` y `ANON_KEY` vigentes de tu web de producción (nunca `service_role` ni secretos de BD).
+
 ---
 
 ## 6. Reglas de Negocio Esenciales en la App Móvil
@@ -564,6 +571,9 @@ flutter build apk --release --dart-define=API_URL=https://tu-api-desplegada.azur
 
 ## 9. Prompt Copy-Paste para tu Agente de IA
 
+> [!IMPORTANT]
+> **Copia o adjunta el archivo `.md` completo, no solo este recuadro.** Así tu agente podrá consultar las secciones **§2.1** (descubrimiento de rutas reales), **§4.1** (helpers `fromJson` tolerantes), **§5** (`ApiService` e `Idempotency-Key`), **§6.D** (`CatalogoScreen` completo) y **§7** (reglas de tu vertical).
+
 ```text
 Hola agente. Trabajamos en el Reto 3 (RDA3) de Integración de Sistemas. Framework asignado: FLUTTER (Dart).
 Vas a construir una app móvil que es SOLO un cliente HTTP de nuestra API ya desplegada en Azure.
@@ -578,6 +588,7 @@ PROHIBIDO:
 - Mocks o datos inventados: nada de listas falsas en un catch, ni precio/cupos por defecto. Si la API devuelve [] muestra "No hay servicios disponibles" con botón Reintentar; si falla, muestra el error con Reintentar.
 - Consola de administración, dashboards, métricas o CRUD de inventario. La app es solo para el cliente final.
 - BottomNavigationBar o botones de secciones inexistentes. Navegación: Catálogo → Detalle → Voucher, y "Mis Reservas" en la AppBar.
+- Desactivar la autenticación del backend ante un 401 o incrustar claves privadas (service_role, secretos). Usa la URL HTTPS vigente en Azure y, si tu API exige login/Supabase, usa la ANON_KEY vigente de tu web y envía 'Authorization: Bearer <token>'.
 
 OBLIGATORIO:
 - fromJson tolerante sin casts directos: ids ('id','_id','auto_id','vehicle_id','alojamiento_id','atraccion_id','offer_id'), precios (número, texto u objeto {total|amount}), fotos (lista de textos, lista de {url} o texto) y respuestas [ ] o {data:[ ]}. Un ítem malformado no debe tumbar la lista.
@@ -586,7 +597,7 @@ OBLIGATORIO:
 - Mis Reservas: cancelación solo si faltan >= 24 h (el backend tiene la última palabra) y refresco inmediato del estado.
 - Voucher con qr_flutter usando el código real devuelto por la API.
 - Permiso <uses-permission android:name="android.permission.INTERNET"/> en android/app/src/main/AndroidManifest.xml.
-- Aplica las reglas de mi vertical de la sección 7 de la guía.
+- Sigue la implementación de referencia de las secciones 2.1, 4.1, 5, 6.D y las reglas de mi vertical de la sección 7 de la guía.
 
 ENTREGA: 'flutter analyze' sin errores y 'flutter build apk --release' generado. En Windows PowerShell no uses '&&': un comando por línea.
 ```

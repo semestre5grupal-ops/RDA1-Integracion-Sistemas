@@ -25,8 +25,26 @@ class TimeSlot {
 
   factory TimeSlot.fromJson(Map<String, dynamic> json) {
     final cupos = _atrParseInt(
-      json['cupos_disponibles'] ?? json['cupos'] ?? json['available_spots'] ?? json['capacity'],
+      json['cupos_disponibles'] ??
+          json['cupos'] ??
+          json['available_spots'] ??
+          json['available_slots'] ??
+          json['disponibles'] ??
+          json['cupo'] ??
+          json['capacity'] ??
+          json['capacidad'] ??
+          json['aforo'],
       0,
+    );
+    final rawTotal = _atrParseInt(
+      json['capacidad_total'] ??
+          json['cupos_totales'] ??
+          json['total_slots'] ??
+          json['total_spots'] ??
+          json['capacidad'] ??
+          json['aforo'] ??
+          json['capacity'],
+      cupos,
     );
     final rawEstado = json['estado']?.toString() ?? json['status']?.toString();
     final estadoCalc = rawEstado != null && rawEstado.isNotEmpty
@@ -35,10 +53,14 @@ class TimeSlot {
 
     return TimeSlot(
       slotId: json['slot_id']?.toString() ?? json['id']?.toString() ?? 'slot-default',
-      horaInicio: json['time']?.toString() ?? json['hora_inicio']?.toString() ?? json['horaInicio']?.toString() ?? json['hora']?.toString() ?? '09:00 a.m.',
+      horaInicio: json['time']?.toString() ??
+          json['hora_inicio']?.toString() ??
+          json['horaInicio']?.toString() ??
+          json['hora']?.toString() ??
+          '09:00 a.m.',
       horaFin: json['hora_fin']?.toString() ?? '',
       cuposDisponibles: cupos,
-      capacidadTotal: _atrParseInt(json['capacidad_total'], cupos > 20 ? cupos : 20),
+      capacidadTotal: rawTotal > 0 ? rawTotal : (cupos > 0 ? cupos : 5),
       estado: estadoCalc,
     );
   }
