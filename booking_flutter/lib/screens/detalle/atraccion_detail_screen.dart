@@ -337,6 +337,26 @@ class _AtraccionDetailScreenState extends State<AtraccionDetailScreen> {
 
                                   BookingServices.agregarReservaDirecta(nuevaReserva);
 
+                                  // Decremento optimista inmediato de la capacidad disponible en UI
+                                  setState(() {
+                                    final idx = _slots.indexWhere((s) => s.slotId == _selectedSlot?.slotId);
+                                    if (idx != -1) {
+                                      final cur = _slots[idx];
+                                      final newCupos = (cur.cuposDisponibles - _totalTickets).clamp(0, cur.capacidadTotal);
+                                      _slots[idx] = TimeSlot(
+                                        slotId: cur.slotId,
+                                        horaInicio: cur.horaInicio,
+                                        horaFin: cur.horaFin,
+                                        cuposDisponibles: newCupos,
+                                        capacidadTotal: cur.capacidadTotal,
+                                        estado: newCupos <= 0 ? 'AGOTADO' : (newCupos <= 5 ? 'ULTIMOS_CUPOS' : 'DISPONIBLE'),
+                                      );
+                                      _selectedSlot = _slots[idx];
+                                    }
+                                  });
+                                  // Sincronización silenciosa en segundo plano con el servidor
+                                  _fetchSlots(silent: true);
+
                                   if (!ctx.mounted) return;
                                   Navigator.pop(ctx);
                                   if (!mounted) return;
