@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/booking_colors.dart';
+import '../services/actualizacion.dart';
 import '../utils/pantalla.dart';
+import '../widgets/aviso_actualizacion.dart';
 import '../widgets/booking_footer.dart';
 import '../widgets/chatbot_flotante.dart';
 import 'catalogo/home_screen.dart';
@@ -18,7 +20,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   bool _showCookieBanner = false;
 
   /// El chat se esconde mientras se baja por la página y vuelve al subir,
@@ -33,6 +35,39 @@ class _MainShellState extends State<MainShell> {
   void initState() {
     super.initState();
     _checkCookies();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revisarActualizacion());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Al volver a la app (estaba en segundo plano) se revisa otra vez.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _revisarActualizacion();
+  }
+
+  DateTime? _ultimaRevision;
+  bool _avisoAbierto = false;
+
+  /// Busca un APK más nuevo al abrir la app y al volver a ella (como mucho cada
+  /// 15 minutos, salvo que la última fuera obligatoria y siga pendiente).
+  Future<void> _revisarActualizacion() async {
+    final ahora = DateTime.now();
+    if (_avisoAbierto) return;
+    if (_ultimaRevision != null && ahora.difference(_ultimaRevision!) < const Duration(minutes: 15)) return;
+    _ultimaRevision = ahora;
+    final nueva = await buscarActualizacion();
+    if (nueva == null || !mounted) return;
+    _avisoAbierto = true;
+    await mostrarAvisoActualizacion(context, nueva);
+    _avisoAbierto = false;
+    // Si era obligatoria y vuelve sin haber instalado, se le pedirá de nuevo al regresar.
+    if (nueva.obligatoria) _ultimaRevision = null;
   }
 
   /// Las pestañas que no son Inicio se crean al entrar y se destruyen al salir:

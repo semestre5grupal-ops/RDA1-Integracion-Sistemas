@@ -32,19 +32,52 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --no-pub --no-fatal-infos
       - run: flutter test --no-pub
-      # Sin android/key.properties el release se firma con la llave de depuración:
-      # sirve para instalar y probar, no para publicar en tienda.
-      - run: flutter build apk --release --dart-define=API_URL=https://booking-core-api.azurewebsites.net/api/v1
+      # Firma fija: si existen los secretos, todas las compilaciones se firman con la misma
+      # llave y el APK nuevo se instala ENCIMA del anterior. Sin ellos se usa la llave de
+      # depuración del servidor, que cambia en cada compilación (hay que desinstalar antes).
+      - name: Llave de firma (si está configurada)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/release.jks
+            printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$KEYSTORE_PASS" "$KEY_ALIAS" "$KEY_PASS" > android/key.properties
+            echo "Firmando con la llave fija del repositorio."
+          else
+            echo "::warning::Sin ANDROID_KEYSTORE_BASE64: se firma con llave de depuración (cambia en cada compilación)."
+          fi
+      # El número de ejecución sube en cada compilación: es el número de versión que la
+      # app compara para saber si hay una más nueva.
+      - run: flutter build apk --release --build-number=${{ github.run_number }} --dart-define=BUILD_NUMBER=${{ github.run_number }} --dart-define=API_URL=https://booking-core-api.azurewebsites.net/api/v1
+      - name: version.json (aviso de actualización dentro de la app)
+        env:
+          OBLIGATORIA: 'true'   # 'false' = la app solo sugiere actualizar
+          NOTAS: ${{ github.event.head_commit.message }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          notas = (os.environ.get('NOTAS') or '').splitlines()[0][:200] if os.environ.get('NOTAS') else ''
+          json.dump({
+            'build': int(os.environ['GITHUB_RUN_NUMBER']),
+            'obligatoria': os.environ['OBLIGATORIA'] == 'true',
+            'url': 'https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/releases/download/apk-movil-latest/booking.apk',
+            'notas': notas,
+          }, open('version.json', 'w'), ensure_ascii=False)
+          PY
+          cat version.json
       - run: cp build/app/outputs/flutter-apk/app-release.apk booking.apk
       - name: Publicar pre-release con enlace fijo
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete apk-movil-latest --cleanup-tag -y || true
-          gh release create apk-movil-latest booking.apk \
+          gh release create apk-movil-latest booking.apk version.json \
             --prerelease --target "$GITHUB_SHA" \
             --title "APK de prueba (rama flutter-apk-completar)" \
-            --notes "Compilado desde $GITHUB_SHA. Firmado con llave de depuración: solo para pruebas."
+            --notes "Compilado desde $GITHUB_SHA (compilación ${{ github.run_number }}). Solo para pruebas."
       - uses: actions/upload-artifact@v4
         with:
           name: booking-apk
